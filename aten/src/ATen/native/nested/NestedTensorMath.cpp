@@ -9,6 +9,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -78,7 +79,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
   auto buffer = self.values();
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
-  const std::vector<int64_t>& offsets = self_ptr->get_offsets();
+  const std::vector<int64_t>& offsets = self_ptr->get_storage_offsets();
   for (const int64_t i: c10::irange(ntensors)){
     result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets[i]);
   }
@@ -193,9 +194,58 @@ Tensor _nested_tensor_from_tensor_list(
       pin_memory);
 }
 
+C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_nested_layer_norm_inputs(
+    const NestedTensorImpl& input,
+    IntArrayRef normalized_shape,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */) {
 
-Tensor NestedTensor_layer_norm(
+  const size_t normalized_ndim = normalized_shape.size();
+  TORCH_CHECK(
+      normalized_ndim >= 1,
+      "Expected normalized_shape to be at least 1-dimensional, i.e., ",
+      "containing at least one element, but got normalized_shape = ",
+      normalized_shape);
+  TORCH_CHECK(
+      !weight.defined() || weight.sizes().equals(normalized_shape),
+      "Expected weight to be of same shape as normalized_shape, but got ",
+      "weight of shape ",
+      weight.sizes(),
+      " and normalized_shape = ",
+      normalized_shape);
+  TORCH_CHECK(
+      !bias.defined() || bias.sizes().equals(normalized_shape),
+      "Expected bias to be of same shape as normalized_shape, but got ",
+      "bias of shape ",
+      bias.sizes(),
+      " and normalized_shape = ",
+      normalized_shape);
+
+  // Check that the normalized_shape has the exact same sizes as the last dimensions from the NestedTensor input
+  // Also, compute M and N considering the idiosyncracies of NestedTensors
+  int64_t N = 1;
+  for (const auto i: c10::irange(normalized_ndim)) {
+    TORCH_CHECK(
+      input.opt_size(-normalized_ndim + i) != c10::nullopt,
+      "normalized_shape extends into irregular dimensions for the nested tensor"
+    );
+    TORCH_CHECK(
+      normalized_shape[i] == *input.opt_size(-normalized_ndim + i),
+      "The shape at dimension ",
+      i,
+      "of normalized_shape doesn't match the input"
+    );
+    N *= normalized_shape[i];
+  }
+
+  const int64_t M = input.numel() / N;
+
+  return std::make_pair(M, N);
+}
+
+std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
     const Tensor& input,
+    IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt,
     double eps) {
@@ -207,8 +257,9 @@ Tensor NestedTensor_layer_norm(
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
   const auto& input_buffer = nt_input->get_buffer();
-  const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_input);
-  const auto valid_word_num = input_buffer.numel() / last_dim;
+  auto M_N = _check_nested_layer_norm_inputs(*nt_input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
   const auto weight_contig = weight.expect_contiguous();
   const auto bias_contig = bias.expect_contiguous();
   auto output_buffer = at::native::empty_like(
@@ -223,21 +274,24 @@ Tensor NestedTensor_layer_norm(
     auto acc_type = at::toAccumulateType(input_buffer.scalar_type(), true);
     options = options.dtype(acc_type);
   }
-  Tensor mean = at::empty({valid_word_num}, options);
-  Tensor rstd = at::empty({valid_word_num}, options);
+  Tensor mean = at::empty({M}, options);
+  Tensor rstd = at::empty({M}, options);
   LayerNormKernel(
       input_buffer.is_cuda() ? kCUDA : kCPU,
       input_buffer,
       *weight_contig,
       *bias_contig,
-      valid_word_num,
-      last_dim,
+      M,
+      N,
       eps,
       &output_buffer,
       &mean,
       &rstd);
-  return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(output_buffer), nt_input->get_nested_size_tensor());
+  return std::make_tuple(
+    wrap_buffer(output_buffer, nt_input->get_nested_size_tensor()),
+    mean,
+    rstd
+  );
 }
 
 Tensor NestedTensor_from_padded_and_nested_example(
@@ -630,10 +684,10 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
       "index ", index,
       " is out of bounds for dimension 0 with size ", ntensors);
   int64_t positive_index = index < 0 ? index + ntensors : index;
-  const at::Tensor& buffer = self_ptr->get_buffer();
+  const at::Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor();
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
-  const std::vector<int64_t>& offsets = self_ptr->get_offsets();
+  const std::vector<int64_t>& offsets = self_ptr->get_storage_offsets();
   return buffer.as_strided(sizes[positive_index], strides[positive_index], offsets[positive_index]);
 }
 
@@ -644,10 +698,10 @@ Tensor clone_nested(
   auto self_ptr = get_nested_tensor_impl(self);
   if (memory_format == c10::MemoryFormat::Preserve ||
   (memory_format == c10::MemoryFormat::Contiguous && self.is_contiguous())) {
-    const Tensor& buffer = self_ptr->get_buffer(),
+    const Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor(),
         sizemat = self_ptr->get_nested_size_tensor(),
         stridemat = self_ptr->get_nested_stride_tensor();
-    const std::vector<int64_t>& offsets = self_ptr->get_offsets();
+    const std::vector<int64_t>& offsets = self_ptr->get_storage_offsets();
     // TODO: The size and the stride do not necessarily need to be cloned,
     //       but it is more conservative.
     //       This is something we could revisit once we land a more
@@ -656,7 +710,7 @@ Tensor clone_nested(
   }
   // actually, memory format is contiguous and self is noncontiguous
   else if (memory_format == c10::MemoryFormat::Contiguous) {
-    const Tensor& self_buffer = self_ptr->get_buffer(),
+    const Tensor& self_buffer = self_ptr->get_unsafe_storage_as_tensor(),
         sizemat = self_ptr->get_nested_size_tensor();
     Tensor output_buffer = at::empty_like(self_buffer);
     Tensor output = wrap_buffer(output_buffer, sizemat);
@@ -676,10 +730,10 @@ Tensor clone_nested(
 
 std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c10::optional<bool> train) {
   auto input_ptr = get_nested_tensor_impl(input);
-  const Tensor& input_buffer = input_ptr->get_buffer(),
+  const Tensor& input_buffer = input_ptr-> get_unsafe_storage_as_tensor(),
       & sizemat = input_ptr->get_nested_size_tensor(),
       & stridemat = input_ptr->get_nested_stride_tensor();
-  const std::vector<int64_t>& offsets = input_ptr->get_offsets();
+  const std::vector<int64_t>& offsets = input_ptr->get_storage_offsets();
   Tensor output_buffer, mask_buffer;
   if (input_buffer.numel() == 0) {
     output_buffer = input_buffer.clone();
@@ -709,7 +763,10 @@ Tensor softmax_nested(
       positive_dim >= 1,
       "Cannot apply softmax across nested dimension 0");
   // create a contiguous output
-  const Tensor& buffer = input_ptr->get_buffer(),
+  // TODO We would ideally use a empty_like here, but that is not supported
+  // for nested tensors yet. Since we are only using the buffer for the options
+  // and size it is okay to use unsafe_storage_as_tensor here.
+  const Tensor& buffer = input_ptr->get_unsafe_storage_as_tensor(),
       & sizemat = input_ptr->get_nested_size_tensor();
   Tensor output_buffer = buffer.new_empty(buffer.sizes());
   Tensor output = wrap_buffer(output_buffer, sizemat.clone());
@@ -747,14 +804,14 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   TORCH_CHECK(ntensors == ntensors2,
       "Expected size for the 1st dimension of batch2 tensor to be: ", ntensors,
       " but got: ", ntensors2, ".");
-  const Tensor& self_buffer = self_ptr->get_buffer(),
-      & mat2_buffer = mat2_ptr->get_buffer();
+  const Tensor& self_buffer = self_ptr->get_unsafe_storage_as_tensor(),
+      & mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
   std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr),
       mat2_sizes = NestedTensor_get_sizes(mat2_ptr),
       self_strides = NestedTensor_get_strides(self_ptr),
       mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  const std::vector<int64_t>& self_offsets = self_ptr->get_offsets(),
-      & mat2_offsets = mat2_ptr->get_offsets();
+  const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets(),
+      & mat2_offsets = mat2_ptr->get_storage_offsets();
   // create a contiguous output
   int64_t out_numel = 0;
   const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
@@ -965,7 +1022,7 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   Tensor sizemat_transposed = at::index_select(sizemat, 1, column_indices),
       stridemat_transposed = at::index_select(stridemat, 1, column_indices);
   return create_nested_view_tensor(
-      self, sizemat_transposed, stridemat_transposed, std::vector<int64_t>(self_ptr->get_offsets()));
+      self, sizemat_transposed, stridemat_transposed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
 
 // utilities supporting `view_nested` and `reshape_nested`
@@ -1123,7 +1180,7 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
       "view size is not compatible with input tensor's size and stride "
       "(at least one dimension spans across two contiguous subspaces). "
       "Use .reshape(...) instead.");
-  return create_nested_view_tensor(self, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(self_ptr->get_offsets()));
+  return create_nested_view_tensor(self, sizemat_reshaped, stridemat_reshaped, std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
   /**
    * Create a buffer tensor that is a view of self
@@ -1137,7 +1194,7 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
 Tensor values_nested(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.is_nested(), "Can only create a buffer from Nested Tensor");
   auto* nt_self = get_nested_tensor_impl(self);
-  return nt_self->get_buffer();
+  return nt_self->get_unsafe_storage_as_tensor();
 }
 
 /**
