@@ -66,7 +66,6 @@ def _rand_shape(dim, min_size, max_size):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
-
 # Test suite for tensor creation ops
 #
 # Includes creation functions like torch.eye, random creation functions like
@@ -392,8 +391,7 @@ class TestTensorCreation(TestCase):
             torch.float64
         ]
 
-        for scipy_tensors, torch_type, scipy_type in zip(scipy_tensors_list, expected_torch_types,
-                                                         expected_scipy_types):
+        for scipy_tensors, torch_type, scipy_type in zip(scipy_tensors_list, expected_torch_types, expected_scipy_types):
             torch_tensors = [torch.tensor(t, device=device) for t in scipy_tensors]
             torch_result = torch.block_diag(*torch_tensors)
             self.assertEqual(torch_result.dtype, torch_type)
@@ -935,7 +933,7 @@ class TestTensorCreation(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_unpack_double(self, device, dtype):
         # Reference: https://github.com/pytorch/pytorch/issues/33111
-        vals = (2**24 + 1, 2**53 + 1,
+        vals = (2 ** 24 + 1, 2 ** 53 + 1,
                 np.iinfo(np.int64).max, np.iinfo(np.uint64).max, np.iinfo(np.uint64).max + 1,
                 -1e500, 1e500)
         for val in vals:
@@ -1543,8 +1541,7 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(
-                            to_),
+                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
                         lambda: t.random_(from_, to_)
                     )
 
@@ -1667,8 +1664,7 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(
-                            to_),
+                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
                         lambda: t.random_(from_, to_)
                     )
 
@@ -1810,7 +1806,8 @@ class TestTensorCreation(TestCase):
                 self.assertEqual('cuda:1',
                                  str(torch.tensor(5, dtype=torch.int64, device='cuda:1').device))
                 self.assertEqual('cuda:1',
-                                 str(torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cuda:1').device))
+                                 str(torch.tensor(torch.ones((2, 3), dtype=torch.float32),
+                                     device='cuda:1').device))
 
                 self.assertEqual('cuda:1',
                                  str(torch.tensor(np.random.randn(2, 3), device='cuda:1').device))
@@ -2475,7 +2472,7 @@ class TestTensorCreation(TestCase):
             x.new_empty_strided(size, stride, dtype=dtype, device=device)
 
     def test_strided_mismatched_stride_shape(self, device):
-        for shape, strides in [((1,), ()), ((1, 2), (1,))]:
+        for shape, strides in [((1, ), ()), ((1, 2), (1, ))]:
             with self.assertRaisesRegex(RuntimeError, "mismatch in length of strides and shape"):
                 torch.tensor(0.42, device=device).as_strided(shape, strides)
 
@@ -2968,10 +2965,8 @@ class TestTensorCreation(TestCase):
             self._test_logspace_base2(device, dtype, steps=steps)
 
     @dtypes(*all_types_and(torch.bfloat16))
-    @dtypesIfCUDA(
-        *integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
-        all_types_and(torch.half, torch.bfloat16)
-    )
+    @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
+                  all_types_and(torch.half, torch.bfloat16))
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
@@ -3458,14 +3453,11 @@ class TestRandomTensorCreation(TestCase):
             regex = 'Expected a .* device type for generator but found .*'
             cuda_t = torch.tensor(n, device='cuda')
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen))
-            self.assertRaisesRegex(RuntimeError, regex,
-                                   lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))
             cpu_t = torch.tensor(n, device='cpu')
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
-            self.assertRaisesRegex(RuntimeError, regex,
-                                   lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
-            self.assertRaisesRegex(RuntimeError, regex,
-                                   lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
+            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
 
 
 # Class for testing *like ops, like torch.ones_like
@@ -3532,14 +3524,11 @@ class TestLikeTensorCreation(TestCase):
 SIZE = 5
 SHAPE = (SIZE,)
 
-
 def may_require_grad(dtype):
     return dtype.is_floating_point or dtype.is_complex
 
-
 def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
-
 
 class TestBufferProtocol(TestCase):
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
@@ -3709,18 +3698,12 @@ class TestBufferProtocol(TestCase):
 def get_another_device(device):
     return "cuda" if torch.device(device).type == "cpu" else "cpu"
 
-
 def identity(tensor):
     return tensor
-
-
 def to_numpy(tensor):
     return tensor.numpy()
-
-
 def to_memview(tensor):
     return memoryview(to_numpy(tensor))
-
 
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
@@ -3969,7 +3952,6 @@ class TestAsArray(TestCase):
             original = torch.as_tensor(e)
             t = torch.asarray(e)
             self.assertEqual(t, original)
-
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
