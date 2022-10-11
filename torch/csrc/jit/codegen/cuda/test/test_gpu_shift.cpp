@@ -2976,6 +2976,7 @@ TEST_F(NVFuserTest, FusionConv2D_CUDA) {
 TEST_F(NVFuserTest, FusionConv2DNoPadding_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
+  ContextCudnnTF32Disabled disabling_tf32_cudnn;
 
   // Input: [C, H, W]
   auto inp = makeSymbolicTensor(3);

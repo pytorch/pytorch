@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
+#include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <torch/torch.h>
@@ -339,6 +340,21 @@ struct TransformPropagatorWithCheck : public TransformPropagator {
 };
 
 } // namespace
+
+class ContextCudnnTF32Disabled {
+ public:
+  ContextCudnnTF32Disabled() {
+    flag_ = at::globalContext().allowTF32CuDNN();
+    at::globalContext().setAllowTF32CuDNN(false);
+  }
+
+  ~ContextCudnnTF32Disabled() {
+    at::globalContext().setAllowTF32CuDNN(flag_);
+  }
+
+ private:
+  bool flag_;
+};
 
 // Fixture class must be uniquely identified, i.e., can't be in an
 // anonymous namespace
