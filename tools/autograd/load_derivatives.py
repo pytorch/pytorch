@@ -756,31 +756,12 @@ def saved_variables(
         return f'strides_or_error({name}, "{name}")'
 
     REPLACEMENTS: List[Tuple[str, Dict[str, Any]]] = [
-        # replace self.sizes() with self_sizes
-        (
-            r"{}.sizes\(\)",
-            {
-                "suffix": "_sizes",
-                "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-            },
-        ),
         # replace self.sym_sizes() with self_sym_sizes
         (
             r"{}.sym_sizes\(\)",
             {
                 "suffix": "_sym_sizes",
                 "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
-            },
-        ),
-        # replace self->sizes() with self_sizes_opt
-        (
-            r"{}->sizes\(\)",
-            {
-                "suffix": "_sizes_opt",
-                "nctype": lambda name: NamedCType(
-                    name, OptionalCType(BaseCType(intArrayRefT))
-                ),
-                "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
             },
         ),
         # replace self->sym_sizes() with self_sym_sizes_opt
@@ -812,12 +793,14 @@ def saved_variables(
                 "res": lambda name: name + "_info.zeros()",  # at eval-time
             },
         ),
-        # replace self.size(2) with self_size_2
+        # replace self.sym_size(2) with self_sym_size_2
         (
-            r"{}.size\((\w+)\)",
+            r"{}.sym_size\((-?\w+)\)",
             {
-                "suffix": lambda m: "_argsize_{}".format(*m.groups()),
-                "nctype": lambda name: NamedCType(name, BaseCType(longT)),
+                "suffix": lambda m: "_sym_argsize_{}".format(
+                    m.groups()[0].replace("-", "minus_")
+                ),
+                "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
             },
         ),
         # replace self.numel() with self_numel
@@ -881,15 +864,6 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(longT)),
             },
         ),
-        # replace self.strides() with self_strides
-        (
-            r"{}.strides\(\)",
-            {
-                "suffix": "_strides",
-                "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-                "expr": stride_expr,
-            },
-        ),
         # replace self.sym_strides() with self_sym_strides
         (
             r"{}.sym_strides\(\)",
@@ -924,6 +898,11 @@ def saved_variables(
         raise RuntimeError(
             ".sizes() is not supported in derivative formulas. Instead, please use the SymInt version,"
             + f".sym_sizes(), which returned a c10::SymIntArrayRef. formula={formula}"
+        )
+    if re.search("\.size\([-]?\d+\)", formula):
+        raise RuntimeError(
+            ".size(int) is not supported in derivative formulas. Instead, please use the SymInt version,"
+            + f".sym_size(int), which returned a c10::SymIntArrayRef. formula={formula}"
         )
     if ".strides()" in formula:
         raise RuntimeError(
