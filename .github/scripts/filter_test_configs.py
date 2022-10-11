@@ -27,6 +27,7 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "nogpu_AVX512",
     "nogpu_NO_AVX2",
     "slow",
+    "tsan",
     "xla",
 }}
 
