@@ -1668,16 +1668,17 @@ class Module:
                                self.__class__.__name__, "\n\t".join(error_msgs)))
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
-    def _named_members(self, get_members_fn, prefix='', recurse=True):
+    def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate: bool = True):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
-        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
+        modules = self.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, self)]
         for module_prefix, module in modules:
             members = get_members_fn(module)
             for k, v in members:
                 if v is None or v in memo:
                     continue
-                memo.add(v)
+                if remove_duplicate:
+                    memo.add(v)
                 name = module_prefix + ('.' if module_prefix else '') + k
                 yield name, v
 
@@ -1756,15 +1757,16 @@ class Module:
         for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
-    def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
+    def named_buffers(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True) -> Iterator[Tuple[str, Tensor]]:
         r"""Returns an iterator over module buffers, yielding both the
         name of the buffer as well as the buffer itself.
 
         Args:
             prefix (str): prefix to prepend to all buffer names.
-            recurse (bool): if True, then yields buffers of this module
+            recurse (bool, optional): if True, then yields buffers of this module
                 and all submodules. Otherwise, yields only buffers that
-                are direct members of this module.
+                are direct members of this module. Defaults to True.
+            remove_duplicate (bool, optional): whether to remove the duplicated buffers in the result. Defaults to True.
 
         Yields:
             (str, torch.Tensor): Tuple containing the name and buffer
@@ -1779,7 +1781,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._buffers.items(),
-            prefix=prefix, recurse=recurse)
+            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
         for elem in gen:
             yield elem
 
