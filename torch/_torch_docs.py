@@ -1910,7 +1910,7 @@ Arguments:
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
 
-Example::
+Example:
     >>> torch.arange(11).chunk(6)
     (tensor([0, 1]),
      tensor([2, 3]),
@@ -5283,7 +5283,7 @@ Returns:
     A boolean tensor of the same shape as :attr:`elements` that is True for elements in
     :attr:`test_elements` and False otherwise
 
-Example::
+Example:
     >>> torch.isin(torch.tensor([[1, 2], [3, 4]]), torch.tensor([2, 3]))
     tensor([[False,  True],
             [ True, False]])
@@ -8491,7 +8491,7 @@ Args:
     {input}
     dims (tuple of int): The desired ordering of dimensions
 
-Example::
+Example:
     >>> x = torch.randn(2, 3, 5)
     >>> x.size()
     torch.Size([2, 3, 5])
