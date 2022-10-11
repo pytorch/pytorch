@@ -20,6 +20,7 @@ def _window_function_checks(function_name: str, window_length: int, dtype: _dtyp
          dtype (:class:`torch.dtype`): the desired data type of the window tensor.
          layout (:class:`torch.layout`): the desired layout of the window tensor.
      """
+
     def is_floating_type(t: _dtype) -> bool:
         return t == torch.float32 or t == torch.bfloat16 or t == torch.float64 or t == torch.float16
 
@@ -95,19 +96,19 @@ def exponential_window(window_length: int,
     if window_length == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if periodic:
-        window_length += 1
-
     if periodic and center is not None:
         raise ValueError('Center must be \'None\' for periodic equal True')
 
     if center is None:
-        center = (window_length - 1) / 2
+        center = -(window_length if periodic else window_length - 1) / 2.0
 
-    k = torch.arange(window_length, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-    window = torch.exp(-torch.abs(k - center) / tau)
+    k = torch.arange(start=center,
+                     end=center + window_length,
+                     dtype=dtype, layout=layout,
+                     device=device,
+                     requires_grad=requires_grad)
 
-    return window[:-1] if periodic else window
+    return torch.exp(-torch.abs(k) / tau)
 
 
 def cosine_window(window_length: int,
@@ -234,11 +235,13 @@ def gaussian_window(window_length: int,
     if window_length == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if periodic:
-        window_length += 1
+    start = -(window_length if periodic else window_length - 1) / 2.0
 
-    k = torch.arange(window_length, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-    k = k - (window_length - 1.0) / 2.0
-    window = torch.exp(-(k / std) ** 2 / 2)
+    k = torch.arange(start,
+                     start + window_length,
+                     dtype=dtype,
+                     layout=layout,
+                     device=device,
+                     requires_grad=requires_grad)
 
-    return window[:-1] if periodic else window
+    return torch.exp(-(k / std) ** 2 / 2)
