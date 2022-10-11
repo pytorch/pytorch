@@ -2567,16 +2567,6 @@
     CUDA: grid_sampler_3d_backward_cuda
   autogen: grid_sampler_3d_backward.out
 
-- func: cosine_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: cosine_window
-  autogen: cosine_window.out
-
-- func: cosine_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: cosine_window
-  autogen: cosine_window.periodic_out
-
 - func: hann_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: hann_window
