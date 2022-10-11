@@ -86,14 +86,14 @@ def cosine(window_length: int,
     if window_length == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if periodic:
-        window_length += 1
-
     start = .5
-    k = torch.arange(start, start + window_length, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-    window = torch.sin(torch.pi / window_length * k)
-
-    return window[:-1] if periodic else window
+    k = torch.arange(start,
+                     start+window_length,
+                     dtype=dtype,
+                     layout=layout,
+                     device=device,
+                     requires_grad=requires_grad)
+    return torch.sin(torch.pi / (window_length + 1 if periodic else window_length) * k)
 
 
 def gaussian(window_length: int,

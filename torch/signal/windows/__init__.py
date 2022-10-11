@@ -52,6 +52,10 @@ Examples:
     >>> torch.signal.windows.cosine(10,periodic=False)
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540,
     0.1564])
+
+.. note::
+    The window is normalized with the maximum value equal to 1, however, the 1 doesn't appear if `M` is even
+    and `periodic` is `False`.
 """.format(
         **factory_common_args
     ),
