@@ -636,7 +636,7 @@ TEST_F(VulkanAPITest, conv2d) {
 
   const double scale2 = 0.15;
   const int zero_point2 = 15;
-  const auto output_vulkan = at::native::vulkan::ops::conv2d(
+  const auto output_vulkan = at::native::vulkan::ops::quantized_conv2d(
       out_vulkan,
       weight_q,
       bias_q,
@@ -739,7 +739,7 @@ TEST_F(VulkanAPITest, conv2d_pw) {
 
   const double scale2 = 0.15;
   const int zero_point2 = 15;
-  const auto output_vulkan = at::native::vulkan::ops::conv2d(
+  const auto output_vulkan = at::native::vulkan::ops::quantized_conv2d(
       out_vulkan,
       weight_q,
       bias_q,
@@ -842,7 +842,7 @@ TEST_F(VulkanAPITest, conv2d_dw) {
 
   const double scale2 = 0.15;
   const int zero_point2 = 15;
-  const auto output_vulkan = at::native::vulkan::ops::conv2d(
+  const auto output_vulkan = at::native::vulkan::ops::quantized_conv2d(
       out_vulkan,
       weight_q,
       bias_q,
