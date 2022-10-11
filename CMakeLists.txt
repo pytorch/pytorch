@@ -927,9 +927,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
-  check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
-  # This doesn't work globally so we use the test on specific
-  # target_compile_options
 endif()
 
 if(USE_ASAN)
