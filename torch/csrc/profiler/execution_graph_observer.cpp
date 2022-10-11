@@ -44,10 +44,12 @@ inline std::string vectorToString(const std::vector<T>& v) {
   return fmt::format("[{}]", fmt::join(v, ","));
 }
 
+constexpr size_t maxNumElements = 4096;
+
 inline std::string getValueType(
     const c10::IValue& val,
     const bool baseType = true,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   std::string type = val.tagKind();
 
   if (val.isTensor()) {
@@ -79,7 +81,7 @@ inline std::string getValueType(
 
 inline std::string getValueShape(
     const c10::IValue& val,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
     if (tensor.defined()) {
@@ -122,8 +124,14 @@ inline std::string getScalarValue(const c10::IValue& val) {
   } else if (val.isBool()) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
-    constexpr int maxStringLen = 500;
-    return fmt::format("\"{}\"", val.toStringRef().substr(0, maxStringLen));
+    const std::string& str_val = val.toStringRef();
+    if (str_val.size() > maxNumElements) {
+      LOG(WARNING) << "string size=" << str_val.size()
+                   << " exceeded maxNumElements=" << maxNumElements;
+      return fmt::format("\"{}\"", str_val.substr(0, maxNumElements));
+    }
+
+    return fmt::format("\"{}\"", str_val);
   } else if (val.isDevice()) {
     return fmt::format("\"{}\"", val.toDevice().str());
   }
@@ -314,7 +322,7 @@ bool initExecutionGraphStart(ExecutionGraphObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.0", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.1", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -368,7 +376,7 @@ inline ExecutionGraphObserver::ID getObjectID(
 inline std::string convertIValue(
     ExecutionGraphObserver& ob,
     const c10::IValue& val,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     const auto t = val.toTensor().unsafeGetTensorImpl();
     ExecutionGraphObserver::ID tensor_id = getObjectID(ob, t);
@@ -615,7 +623,7 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
 bool addExecutionGraphObserver(const std::string& output_file_path) {
   // Check if the observer is already initialized.
   if (ObserverManager::get() == nullptr) {
-    ObserverManager::init();
+    ObserverManager::push(std::make_shared<ExecutionGraphObserver>());
     auto& ob = *ObserverManager::get();
     ob.pid = processId();
     // Set output
@@ -652,7 +660,9 @@ void removeExecutionGraphObserver() {
       removeCallback(ob->cb_handle);
       ob->cb_handle = INVALID_CALLBACK_HANDLE;
       // Release the current EG observer object and reset.
-      ObserverManager::pop();
+      TORCH_INTERNAL_ASSERT(
+          ObserverManager::pop() != nullptr,
+          "Global state ptr cannot be null before resetting");
       VLOG(1) << "Removed PyTorch execution graph observer";
     } else {
       LOG(WARNING) << "Execution graph observer was not registered.";
