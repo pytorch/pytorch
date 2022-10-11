@@ -2634,8 +2634,7 @@ class TestTensorCreation(TestCase):
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 
-        torch_method = getattr(torch.signal.windows, name)
-
+        torch_method = getattr(torch, name + '_window')
         if not dtype.is_floating_point:
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
