@@ -239,7 +239,6 @@ def gaussian_window(window_length: int,
 
     k = torch.arange(window_length, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
     k = k - (window_length - 1.0) / 2.0
-    sig2 = 2 * std * std
-    window = torch.exp(-k ** 2 / sig2)
+    window = torch.exp(-(k / std) ** 2 / 2)
 
     return window[:-1] if periodic else window
