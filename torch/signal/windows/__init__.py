@@ -29,7 +29,7 @@ The cosine window is defined as follows:
 Where `M` is the length of the window.
     """ +
     r"""
-    
+
 Args:
     window_length (int): the length of the output window.
         In other words, the number of points of the cosine window.
@@ -54,7 +54,7 @@ Examples:
     0.1564])
 
 .. note::
-    The window is normalized with the maximum value equal to 1, however, the 1 doesn't appear if `M` is even
+    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
     and `periodic` is `False`.
 """.format(
         **factory_common_args
@@ -73,17 +73,17 @@ The exponential window is defined as follows:
     w(n) = \exp{\left(-\frac{|n - center|}{\tau}\right)}
     """ +
     r"""
-    
+
 Args:
-    window_length (int): the length of the output window. 
+    window_length (int): the length of the output window.
         In other words, the number of points of the ee window.
     periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
         If `False`, returns a symmetric window suitable for use in filter design. Default: `True`.
     center (float, optional): his value defines where the center of the window will be located.
         In other words, at which sample the peak of the window can be found.
         Default: `window_length / 2` if `periodic` is `True` (default), else `(window_length - 1) / 2`.
-    tau (float, optional): the decay value. 
-        For `center = 0`, it's suggested to use :math:`\tau = -\frac{(M - 1)}{\ln(x)}`, 
+    tau (float, optional): the decay value.
+        For `center = 0`, it's suggested to use :math:`\tau = -\frac{(M - 1)}{\ln(x)}`,
         if `x` is the fraction of the window remaining at the end. Default: 1.0.
     """ +
     r"""
@@ -104,6 +104,10 @@ Examples:
     >>> torch.signal.windows.exponential(10,periodic=False,tau=.5)
     tensor([1.2341e-04, 9.1188e-04, 6.7379e-03, 4.9787e-02, 3.6788e-01, 3.6788e-01,
     4.9787e-02, 6.7379e-03, 9.1188e-04, 1.2341e-04])
+
+.. note::
+    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
+    and `periodic` is `False`.
 """.format(
         **factory_common_args
     ),
@@ -120,7 +124,7 @@ The gaussian window is defined as follows:
     w(n) = \exp{\left(-\left(\frac{n}{2\sigma}\right)^2\right)}
     """ +
     r"""
-    
+
 Args:
     window_length (int): the length of the output window.
         In other words, the number of points of the cosine window.
@@ -145,6 +149,10 @@ Examples:
     >>> torch.signal.windows.gaussian(10,periodic=False,std=0.9)
     tensor([3.7267e-06, 5.1998e-04, 2.1110e-02, 2.4935e-01, 8.5700e-01, 8.5700e-01,
     2.4935e-01, 2.1110e-02, 5.1998e-04, 3.7267e-06])
+
+.. note::
+    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
+    and `periodic` is `False`.
 """.format(
         **factory_common_args
     ),

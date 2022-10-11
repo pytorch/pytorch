@@ -88,7 +88,7 @@ def cosine(window_length: int,
 
     start = .5
     k = torch.arange(start,
-                     start+window_length,
+                     start + window_length,
                      dtype=dtype,
                      layout=layout,
                      device=device,
