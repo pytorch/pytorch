@@ -12,6 +12,8 @@ __all__ = [
     'gaussian',
 ]
 
+_eps = 1e-10  # Used to fix floating point errors
+
 
 def _window_function_checks(function_name: str, window_length: int, dtype: _dtype, layout: _layout) -> None:
     r"""Performs common checks for all the defined windows.
@@ -82,7 +84,7 @@ def exponential(window_length: int,
 
     constant = 1 / tau
     k = torch.arange(center * constant,
-                     (center * constant + window_length * constant),  # Distributive property does not apply
+                     (center + (window_length - 1)) * constant + _eps,
                      constant,
                      dtype=dtype,
                      layout=layout,
@@ -119,7 +121,7 @@ def cosine(window_length: int,
     to avoid inconsistency, we advise adding a small epsilon to end in such cases.
     """
     k = torch.arange(start * constant,
-                     (start * constant + window_length * constant),  # Distributive property does not apply
+                     (start + (window_length - 1)) * constant + _eps,
                      step=constant,
                      dtype=dtype,
                      layout=layout,
@@ -156,7 +158,7 @@ def gaussian(window_length: int,
     to avoid inconsistency, we advise adding a small epsilon to end in such cases.
     """
     k = torch.arange(start * constant,
-                     (start * constant + window_length * constant),  # Distributive property does not apply here.
+                     (start + (window_length - 1)) * constant + _eps,
                      step=constant,
                      dtype=dtype,
                      layout=layout,
