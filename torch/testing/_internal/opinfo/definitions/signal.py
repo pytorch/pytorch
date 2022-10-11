@@ -113,6 +113,22 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
     )
 
 
+def make_signal_windows_ref(fn):
+    r"""Wrapper for signal window references.
+
+    Particularly used for window references that don't have a matching signature with
+    torch, e.g., gaussian window.
+    """
+    def _fn(*args, **kwargs):
+        # Remove torch-specific kwargs
+        for torch_key in {'device', 'layout', 'dtype', 'requires_grad'}:
+            if torch_key in kwargs:
+                kwargs.pop(torch_key)
+        return fn(*args, **kwargs)
+
+    return _fn
+
+
 def make_signal_windows_opinfo(
     name, ref, sample_inputs_func, error_inputs_func, *, skips=()
 ):
@@ -172,19 +188,19 @@ def make_signal_windows_opinfo(
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.cosine",
-        ref=scipy.signal.windows.cosine,
+        ref=make_signal_windows_ref(scipy.signal.windows.cosine),
         sample_inputs_func=sample_inputs_window,
         error_inputs_func=error_inputs_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
-        ref=scipy.signal.windows.exponential,
+        ref=make_signal_windows_ref(scipy.signal.windows.exponential),
         sample_inputs_func=partial(sample_inputs_window, tau=random.uniform(0, 10)),
         error_inputs_func=error_inputs_exponential_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
-        ref=scipy.signal.windows.gaussian,
+        ref=make_signal_windows_ref(scipy.signal.windows.gaussian),
         sample_inputs_func=partial(sample_inputs_window, std=random.uniform(0, 3)),
         error_inputs_func=error_inputs_gaussian_window,
     ),
