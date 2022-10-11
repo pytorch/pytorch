@@ -3392,12 +3392,10 @@ as the input tensor excluding its innermost dimension'):
         expected = torch.tensor(0, device=device, dtype=dtype)
         self.assertEqual(torch.sum(t), expected)
 
-        is_rocm_or_win_and_chalf = (TEST_WITH_ROCM or IS_WINDOWS) and dtype is torch.chalf
-        # On Rocm/Windows:
-        # RuntimeError: "mean_cuda" not implemented for 'ComplexHalf'
+        # mean_cuda is not implemented for ComplexHalf
         err_msg = "not implemented for 'ComplexHalf'"
         ctx = self.assertRaisesRegex(
-            RuntimeError, err_msg) if is_rocm_or_win_and_chalf else contextlib.nullcontext()
+            RuntimeError, err_msg) if dtype is torch.chalf else contextlib.nullcontext()
         with ctx:
             self.assertEqual(torch.mean(t), expected)
 
