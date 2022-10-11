@@ -22,5 +22,4 @@ python_ref_db: List[OpInfo] = [
     *fft.python_ref_db,
     *linalg.python_ref_db,
     *special.python_ref_db,
-    *signal.python_ref_db,
 ]

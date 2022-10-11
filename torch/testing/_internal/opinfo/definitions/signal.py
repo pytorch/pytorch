@@ -1,4 +1,7 @@
+import random
 import unittest
+
+from itertools import product
 from typing import List
 
 import torch
@@ -15,24 +18,39 @@ if TEST_SCIPY:
     import scipy.signal
 
 
-def _sample_input_windows(sample_input, *args, **kwargs):
-    for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
-        for periodic in [True, False]:
-            kwargs.update(
-                {
-                    "periodic": periodic,
-                }
-            )
-            yield sample_input(size, args=args, kwargs=kwargs)
+def sample_inputs_window(op_info, device, dtype, requires_grad, *, kws=({},), **kwargs):
+    _kwargs = dict(
+        kwargs, **{"device": device, "dtype": dtype, "requires_grad": requires_grad}
+    )
+    sizes = [0, 1, 2, 5, 10, 50, 100, 1024, 2048]
+    for size, periodic, k in product(sizes, (True, False), kws):
+        yield SampleInput(size, periodic=periodic, **k, **_kwargs)
 
 
-def sample_inputs_window(op_info, *args, **kwargs):
-    return _sample_input_windows(SampleInput, *args, **kwargs)
+def sample_inputs_gaussian_window(op_info, device, dtype, requires_grad, **kwargs):
+    kws = [{"std": random.uniform(0, 3)} for _ in range(50)]
+    yield from sample_inputs_window(
+        op_info, device, dtype, requires_grad, kws=kws, **kwargs
+    )
 
 
-def error_inputs_window(op_info, *args, **kwargs):
+def sample_inputs_exponential_window(op_info, device, dtype, requires_grad, **kwargs):
+    kws = [{"center": None, "tau": random.uniform(0, 10)} for _ in range(50)]
+    yield from sample_inputs_window(
+        op_info, device, dtype, requires_grad, kws=kws, **kwargs
+    )
+
+
+def error_inputs_window(op_info, device, **kwargs):
+    tmp_kwargs = dict(
+        kwargs,
+        **{
+            "device": device,
+        },
+    )
+
     yield ErrorInput(
-        SampleInput(-1, args=args, kwargs=kwargs),
+        SampleInput(-1, kwargs=tmp_kwargs),
         error_type=ValueError,
         error_regex="requires non-negative window_length, got window_length=-1",
     )
@@ -45,31 +63,36 @@ def error_inputs_window(op_info, *args, **kwargs):
     )
 
     yield ErrorInput(
-        SampleInput(3, args=args, kwargs=tmp_kwargs),
+        SampleInput(3, kwargs=tmp_kwargs),
         error_type=ValueError,
         error_regex="is not implemented for sparse types, got: torch.sparse_coo",
     )
 
     tmp_kwargs = kwargs
-    tmp_kwargs["dtype"] = torch.long
+    tmp_kwargs.update(
+        {
+            "dtype": torch.long,
+        }
+    )
 
     yield ErrorInput(
-        SampleInput(3, args=args, kwargs=tmp_kwargs),
+        SampleInput(3, kwargs=tmp_kwargs),
         error_type=ValueError,
         error_regex="expects floating point dtypes, got: torch.int64",
     )
 
 
-def error_inputs_exponential_window(op_info, device, *args, **kwargs):
-    tmp_kwargs = dict(kwargs, **{"dtype": torch.float32, "device": device})
+def error_inputs_exponential_window(op_info, device, **kwargs):
+    tmp_kwargs = dict(kwargs, **{"dtype": torch.float32})
 
-    for error_input in error_inputs_window(op_info, *args, **kwargs):
-        yield error_input
+    yield from error_inputs_window(op_info, device, **tmp_kwargs)
+
+    tmp_kwargs.update({"device": device})
 
     tmp_kwargs = dict(tmp_kwargs, **{"tau": -1})
 
     yield ErrorInput(
-        SampleInput(3, args=args, kwargs=tmp_kwargs),
+        SampleInput(3, kwargs=tmp_kwargs),
         error_type=ValueError,
         error_regex="Tau must be positive, got: -1 instead.",
     )
@@ -77,39 +100,51 @@ def error_inputs_exponential_window(op_info, device, *args, **kwargs):
     tmp_kwargs = dict(tmp_kwargs, **{"center": 1})
 
     yield ErrorInput(
-        SampleInput(3, args=args, kwargs=tmp_kwargs),
+        SampleInput(3, kwargs=tmp_kwargs),
         error_type=ValueError,
         error_regex="Center must be 'None' for periodic equal True",
     )
 
 
-def error_inputs_gaussian_window(op_info, device, *args, **kwargs):
+def error_inputs_gaussian_window(op_info, device, **kwargs):
     tmp_kwargs = dict(kwargs, **{"dtype": torch.float32, "device": device})
 
-    for error_input in error_inputs_window(op_info, *args, **kwargs):
-        yield error_input
+    yield from error_inputs_window(op_info, device, **kwargs)
 
     tmp_kwargs = dict(tmp_kwargs, **{"std": -1})
 
     yield ErrorInput(
-        SampleInput(3, args=args, kwargs=tmp_kwargs),
+        SampleInput(3, kwargs=tmp_kwargs),
         error_type=ValueError,
         error_regex="Standard deviation must be positive, got: -1 instead.",
     )
 
 
+def make_signal_windows_opinfo(
+    name, variant_test_name, sample_inputs_func, error_inputs_func, *, skips=()
+):
+    return OpInfo(
+        name=name,
+        variant_test_name=variant_test_name,
+        ref=scipy.signal.get_window if TEST_SCIPY else None,
+        dtypes=all_types_and(torch.float, torch.double, torch.long),
+        dtypesIfCUDA=all_types_and(
+            torch.float, torch.double, torch.bfloat16, torch.half, torch.long
+        ),
+        sample_inputs_func=sample_inputs_func,
+        error_inputs_func=error_inputs_func,
+        supports_out=False,
+        supports_autograd=False,
+        skips=skips,
+    )
+
+
 op_db: List[OpInfo] = [
-    OpInfo(
+    make_signal_windows_opinfo(
         "signal.windows.cosine",
-        ref=scipy.signal.get_window if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.float, torch.double, torch.long),
-        dtypesIfCUDA=all_types_and(
-            torch.float, torch.double, torch.bfloat16, torch.half, torch.long
-        ),
-        sample_inputs_func=sample_inputs_window,
-        error_inputs_func=error_inputs_window,
-        supports_out=False,
-        supports_autograd=False,
+        "signal.windows.cosine_default",
+        sample_inputs_window,
+        error_inputs_window,
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -147,17 +182,11 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
         ),
     ),
-    OpInfo(
+    make_signal_windows_opinfo(
         "signal.windows.exponential",
-        ref=scipy.signal.get_window if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.float, torch.double, torch.long),
-        dtypesIfCUDA=all_types_and(
-            torch.float, torch.double, torch.bfloat16, torch.half, torch.long
-        ),
-        sample_inputs_func=sample_inputs_window,
-        error_inputs_func=error_inputs_exponential_window,
-        supports_out=False,
-        supports_autograd=False,
+        "signal.windows.exponential_default",
+        sample_inputs_exponential_window,
+        error_inputs_exponential_window,
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -195,17 +224,11 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
         ),
     ),
-    OpInfo(
+    make_signal_windows_opinfo(
         "signal.windows.gaussian",
-        ref=scipy.signal.get_window if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.float, torch.double, torch.long),
-        dtypesIfCUDA=all_types_and(
-            torch.float, torch.double, torch.bfloat16, torch.half, torch.long
-        ),
-        sample_inputs_func=sample_inputs_window,
-        error_inputs_func=error_inputs_gaussian_window,
-        supports_out=False,
-        supports_autograd=False,
+        "signal.windows.gaussian_default",
+        sample_inputs_gaussian_window,
+        error_inputs_gaussian_window,
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -244,5 +267,3 @@ op_db: List[OpInfo] = [
         ),
     ),
 ]
-
-python_ref_db: List[OpInfo] = []
