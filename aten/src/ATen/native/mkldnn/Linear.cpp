@@ -175,7 +175,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-Tensor linear_pointwise_run(
+Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
@@ -246,7 +246,7 @@ Tensor linear_pointwise_run(
   return output;
 }
 
-Tensor linear_binary_run(
+Tensor mkldnn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -258,7 +258,6 @@ Tensor linear_binary_run(
   TORCH_CHECK(
       it_binary != fusion_binary_alg_map().end(), "Fusion behavior undefined.");
 
-  // TODO: remove duplicated code
   auto input_size = input.sizes();
 
   const int64_t dim = input.dim();
@@ -323,10 +322,10 @@ Tensor linear_binary_run(
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
-      TORCH_FN(linear_pointwise_run));
+      TORCH_FN(mkldnn_linear_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_binary"),
-      TORCH_FN(linear_binary_run));
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_FN(mkldnn_linear_pointwise_binary));
 }
 
 } // namespace native

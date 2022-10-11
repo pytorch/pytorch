@@ -295,7 +295,7 @@ Tensor mkldnn_convolution_pointwise(
       algorithm);
 }
 
-Tensor mkldnn_convolution_binary(
+Tensor mkldnn_convolution_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
     const Tensor& weight_t,
@@ -530,8 +530,8 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_convolution_binary"),
-      TORCH_FN(mkldnn_convolution_binary));
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise.binary"),
+      TORCH_FN(mkldnn_convolution_pointwise_binary));
 }
 
 }}  // namespace at::native
