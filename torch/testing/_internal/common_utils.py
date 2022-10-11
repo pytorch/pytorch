@@ -2341,6 +2341,12 @@ class TestCase(expecttest.TestCase):
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
         numpy_sample = sample_input.numpy()
         n_inp, n_args, n_kwargs = numpy_sample.input, numpy_sample.args, numpy_sample.kwargs
+
+        # Remove torch-specific kwargs
+        for torch_key in {'device', 'layout', 'dtype', 'requires_grad'}:
+            if torch_key in n_kwargs:
+                n_kwargs.pop(torch_key)
+
         t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
 
         actual = torch_fn(t_inp, *t_args, **t_kwargs)

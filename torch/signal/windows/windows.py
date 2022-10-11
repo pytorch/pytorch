@@ -4,7 +4,6 @@ import numpy as np
 from torch import Tensor
 from torch._prims_common import is_float_dtype
 from torch._torch_docs import factory_common_args
-from torch.types import _dtype, _device, _layout
 
 __all__ = [
     'cosine',
@@ -32,18 +31,18 @@ def _add_docstr(*args):
     return decorator
 
 
-def _window_function_checks(function_name: str, window_length: int, dtype: _dtype, layout: _layout) -> None:
+def _window_function_checks(function_name: str, M: int, dtype: torch.dtype, layout: torch.layout) -> None:
     r"""Performs common checks for all the defined windows.
      This function should be called before computing any window
 
      Args:
          function_name (str): name of the window function.
-         window_length (int): length of the window.
+         M (int): length of the window.
          dtype (:class:`torch.dtype`): the desired data type of the window tensor.
          layout (:class:`torch.layout`): the desired layout of the window tensor.
      """
-    if window_length < 0:
-        raise ValueError(f'{function_name} requires non-negative window_length, got window_length={window_length}')
+    if M < 0:
+        raise ValueError(f'{function_name} requires non-negative window_length, got window_length={M}')
     if layout is not torch.strided:
         raise ValueError(f'{function_name} is implemented for strided tensors only, got: {layout}')
     if not is_float_dtype(dtype):
@@ -68,9 +67,7 @@ Args:
     center (float, optional): where the center of the window will be located.
         In other words, at which sample the peak of the window can be found.
         Default: `window_length / 2` if `periodic` is `True` (default), else `(window_length - 1) / 2`.
-    tau (float, optional): the decay value.
-        For `center = 0`, it's suggested to use :math:`\tau = -\frac{(M - 1)}{\ln(x)}`,
-        if `x` is the fraction of the window remaining at the end. Default: 1.0.
+    tau (float, optional): the decay value. Default: 1.0.
     sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
         If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.
     """ +
@@ -100,8 +97,17 @@ Examples:
         **factory_common_args
     ),
 )
-def exponential(M: int, center: float = None, tau: float = 1.0, sym: bool = True, *, dtype: _dtype = None,
-                layout: _layout = torch.strided, device: _device = None, requires_grad: bool = False) -> Tensor:
+def exponential(
+        M: int,
+        center: float = None,
+        tau: float = 1.0,
+        sym: bool = True,
+        *,
+        dtype: torch.dtype = None,
+        layout: torch.layout = torch.strided,
+        device: torch.device = None,
+        requires_grad: bool = False
+) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
@@ -186,9 +192,9 @@ Examples:
 def cosine(M: int,
            sym: bool = True,
            *,
-           dtype: _dtype = None,
-           layout: _layout = torch.strided,
-           device: _device = None,
+           dtype: torch.dtype = None,
+           layout: torch.layout = torch.strided,
+           device: torch.device = None,
            requires_grad: bool = False) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
@@ -233,7 +239,8 @@ The gaussian window is defined as follows:
 Args:
     M (int): the length of the output window.
         In other words, the number of points of the cosine window.
-    std (float): the standard deviation of the gaussian. It controls how narrow or wide the window is.
+    std (float, optional): the standard deviation of the gaussian. It controls how narrow or wide the window is.
+        Default: 1.0.
     sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
         If `True`, returns a symmetric window suitable for use in filter design. Default: `True`
 
@@ -262,12 +269,12 @@ Examples:
     ),
 )
 def gaussian(M: int,
-             std: float,
+             std: float = 1.0,
              sym: bool = True,
              *,
-             dtype: _dtype = None,
-             layout: _layout = torch.strided,
-             device: _device = None,
+             dtype: torch.dtype = None,
+             layout: torch.layout = torch.strided,
+             device: torch.device = None,
              requires_grad: bool = False) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
