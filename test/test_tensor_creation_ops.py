@@ -345,11 +345,11 @@ class TestTensorCreation(TestCase):
 
         if device != 'cpu':
             with self.assertRaisesRegex(
-                    RuntimeError,
-                    (
-                            "torch.block_diag: input tensors must all be on the same device."
-                            " Input 0 is on device cpu and input 1 is on device "
-                    )
+                RuntimeError,
+                (
+                    "torch.block_diag: input tensors must all be on the same device."
+                    " Input 0 is on device cpu and input 1 is on device "
+                )
             ):
                 torch.block_diag(torch.ones(2, 2).cpu(), torch.ones(2, 2, device=device))
 
@@ -474,8 +474,7 @@ class TestTensorCreation(TestCase):
             out = torch.zeros(2, device=device, dtype=dtype)
             expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
             error = "Expected object of scalar type {} but got scalar type " \
-                    "{} for argument 'out'".format(
-                complex_dtype_name(expected_dtype), dtype_name(dtype))
+                    "{} for argument 'out'".format(complex_dtype_name(expected_dtype), dtype_name(dtype))
             with self.assertRaisesRegex(RuntimeError, error):
                 op(a, b, out=out)
 
@@ -2995,8 +2994,10 @@ class TestTensorCreation(TestCase):
             self._test_logspace_base2(device, dtype, steps=steps)
 
     @dtypes(*all_types_and(torch.bfloat16))
-    @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
-    all_types_and(torch.half, torch.bfloat16))
+    @dtypesIfCUDA(
+        *integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
+        all_types_and(torch.half, torch.bfloat16)
+    )
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
