@@ -269,8 +269,8 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   //   c = torch.ones(4, 4)
   //   torch.ops.aten.copy(a, b).add_(c)
   // We don't want to emit an extra copy every time though, so we only do it if the shapes are different.
-  if (self.sizes() != intermediate.sizes()) {
-    return at::expand_copy(intermediate, self.sizes());
+  if (self.sym_sizes() != intermediate.sym_sizes()) {
+    return at::expand_copy_symint(intermediate, self.sym_sizes());
   } else {
     return intermediate;
   }
