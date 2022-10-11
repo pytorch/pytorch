@@ -226,16 +226,20 @@ jobs:
             false
           fi
 
-  check_labels:
+  check-labels:
+    name: Check labels
     runs-on: linux.20_04.16x
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout repo
+        id: checkout
+        uses: actions/checkout@v2
         with:
-          submodules: false
-          fetch-depth: 1
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: 3.8
