@@ -170,6 +170,29 @@ void CommandBuffer::dispatch(const utils::uvec3& global_workgroup_size) {
   state_ = CommandBuffer::State::RECORDING;
 }
 
+void CommandBuffer::copy_buffer_to_buffer(
+    const api::VulkanBuffer& source,
+    const api::VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::BARRIERS_INSERTED,
+      "Vulkan CommandBuffer: called copy_buffer_to_buffer() on a command buffer whose state "
+      "is not BARRIERS_INSERTED.");
+
+  const VkBufferCopy copy_details{
+      src_offset.data[0u], // srcOffset
+      dst_offset.data[0u], // dstOffset
+      copy_range.data[0u], // size
+  };
+
+  vkCmdCopyBuffer(
+      handle_, source.handle(), destination.handle(), 1u, &copy_details);
+
+  state_ = CommandBuffer::State::RECORDING;
+}
+
 void CommandBuffer::copy_texture_to_texture(
     const api::VulkanImage& source,
     const api::VulkanImage& destination,
