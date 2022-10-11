@@ -240,34 +240,36 @@ ALLOWLIST_OP = (
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     xfail(
         "ceil",
-        dtypes=(torch.bfloat16, torch.float64),
-        reason="Ceil not implemented for f64 and bf64 in onnx runtime",
+        dtypes=[torch.float64],
+        reason="Ceil not implemented for f64 in onnx runtime",
     ),
     skip(
         "ceil",
         dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
-        reason="Not supported by onnx",
+        reason="not supported by onnx",
     ),
     skip(
         "sqrt",
         dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES,
-        reason="Not supported by onnx",
+        reason="not supported by onnx",
     ),
     xfail(
         "t",
-        dtypes=(torch.bfloat16,) + COMPLEX_TYPES,
-        reason="Transpose not implemented for bf64 in onnx runtime",
+        dtypes=COMPLEX_TYPES,
+        reason="jit tracer error for complex types",
     ),
 )
 
 # Expected opset specific fails for ops that do not support specific opsets
 
 EXPECTED_OPSET_FAILS: Tuple[XfailOpset, ...] = (
+    # TODO: sqrt for torch.bfloat16 is just an example. Replace it with more meaningful
+    # skips when there are.
     XfailOpset(
         "sqrt",
         dtypes=[torch.bfloat16],
         opsets=[opsets_before(13)],
-        reason="sqrt not defined for bf16 before opset 13",
+        reason="Sqrt not defined for bf16 before opset 13",
     ),
 )
 
@@ -322,15 +324,16 @@ class TestConsistency(common_utils.TestCase):
 
             with self.subTest(sample=cpu_sample, opset=opset):
 
+                context_manager = contextlib.nullcontext()
                 # Skip opset specific fails
                 if op.name in expected_opset_fails_name_mapping:
                     fail = expected_opset_fails_name_mapping[op.name]
                     if fail.should_fail(opset, dtype):
                         context_manager = self.assertRaises(fail.exception or Exception)
-                    else:
-                        context_manager = contextlib.nullcontext()
-                else:
-                    context_manager = contextlib.nullcontext()
+                if dtype == torch.bfloat16 and opset < 13:
+                    # Always skip bfloat16 for opsets before 13 because onnx started
+                    # supporting bfloat16 from opset 13.
+                    context_manager = self.assertRaises(Exception)
 
                 # Run the test
                 inputs = (cpu_sample.input, *cpu_sample.args)
