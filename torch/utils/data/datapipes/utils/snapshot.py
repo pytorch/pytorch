@@ -1,6 +1,6 @@
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.graph_settings import apply_shuffle_seed
+from torch.utils.data.graph_settings import apply_random_seed
 
 
 # TODO: Caveats
@@ -39,7 +39,7 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
     # simple fast-forwarding. Therefore, we need to call `reset` twice, because if `SnapshotState` is `Restored`,
     # the first reset will not actually reset.
     datapipe.reset()  # This ensures `SnapshotState` is `Iterating` by this point, even if it was `Restored`.
-    apply_shuffle_seed(datapipe, rng)
+    apply_random_seed(datapipe, rng)
 
     remainder = n_iterations
     it = iter(datapipe)  # This always reset the DataPipe if it hasn't already.

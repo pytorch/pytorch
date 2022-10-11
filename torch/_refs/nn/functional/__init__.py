@@ -6,6 +6,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
 from torch._decomp import register_decomposition
+from torch._decomp.decompositions import Reduction
 from torch._prims_common import (
     check,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -31,10 +32,12 @@ __all__ = [
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
+    "huber_loss",
     "l1_loss",
     "margin_ranking_loss",
     "mish",
     "mse_loss",
+    "poisson_nll_loss",
     "prelu",
     "relu",
     "relu6",
@@ -300,6 +303,17 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
 
 
 # Losses
+def _reduction_int_to_str(reduction: int) -> str:
+    if reduction == Reduction.NONE.value:
+        return "none"
+    elif reduction == Reduction.MEAN.value:
+        return "mean"
+    elif reduction == Reduction.SUM.value:
+        return "sum"
+    else:
+        raise ValueError(f"{reduction} is not a valid value for reduction")
+
+
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
     if reduction == "sum":
         return refs.sum(loss)
@@ -311,7 +325,7 @@ def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeTyp
 
 def _check_reduction_value(reduction: str):
     if reduction not in ("mean", "sum", "none"):
-        raise ValueError("{} is not a valid value for reduction".format(reduction))
+        raise ValueError(f"{reduction} is not a valid value for reduction")
 
 
 # This helper function maps depreciated arguments, "size_average" and "reduce"
@@ -332,7 +346,11 @@ def _get_string_reduction_arg(
     return ret
 
 
-@register_decomposition(torch.ops.aten.l1_loss)
+# CompositeImplicitAutograd - don't register decomp
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -340,6 +358,9 @@ def l1_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.l1_loss
+    """
     if size_average is not None or reduce is not None:
         # TODO: raise exception instead of converting value
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
@@ -409,6 +430,37 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
+
+
+# TODO: This ref supports int reduction and out kwarg to be compatible with ATen:
+# https://github.com/pytorch/pytorch/issues/83931
+# TODO: Could be rewritten to support complex:
+# https://github.com/pytorch/pytorch/pull/85041
+@register_decomposition(torch.ops.aten.huber_loss)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def huber_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    reduction: Union[str, int] = "mean",
+    delta: float = 1.0,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.huber_loss
+    """
+    if type(reduction) is int:
+        reduction = _reduction_int_to_str(reduction)
+    _check_reduction_value(reduction)  # type: ignore[arg-type]
+    check(
+        delta > 0,
+        lambda: "huber_loss does not support non-positive values for delta.",
+    )
+    z = (input - target).abs()
+    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
+    return _apply_loss_reduction(loss, reduction)  # type: ignore[arg-type]
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out
@@ -509,6 +561,43 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         return a * 0.5 * (1 + torch.erf(a * kAlpha))
     else:
         raise RuntimeError("approximate argument must be either none or tanh.")
+
+
+# CompositeImplicitAutograd - don't register decomp
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def poisson_nll_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    log_input: bool = True,
+    full: bool = False,
+    size_average: Optional[bool] = None,
+    eps: float = 1e-8,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.poisson_nll_loss
+    """
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+    _check_reduction_value(reduction)
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input + eps)
+
+    if full:
+        stirling_term = (
+            target * torch.log(target) - target + 0.5 * torch.log(2 * torch.pi * target)
+        )
+        # avoid inplace add
+        loss = loss + stirling_term.masked_fill(target <= 1, 0)
+    return _apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(torch.ops.aten.prelu)
