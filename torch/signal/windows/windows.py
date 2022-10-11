@@ -85,7 +85,7 @@ def exponential(window_length: int,
     constant = 1 / tau
 
     """
-    Note that non-integer step is subject to floating point rounding errors when comparing against end; 
+    Note that non-integer step is subject to floating point rounding errors when comparing against end;
     to avoid inconsistency, we advise adding a small epsilon to end in such cases.
     """
     k = torch.arange(center * constant,
@@ -122,7 +122,7 @@ def cosine(window_length: int,
     constant = torch.pi / (window_length + 1 if periodic else window_length)
 
     """
-    Note that non-integer step is subject to floating point rounding errors when comparing against end; 
+    Note that non-integer step is subject to floating point rounding errors when comparing against end;
     to avoid inconsistency, we advise adding a small epsilon to end in such cases.
     """
     k = torch.arange(start * constant,
@@ -132,6 +132,8 @@ def cosine(window_length: int,
                      layout=layout,
                      device=device,
                      requires_grad=requires_grad)
+
+    _window_length_check(window_length, k.size()[0])
 
     return torch.sin(k)
 
@@ -159,7 +161,7 @@ def gaussian(window_length: int,
     constant = 1 / (std * np.sqrt(2))
 
     """
-    Note that non-integer step is subject to floating point rounding errors when comparing against end; 
+    Note that non-integer step is subject to floating point rounding errors when comparing against end;
     to avoid inconsistency, we advise adding a small epsilon to end in such cases.
     """
     k = torch.arange(start * constant,
