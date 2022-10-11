@@ -27,65 +27,6 @@
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
-namespace {
-// This is the un-specialized struct.  Note that we prevent instantiation of this
-// struct by putting an undefined symbol in the function body so it won't compile.
-//  template <typename T>
-//  struct SharedMemory
-//  {
-//      // Ensure that we won't compile any un-specialized types
-//      __device__ T *getPointer()
-//      {
-//          extern __device__ void error(void);
-//          error();
-//          return NULL;
-//      }
-//  };
-// https://github.com/NVIDIA/apex/issues/246
-template <typename T>
-struct SharedMemory;
-
-template <>
-struct SharedMemory <float>
-{
-    __device__ float *getPointer()
-    {
-        extern __shared__ float s_float[];
-        return s_float;
-    }
-};
-
-template <>
-struct SharedMemory <double>
-{
-    __device__ double *getPointer()
-    {
-        extern __shared__ double s_double[];
-        return s_double;
-    }
-};
-
-template <>
-struct SharedMemory <c10::Half>
-{
-    __device__ c10::Half *getPointer()
-    {
-        extern __shared__ c10::Half s_half[];
-        return s_half;
-    }
-};
-
-template <>
-struct SharedMemory <c10::BFloat16>
-{
-    __device__ c10::BFloat16 *getPointer()
-    {
-        extern __shared__ c10::BFloat16 s_bf16[];
-        return s_bf16;
-    }
-};
-}
-
 
 namespace at {
 namespace native {
@@ -880,8 +821,8 @@ void cuComputePartGradGammaBeta(
     const int thr_load_col_off = (threadIdx.x*blockDim.y)&(blockDim.x-1);
     const int thr_load_row_off = (threadIdx.x*blockDim.y)/blockDim.x + threadIdx.y*blockDim.y;
     const int i2_off = blockIdx.x * blockDim.x + thr_load_col_off;
-    SharedMemory<T_ACC> shared;
-    T_ACC* buf = shared.getPointer(); // buf has at least blockDim.x * blockDim.y * blockDim.y + (blockDim.y - 1)*(blockDim.x/blockDim.y) elements
+    alignas(sizeof(double)) extern __shared__ char shared[];
+    T_ACC * buf = reinterpret_cast<T_ACC*>(&shared); // buf has at least blockDim.x * blockDim.y * blockDim.y + (blockDim.y - 1)*(blockDim.x/blockDim.y) elements
     T_ACC* warp_buf1 = (T_ACC*)buf;
     T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
     // compute partial sums from strided inputs
@@ -938,8 +879,8 @@ void cuComputeGradGammaBeta(
     T* grad_beta)
 {
     // sum partial gradients for gamma and beta
-    SharedMemory<T_ACC> shared;
-    T_ACC* buf = shared.getPointer();
+    alignas(sizeof(double)) extern __shared__ char shared[];
+    T_ACC * buf = reinterpret_cast<T_ACC*>(&shared);
     int i2 = blockIdx.x * blockDim.x + threadIdx.x;
     if (i2 < N) {
       // each warp does sequential reductions until reduced part_size is num_warps
@@ -1024,8 +965,8 @@ void cuComputeGradInput(
     }
     // inter-warp reductions
     if (blockDim.y > 1) {
-      SharedMemory<T_ACC> shared;
-      T_ACC* buf = shared.getPointer();
+      alignas(sizeof(double)) extern __shared__ char shared[];
+      T_ACC * buf = reinterpret_cast<T_ACC*>(&shared);
       for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
         // upper half of warps write to shared
         if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
