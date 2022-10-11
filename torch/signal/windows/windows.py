@@ -86,13 +86,13 @@ Keyword args:
 Examples:
     >>> # Generate an exponential window without keyword args.
     >>> torch.signal.windows.exponential(10)
-    tensor([0.0067, 0.0183, 0.0498, 0.1353, 0.3679, 1.0000, 0.3679, 0.1353, 0.0498,
-    0.0183])
+    tensor([0.0111, 0.0302, 0.0821, 0.2231, 0.6065, 0.6065, 0.2231, 0.0821, 0.0302,
+        0.0111])
 
     >>> # Generate a periodic exponential window and decay factor equal to .5
     >>> torch.signal.windows.exponential(10,sym=False,tau=.5)
-    tensor([1.2341e-04, 9.1188e-04, 6.7379e-03, 4.9787e-02, 3.6788e-01, 3.6788e-01,
-    4.9787e-02, 6.7379e-03, 9.1188e-04, 1.2341e-04])
+    tensor([4.5400e-05, 3.3546e-04, 2.4788e-03, 1.8316e-02, 1.3534e-01, 1.0000e+00,
+        1.3534e-01, 1.8316e-02, 2.4788e-03, 3.3546e-04])
     """.format(
         **factory_common_args
     ),
@@ -178,13 +178,13 @@ Keyword args:
 Examples:
     >>> # Generate a cosine window without keyword args.
     >>> torch.signal.windows.cosine(10)
-    tensor([0.1423, 0.4154, 0.6549, 0.8413, 0.9595, 1.0000, 0.9595, 0.8413, 0.6549,
-    0.4154])
-
-    >>> # Generate a symmetric cosine window.
-    >>> torch.signal.windows.cosine(10,sym=False)
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540,
-    0.1564])
+        0.1564])
+
+    >>> # Generate a periodic cosine window.
+    >>> torch.signal.windows.cosine(10,sym=False)
+    tensor([0.1423, 0.4154, 0.6549, 0.8413, 0.9595, 1.0000, 0.9595, 0.8413, 0.6549,
+        0.4154])
 """.format(
         **factory_common_args
     ),
@@ -257,13 +257,13 @@ Keyword args:
 Examples:
     >>> # Generate a gaussian window without keyword args.
     >>> torch.signal.windows.gaussian(10)
-    tensor([1.9287e-22, 1.2664e-14, 1.5230e-08, 3.3546e-04, 1.3534e-01, 1.0000e+00,
-    1.3534e-01, 3.3546e-04, 1.5230e-08, 1.2664e-14])
+    tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01,
+        3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
 
     >>> # Generate a periodic gaussian window and standard deviation equal to 0.9.
     >>> torch.signal.windows.gaussian(10,sym=False,std=0.9)
-    tensor([3.7267e-06, 5.1998e-04, 2.1110e-02, 2.4935e-01, 8.5700e-01, 8.5700e-01,
-    2.4935e-01, 2.1110e-02, 5.1998e-04, 3.7267e-06])
+    tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00,
+        5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
         **factory_common_args
     ),
