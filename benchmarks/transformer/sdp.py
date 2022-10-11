@@ -1,6 +1,8 @@
 import torch
 import itertools
 import numpy as np
+import sys
+import csv
 
 
 class CompositeMHA(torch.nn.Module):
@@ -73,7 +75,7 @@ def benchmark_torch_function(iters, f, *args, **kwargs):
     return (start_event.elapsed_time(end_event) * 1.0e-3) / iters
 
 
-def run_timing(batch_size, D, H, L):
+def run_timing(batch_size, D, H, L, writer):
     dropout_p = 0.0
     mask = None
 
@@ -96,10 +98,15 @@ def run_timing(batch_size, D, H, L):
         with torch.inference_mode():
             pt_time = benchmark_torch_function(iters, npt, x, x, x, mask) * 1e3
             cp_time = benchmark_torch_function(iters, cpt, x, x, x, mask) * 1e3
-            print(f"L: {L:4.0f} H: {H:2.0f} D: {D:4.0f} ", end="")
-            print(f"pt_time: {pt_time:4.2f}ms ", end="")
-            print(f"cp_time: {cp_time:4.2f}ms ", end="")
-            print(f"speedup: {pt_time / cp_time:4.2f}x")
+            results = {}
+            results["L"] = L
+            results["H"] = H
+            results["D"] = D
+            results["pt_time"] = pt_time
+            results["cp_time"] = cp_time
+            results["speedup"] = pt_time / cp_time
+            results["dtype"] = str(x.dtype)
+            writer.writerow(results)
 
 
 if __name__ == "__main__":
@@ -108,6 +115,10 @@ if __name__ == "__main__":
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    headers = ["L", "H", "D", "pt_time", "cp_time", "speedup", "dtype"]
+    writer = csv.DictWriter(sys.stdout, headers)
+    writer.writeheader()
+
     batch_size = 64
     for H, L in itertools.product([1, 2, 4, 8, 16, 32], [64, 128, 256]):
-        run_timing(batch_size, 1024, H, L)
+        run_timing(batch_size, 1024, H, L, writer)
