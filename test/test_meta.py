@@ -439,7 +439,6 @@ meta_function_expected_failures = {
     torch.take : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
-    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.frexp : {f64, f16, bf16, f32},
     torch.functional.unique : {f64, i32, i64, u8, i16, bf16, b8, i8, f32},
     torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, bf16, b8, i8, f32},
@@ -547,6 +546,8 @@ meta_function_skips = {
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
     # for grid_sampler_2d, so we can't just xfail it
     torch.nn.functional.grid_sample : {f64, f32},
+
+    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
 }
 
 
@@ -697,8 +698,6 @@ meta_dispatch_expected_failures = {
     aten._pdist_forward.default : {f32, f64},
     aten._unique2.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
-    aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.grid_sampler_3d.default : {f32, f64},
@@ -742,6 +741,8 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
+    aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
+    aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
