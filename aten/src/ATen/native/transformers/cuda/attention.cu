@@ -16,7 +16,6 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 
-#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 
@@ -368,8 +367,8 @@ __global__ void transform_bias_rescale_qkv_add_padding_kernel(
 }
 
 Tensor collapse_dims_1_and_2(const Tensor& sizes) {
-  auto sizes_dim1 = at::native::narrow(sizes, 1, 0, 1);
-  auto sizes_dim2 = at::native::narrow(sizes, 1, 1, 1);
+  auto sizes_dim1 = at::native::narrow_symint(sizes, 1, 0, 1);
+  auto sizes_dim2 = at::native::narrow_symint(sizes, 1, 1, 1);
 
   return (sizes_dim1 * sizes_dim2).contiguous();
 }
@@ -451,7 +450,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_size_tensor());
           auto offsets =
               NestedTensor_batch_offsets_from_size_tensor(sizes, sizes.numel());
-          at::native::narrow(offsets, 0, sizes.numel() + 1, sizes.numel())
+          at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
               .copy_(sizes.reshape({-1}));
           auto metadata = offsets.to(at::Device(kCUDA), at::kInt, true, true);
           const auto offsets_ptr = metadata.data_ptr<int>();
