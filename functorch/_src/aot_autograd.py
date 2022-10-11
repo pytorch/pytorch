@@ -15,7 +15,6 @@ from torch._subclasses import FakeTensorMode, CrossRefFakeMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
-from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 
 from functorch import make_fx
 from functorch.experimental import functionalize
@@ -243,22 +242,28 @@ def make_boxed_compiler(compiler):
     return f
 
 
-def call_func_with_args(f, args, steal_args=False):
+def call_func_with_args(f, args, steal_args=False, disable_amp=False):
     if not steal_args:
         args = list(args)
     assert isinstance(args, list)
 
-    if hasattr(f, "_boxed_call"):
-        out = normalize_as_list(f(args))
-    else:
-        # TODO: Please remove soon
-        # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
-        warnings.warn(
-            "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
-            "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-            "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
-        )
-        out = normalize_as_list(f(*args))
+    if disable_amp:
+        guard = torch._C._DisableAutocast()
+    try:
+        if hasattr(f, "_boxed_call"):
+            out = normalize_as_list(f(args))
+        else:
+            # TODO: Please remove soon
+            # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
+            warnings.warn(
+                "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
+                "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
+                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+            )
+            out = normalize_as_list(f(*args))
+    finally:
+        if disable_amp:
+            del guard
     return out
 
 
@@ -281,7 +286,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
         fw_module.print_readable()
 
 
-    disable_amp = should_disable_autocast(fw_module, flat_args)
+    disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
 
     with context(), track_graph_compiling("inference"):
@@ -289,12 +294,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
     @wraps(compiled_fw)
     def new_fn(args):
-        # on hot path, so avoid invoking nullcontext if disable_amp is False
-        if disable_amp:
-            with disable_autocast_manager():
-                fw_outs = call_func_with_args(compiled_fw, args)
-        else:
-            fw_outs = call_func_with_args(compiled_fw, args)
+        fw_outs = call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
         return fw_outs
 
     return new_fn
@@ -307,44 +307,6 @@ def disable_autocast_manager():
         yield
     finally:
         del guard
-
-class NonIdempotentException(Exception):
-    pass
-
-class NonIdempotentAMP(torch.fx.Interpreter):
-    """
-    When we invoke a Composite Implicit autograd operator that has an autocast rule, such as Einsum,
-    autocast is disabled during its invocation. When we trace out the operators in an implicit op,
-    re-applying autocast rules on those operators might yield divergence from what was executed at runtime.
-    This pass checks for divergence. If divergence is found, we will disable autocast.
-    We would like to avoid disabling autocast if possible because accessing TLS is slow.
-    """
-
-    def __init__(self, gm: torch.fx.GraphModule):
-        super().__init__(gm)
-        self.non_idempotent = False
-
-    def run_node(self, n: torch.fx.Node):
-        tensor_meta = n.meta.get("tensor_meta")
-        output = super().run_node(n)
-        if tensor_meta:
-            assert isinstance(output, torch.Tensor)
-            if output.dtype != tensor_meta.dtype:
-                raise NonIdempotentException()
-        return output
-
-    def is_non_idempotent(self, *args):
-        try:
-            with disable_autocast_cache():
-                self.run(*args)
-        except NonIdempotentException:
-            return True
-        return False
-
-def should_disable_autocast(fx_g, args):
-    if not torch._C._is_any_autocast_enabled():
-        return False
-    return NonIdempotentAMP(fx_g).is_non_idempotent(*args)
 
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
@@ -417,13 +379,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     joint_inputs = (deduped_flat_args, out)
 
+    disable_amp = torch._C._is_any_autocast_enabled()
+
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
         # NB: tracing_mode is real, as it's assumed the calling context setup
         # fake tensor mode / symbolic shapes if that is needed
         fx_g = make_fx(joint_forward_backward)(*joint_inputs)
 
-        disable_amp = should_disable_autocast(fx_g, joint_inputs)
         context = disable_autocast_manager if disable_amp else nullcontext
 
         def fake_fn(primals, tangents):
@@ -441,7 +404,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         fx_g.recompile()
     else:
         fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
-        disable_amp = should_disable_autocast(fx_g, flat_args)
 
     if config.debug_joint:
         print("====== Joint graph ======")
@@ -468,15 +430,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
-            if disable_amp:
-                with disable_autocast_manager():
-                    fw_outs = call_func_with_args(
-                        CompiledFunction.compiled_fw, deduped_flat_tensor_args
-                    )
-            else:
-                fw_outs = call_func_with_args(
-                    CompiledFunction.compiled_fw, deduped_flat_tensor_args
-                )
+            fw_outs = call_func_with_args(
+                CompiledFunction.compiled_fw, deduped_flat_tensor_args, disable_amp=disable_amp
+            )
             num_outs = CompiledFunction.num_outs
             ctx.save_for_backward(*fw_outs[num_outs:])
             return tuple(fw_outs[0:num_outs])
@@ -487,20 +443,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             contiguous_args = [t.contiguous() for t in flat_args]
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
             if CompiledFunction.compiled_bw is None:
-                with track_graph_compiling("backward", True):
+                context = disable_autocast_manager if disable_amp else nullcontext
+                with context(), track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
                         bw_module, all_args
                     )
             ctx.maybe_clear_saved_tensors()
-            if disable_amp:
-                with disable_autocast_manager():
-                    out = call_func_with_args(
-                        CompiledFunction.compiled_bw, all_args, steal_args=True
-                    )
-            else:
-                out = call_func_with_args(
-                    CompiledFunction.compiled_bw, all_args, steal_args=True
-                )
+            out = call_func_with_args(
+                CompiledFunction.compiled_bw, all_args, steal_args=True, disable_amp=disable_amp
+            )
             return tuple(out)
 
     @wraps(CompiledFunction.apply)
