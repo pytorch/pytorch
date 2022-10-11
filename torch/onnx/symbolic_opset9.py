@@ -205,6 +205,7 @@ __all__ = [
     "prim_shape",
     "prim_tolist",
     "prim_tuple_construct",
+    "prim_type",
     "prim_unchecked_cast",
     "prim_uninitialized",
     "rand_like",
