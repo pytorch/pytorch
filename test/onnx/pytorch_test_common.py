@@ -107,13 +107,13 @@ def skipTraceTest(min_opset_version=float("inf")):
     return skip_dec
 
 
-def skipScriptTest(min_opset_version=float("inf")):
+def skipScriptTest(min_opset_version=float("inf"), reason=""):
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             self.is_script_test_enabled = self.opset_version >= min_opset_version
             if not self.is_script_test_enabled and self.is_script:
-                raise unittest.SkipTest("Skip verify test for TorchScript")
+                raise unittest.SkipTest(f"Skip verify test for TorchScript. {reason}")
             return func(self, *args, **kwargs)
 
         return wrapper
