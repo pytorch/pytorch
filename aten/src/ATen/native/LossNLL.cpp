@@ -646,9 +646,9 @@ Tensor nll_loss_nd(
     TORCH_CHECK_VALUE(
         false,
         "Expected input batch_size (",
-        self.sizes()[0],
+        self.sym_sizes()[0],
         ") to match target batch_size (",
-        target.sizes()[0],
+        target.sym_sizes()[0],
         ").");
   }
 
@@ -661,37 +661,37 @@ Tensor nll_loss_nd(
     ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
   } else {
     // dim == 3 or dim > 4
-    auto n = input_.size(0);
-    auto c = input_.size(1);
-    auto out_size = input_.sizes().slice(2).vec();
+    auto n = input_.sym_sizes()[0];
+    auto c = input_.sym_sizes()[1];
+    auto out_size = input_.sym_sizes().slice(2).vec();
     out_size.insert(out_size.begin(), n);
     if (target_.sym_sizes().slice(1) != input_.sym_sizes().slice(2)) {
       TORCH_CHECK(
           false,
           "Expected target size ",
-          IntArrayRef(out_size),
+          SymIntArrayRef(out_size),
           ", got ",
-          target_.sizes());
+          target_.sym_sizes());
     }
     input_ = input_.contiguous();
     target_ = target_.contiguous();
     // support empty batches, see #15870
     if (input_.numel() > 0) {
-      input_ = input_.view({n, c, 1, -1});
+      input_ = input_.view_symint({n, c, 1, -1});
     } else {
-      input_ = input_.view({n, c, 0, 0});
+      input_ = input_.view_symint({n, c, 0, 0});
     }
     if (target_.numel() > 0) {
-      target_ = target_.view({n, 1, -1});
+      target_ = target_.view_symint({n, 1, -1});
     } else {
-      target_ = target_.view({n, 0, 0});
+      target_ = target_.view_symint({n, 0, 0});
     }
     if (reduction != Reduction::None) {
       ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
     } else {
       auto out =
           at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
-      ret = out.view(out_size);
+      ret = out.view_symint(out_size);
     }
   }
   return ret;

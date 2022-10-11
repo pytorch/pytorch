@@ -1280,6 +1280,9 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: chunk
+    NestedTensorCPU, NestedTensorCUDA: chunk_nested_tensor
 
 - func: tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -2456,6 +2459,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: frac_out
+    MPS: frac_out_mps
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
@@ -2889,6 +2893,7 @@
     CUDA: layer_norm_cuda
     MPS: layer_norm_mps
     CompositeExplicitAutograd: math_native_layer_norm
+    NestedTensorCPU, NestedTensorCUDA: nested_layer_norm
   autogen: native_layer_norm.out
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, SymInt[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
@@ -4945,6 +4950,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sum
+    SparseCPU, SparseCUDA: sum_coo
     SparseCsrCPU, SparseCsrCUDA: sum_csr
   autogen: sum.out
 
@@ -6244,6 +6250,7 @@
 - func: sparse_dim(Tensor self) -> int
   variants: method
   dispatch:
+    CPU, CUDA: sparse_dim_strided
     SparseCPU, SparseCUDA, SparseMeta: sparse_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
@@ -6260,6 +6267,7 @@
 - func: dense_dim(Tensor self) -> int
   variants: method
   dispatch:
+    CPU, CUDA: dense_dim_strided
     SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
@@ -8707,13 +8715,6 @@
     MPS: max_mps
     QuantizedCPU: max_quantized_cpu
 
-# Not to be confused with binary op `max.out`. Commented because of failed CI
-# FIXME: enable this
-#- func: max.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-#  device_check: NoCheck   # TensorIterator
-#  dispatch:
-#    CompositeExplicitAutograd: max_unary_out
-
 - func: fmax(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmax.out
   device_check: NoCheck   # TensorIterator
@@ -8747,6 +8748,12 @@
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+
+- func: max.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU, CUDA: max_unary_out
+    QuantizedCPU: max_quantized_unary_out
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
   structured_delegate: minimum.out
@@ -13139,12 +13146,6 @@
     NestedTensorCPU: NestedTensor_softmax_dropout
     NestedTensorCUDA: NestedTensor_softmax_dropout_cuda
 
-- func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
-  variants: method
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm
-  autogen: _nested_tensor_layer_norm.out
-
 # Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
 - func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, int? mask_type=None) -> Tensor
   variants: function
@@ -13204,6 +13205,11 @@
   variants: function
   dispatch:
     CUDA: flash_scaled_dot_product_attention
+
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _efficient_attention_forward
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function

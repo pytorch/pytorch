@@ -2904,7 +2904,8 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
                                                   axis,
                                                   quantizer->scalar_type());
   }
-  // quantized kernels shouldn't run with symints
+  // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
+  // are missing for now.
   auto result = make_qtensor(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides), quantizer);
   if (dim.has_value()) {
     namedinference::propagate_names_except(result, self, {dim.value()});
@@ -3902,6 +3903,14 @@ at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
   auto tmp = self.alias();
   out.copy_(tmp);
   return out;
+}
+
+int64_t sparse_dim_strided(const at::Tensor& self) {
+  return 0;
+}
+
+int64_t dense_dim_strided(const at::Tensor& self) {
+  return self.dim();
 }
 
 } // namespace native
