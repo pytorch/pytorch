@@ -339,5 +339,5 @@ buck-out/
 third_party/ruy/
 third_party/glog/
 
-# Virualenv
+# Virtualenv
 venv/
