@@ -156,11 +156,11 @@ class FlatParameter(nn.Parameter):
             entry; see :class:`ParamInfo`.
         _numels (Tuple[int, ...]): Each parameter's numel.
         _shapes (Tuple[torch.Size, ...]): Each parameter's shape.
-        _fqns (Tuple[str, ...]): Each parameter's name prefixed with the parent
-            module names starting from the module passed to construct this
-            flattened parameter via :class:`FlatParamHandle`; the prefixed
-            names are guaranteed to be unique within the subtree rooted in that
-            module.
+        _fqns (Tuple[str, ...]): Each original parameter's name prefixed with
+            the parent module names starting from the module passed to
+            construct this flattened parameter via :class:`FlatParamHandle`;
+            the prefixed names are guaranteed to be unique within the subtree
+            rooted in that module. We refer to these names as FQNs.
         _num_params (int): Number of original parameters flattened into this
             flattened parameter; this is the length of ``_param_infos``,
             ``_numels``, ``_shapes``, and ``_fqns``.
