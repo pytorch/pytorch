@@ -8,11 +8,24 @@ When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_F
 ALLOWLIST_OP lists.
 
 """
+import contextlib
 import copy
+import dataclasses
+import io
 import itertools
 import unittest
 from collections import namedtuple
-from typing import Collection, Iterable, Optional, Sequence
+from typing import (
+    Callable,
+    Collection,
+    Iterable,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
+
+import onnx
 
 import torch
 from torch.onnx import _constants, verification
@@ -86,7 +99,7 @@ COMPLEX_TYPES = (
 )
 
 
-# Copied from functorch
+# Copied from functorch: functorch/test/common_utils.py
 # A named tuple for storing information about a test case to skip
 DecorateMeta = namedtuple(
     "DecorateMeta",
@@ -139,6 +152,30 @@ def skip(
     )
 
 
+@dataclasses.dataclass
+class XfailOpset:
+    """Expects a OpInfo test to fail on specific ONNX opsets."""
+
+    op_name: str
+    opsets: Collection[Union[int, Callable[[int], bool]]]
+    dtypes: Optional[Collection[torch.dtype]] = None
+    exception: Optional[Exception] = None
+    reason: str = "unspecified"
+
+    def _contains_opset(self, opset: int) -> bool:
+        return any(
+            opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
+            for opset_spec in self.opsets
+        )
+
+    def _contains_dtype(self, dtype: torch.dtype) -> bool:
+        return self.dtypes is None or dtype in self.dtypes
+
+    def should_fail(self, opset: int, dtype: torch.dtype) -> bool:
+        """Returns whether the test should fail for the given opset and dtype."""
+        return self._contains_opset(opset) and self._contains_dtype(dtype)
+
+
 def skip_ops(
     all_opinfos: Sequence[opinfo_core.OpInfo],
     test_case_name: str,
@@ -168,10 +205,39 @@ def skip_ops(
     return wrapped
 
 
+def opsets_before(opset: int) -> Callable[[int], bool]:
+    """Returns a comparison function that decides if the given opset is before the specified."""
+
+    def compare(other_opset: int):
+        return other_opset < opset
+
+    return compare
+
+
+def opsets_after(opset: int) -> Callable[[int], bool]:
+    """Returns a comparison function that decides if the given opset is after the specified."""
+
+    def compare(other_opset: int):
+        return other_opset > opset
+
+    return compare
+
+
+### Modify this section ###
 # NOTE: Modify this section as more ops are supported. The list should be sorted
 # alphabetically.
 
-EXPECTED_SKIPS_OR_FAILS = (
+# Ops to be tested for consistency between onnx and pytorch
+ALLOWLIST_OP = (
+    "ceil",
+    "sqrt",
+    "t",
+)
+
+# Expected failures for onnx export. If an op is expected to fail only for certain
+# ONNX opsets, add the op to EXPECTED_OPSET_FAILS below.
+
+EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     xfail(
         "ceil",
         dtypes=(torch.bfloat16, torch.float64),
@@ -182,14 +248,9 @@ EXPECTED_SKIPS_OR_FAILS = (
         dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
         reason="Not supported by onnx",
     ),
-    xfail(
-        "sqrt",
-        dtypes=(torch.bfloat16,),
-        reason="Sqrt not implemented for bf64 in onnx runtime",
-    ),
     skip(
         "sqrt",
-        dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
+        dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES,
         reason="Not supported by onnx",
     ),
     xfail(
@@ -199,16 +260,19 @@ EXPECTED_SKIPS_OR_FAILS = (
     ),
 )
 
+# Expected opset specific fails for ops that do not support specific opsets
 
-# Ops and the dtypes to be tested for consistency
-# NOTES: Incrementally add / uncomment ops and add types to this list as they are supported
-# The list should be kept reasonably sorted
-
-ALLOWLIST_OP = (
-    "ceil",
-    "sqrt",
-    "t",
+EXPECTED_OPSET_FAILS: Tuple[XfailOpset, ...] = (
+    XfailOpset(
+        "sqrt",
+        dtypes=[torch.bfloat16],
+        opsets=[opsets_before(13)],
+        reason="sqrt not defined for bf16 before opset 13",
+    ),
 )
+
+### END OF SECTION TO MODIFY ###
+
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
@@ -244,6 +308,9 @@ class TestConsistency(common_utils.TestCase):
         if op.name not in ALLOWLIST_OP:
             self.skipTest(f"'{op.name}' is not in the allow list for test on ONNX")
 
+        expected_opset_fails_name_mapping = {
+            fail.op_name: fail for fail in EXPECTED_OPSET_FAILS
+        }
         samples = op.sample_inputs(
             device,
             dtype,
@@ -254,17 +321,44 @@ class TestConsistency(common_utils.TestCase):
             model = SingleOpModel(op, cpu_sample.kwargs)
 
             with self.subTest(sample=cpu_sample, opset=opset):
-                verification.verify(
-                    model,
-                    (cpu_sample.input, *cpu_sample.args),
-                    input_kwargs={},
-                    opset_version=opset,
-                    keep_initializers_as_inputs=True,
-                    ort_providers=ORT_PROVIDERS,
-                    check_shape=True,
-                    check_dtype=True,
-                    flatten=True,
-                )
+
+                # Skip opset specific fails
+                if op.name in expected_opset_fails_name_mapping:
+                    fail = expected_opset_fails_name_mapping[op.name]
+                    if fail.should_fail(opset, dtype):
+                        context_manager = self.assertRaises(fail.exception or Exception)
+                    else:
+                        context_manager = contextlib.nullcontext()
+                else:
+                    context_manager = contextlib.nullcontext()
+
+                # Run the test
+                inputs = (cpu_sample.input, *cpu_sample.args)
+                with context_manager:
+
+                    if dtype == torch.bfloat16:
+                        # Only export to ONNX without running with onnxruntime because
+                        # the CPU execution path for bfloat16 is not implemented in onnxruntime.
+                        model_buffer = io.BytesIO()
+                        torch.onnx.export(
+                            model, inputs, model_buffer, opset_version=opset
+                        )
+                        model_buffer.seek(0)
+                        onnx_model = onnx.load(model_buffer)
+                        onnx.checker.check_model(onnx_model, full_check=True)
+                        continue
+
+                    verification.verify(
+                        model,
+                        inputs,
+                        input_kwargs={},
+                        opset_version=opset,
+                        keep_initializers_as_inputs=True,
+                        ort_providers=ORT_PROVIDERS,
+                        check_shape=True,
+                        check_dtype=True,
+                        flatten=True,
+                    )
 
 
 common_device_type.instantiate_device_type_tests(
