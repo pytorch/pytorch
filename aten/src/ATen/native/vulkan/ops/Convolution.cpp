@@ -277,6 +277,7 @@ static api::ShaderSource get_shader(
     const Conv2dMethod method,
     const bool transposed,
     const bool quantized) {
+  api::Context* const context = api::context();
   api::ShaderInfo shader;
 
   if (quantized) {
@@ -313,6 +314,12 @@ static api::ShaderSource get_shader(
       break;
     case Conv2dPointwise:
       shader = VK_SHADER(conv2d_pw_2x2);
+      auto device_name = context->adapter_ptr()->device_name();
+      std::transform(device_name.begin(), device_name.end(), device_name.begin(),
+          [](unsigned char c){ return std::tolower(c); });
+      if (device_name.find("mali-g52") != std::string::npos) {
+        shader = VK_SHADER(conv2d_pw_1x1);
+      }
       break;
   }
   return shader.shader_src;

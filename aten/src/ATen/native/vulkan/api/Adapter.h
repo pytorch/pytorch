@@ -146,6 +146,10 @@ class Adapter final {
     return physical_device_.timestamp_period;
   }
 
+  inline std::string device_name() const {
+    return physical_device_.properties.deviceName;
+  }
+
   // Queue Management
 
   Queue request_queue();
