@@ -871,6 +871,90 @@ class TestTransformers(NNTestCase):
         _test_fastpath(model, not_aligned_mask, nested_tensor_return_value, nested_tensors=True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @parametrize("type", ["dense", "nested"])
+    @parametrize("is_contiguous", [True, False])
+    def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
+        def rand_nt(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.nested.nested_tensor([torch.randn(seq_len, num_heads, head_dim,
+                                                           device="cuda", dtype=torch.float16) for _ in range(batch)])
+
+        def rand_tensor(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.randn(batch, seq_len, num_heads, head_dim, device="cuda", dtype=torch.float16)
+
+        batch, seq_len, num_heads, head_dim = 32, 64, 16, 64
+        shape = (batch, seq_len, num_heads, head_dim)
+        if type == "dense":
+            query = rand_tensor(shape)
+            key = rand_tensor(shape)
+            value = rand_tensor(shape)
+        elif type == "nested":
+            query = rand_nt(shape)
+            key = rand_nt(shape)
+            value = rand_nt(shape)
+
+        # Lets switch seq_len and num_heads
+        # B x S X H X D -> B x H x S x D
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        if is_contiguous:
+            query = query.contiguous()
+            key = key.contiguous()
+            value = value.contiguous()
+
+        with sdp_kernel(enable_math=False):
+            actual = torch.nn.functional._scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+        with sdp_kernel(enable_flash=False):
+            math_ref = torch.nn.functional._scaled_dot_product_attention(
+                query.contiguous(), key.contiguous(), value.contiguous(),
+                attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @parametrize("type", ["dense", "nested"])
+    @parametrize("is_contiguous", [True, False])
+    def test_scaled_dot_product_attention_fused_kernels_packed(self, type: str, is_contiguous: bool):
+        def rand_nt(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.nested.nested_tensor([torch.randn(seq_len, 3 * num_heads * head_dim,
+                                                           device="cuda", dtype=torch.float16) for _ in range(batch)])
+
+        def rand_tensor(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.randn(batch, seq_len, 3 * num_heads * head_dim, device="cuda", dtype=torch.float16)
+
+        batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
+        shape = (batch_size, seq_len, num_heads, head_dim)
+
+        # Test Packed
+        qkv = rand_tensor(shape) if type == "dense" else rand_nt(shape)
+        query, key, value = qkv.chunk(3, dim=-1)
+
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        if is_contiguous:
+            query = query.contiguous()
+            key = key.contiguous()
+            value = value.contiguous()
+
+        with sdp_kernel(enable_math=False):
+            actual = torch.nn.functional._scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+        with sdp_kernel(enable_flash=False):
+            math_ref = torch.nn.functional._scaled_dot_product_attention(
+                query.contiguous(), key.contiguous(), value.contiguous(),
+                attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sdp_runtime_dispatch(self):
         # We will test all the constraints that we know will cause a failure
         # The problem is that any code path that goes down flash_attention
