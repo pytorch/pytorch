@@ -81,7 +81,7 @@ Where `c` is the center of the window.
 
 Args:
     {M}
-    
+
 Keyword args:
     center (float, optional): where the center of the window will be located.
         Default: `M / 2` if `sym` is `False`, else `(M - 1) / 2`.
@@ -162,7 +162,7 @@ The cosine window is defined as follows:
     r"""
 
 {normalization}
-    
+
 Args:
     {M}
 
@@ -231,8 +231,8 @@ The gaussian window is defined as follows:
 
 {normalization}
     """,
-    r"""  
-    
+    r"""
+
 Args:
     {M}
 

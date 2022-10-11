@@ -190,19 +190,25 @@ def make_signal_windows_opinfo(
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.cosine",
-        ref=make_signal_windows_ref(scipy.signal.windows.cosine) if TEST_SCIPY else None,
+        ref=make_signal_windows_ref(scipy.signal.windows.cosine)
+        if TEST_SCIPY
+        else None,
         sample_inputs_func=sample_inputs_window,
         error_inputs_func=error_inputs_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
-        ref=make_signal_windows_ref(scipy.signal.windows.exponential) if TEST_SCIPY else None,
+        ref=make_signal_windows_ref(scipy.signal.windows.exponential)
+        if TEST_SCIPY
+        else None,
         sample_inputs_func=partial(sample_inputs_window, tau=random.uniform(0, 10)),
         error_inputs_func=error_inputs_exponential_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
-        ref=make_signal_windows_ref(scipy.signal.windows.gaussian) if TEST_SCIPY else None,
+        ref=make_signal_windows_ref(scipy.signal.windows.gaussian)
+        if TEST_SCIPY
+        else None,
         sample_inputs_func=partial(sample_inputs_window, std=random.uniform(0, 3)),
         error_inputs_func=error_inputs_gaussian_window,
     ),
