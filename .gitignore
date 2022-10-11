@@ -338,3 +338,6 @@ buck-out/
 # Downloaded libraries
 third_party/ruy/
 third_party/glog/
+
+# Virualenv
+venv/
