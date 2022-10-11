@@ -141,7 +141,7 @@ def make_signal_windows_opinfo(
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.cosine",
-        variant_test_name="signal.windows.cosine_default",
+        variant_test_name="",
         ref=scipy.signal.windows.cosine,
         sample_inputs_func=sample_inputs_window,
         error_inputs_func=error_inputs_window,
@@ -178,13 +178,11 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestMathBits", "test_neg_conj_view"
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestMathBits", "test_neg_view"),
-            # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
         ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
-        variant_test_name="signal.windows.exponential_default",
+        variant_test_name="",
         ref=scipy.signal.windows.exponential,
         sample_inputs_func=partial(sample_inputs_window, tau=random.uniform(0, 10)),
         error_inputs_func=error_inputs_exponential_window,
@@ -221,13 +219,11 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestMathBits", "test_neg_conj_view"
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestMathBits", "test_neg_view"),
-            # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
         ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
-        variant_test_name="signal.windows.gaussian_default",
+        variant_test_name="",
         ref=scipy.signal.windows.gaussian,
         sample_inputs_func=sample_inputs_gaussian_window,
         error_inputs_func=error_inputs_gaussian_window,
@@ -264,8 +260,6 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestMathBits", "test_neg_conj_view"
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestMathBits", "test_neg_view"),
-            # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
         ),
     ),
 ]
