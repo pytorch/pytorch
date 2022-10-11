@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/Reduction.h>
-#include <ATen/core/dynamic_type.h>
 #include <ATen/core/type_factory.h>
 #include <c10/util/Optional.h>
 #include <c10/util/string_utils.h>

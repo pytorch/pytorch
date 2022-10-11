@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#include <ATen/core/dynamic_type.h>
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif

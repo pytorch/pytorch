@@ -13,7 +13,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <ATen/core/dynamic_type.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <caffe2/serialize/versions.h>

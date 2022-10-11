@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <exception>
 
-#include <ATen/core/dynamic_type.h>
 #include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>

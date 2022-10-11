@@ -5,7 +5,6 @@
 #include <type_traits>
 #include <utility>
 
-#include <ATen/core/dynamic_type.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/IListRef.h>

@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 
-#include <ATen/core/dynamic_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
