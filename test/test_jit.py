@@ -3048,8 +3048,8 @@ class TestFrontend(JitTestCase):
         value2 = torch.ones(1)
         value3 = torch.ones(1)
         example_input_dict = {'key1': value1, 'key2': value2, 'key3': value3}
-        traced_model_1 = torch.jit.trace(model_1, example_input_dict, unpack_input_dict=True, strict=False)
-        traced_model_2 = torch.jit.trace(model_2, {'x': torch.rand([2]), 'y': torch.rand([2])}, unpack_input_dict=True)
+        traced_model_1 = torch.jit.trace(model_1, example_kwarg_inputs=example_input_dict, strict=False)
+        traced_model_2 = torch.jit.trace(model_2, example_kwarg_inputs={'x': torch.rand([2]), 'y': torch.rand([2])})
         res_1 = traced_model_1(**example_input_dict)
         self.assertEqual(res_1, 3 * torch.ones(1))
         with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'x'."):

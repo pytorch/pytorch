@@ -316,7 +316,7 @@ def _check_trace(
     force_outplace,
     is_trace_module,
     _module_class,
-    unpack_input_dict=False
+    example_kwarg_inputs=None,
 ):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -336,11 +336,11 @@ def _check_trace(
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
-                unpack_input_dict=unpack_input_dict
+                example_kwarg_inputs=example_kwarg_inputs
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
-            if isinstance(inputs, (torch.Tensor)) or isinstance(inputs, dict) and not unpack_input_dict:
+            if isinstance(inputs, (torch.Tensor)) or isinstance(inputs, dict) and example_kwarg_inputs is None:
                 inputs = (inputs,)
         else:
             check_mod = torch.jit.trace(
@@ -350,7 +350,7 @@ def _check_trace(
                 strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
-                unpack_input_dict=unpack_input_dict
+                example_kwarg_inputs=example_kwarg_inputs,
             )
             check_mod_func = check_mod
 
@@ -443,7 +443,7 @@ def _check_trace(
 
         def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
             try:
-                if isinstance(inputs, dict) and unpack_input_dict:
+                if isinstance(inputs, dict) and isinstance(example_kwarg_inputs, dict):
                     outs = wrap_retval(mod(**inputs))
                 else:
                     outs = wrap_retval(mod(*_clone_inputs(inputs)))
@@ -601,7 +601,7 @@ def wrap_check_inputs(check_inputs):
 
 def trace(
     func,
-    example_inputs,
+    example_inputs=None,
     optimize=None,
     check_trace=True,
     check_inputs=None,
@@ -610,7 +610,7 @@ def trace(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
-    unpack_input_dict=False,
+    example_kwarg_inputs=None
 ):
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
@@ -666,16 +666,16 @@ def trace(
             tensors. When a module is passed `torch.jit.trace`, only the
             ``forward`` method is run and traced (see :func:`torch.jit.trace
             <torch.jit.trace_module>` for details).
-        example_inputs (tuple or torch.Tensor or dict):  A tuple of example inputs that
+
+    Keyword arguments:
+        example_inputs (tuple or torch.Tensor or None):  A tuple of example inputs that
             will be passed to the function while tracing. The resulting trace
             can be run with inputs of different types and shapes assuming the
             traced operations support those types and shapes. `example_inputs`
             may also be a single Tensor in which case it is automatically
-            wrapped in a tuple. When example_inputs is a dict, if unpack_input_dict
-            is set to True, it reprensents a pack of keyword arguments and can be unpacked
-            by the traced function's arguments name.
+            wrapped in a tuple. When the value is None, example_kwarg_inputs should
+            be specified.
 
-    Keyword arguments:
         check_trace (``bool``, optional): Check if the same inputs run through
             traced code produce the same outputs. Default: ``True``. You might want
             to disable this if, for example, your network contains non-
@@ -699,10 +699,9 @@ def trace(
             and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
-        unpack_input_dict (``bool``, optional): When we use a python dict as
-            example_inputs, it suggests wether it is a pack of keyword arguments(True) or
-            a single value(False). This is a workaround for the ambiguity of using dict
-            as example_input. The old behavior will be deprecated.
+        example_kwarg_inputs (dict): This parameter is a pack of keyword arguments
+            example inputs that will be passed to the function while tracing. The dict
+            will be unpacking by the arguments name of the traced function.
 
     Returns:
         If `func` is `nn.Module` or ``forward`` of `nn.Module`, `trace` returns
@@ -768,6 +767,12 @@ def trace(
         )
         return func
 
+    if example_inputs is None:
+        if isinstance(example_kwarg_inputs, dict):
+            example_inputs = example_kwarg_inputs
+        else:
+            raise RuntimeError("example_kwarg_inputs should be a dict")
+
     if isinstance(func, torch.nn.Module):
         return trace_module(
             func,
@@ -779,7 +784,7 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
-            unpack_input_dict=unpack_input_dict
+            example_kwarg_inputs=example_kwarg_inputs,
         )
 
     if (
@@ -797,7 +802,7 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
-            unpack_input_dict=unpack_input_dict
+            example_kwarg_inputs=example_kwarg_inputs,
         )
 
     # Special case for common case of passing a single Tensor
@@ -838,7 +843,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
-                unpack_input_dict=unpack_input_dict
+                example_kwarg_inputs=example_kwarg_inputs,
             )
         else:
             _check_trace(
@@ -850,7 +855,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
-                unpack_input_dict=unpack_input_dict
+                example_kwarg_inputs=example_kwarg_inputs,
             )
 
     return traced
@@ -870,7 +875,7 @@ def trace_module(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
-    unpack_input_dict=False
+    example_kwarg_inputs=None,
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -989,7 +994,7 @@ def trace_module(
                 func = getattr(mod, method_name)
                 argument_names = get_callable_argument_names(func)
 
-            if isinstance(example_inputs, dict) and unpack_input_dict:
+            if isinstance(example_inputs, dict) and isinstance(example_kwarg_inputs, dict):
                 # Raise exception when the user provided key names are not aligned with forward() method's arguments' name/
                 for key in example_inputs:
                     if key not in argument_names:
@@ -1006,15 +1011,6 @@ def trace_module(
                     argument_names,
                 )
             else:
-                if isinstance(example_inputs, dict):
-                    warnings.warn(
-                        "Directly using python dict as a `single` value(with unpack_input_dict=False) to "
-                        "example_inputs is deprecated and will be removed in upcoming PyTorch release(1.16)."
-                        "Instead, users should wrap the dict with python tuple first, and then assign to "
-                        "example_inputs for the deprecated behavior. In the future, passing a dict to example_inputs"
-                        "will represent a pack of keyword parameters which will be unpacked according to the "
-                        "traced function's parameter name."
-                    )
                 example_inputs = make_tuple(example_inputs)
                 module._c._create_method_from_trace(
                     method_name,
@@ -1040,7 +1036,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
-                        unpack_input_dict=unpack_input_dict
+                        example_kwarg_inputs=example_kwarg_inputs,
                     )
                 else:
                     _check_trace(
@@ -1052,7 +1048,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
-                        unpack_input_dict=unpack_input_dict
+                        example_kwarg_inputs=example_kwarg_inputs,
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
