@@ -189,7 +189,7 @@ def gaussian_window(window_length: int,
     The gaussian window is defined as follows:
 
     .. math::
-        w(n) = w(n) = e^{-\left(\frac{n}{2\sigma}\right)^2}
+        w(n) = e^{-\left(\frac{n}{2\sigma}\right)^2}
 
     Args:
         window_length (int): the length of the output window.
