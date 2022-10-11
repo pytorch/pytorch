@@ -1543,8 +1543,7 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(
-                            to_),
+                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
                         lambda: t.random_(from_, to_)
                     )
 
@@ -1810,8 +1809,7 @@ class TestTensorCreation(TestCase):
                 self.assertEqual('cuda:1',
                                  str(torch.tensor(5, dtype=torch.int64, device='cuda:1').device))
                 self.assertEqual('cuda:1',
-                                 str(torch.tensor(torch.ones((2, 3), dtype=torch.float32),
-                                                  device='cuda:1').device))
+                                 str(torch.tensor(torch.ones((2, 3), dtype=torch.float32), device='cuda:1').device))
 
                 self.assertEqual('cuda:1',
                                  str(torch.tensor(np.random.randn(2, 3), device='cuda:1').device))
@@ -2043,8 +2041,7 @@ class TestTensorCreation(TestCase):
         float64_min = torch.finfo(torch.float64).min
         g_1 = torch.tensor((float('nan'), 0, int64_min, int64_max, int64_min - 1), dtype=torch.bool)
         self.assertEqual(e, g_1)
-        g_2 = torch.tensor((int64_max + 1, 0, (int64_max + 1) * 2, (int64_max + 1) * 2 + 1, float64_min),
-                           dtype=torch.bool)
+        g_2 = torch.tensor((int64_max + 1, 0, (int64_max + 1) * 2, (int64_max + 1) * 2 + 1, float64_min), dtype=torch.bool)
         self.assertEqual(e, g_2)
         g_3 = torch.tensor((float64_max, 0, float64_max + 1, float64_min - 1, float64_max + 1e291), dtype=torch.bool)
         self.assertEqual(e, g_3)
@@ -2497,11 +2494,11 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     def test_empty_overflow(self, device):
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty([2, 4, 2 ** 29, 2 ** 29], dtype=torch.float64)
+            torch.empty([2, 4, 2**29, 2**29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty([8, 8, 2 ** 29, 2 ** 29], dtype=torch.float64)
+            torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty_strided([8, 8], [2 ** 61, 1], dtype=torch.float64)
+            torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
 
     def test_eye(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -2542,7 +2539,7 @@ class TestTensorCreation(TestCase):
         start = -0.0316082797944545745849609375 + (0.8888888888j if dtype.is_complex else 0)
         end = .0315315723419189453125 + (0.444444444444j if dtype.is_complex else 0)
 
-        for steps in [1, 2, 3, 5, 11, 256, 257, 2 ** 22]:
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             t = torch.linspace(start, end, steps, device=device, dtype=dtype)
             a = np.linspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
@@ -2560,7 +2557,7 @@ class TestTensorCreation(TestCase):
             t = t.cpu()
             self.assertEqual(t, torch.from_numpy(a))
 
-        for steps in [1, 2, 3, 5, 11, 256, 257, 2 ** 22]:
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             test_fn(torch.linspace, np.linspace, steps)
 
     @dtypes(torch.complex64)
