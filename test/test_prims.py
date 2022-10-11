@@ -648,6 +648,10 @@ class TestPrims(TestCase):
                 for node in call_function_nodes
             )
             self.assertFalse(includes_batch_norm_backward)
+            all_nvprims = all(
+                str(node.target).startswith("nvprims") for node in call_function_nodes
+            )
+            self.assertTrue(all_nvprims)
 
     @onlyCUDA
     @skipCUDAIfRocm
