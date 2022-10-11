@@ -34,16 +34,9 @@ Tensor max(const Tensor &self) {
 }
 
 Tensor& max_unary_out(const Tensor &self, Tensor& out) {
-  // First check if the devices match (CPU vs GPU)
-  TORCH_CHECK(self.device() == out.device());
-
-  TORCH_CHECK(canCast(
-      typeMetaToScalarType(self.dtype()),
-      typeMetaToScalarType(out.dtype())));
-
-  at::native::resize_output(out, {});
-
-  max_all_stub(self.device().type(), out, self.contiguous());
+  Tensor tmp_output = at::max(self);
+  at::native::resize_output(out, tmp_output.sizes());
+  out.copy_(tmp_output);
   return out;
 }
 
