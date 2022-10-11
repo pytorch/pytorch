@@ -15,10 +15,14 @@ TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 struct TORCH_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
-  explicit TensorGeometry(IntArrayRef sizes)
-      : sizes_(sizes.vec()), strides_(sizes.size()), storage_offset_(0) {
+  explicit TensorGeometry(c10::SymIntArrayRef sizes)
+      : sizes_(sizes.vec()),
+        strides_(sizes.size()),
+        storage_offset_(0),
+        has_symbolic_sizes_strides_(
+            !c10::asIntArrayRefSlowOpt(sizes).has_value()) {
     int64_t dim = sizes.size();
-    int64_t expected_stride = 1;
+    c10::SymInt expected_stride = 1;
     for (int64_t i = dim - 1; i >= 0; i--) {
       strides_[i] = expected_stride;
       expected_stride *= sizes_[i];
@@ -27,10 +31,12 @@ struct TORCH_API TensorGeometry {
   }
 
   explicit TensorGeometry(const TensorBase& t)
-      : sizes_(t.sizes().vec()),
-        strides_(t.strides().vec()),
-        storage_offset_(t.storage_offset()),
-        numel_(t.numel()) {}
+      : sizes_(t.sym_sizes().vec()),
+        strides_(t.sym_strides().vec()),
+        storage_offset_(t.sym_storage_offset()),
+        numel_(t.sym_numel()),
+        has_symbolic_sizes_strides_(
+            t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {}
 
   // true if the tensor is contiguous
   bool is_contiguous() const;
@@ -38,24 +44,52 @@ struct TORCH_API TensorGeometry {
   int64_t dim() const {
     return sizes_.size();
   }
+
   int64_t size(int64_t dim) const {
+    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    dim = c10::maybe_wrap_dim(dim, this->dim());
+    return sizes_.at(static_cast<size_t>(dim)).as_int_unchecked();
+  }
+  c10::IntArrayRef sizes() const {
+    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    return c10::asIntArrayRefUnchecked(sizes_);
+  }
+  int64_t stride(int64_t dim) const {
+    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    dim = c10::maybe_wrap_dim(dim, this->dim());
+    return strides_.at(static_cast<size_t>(dim)).as_int_unchecked();
+  }
+  c10::IntArrayRef strides() const {
+    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    return c10::asIntArrayRefUnchecked(strides_);
+  }
+  int64_t storage_offset() const {
+    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    return storage_offset_.as_int_unchecked();
+  }
+  int64_t numel() const {
+    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    return numel_.as_int_unchecked();
+  }
+
+  c10::SymInt sym_size(int64_t dim) const {
     dim = c10::maybe_wrap_dim(dim, this->dim());
     return sizes_.at(static_cast<size_t>(dim));
   }
-  IntArrayRef sizes() const {
-    return IntArrayRef{sizes_};
+  c10::SymIntArrayRef sym_sizes() const {
+    return sizes_;
   }
-  int64_t stride(int64_t dim) const {
+  c10::SymInt sym_stride(int64_t dim) const {
     dim = c10::maybe_wrap_dim(dim, this->dim());
     return strides_.at(static_cast<size_t>(dim));
   }
-  IntArrayRef strides() const {
-    return IntArrayRef{strides_};
+  c10::SymIntArrayRef sym_strides() const {
+    return strides_;
   }
-  int64_t storage_offset() const {
+  c10::SymInt sym_storage_offset() const {
     return storage_offset_;
   }
-  int64_t numel() const {
+  c10::SymInt sym_numel() const {
     return numel_;
   }
 
@@ -80,10 +114,12 @@ struct TORCH_API TensorGeometry {
     return r;
   }
 
-  std::vector<int64_t> sizes_;
-  std::vector<int64_t> strides_;
-  int64_t storage_offset_;
-  int64_t numel_;
+ private:
+  std::vector<c10::SymInt> sizes_;
+  std::vector<c10::SymInt> strides_;
+  c10::SymInt storage_offset_;
+  c10::SymInt numel_;
+  bool has_symbolic_sizes_strides_;
 };
 
 } // namespace at
