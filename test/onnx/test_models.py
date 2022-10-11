@@ -230,7 +230,7 @@ class TestModels(common_utils.TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @skipScriptTest(min_opset_version=15)  # None type in outputs
+    @skipScriptTest(skip_before_opset_version=15, reason="None type in outputs")
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
