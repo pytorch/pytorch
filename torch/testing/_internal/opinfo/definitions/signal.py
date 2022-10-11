@@ -187,6 +187,12 @@ def make_signal_windows_opinfo(
                 "test_schema_correctness",
                 dtypes=[torch.float16],
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=[torch.float16],
+            ),
             *skips,
         ),
     )
