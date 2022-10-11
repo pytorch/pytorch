@@ -12,9 +12,9 @@ template<bool inplace>
 using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
 
 Tensor make_feature_noise(const Tensor& input) {
-  auto input_sizes = input.sizes();
+  auto input_sizes = input.sym_sizes();
   TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
-  std::vector<int64_t> sizes;
+  std::vector<c10::SymInt> sizes;
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
@@ -22,7 +22,7 @@ Tensor make_feature_noise(const Tensor& input) {
     (void)i; //Suppress unused variable warning
     sizes.push_back(1);
   }
-  return input.new_empty(sizes);
+  return input.new_empty_symint(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
@@ -46,7 +46,7 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
 Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
-  if (p == 0 || !train || input.numel() == 0) {
+  if (p == 0 || !train || input.sym_numel() == 0) {
     return input;
   }
 
