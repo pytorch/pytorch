@@ -71,8 +71,9 @@ class BackwardHook(object):
       - Calling the user hook once both output and input gradients are available
     """
 
-    def __init__(self, module, user_hooks):
+    def __init__(self, module, user_hooks, user_pre_hooks):
         self.user_hooks = user_hooks
+        self.user_pre_hooks = user_pre_hooks
         self.module = module
 
         self.grad_outputs = None
@@ -173,6 +174,10 @@ class BackwardHook(object):
                 self.grad_outputs = self._pack_with_none(self.output_tensors_index,
                                                          grad_output,
                                                          self.n_outputs)
+
+                if self.user_pre_hooks:
+                    for user_pre_hook in self.user_pre_hooks:
+                        self.grad_outputs = user_pre_hook(self.module, self.grad_outputs)
 
                 # Special case if no input required gradients, this hook should call the user
                 # hook directly

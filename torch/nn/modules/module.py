@@ -12,7 +12,8 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
-__all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook', 'register_module_backward_hook',
+__all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook', 'register_module_backward_pre_hook',
+           'register_module_backward_hook',
            'register_module_full_backward_hook', 'Module']
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
@@ -82,6 +83,7 @@ class _WrappedHook:
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
+_global_backward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_backward_hooks: Dict[int, Callable] = OrderedDict()
 _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
@@ -178,6 +180,14 @@ def register_module_backward_hook(
 
     handle = hooks.RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
+    return handle
+
+
+def register_module_backward_pre_hook(
+    hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+) -> RemovableHandle:
+    handle = hooks.RemovableHandle(_global_backward_pre_hooks)
+    _global_backward_pre_hooks[handle.id] = hook
     return handle
 
 
@@ -295,6 +305,7 @@ class Module:
     _parameters: Dict[str, Optional[Parameter]]
     _buffers: Dict[str, Optional[Tensor]]
     _non_persistent_buffers_set: Set[str]
+    _backward_pre_hooks: Dict[int, Callable]
     _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
     _forward_hooks: Dict[int, Callable]
@@ -320,6 +331,7 @@ class Module:
         super().__setattr__('_parameters', OrderedDict())
         super().__setattr__('_buffers', OrderedDict())
         super().__setattr__('_non_persistent_buffers_set', set())
+        super().__setattr__('_backward_pre_hooks', OrderedDict())
         super().__setattr__('_backward_hooks', OrderedDict())
         super().__setattr__('_is_full_backward_hook', None)
         super().__setattr__('_forward_hooks', OrderedDict())
@@ -986,6 +998,21 @@ class Module:
 
         return self._apply(convert)
 
+    def register_backward_pre_hook(
+        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+    ) -> RemovableHandle:
+        r"""Registers a backward pre hook on the module.
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
+
+        """
+        handle = hooks.RemovableHandle(self._backward_pre_hooks)
+        self._backward_pre_hooks[handle.id] = hook
+        return handle
+
     def register_backward_hook(
         self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
     ) -> RemovableHandle:
@@ -1185,11 +1212,17 @@ class Module:
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
-        if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks or _global_backward_hooks
+        if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
+                or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*input, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
+        backward_pre_hooks = []
+        if self._backward_pre_hooks or _global_backward_pre_hooks:
+            backward_pre_hooks += _global_backward_pre_hooks.values()
+            backward_pre_hooks += self._backward_pre_hooks.values()
+
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
@@ -1201,8 +1234,8 @@ class Module:
                     input = result
 
         bw_hook = None
-        if full_backward_hooks:
-            bw_hook = hooks.BackwardHook(self, full_backward_hooks)
+        if full_backward_hooks or backward_pre_hooks:
+            bw_hook = hooks.BackwardHook(self, full_backward_hooks, backward_pre_hooks)
             input = bw_hook.setup_input_hook(input)
 
         result = forward_call(*input, **kwargs)
