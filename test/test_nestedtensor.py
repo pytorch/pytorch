@@ -618,6 +618,67 @@ class TestNestedTensorDeviceType(TestCase):
         answer = torch.tensor(200.0, device=device, dtype=dtype).expand(4)
         self.assertEqual(nt[1, 1, :], answer)
 
+        # Test that indexing works when requires_grad_(True)
+        # previously this was failing because the backward kernel for select.int uses .sizes()
+        nt = torch.nested.nested_tensor([x0, x1]).requires_grad_(True)
+        self.assertEqual(nt[0], x0)
+        self.assertEqual(nt[-1], x1)
+        grad_x0 = torch.randn((2, 5), device=device, dtype=dtype)
+        nt[0].backward(grad_x0)
+        expected_grad = torch.nested.nested_tensor([grad_x0, torch.zeros((3, 4), device=device, dtype=dtype)])
+        self.assertEqual(nt.grad, expected_grad)
+
+    @dtypes(*floating_types_and_half())
+    def test_nested_tensor_chunk(self, device, dtype):
+        # Transformer use case
+        a = torch.randn(3, 3 * 4, device=device, dtype=dtype)
+        b = torch.randn(2, 3 * 4, device=device, dtype=dtype)
+        c = torch.randn(1, 3 * 4, device=device, dtype=dtype)
+        a_chunks = a.chunk(3, dim=-1)
+        b_chunks = b.chunk(3, dim=-1)
+        c_chunks = c.chunk(3, dim=-1)
+
+        a_nt = [a_chunks[0], b_chunks[0], c_chunks[0]]
+        b_nt = [a_chunks[1], b_chunks[1], c_chunks[1]]
+        c_nt = [a_chunks[2], b_chunks[2], c_chunks[2]]
+
+        nt = torch.nested.nested_tensor([a, b, c])
+        chunked = nt.chunk(3, dim=-1)
+
+        self.assertEqual(chunked[0], torch.nested.nested_tensor(a_nt))
+        self.assertEqual(chunked[1], torch.nested.nested_tensor(b_nt))
+        self.assertEqual(chunked[2], torch.nested.nested_tensor(c_nt))
+
+        for chunk in chunked:
+            self.assertFalse(chunk.is_contiguous())
+
+        # Failure chunking on ragged dimensions
+        self.assertRaisesRegex(
+            RuntimeError, "Chunk for nested tensors is currently only supported for the last dimension.",
+            lambda: torch.chunk(nt, 5, dim=1))
+        self.assertRaisesRegex(
+            RuntimeError, "Chunk for nested tensors is currently only supported for the last dimension.",
+            lambda: torch.chunk(nt, 5, dim=0))
+
+        # Failure on non-contiguous nt
+        _, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3), device, dtype)
+        self.assertRaisesRegex(
+            RuntimeError, "chunk expects `self` to be contiguous.", lambda: torch.chunk(nt_noncontiguous, 5, dim=-1))
+
+        # Failure when calling non divisible n_chunks
+        self.assertRaisesRegex(
+            RuntimeError, "Chunk for nested tensors is only supported for "
+            "nested tensors with trailing dimension divisible by chunks.",
+            lambda: torch.chunk(nt, 5, dim=-1))
+
+        # Failure when calling backward on a chunk
+        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        nt_grad = torch.nested.as_nested_tensor([a, b])
+        chunked = torch.chunk(nt_grad, 2, dim=-1)
+        self.assertRaisesRegex(RuntimeError, "derivative for aten::chunk is not implemented",
+                               lambda: chunked[0].backward(chunked[0].clone()))
+
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_nested_tensor_indexing_noncontiguous(self, device, dtype):
@@ -757,6 +818,24 @@ class TestNestedTensorDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "NestedTensor always requires keepdim=True for now."):
             torch.nested.nested_tensor([torch.tensor([3, 4, 5]), torch.tensor([1, 2])]).sum(-1)
+
+    @dtypes(torch.float, torch.float16)
+    def test_contiguous(self, device, dtype):
+        # Since we don't have access to the buffer in python this is harder to show what
+        # we are testing for. When we call chunk on a consistent dim of a NT
+        # for chunk_size > 1 the resulting tensors are views of the original NT
+        # whose numels is now less than the size of the buffer. Clone was
+        # previously creating a new NT with a buffer that was the same size as the
+        # original.
+        nt_contiguous = torch.nested.nested_tensor([torch.randn(2, 20, device=device, dtype=dtype),
+                                                    torch.randn(4, 20, device=device, dtype=dtype)])
+        # Split up the last dimension which has a consistent size of 20 into 5 chunks
+        chunks = nt_contiguous.chunk(5, dim=-1)
+
+        # # Check chunks are contiguous after calling contiguous
+        for chunk in chunks:
+            self.assertFalse(chunk.is_contiguous())
+            self.assertTrue(chunk.contiguous().is_contiguous())
 
     @dtypes(torch.float, torch.float16)
     @skipMeta
