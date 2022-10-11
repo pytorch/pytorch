@@ -15,15 +15,7 @@ import io
 import itertools
 import unittest
 from collections import namedtuple
-from typing import (
-    Callable,
-    Collection,
-    Iterable,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
 
 import onnx
 
@@ -223,7 +215,7 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
-### Modify this section ###
+# Modify this section ###
 # NOTE: Modify this section as more ops are supported. The list should be sorted
 # alphabetically.
 
@@ -273,7 +265,7 @@ EXPECTED_OPSET_FAILS: Tuple[XfailOpset, ...] = (
     ),
 )
 
-### END OF SECTION TO MODIFY ###
+# END OF SECTION TO MODIFY ###
 
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
