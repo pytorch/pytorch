@@ -43,7 +43,7 @@ def main() -> None:
             msg = ("Label your PR! If your changes are user facing and "
                    "intended to be a part of release notes, please use a "
                    "`release notes:` label. If not, please add the `topic: "
-                   "not user facing` label. For more information, check out"
+                   "not user facing` label. For more information, check out "
                    "https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.")
             gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg)
     except Exception as e:
