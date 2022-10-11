@@ -7704,38 +7704,6 @@ TEST(StaticRuntime, autogen_outer) {
       /*check_resize=*/true);
 }
 
-TEST(StaticRuntime, autogen_linalg_svdvals) {
-  const std::string script = R"IR(
-    graph(%A: Tensor, %driver: str?):
-        %bias: None = prim::Constant()
-        %ret = aten::linalg_svdvals(%A, %driver)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto A0 = at::rand({6, 6, 6});
-  auto driver0 = "floor";
-  std::vector<IValue> args{A0, driver0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto A1 = at::rand({22, 22, 22});
-  auto driver1 = "floor";
-  std::vector<IValue> args2{A1, driver1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
 TEST(StaticRuntime, autogen_linalg_cond) {
   const std::string script = R"IR(
     graph(%self: Tensor, %p: int?):
