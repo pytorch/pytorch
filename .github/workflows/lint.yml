@@ -228,16 +228,13 @@ jobs:
 
   check-labels:
     name: Check labels
-    runs-on: ubuntu-20.04
-    env:
-        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    runs-on: linux.20_04.16x
     steps:
-      - name: Checkout repo
-        id: checkout
-        uses: actions/checkout@v2
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
-          fetch-depth: 0
-          token: ${{ secrets.MERGEBOT_TOKEN }}
+          submodules: false
+          fetch-depth: 1
 
       - name: Setup Python
         uses: actions/setup-python@v4
@@ -255,8 +252,7 @@ jobs:
 
       - name: Check labels
         env:
-          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
-          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          PR_NUM: ${{ github.event.number }}
         run: |
           set -ex
           python3 .github/scripts/check_labels.py "${PR_NUM}"
