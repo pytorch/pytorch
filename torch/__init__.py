@@ -846,6 +846,7 @@ from torch import fft as fft
 from torch import futures as futures
 from torch import nested as nested
 from torch import nn as nn
+from torch.signal import windows as windows
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
