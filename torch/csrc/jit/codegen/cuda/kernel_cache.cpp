@@ -196,7 +196,13 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
   auto kernel_runtime = getKernelRuntimeFor(args);
   most_recent_runtime_ = kernel_runtime;
+  int seq_id = 0;
+  RECORD_FUNCTION("run_fused_kernel",
+      std::vector<c10::IValue>  (inputs.begin(),
+          inputs.end()),
+      seq_id);
   auto outputs = kernel_runtime->runWithInput(args);
+  RECORD_OUTPUTS(outputs);
 
   // permute output tensor returned by kernel execution. See Part_3 in Note [
   // Permutation support in nvfuser ]
@@ -633,15 +639,9 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
     // TODO: currently we are still outputing PyTorch tensors, instead of
     // something abstract. This is quite unsatisfying. Prepare input vector
 
-    int seq_id;
-    RECORD_FUNCTION("run_fused_kernel",
-      std::vector<c10::IValue>  (group_to_run->inputs.begin(),
-        group_to_run->inputs.end()),
-        seq_id);
     // Run graph segment
     std::vector<at::Tensor> group_runtime_outputs =
         runKernelWithInput(group_runtime_inputs, group_to_run);
-    RECORD_OUTPUTS(group_runtime_outputs);
 
     const auto& group_outputs = group_to_run->outputs();
 
