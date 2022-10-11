@@ -1097,6 +1097,110 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertIn(node.scopeName(), expected_torch_script_scope_names)
 
+    def test_scope_of_constants_when_combined_by_cse_pass(self):
+        LAYER_NUM = 3
+
+        class M(torch.nn.Module):
+            def __init__(self, constant):
+                super().__init__()
+                self.constant = constant
+
+            def forward(self, x):
+                # 'self.constant' is designed to be the same for all layers,
+                # hence it is common sub expression.
+                return x + self.constant
+
+        class N(torch.nn.Module):
+            def __init__(self, layers: int = LAYER_NUM):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [M(constant=torch.tensor(1.0)) for i in range(layers)]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        graph, _, _ = self._model_to_graph(
+            N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
+        )
+
+        # NOTE: Duplicated constants are populated due to implicit casting in scalar_type_analysis,
+        #       so we expect 3 constants with different scopes. The 3 constants are for the 3 layers.
+        #       If CSE in exporter is improved later, this test needs to be updated.
+        #       It should expect 1 constant, with same scope as root.
+        SCOPE_PREFIX = "test_utility_funs.TestUtilityFuns_opset9.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
+        EXPECTED_ROOT_SCOPE_NAME = f"{SCOPE_PREFIX}.N::"
+        EXPECTED_LAYER_SCOPE_NAME = f"{SCOPE_PREFIX}.M::layers"
+        EXPECTED_CONSTANT_SCOPE_NAME = [
+            f"{EXPECTED_ROOT_SCOPE_NAME}/{EXPECTED_LAYER_SCOPE_NAME}.{i}"
+            for i in range(LAYER_NUM)
+        ]
+
+        constant_scope_names = []
+        for node in graph.nodes():
+            if node.kind() == "onnx::Constant":
+                constant_scope_names.append(node.scopeName())
+        self.assertEqual(constant_scope_names, EXPECTED_CONSTANT_SCOPE_NAME)
+
+    def test_scope_of_nodes_when_combined_by_cse_pass(self):
+        LAYER_NUM = 3
+
+        class M(torch.nn.Module):
+            def __init__(self, constant, bias):
+                super().__init__()
+                self.constant = constant
+                self.bias = bias
+
+            def forward(self, x):
+                # 'constant' and 'x' is designed to be the same for all layers,
+                # hence `x + self.constant` is common sub expression.
+                # 'bias' is designed to be different for all layers,
+                # hence `* self.bias` is not common sub expression.
+                return (x + self.constant) * self.bias
+
+        class N(torch.nn.Module):
+            def __init__(self, layers: int = LAYER_NUM):
+                super().__init__()
+
+                self.layers = torch.nn.ModuleList(
+                    [
+                        M(constant=torch.tensor([1.0]), bias=torch.randn(1))
+                        for i in range(layers)
+                    ]
+                )
+
+            def forward(self, x):
+                y = []
+                for layer in self.layers:
+                    y.append(layer(x))
+                return y[0], y[1], y[2]
+
+        graph, _, _ = self._model_to_graph(
+            N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
+        )
+        SCOPE_PREFIX = "test_utility_funs.TestUtilityFuns_opset9.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
+        EXPECTED_ROOT_SCOPE_NAME = f"{SCOPE_PREFIX}.N::"
+        EXPECTED_LAYER_SCOPE_NAME = f"{SCOPE_PREFIX}.M::layers"
+        EXPECTED_ADD_SCOPE_NAMES = [
+            f"{EXPECTED_ROOT_SCOPE_NAME}/{EXPECTED_LAYER_SCOPE_NAME}.0"
+        ]
+        EXPECTED_MUL_SCOPE_NAMES = [
+            f"{EXPECTED_ROOT_SCOPE_NAME}/{EXPECTED_LAYER_SCOPE_NAME}.{i}"
+            for i in range(LAYER_NUM)
+        ]
+
+        add_scope_names = []
+        mul_scope_names = []
+        for node in graph.nodes():
+            if node.kind() == "onnx::Add":
+                add_scope_names.append(node.scopeName())
+            elif node.kind() == "onnx::Mul":
+                mul_scope_names.append(node.scopeName())
+        self.assertEqual(add_scope_names, EXPECTED_ADD_SCOPE_NAMES)
+        self.assertEqual(mul_scope_names, EXPECTED_MUL_SCOPE_NAMES)
+
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
