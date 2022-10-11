@@ -100,6 +100,10 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
     def background_context(self) -> infra.DiagnosticContext:
         return self._background_context
 
+    def clear(self):
+        super().clear()
+        self._background_context._diagnostics.clear()
+
     def sarif_log(self):
         log = super().sarif_log()
         log.runs.append(self._background_context.sarif())
