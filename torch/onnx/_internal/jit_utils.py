@@ -53,7 +53,7 @@ class GraphContext:
         outputs: int = 1,
         **kwargs,
     ):
-        """Creates an ONNX operator "opname", taking "raw_args" as inputs and attributes "kwargs".
+        """Creates an ONNX operator "opname", taking "raw_args" as inputs and "kwargs" as attributes.
 
         The set of operators and the inputs/attributes they take
         is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
@@ -229,7 +229,7 @@ def _create_node(
     n_outputs: int,
     shape_inference: bool = True,
 ) -> _C.Node:
-    """Creates an node 'opname', taking "args" as inputs and attributes 'kwargs'."""
+    """Creates an node 'domain_op', taking inputs and attributes."""
     if isinstance(graph_or_block, _C.Graph):
         graph = graph_or_block
         node = graph.create(domain_op, inputs, n_outputs)
