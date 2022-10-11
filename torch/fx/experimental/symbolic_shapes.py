@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import operator
 import math
 import functools
@@ -320,7 +320,7 @@ class ShapeEnv(object):
         self.divisible: Set["sympy.Expr"] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_symint: Dict[int, torch.SymIntNode] = {0: 0, 1: 1}
+        self.val_to_var: Dict[int, "sympy.Expr"] = {0: 0, 1: 1}
 
     def _get_key(self):
         """
@@ -359,7 +359,15 @@ class ShapeEnv(object):
                     ]
                 )[0]
                 stride[i] = self[val]
-        return size, stride
+
+        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]
+
+    def create_symintnode(self, expr: Union["sympy.Expr", int]):
+        if isinstance(expr, int):
+            return expr
+        py_sym_int = PySymInt(expr, self)
+        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        return cpp_sym_int
 
     def __getitem__(self, val: int) -> "sympy.Expr":
         if not HAS_SYMPY:
@@ -371,14 +379,12 @@ class ShapeEnv(object):
         # the same symint
         # TODO: Create a guard whenever this happens
         # TODO: But how do I represent the guard in this case?
-        if val in self.val_to_symint:
-            return self.val_to_symint[val]
+        if val in self.val_to_var:
+            return self.val_to_var[val]
         sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
-        py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         self.var_to_val[sympy_expr] = sympy.Integer(val)
-        self.val_to_symint[val] = cpp_sym_int
-        return cpp_sym_int
+        self.val_to_var[val] = sympy_expr
+        return sympy_expr
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()

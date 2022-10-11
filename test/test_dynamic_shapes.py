@@ -110,13 +110,14 @@ class FakeSymbolicTensor(torch.Tensor):
 
 
 def create_symbolic_tensor(name, arg, shape_env, storage_offset=0):
-    sym_shapes = tuple([shape_env.create_symint(f"{name}_{idx}", val) for idx, val in enumerate(arg.size())])
-    sym_strides = tuple([shape_env.create_symint(f"{name}_{idx}_stride", val) for idx, val in enumerate(arg.stride())])
+    sym_shapes, sym_strides = shape_env.create_symbolic_sizes_strides(arg)
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, storage_offset)
 
 
 CPP_SYMINT_CLASS = type(torch.SymIntNode.new_symint(1))
 
+def create_symint(shape_env, i):
+    return shape_env.create_symintnode(shape_env[i])
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
@@ -125,8 +126,8 @@ class TestPySymInt(TestCase):
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
-        for i in range(5):
-            symints.append((i, shape_env.create_symint(f"s{i}", i)))
+        for i in range(2, 5):
+            symints.append((i, create_symint(shape_env, i)))
 
         ops = [operator.add, operator.sub, operator.floordiv, operator.mul, operator.mod]
 
@@ -140,10 +141,10 @@ class TestPySymInt(TestCase):
     def test_reverse_arith_ops(self):
         shape_env = ShapeEnv()
 
-        a = shape_env.create_symint("s1", 2)
+        a = create_symint(shape_env, 2)
         self.assertTrue(5 // a == 5 // 2)
 
-        a = shape_env.create_symint("s1", 2)
+        a = create_symint(shape_env, 2)
         self.assertTrue(5 * a == 5 * 2)
 
 
@@ -169,7 +170,7 @@ class TestPySymInt(TestCase):
         self.assertTrue(x.size(2) == 3)
         self.assertTrue(isinstance(x.size(2), CPP_SYMINT_CLASS))
 
-        offset = shape_env.create_symint("offset", 2)
+        offset = create_symint(shape_env, 2)
         y = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env, offset)
         self.assertTrue(isinstance(y.storage_offset(), CPP_SYMINT_CLASS))
         self.assertTrue(y.storage_offset() == 2)
@@ -314,28 +315,28 @@ class TestPySymInt(TestCase):
     @skipIfNoSympy
     def test_meta_symint(self):
         shape_env = ShapeEnv()
-        a0 = shape_env.create_symint("a0", 2)
+        a0 = create_symint(shape_env, 2)
         r = torch.empty(a0, device='meta')
         self.assertIsInstance(r.shape[0], CPP_SYMINT_CLASS)
 
     @skipIfNoSympy
     def test_guard_int(self):
         shape_env = ShapeEnv()
-        a0 = shape_env.create_symint("a0", 2)
+        a0 = create_symint(shape_env, 2)
         self.assertEqual(a0.guard_int(), 2)
-        self.assertEqual(str(shape_env.guards[0][0]), "a0")
+        self.assertEqual(str(shape_env.guards[0][0]), "s0")
         self.assertEqual(shape_env.guards[0][1], 2)
 
     @skipIfNoSympy
     def test_int_conversion(self):
         shape_env = ShapeEnv()
-        a0 = shape_env.create_symint("a0", 2)
+        a0 = create_symint(shape_env, 2)
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
 
     @skipIfNoSympy
     def test_symint_as_scalar(self):
         shape_env = ShapeEnv()
-        a0 = shape_env.create_symint("a0", 2)
+        a0 = create_symint(shape_env, 2)
 
         sym_int_encountered = False
 
