@@ -1775,8 +1775,6 @@ data_dependent_op_tests = (
 
 aliasing_failures = (
     "histogramdd",
-    "nn.functional.pixel_shuffle",
-    "nn.functional.pixel_unshuffle",
 )
 
 # tests which have inconsistent fake tensor stride propagation
