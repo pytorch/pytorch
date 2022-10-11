@@ -3238,6 +3238,31 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    def test_repeat_graph_capture_cublas_workspace_memory(self):
+        (x, y, z) = 1024, 512, 64
+        a = torch.rand((x, y), device='cuda')
+        b = torch.rand((y, z), device='cuda')
+
+        # warmup
+        torch.mm(a, b)
+
+        free_bytes_before, total_bytes = torch.cuda.mem_get_info()
+        used_gb_before = (total_bytes - free_bytes_before) / 1e9
+
+        for i in range(100):
+            torch_graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(torch_graph):
+                torch.mm(a, b)
+            torch_graph.replay()
+
+        free_bytes_after, _ = torch.cuda.mem_get_info()
+        used_gb_after = (total_bytes - free_bytes_after) / 1e9
+
+        self.assertFalse(used_gb_before + 0.1 < used_gb_after)
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_functional(self):
         ops_with_kwargs = ((torch.nn.functional.dropout, {"p": 0.1}),
                            (torch.nn.functional.rrelu, {"training": True}),)
