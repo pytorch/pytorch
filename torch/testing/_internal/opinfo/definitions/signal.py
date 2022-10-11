@@ -127,11 +127,6 @@ def make_signal_windows_opinfo(
         supports_out=False,
         supports_autograd=False,
         skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNormalizeOperators",
-                "test_normalize_operator_exhaustive",
-            ),
             # TODO: same as this?
             # https://github.com/pytorch/pytorch/issues/81774
             # also see: arange, new_full
