@@ -42,8 +42,16 @@ class CapabilityBasedPartitioner:
         self.allows_single_node_partition = allows_single_node_partition
 
     def __is_node_supported(self, node: Node) -> bool:
-        # TODO: reject 'getitem' node since they are special cased in partitioning.
-        return self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
+        # reject 'getitem' node since they are special cased in partitioning.
+        return
+        (
+            self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
+            and
+            (
+                node.op != "call_function" or
+                _get_qualified_name(node.target) != "_operator.getitem"    # type: ignore[arg-type]
+            )
+        )
 
     def propose_partitions(self) -> List[Partition]:
         # assumptions: nodes in candidate list is sorted in topological order
