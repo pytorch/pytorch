@@ -778,7 +778,9 @@ def im2col(
         input_w, kernel_w, dilation_w, padding_w, stride_w, input.device
     )
 
-    padded_input = F.pad(input, (padding_h, padding_h, padding_w, padding_w))
+    # Note that F.pad takes (padding_left, padding_right, padding_top, padding_bottom)
+    # ugh
+    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
 
     blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
     output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
@@ -886,7 +888,7 @@ def col2im(
     )
     idx = (None, None, indices_row, indices_col)
     output = torch.ops.aten.index_put(output, idx, input, accumulate=True)
-    output = F.pad(output, (-padding_h, -padding_h, -padding_w, -padding_w))
+    output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
         output = output.squeeze(0)
@@ -897,6 +899,23 @@ def col2im(
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
+
+
+@register_decomposition(aten.unfold_backward)
+def unfold_backward(
+    grad: Tensor, input_size: List[int], dimension: int, size: int, step: int
+) -> Tensor:
+    if len(input_size) == 0:
+        return torch.squeeze_copy(grad, 0)
+    dim = utils.canonicalize_dim(len(input_size), dimension)
+    idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
+    idx = idx.unfold(0, size, step).flatten()
+    grad = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
+    # nb. At the moment this generates two kernels in triton
+    # It could potentially be fused into one call to scatter_reduce,
+    # in the case step <= size provided scatter_reduce generates 1 kernel
+    grad_input = grad.new_zeros(input_size)
+    return torch.index_add(grad_input, dim, idx, grad)
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -1265,12 +1284,8 @@ def native_layer_norm_backward(
     if M <= 0 or N <= 0:
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
-            input.new_zeros(input_shape[axis:])
-            if output_mask[1] and weight_cast
-            else None,
-            input.new_zeros(input_shape[axis:])
-            if output_mask[2] and bias_cast
-            else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[2] else None,
         )
 
     x_hat = (input_cast - mean) * rstd
@@ -1768,7 +1783,7 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
-    idx = (slice(None),) * dim + (index,)
+    idx = (None,) * dim + (index,)
     torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
     return x
 
@@ -2443,6 +2458,7 @@ def register_inplace(aten_op, outplace_op):
 
 
 register_inplace(aten.add_, aten.add)
+register_inplace(aten.sub_, aten.sub)
 register_inplace(aten.mul_, aten.mul)
 register_inplace(aten.relu_, aten.relu)
 register_inplace(aten.hardtanh_, aten.hardtanh)

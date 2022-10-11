@@ -1,6 +1,19 @@
-#include <ATen/ATen.h>
+#define TORCH_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/mkldnn_linear_backward_input.h>
+#include <ATen/ops/mkldnn_linear_backward_input_native.h>
+#include <ATen/ops/mkldnn_linear_backward_native.h>
+#include <ATen/ops/mkldnn_linear_backward_weights.h>
+#include <ATen/ops/mkldnn_linear_backward_weights_native.h>
+#include <ATen/ops/mkldnn_linear_native.h>
+#endif
 
 #if !AT_MKLDNN_ENABLED()
 
