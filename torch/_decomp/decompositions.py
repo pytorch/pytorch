@@ -1241,7 +1241,7 @@ def native_group_norm_backward(
     return (d_input, d_gamma, d_bias)
 
 
-def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
+def _maybe_cast(x: Optional[Tensor], dtype: torch.dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
     return x
@@ -1262,10 +1262,20 @@ def native_layer_norm_backward(
     input_shape = input.shape
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    grad_out_cast, input_cast, weight_cast, bias_cast = [
-        x.to(computation_dtype).contiguous() if x is not None else x
-        for x in (grad_out, input, weight, bias)
-    ]
+
+    grad_out_cast = (
+        grad_out.to(computation_dtype).contiguous()
+        if grad_out is not None
+        else grad_out
+    )
+    input_cast = (
+        input.to(computation_dtype).contiguous() if input is not None else input
+    )
+    weight_cast = (
+        weight.to(computation_dtype).contiguous() if weight is not None else weight
+    )
+    bias_cast = bias.to(computation_dtype).contiguous() if bias is not None else bias
+
     assert grad_out_cast is not None
 
     axis = input_ndim - len(normalized_shape)
@@ -1300,9 +1310,15 @@ def native_layer_norm_backward(
     c3 = torch.mul(x_hat, c2)
 
     inner = a - b - c3
-    d_input: Optional[Tensor] = None
-    d_weight: Optional[Tensor] = None
-    d_bias: Optional[Tensor] = None
+
+    # Should be None but doesn't work with vjp
+    d_input: Optional[Tensor] = torch.zeros_like(input_cast)
+    d_weight: Optional[Tensor] = (
+        torch.zeros_like(weight_cast) if weight_cast is not None else torch.zeros(())
+    )
+    d_bias: Optional[Tensor] = (
+        torch.zeros_like(bias_cast) if bias_cast is not None else torch.zeros(())
+    )
     if output_mask[0]:
         d_input = (rstd / N) * inner
 
@@ -1529,7 +1545,7 @@ def cudnn_batch_norm(
     )
 
 
-def _broadcast_batch_norm_backward(x, broadcast_mask):
+def _broadcast_batch_norm_backward(x: Tensor, broadcast_mask: List[int]):
     for axis, mask in enumerate(broadcast_mask):
         if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
             x = x.unsqueeze(axis)
@@ -1551,26 +1567,24 @@ def native_batch_norm_backward(
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_dtype = input.dtype
     computation_dtype = utils.get_computation_dtype(input.dtype)
-    (
-        grad_out_cast,
-        input_cast,
-        weight_cast,
-        running_mean_cast,
-        running_var_cast,
-        save_mean_cast,
-        save_invstd_cast,
-    ) = [
-        x.to(computation_dtype) if x is not None else x
-        for x in (
-            grad_out,
-            input,
-            weight,
-            running_mean,
-            running_var,
-            save_mean,
-            save_invstd,
-        )
-    ]
+
+    # This is very unfortunate, but TorchScript doesn't seem to be able to script it otherwise
+    grad_out_cast = grad_out.to(computation_dtype) if grad_out is not None else grad_out
+    input_cast = input.to(computation_dtype) if input is not None else input
+    weight_cast = weight.to(computation_dtype) if weight is not None else weight
+    running_mean_cast = (
+        running_mean.to(computation_dtype) if running_mean is not None else running_mean
+    )
+    running_var_cast = (
+        running_var.to(computation_dtype) if running_var is not None else running_var
+    )
+    save_mean_cast = (
+        save_mean.to(computation_dtype) if save_mean is not None else save_mean
+    )
+    save_invstd_cast = (
+        save_invstd.to(computation_dtype) if save_invstd is not None else save_invstd
+    )
+
     input_shape = input.shape
     input_rank = input.dim()
     assert input_rank >= 2, "rank of the input must be at least 2"
@@ -1585,6 +1599,8 @@ def native_batch_norm_backward(
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
         invstd = torch.rsqrt(running_var_cast + eps)
+    assert mean is not None
+    assert invstd is not None
 
     broadcast_mask: List[int] = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]
@@ -1617,13 +1633,19 @@ def native_batch_norm_backward(
 
     if output_mask[1]:
         grad_weight = dot_p * invstd
+    elif weight is not None:
+        grad_weight = torch.zeros_like(
+            weight
+        )  # should be None but doesn't work with vjp
     else:
-        grad_weight = None  # "None" doesn't work with vjp, should use zeros for vjp
+        grad_weight = torch.zeros(())  # should be None but doesn't work with vjp
 
     if output_mask[2]:
         grad_bias = grad_output_sum
     else:
-        grad_bias = None  # "None" doesn't work with vjp, should use zeros for vjp
+        grad_bias = torch.zeros_like(
+            grad_output_sum
+        )  # should be None but doesn't work with vjp
 
     return (
         grad_input.to(input_dtype),

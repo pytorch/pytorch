@@ -501,7 +501,7 @@ def create_differentiability_info(
         if (
             only_used_grads_indices
             and set(used_grads_indices) == {0}
-            and defn_name != "native_batch_norm"
+            and defn_name not in ("native_batch_norm", "native_layer_norm")
         ):
             raise RuntimeError(
                 f"Derivative definition of {defn_name} in derivatives.yaml solely "

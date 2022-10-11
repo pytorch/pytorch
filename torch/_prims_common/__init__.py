@@ -1058,15 +1058,16 @@ def check_same_dtype(*args):
 
 
 # Maps datatypes to their computation types for elementwise operations
-_computation_dtype_map = {
-    torch.bfloat16: torch.float32,
-    torch.float16: torch.float32,
-    torch.complex32: torch.complex64,
-}
-
-
+# We use an if-else instead of dictionary to stay TorchScript-able
 def get_computation_dtype(dtype: torch.dtype) -> torch.dtype:
-    return _computation_dtype_map.get(dtype, dtype)
+    if dtype == torch.bfloat16:
+        return torch.float32
+    elif dtype == torch.float16:
+        return torch.float32
+    elif dtype == torch.complex32:
+        return torch.complex64
+    else:
+        return dtype
 
 
 class ELEMENTWISE_TYPE_PROMOTION_KIND(Enum):

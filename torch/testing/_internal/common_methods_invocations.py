@@ -10679,6 +10679,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
+           # See NOTE [Native batch norm saved intermediatesb]
+           gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs)[0],
            assert_jit_shape_analysis=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_native_layer_norm,
@@ -10701,6 +10703,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # See NOTE [Native batch norm saved intermediatesb]
+           gradcheck_wrapper=lambda op, *args, **kwargs: op(*args, **kwargs)[0],
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_native_batch_norm,
            skips=(
