@@ -43,7 +43,7 @@ def exponential(window_length: int,
                 layout: _layout = torch.strided,
                 device: _device = None,
                 requires_grad: bool = False) -> Tensor:
-    r"""Computes a window with an exponential form.
+    r"""Computes a window with an exponential waveform.
     Also known as Poisson window.
 
     The exponential window is defined as follows:
