@@ -15,15 +15,7 @@ import io
 import itertools
 import unittest
 from collections import namedtuple
-from typing import (
-    Callable,
-    Collection,
-    Iterable,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
 
 import onnx
 
@@ -186,7 +178,7 @@ def skip_ops(
     ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in to_skip:
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
-        assert opinfo is not None, f"Couldn't find OpInfo for {decorate_meta}"
+        assert opinfo is not None, f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
@@ -223,42 +215,52 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
-### Modify this section ###
+# Modify this section ###
 # NOTE: Modify this section as more ops are supported. The list should be sorted
 # alphabetically.
 
 # Ops to be tested for consistency between onnx and pytorch
 ALLOWLIST_OP = (
     "ceil",
+    "div",
+    "floor_divide",
     "sqrt",
     "t",
+    "true_divide",
 )
+
+# fmt: off
+# Turn off black formatting to keep the list compact
 
 # Expected failures for onnx export. If an op is expected to fail only for certain
 # ONNX opsets, add the op to EXPECTED_OPSET_FAILS below.
-
+# The list should be sorted alphabetically by op name.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    xfail(
-        "ceil",
-        dtypes=[torch.float64],
-        reason="Ceil not implemented for f64 in onnx runtime",
+    skip("ceil", dtypes=[torch.float64], reason="Ceil for f64 not implemented in onnx runtime"),
+    skip("ceil", dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    xfail("div", variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    xfail("div", variant_name="floor_rounding", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    xfail("div", variant_name="trunc_rounding", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    skip(
+        "div", variant_name="no_rounding_mode", dtypes=[torch.float64, torch.uint8, torch.int8, torch.int16],
+        reason="Div for uint8, int8, int16, f64 not implemented in onnx runtime"
     ),
     skip(
-        "ceil",
-        dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
-        reason="not supported by onnx",
+        "div", variant_name="floor_rounding", dtypes=[torch.float64, torch.uint8, torch.int8, torch.int16],
+        reason="Div for uint8, int8, int16, f64 not implemented in onnx runtime"
     ),
     skip(
-        "sqrt",
-        dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES,
-        reason="not supported by onnx",
+        "div", variant_name="trunc_rounding", dtypes=[torch.float64, torch.uint8, torch.int8, torch.int16],
+        reason="Div for uint8, int8, int16, f64 not implemented in onnx runtime"
     ),
-    xfail(
-        "t",
-        dtypes=COMPLEX_TYPES,
-        reason="jit tracer error for complex types",
-    ),
+    xfail("floor_divide", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    skip("floor_divide", dtypes=[torch.float64], reason="Floor for f64 not implemented in onnx runtime"),
+    skip("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    xfail("t", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    xfail("true_divide", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    xfail("true_divide", dtypes=[torch.float64], reason="ONNX output type is f32 which does not match PyTorch output type f64"),
 )
+# fmt: on
 
 # Expected opset specific fails for ops that do not support specific opsets
 
@@ -273,7 +275,7 @@ EXPECTED_OPSET_FAILS: Tuple[XfailOpset, ...] = (
     ),
 )
 
-### END OF SECTION TO MODIFY ###
+# END OF SECTION TO MODIFY ###
 
 
 OPS_DB = copy.deepcopy(common_methods_invocations.op_db)

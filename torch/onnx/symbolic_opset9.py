@@ -402,7 +402,7 @@ def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
     elif rounding_mode == "floor":
         return floor_divide(g, self, other)
     elif rounding_mode == "trunc":
-        return trunc_divide(g, self, other)
+        return _trunc_divide(g, self, other)
     else:
         raise errors.SymbolicValueError(
             f'Unsupported rounding mode: "{rounding_mode}". Expected None, "floor" or "trunc"',
@@ -410,9 +410,8 @@ def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
         )
 
 
-@_onnx_symbolic("aten::trunc")
 @_beartype.beartype
-def trunc_divide(g: jit_utils.GraphContext, self, other):
+def _trunc_divide(g: jit_utils.GraphContext, self, other):
     quotient = g.op("Div", self, other)
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
@@ -448,7 +447,9 @@ def trunc_divide(g: jit_utils.GraphContext, self, other):
 @_beartype.beartype
 def floor_divide(g: jit_utils.GraphContext, self, other):
     quotient = true_divide(g, self, other)
-    return g.op("Floor", quotient)
+    self_type = _type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type()
+    floor = g.op("Floor", quotient)
+    return g.op("Cast", floor, to_i=self_type)
 
 
 @_onnx_symbolic("aten::floordiv")
@@ -471,6 +472,8 @@ def true_divide(g: jit_utils.GraphContext, self, other):
     # Performs div as usual.
     # Implicit casting will be handled in scalar type analysis pass.
     if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
+        # FIXME(justinchuby): Fix the output type when both input are f64.
+        # Currently, the output type is f32.
         return g.op("Div", self, other)
 
     # Case 2: neither is floating
@@ -609,13 +612,16 @@ def neg(g: jit_utils.GraphContext, self):
 @_beartype.beartype
 def sqrt(g: jit_utils.GraphContext, self):
     # TODO(justinchuby): Add a helper function in jit_utils and use it to check types
-    if symbolic_helper._is_in_type_group(self, {
-        _type_utils.JitScalarType.UINT8,
-        _type_utils.JitScalarType.INT8,
-        _type_utils.JitScalarType.INT16,
-        _type_utils.JitScalarType.INT,
-        _type_utils.JitScalarType.INT64
-    }):
+    if symbolic_helper._is_in_type_group(
+        self,
+        {
+            _type_utils.JitScalarType.UINT8,
+            _type_utils.JitScalarType.INT8,
+            _type_utils.JitScalarType.INT16,
+            _type_utils.JitScalarType.INT,
+            _type_utils.JitScalarType.INT64,
+        },
+    ):
         # torch converts all int inputs to sqrt to float
         self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
