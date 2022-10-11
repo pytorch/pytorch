@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-from .core import MaskedTensor, is_masked_tensor
+from .core import MaskedTensor
 
 __all__ = [
     "as_masked_tensor",
@@ -15,11 +15,7 @@ These two factory functions are intended to mirror
 """
 
 def masked_tensor(data, mask, requires_grad=False):
-    assert not is_masked_tensor(data)
-    assert not is_masked_tensor(mask)
     return MaskedTensor(data, mask, requires_grad)
 
 def as_masked_tensor(data, mask):
-    assert not is_masked_tensor(data)
-    assert not is_masked_tensor(mask)
     return MaskedTensor._from_values(data, mask)

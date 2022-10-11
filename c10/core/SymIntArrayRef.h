@@ -13,10 +13,29 @@
 namespace c10 {
 using SymIntArrayRef = ArrayRef<SymInt>;
 
-TORCH_API at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar);
-TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
-TORCH_API c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
-    c10::SymIntArrayRef ar);
+inline at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
+  return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
+}
+
+inline c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
+    c10::SymIntArrayRef ar) {
+  for (c10::SymInt sci : ar) {
+    if (sci.is_symbolic()) {
+      return c10::nullopt;
+    }
+  }
+
+  return {asIntArrayRefUnchecked(ar)};
+}
+
+inline at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar) {
+  for (c10::SymInt sci : ar) {
+    TORCH_CHECK(
+        !sci.is_symbolic(),
+        "SymIntArrayRef expected to contain only concrete integers");
+  }
+  return asIntArrayRefUnchecked(ar);
+}
 
 // Prefer using a more semantic constructor, like
 // fromIntArrayRefKnownNonNegative
@@ -29,7 +48,7 @@ inline SymIntArrayRef fromIntArrayRefKnownNonNegative(IntArrayRef array_ref) {
   return fromIntArrayRefUnchecked(array_ref);
 }
 
-inline SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {
+inline SymIntArrayRef fromIntArrayRefSlow(IntArrayRef array_ref) {
   for (size_t i = 0; i < array_ref.size(); ++i) {
     TORCH_CHECK(
         SymInt::check_range(array_ref[i]),
