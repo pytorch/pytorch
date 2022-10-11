@@ -325,7 +325,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 Args:
     {input}
-    other (Tensor or Number): the tensor or number to add to input.
+    other (Tensor or Number): the tensor or number to add to :attr:`input`.
 
 Keyword arguments:
     alpha (Number): the multiplier for :attr:`other`.
@@ -421,7 +421,7 @@ add_docstr(
 addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
-multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
+multiplies the result by the scalar :attr:`value` and adds it to :attr:`input`.
 
 .. warning::
     Integer division with addcdiv is no longer supported, and in a future
@@ -472,8 +472,8 @@ add_docstr(
 addcmul(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
 Performs the element-wise multiplication of :attr:`tensor1`
-by :attr:`tensor2`, multiply the result by the scalar :attr:`value`
-and add it to :attr:`input`.
+by :attr:`tensor2`, multiplies the result by the scalar :attr:`value`
+and adds it to :attr:`input`.
 
 .. math::
     \text{out}_i = \text{input}_i + \text{value} \times \text{tensor1}_i \times \text{tensor2}_i
@@ -648,7 +648,7 @@ it will not be propagated.
 """
     + r"""
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
-:attr:`alpha` must be real numbers, otherwise they should be integers
+:attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
     input (Tensor): vector to be added
@@ -726,7 +726,7 @@ add_docstr(
     r"""
 allclose(input, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> bool
 
-This function checks if all :attr:`input` and :attr:`other` satisfy the condition:
+This function checks if :attr:`input` and :attr:`other` satisfy the condition:
 
 .. math::
     \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
@@ -948,15 +948,15 @@ add_docstr(
     r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Converts data into a tensor, sharing data and preserving autograd
+Converts :attr:`data` into a tensor, sharing data and preserving autograd
 history if possible.
 
-If data is already a tensor with the requested dtype and device
-then data itself is returned, but if data is a
+If :attr:`data` is already a tensor with the requested dtype and device
+then :attr:`data` itself is returned, but if :attr:`data` is a
 tensor with a different dtype or device then it's copied as if using
 `data.to(dtype=dtype, device=device)`.
 
-If data is a NumPy array (an ndarray) with the same dtype and device then a
+If :attr:`data` is a NumPy array (an ndarray) with the same dtype and device then a
 tensor is constructed using :func:`torch.from_numpy`.
 
 .. seealso::
@@ -999,7 +999,7 @@ add_docstr(
     r"""
 asin(input, *, out=None) -> Tensor
 
-Returns a new tensor with the arcsine  of the elements of :attr:`input`.
+Returns a new tensor with the arcsine of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \sin^{-1}(\text{input}_{i})
@@ -1075,7 +1075,7 @@ add_docstr(
     r"""
 atan(input, *, out=None) -> Tensor
 
-Returns a new tensor with the arctangent  of the elements of :attr:`input`.
+Returns a new tensor with the arctangent of the elements of :attr:`input`.
 
 .. math::
     \text{out}_{i} = \tan^{-1}(\text{input}_{i})
@@ -1471,7 +1471,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_not(torch.tensor([-1, -2, 3], dtype=torch.int8))
     tensor([ 0,  1, -4], dtype=torch.int8)
@@ -1540,7 +1540,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_and(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([1, 0,  3], dtype=torch.int8)
@@ -1566,7 +1566,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_or(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-1, -2,  3], dtype=torch.int8)
@@ -1592,7 +1592,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_xor(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-2, -2,  0], dtype=torch.int8)
@@ -1625,7 +1625,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_left_shift(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-2, -2, 24], dtype=torch.int8)
@@ -1656,7 +1656,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_right_shift(torch.tensor([-2, -7, 31], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-1, -7,  3], dtype=torch.int8)
@@ -1843,7 +1843,7 @@ Args:
         in the list, tuple or tensor. For instance, :code:`indices_or_sections=[2, 3]` and :code:`dim=0`
         would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
 
-        If indices_or_sections is a tensor, it must be a zero-dimensional or one-dimensional
+        If :attr:`indices_or_sections` is a tensor, it must be a zero-dimensional or one-dimensional
         long tensor on the CPU.
 
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
@@ -1892,17 +1892,17 @@ the input tensor.
 
 .. note::
 
-    This function may return less then the specified number of chunks!
+    This function may return fewer than the specified number of chunks!
 
 .. seealso::
 
     :func:`torch.tensor_split` a function that always returns exactly the specified number of chunks
 
-If the tensor size along the given dimesion :attr:`dim` is divisible by :attr:`chunks`,
+If the tensor size along the given dimension :attr:`dim` is divisible by :attr:`chunks`,
 all returned chunks will be the same size.
 If the tensor size along the given dimension :attr:`dim` is not divisible by :attr:`chunks`,
 all returned chunks will be the same size, except the last one.
-If such division is not possible, this function may return less
+If such division is not possible, this function may return fewer
 than the specified number of chunks.
 
 Arguments:
@@ -1910,7 +1910,7 @@ Arguments:
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
 
-Example::
+Example:
     >>> torch.arange(11).chunk(6)
     (tensor([0, 1]),
      tensor([2, 3]),
@@ -5141,7 +5141,9 @@ Example::
            bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
                       tensor([0.0000, 0.5000, 1.0000])))
 
-""",
+""".format(
+        **common_args
+    ),
 )
 # TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
 torch.histogramdd.__module__ = "torch"
