@@ -119,9 +119,10 @@ def make_signal_windows_ref(fn):
     Particularly used for window references that don't have a matching signature with
     torch, e.g., gaussian window.
     """
+
     def _fn(*args, **kwargs):
         # Remove torch-specific kwargs
-        for torch_key in {'device', 'layout', 'dtype', 'requires_grad'}:
+        for torch_key in {"device", "layout", "dtype", "requires_grad"}:
             if torch_key in kwargs:
                 kwargs.pop(torch_key)
         return fn(*args, **kwargs)
@@ -184,7 +185,7 @@ def make_signal_windows_opinfo(
                 unittest.skip("Skipped"),
                 "test_schema_correctness",
                 "TestSchemaCheckModeOpInfo",
-                dtypes=[torch.float16]
+                dtypes=[torch.float16],
             ),
             *skips,
         ),
