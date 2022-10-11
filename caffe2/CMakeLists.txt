@@ -980,6 +980,7 @@ elseif(USE_CUDA)
     if($ENV{ATEN_STATIC_CUDA})
       target_link_libraries(torch_cuda_linalg PRIVATE
           CUDA::cusolver_static
+          ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
       )
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
