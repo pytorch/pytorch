@@ -1,7 +1,5 @@
-from .windows import cosine_window, exponential_window, gaussian_window
+from . import windows
 
 __all__ = [
-    'cosine_window',
-    'exponential_window',
-    'gaussian_window',
+    'windows'
 ]

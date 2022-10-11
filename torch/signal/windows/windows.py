@@ -4,9 +4,9 @@ from torch import Tensor
 from torch.types import _dtype, _device, _layout
 
 __all__ = [
-    'cosine_window',
-    'exponential_window',
-    'gaussian_window',
+    'cosine',
+    'exponential',
+    'gaussian',
 ]
 
 
@@ -35,30 +35,32 @@ def _window_function_checks(function_name: str, window_length: int, dtype: _dtyp
         raise RuntimeError(f'{function_name} expects floating point dtypes, got: {dtype}')
 
 
-def exponential_window(window_length: int,
-                       periodic: bool = True,
-                       center: float = None,
-                       tau: float = 1.0,
-                       dtype: _dtype = None,
-                       layout: _layout = torch.strided,
-                       device: _device = None,
-                       requires_grad: bool = False) -> Tensor:
+def exponential(window_length: int,
+                periodic: bool = True,
+                center: float = None,
+                tau: float = 1.0,
+                dtype: _dtype = None,
+                layout: _layout = torch.strided,
+                device: _device = None,
+                requires_grad: bool = False) -> Tensor:
     r"""Computes a window with an exponential form.
-    The window is also known as Poisson window.
+    Also known as Poisson window.
 
     The exponential window is defined as follows:
 
     .. math::
-        w(n) = e^{-\frac{|n - center|}{\tau}}
+        w(n) = \exp{\left(-\frac{|n - center|}{\tau}\right)}
 
     Args:
         window_length (int): the length of the output window. In other words, the number of points of the cosine window.
         periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
-            If `False`,returns a symmetric window suitable for use in filter design.
-        center (float, optional): this value defines where the center of the window will be located.
+            If `False`, returns a symmetric window suitable for use in filter design. Default: `True`.
+        center (float, optional): his value defines where the center of the window will be located.
             In other words, at which sample the peak of the window can be found.
-        tau (float, optional): the decay value. For `center = 0`, it's suggested to use `tau = -(M - 1) / ln(x)`,
-            if `x` is the fraction of the window remaining at the end.
+            Default: `window_length / 2` if `periodic` is `True` (default), else `(window_length - 1) / 2`.
+        tau (float, optional): the decay value. For `center = 0`, it's suggested to use
+            :math:`\tau = -\frac{(M - 1)}{\ln(x)}`, if `x` is the fraction of the window remaining at the end.
+            Default: 1.0.
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -71,17 +73,14 @@ def exponential_window(window_length: int,
             :attr:`device` will be the CPU for CPU tensor types and the current CUDA device for CUDA tensor types.
         requires_grad (bool, optional): If autograd should record operations on the returned tensor. Default: ``False``.
 
-    Returns:
-        (torch.Tensor): window in the form of a tensor.
-
     Examples:
         >>> # Generate an exponential window without keyword args.
-        >>> torch.signal.windows.exponential_window(10)
+        >>> torch.signal.windows.exponential(10)
         tensor([0.0067, 0.0183, 0.0498, 0.1353, 0.3679, 1.0000, 0.3679, 0.1353, 0.0498,
         0.0183])
 
         >>> # Generate a symmetric exponential window and decay factor equal to .5
-        >>> torch.signal.windows.exponential_window(10, tau=.5, periodic=False)
+        >>> torch.signal.windows.exponential(10,periodic=False,tau=.5)
         tensor([1.2341e-04, 9.1188e-04, 6.7379e-03, 4.9787e-02, 3.6788e-01, 3.6788e-01,
         4.9787e-02, 6.7379e-03, 9.1188e-04, 1.2341e-04])
     """
@@ -111,16 +110,16 @@ def exponential_window(window_length: int,
     return torch.exp(-torch.abs(k) / tau)
 
 
-def cosine_window(window_length: int,
-                  periodic: bool = True,
-                  dtype: _dtype = None,
-                  layout: _layout = torch.strided,
-                  device: _device = None,
-                  requires_grad: bool = False) -> Tensor:
+def cosine(window_length: int,
+           periodic: bool = True,
+           dtype: _dtype = None,
+           layout: _layout = torch.strided,
+           device: _device = None,
+           requires_grad: bool = False) -> Tensor:
     r"""Computes a window with a simple cosine waveform.
+    Also known as the sine window.
 
-    The cosine window is also known as the sine window due to the following
-    equality:
+    The cosine window is defined as follows:
 
     .. math::
         w(n) = \cos{\left(\frac{\pi n}{M} - \frac{\pi}{2}\right)} = \sin{\left(\frac{\pi n}{M}\right)}
@@ -130,8 +129,8 @@ def cosine_window(window_length: int,
     Args:
         window_length (int): the length of the output window.
             In other words, the number of points of the cosine window.
-        periodic (bool): If `True`, returns a periodic window suitable for use in spectral analysis.
-            If `False`, returns a symmetric window suitable for use in filter design.
+        periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
+            If `False`, returns a symmetric window suitable for use in filter design. Default: `True`.
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -144,17 +143,14 @@ def cosine_window(window_length: int,
             :attr:`device` will be the CPU for CPU tensor types and the current CUDA device for CUDA tensor types.
         requires_grad (bool, optional): If autograd should record operations on the returned tensor. Default: ``False``.
 
-    Returns:
-        (torch.Tensor): window in the form of a tensor.
-
     Examples:
         >>> # Generate a cosine window without keyword args.
-        >>> torch.signal.windows.cosine_window(10)
+        >>> torch.signal.windows.cosine(10)
         tensor([0.1423, 0.4154, 0.6549, 0.8413, 0.9595, 1.0000, 0.9595, 0.8413, 0.6549,
         0.4154])
 
         >>> # Generate a symmetric cosine window.
-        >>> torch.signal.windows.cosine_window(10, periodic=False)
+        >>> torch.signal.windows.cosine(10,periodic=False)
         tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540,
         0.1564])
     """
@@ -178,26 +174,27 @@ def cosine_window(window_length: int,
     return window[:-1] if periodic else window
 
 
-def gaussian_window(window_length: int,
-                    periodic: bool = True,
-                    std: float = 0.5,
-                    dtype: _dtype = None,
-                    layout: _layout = torch.strided,
-                    device: _device = None,
-                    requires_grad: bool = False) -> Tensor:
+def gaussian(window_length: int,
+             periodic: bool = True,
+             std: float = 0.5,
+             dtype: _dtype = None,
+             layout: _layout = torch.strided,
+             device: _device = None,
+             requires_grad: bool = False) -> Tensor:
     r"""Computes a window with a gaussian waveform.
 
     The gaussian window is defined as follows:
 
     .. math::
-        w(n) = e^{-\left(\frac{n}{2\sigma}\right)^2}
+        w(n) = \exp{\left(-\left(\frac{n}{2\sigma}\right)^2\right)}
 
     Args:
         window_length (int): the length of the output window.
             In other words, the number of points of the cosine window.
         periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
-            If `False`, returns a symmetric window suitable for use in filter design.
+            If `False`, returns a symmetric window suitable for use in filter design. Default: `True`
         std (float, optional): the standard deviation of the gaussian. It controls how narrow or wide the window is.
+            Default: 0.5.
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -210,20 +207,18 @@ def gaussian_window(window_length: int,
             :attr:`device` will be the CPU for CPU tensor types and the current CUDA device for CUDA tensor types.
         requires_grad (bool, optional): If autograd should record operations on the returned tensor. Default: ``False``.
 
-    Returns:
-        (torch.Tensor): window in the form of a tensor.
-
     Examples:
         >>> # Generate a gaussian window without keyword args.
-        >>> torch.signal.windows.gaussian_window(10)
+        >>> torch.signal.windows.gaussian(10)
         tensor([1.9287e-22, 1.2664e-14, 1.5230e-08, 3.3546e-04, 1.3534e-01, 1.0000e+00,
         1.3534e-01, 3.3546e-04, 1.5230e-08, 1.2664e-14])
 
         >>> # Generate a symmetric gaussian window and standard deviation equal to 0.9.
-        >>> torch.signal.windows.gaussian_window(10, std=0.9, periodic=False)
+        >>> torch.signal.windows.gaussian(10,periodic=False,std=0.9)
         tensor([3.7267e-06, 5.1998e-04, 2.1110e-02, 2.4935e-01, 8.5700e-01, 8.5700e-01,
         2.4935e-01, 2.1110e-02, 5.1998e-04, 3.7267e-06])
     """
+
     if dtype is None:
         dtype = torch.get_default_dtype()
 

@@ -2634,11 +2634,7 @@ class TestTensorCreation(TestCase):
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 
-        try:
-            torch_method = getattr(torch.signal.windows, name + '_window')
-        except AttributeError:
-            # TODO: Remove try-except when all windows are moved to torch.signal.windows
-            torch_method = getattr(torch, name + '_window')
+        torch_method = getattr(torch.signal.windows, name)
 
         if not dtype.is_floating_point:
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
