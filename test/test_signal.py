@@ -32,7 +32,8 @@ class TestSignalWindows(TestCase):
             window_name = re.search(self.supported_windows, op.name).group(0)
 
             ref_kwargs = {
-                k: sample_input.kwargs[k] for k in sample_input.kwargs if k not in ('device', 'dtype', 'requires_grad', 'periodic')
+                k: sample_input.kwargs[k] for k in sample_input.kwargs
+                if k not in ('device', 'dtype', 'requires_grad', 'periodic')
             }
 
             expected = torch.from_numpy(

@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 
 from torch import Tensor
 from torch._torch_docs import factory_common_args
@@ -299,7 +298,7 @@ def gaussian(window_length: int,
 
     start = -(window_length if periodic else window_length - 1) / 2.0
 
-    constant = 1 / (std * np.sqrt(2))
+    constant = 1 / (std * torch.sqrt(torch.tensor(2)).item())
 
     """
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
