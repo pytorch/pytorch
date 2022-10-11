@@ -612,6 +612,15 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             a real tensor with an extra last dimension for the real and
             imaginary components.
 
+            .. versionchanged:: 1.14.0
+               ``return_complex`` is now a required argument for real inputs,
+               as the default is being trainsitioned to ``True``.
+
+            .. deprecated:: 1.14.0
+               ``return_complex=False`` is deprecated, instead use ``return_complex=True``
+               Note that calling :func:`torch.view_as_real` on the output will
+               recover the deprecated output format.
+
     Returns:
         Tensor: A tensor containing the STFT result with shape described above
 
