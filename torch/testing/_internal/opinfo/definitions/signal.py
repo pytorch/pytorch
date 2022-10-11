@@ -26,21 +26,8 @@ def sample_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs)
     additional keyword arguments.
     """
 
-    # Test a window size of length zero and one.
-    # If it's either symmetric or not doesn't matter in these sample inputs.
-    for size in range(2):
-        yield SampleInput(
-            size,
-            *args,
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad,
-            **kwargs,
-        )
-
-    # For sizes larger than 1 we need to test both symmetric and non-symmetric windows.
-    # Note: sample input tensors must be kept rather small.
-    for size, sym in product(list(range(2, 6)), (True, False)):
+    # Tests window sizes up to 5 samples.
+    for size, sym in product(range(6), (True, False)):
         yield SampleInput(
             size,
             *args,
@@ -97,7 +84,7 @@ def error_inputs_exponential_window(op_info, device, **kwargs):
     yield ErrorInput(
         SampleInput(3, center=1, sym=False, dtype=torch.float32, device=device),
         error_type=ValueError,
-        error_regex="Center must be 'None' for non-symmetric windows",
+        error_regex="Center must be None for non-symmetric windows",
     )
 
 
@@ -203,19 +190,19 @@ def make_signal_windows_opinfo(
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.cosine",
-        ref=make_signal_windows_ref(scipy.signal.windows.cosine),
+        ref=make_signal_windows_ref(scipy.signal.windows.cosine) if TEST_SCIPY else None,
         sample_inputs_func=sample_inputs_window,
         error_inputs_func=error_inputs_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
-        ref=make_signal_windows_ref(scipy.signal.windows.exponential),
+        ref=make_signal_windows_ref(scipy.signal.windows.exponential) if TEST_SCIPY else None,
         sample_inputs_func=partial(sample_inputs_window, tau=random.uniform(0, 10)),
         error_inputs_func=error_inputs_exponential_window,
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
-        ref=make_signal_windows_ref(scipy.signal.windows.gaussian),
+        ref=make_signal_windows_ref(scipy.signal.windows.gaussian) if TEST_SCIPY else None,
         sample_inputs_func=partial(sample_inputs_window, std=random.uniform(0, 3)),
         error_inputs_func=error_inputs_gaussian_window,
     ),
