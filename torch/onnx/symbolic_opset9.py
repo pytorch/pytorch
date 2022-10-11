@@ -434,12 +434,12 @@ def _trunc_divide(g: jit_utils.GraphContext, self, other):
             and symbolic_helper._is_fp(other)
         ):
             return g.op("Cast", casted, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-        else:
-            return g.op(
-                "Cast",
-                casted,
-                to_i=_type_utils.JitScalarType.from_name(scalar_type).onnx_type(),
-            )
+
+        return g.op(
+            "Cast",
+            casted,
+            to_i=_type_utils.JitScalarType.from_name(scalar_type).onnx_type(),
+        )
     return g.op("Cast", casted, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
 
