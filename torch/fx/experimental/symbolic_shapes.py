@@ -238,12 +238,13 @@ def _make_magic(method, func, py_type):
         if SYM_FUNCTION_MODE:
             return _handle_sym_dispatch(op, (self, other), {})
         if isinstance(other, py_type):
-            other_expr = self.shape_env.replace(other.expr)
+            other_expr = other.expr
         else:
             assert isinstance(other, sympy.Expr)
             other_expr = other
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
+        other_expr = self.shape_env.replace(other_expr)
         out = func(expr, other_expr)
         out = sympy.expand(out)
         if method in ["truediv"]:
