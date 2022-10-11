@@ -150,8 +150,11 @@ function setup_torchdeploy_deps(){
   sudo apt update && \
   sudo apt install -y binutils && \
   sudo rm -rf /var/lib/apt/lists/*
-  export CC=$(which gcc)
-  export CXX=$(which g++)
+  cc_compiler = $(which gcc)
+  cxx_compiler = $(which g++)
+  export CC=cc_compiler
+  export CXX=cxx_compiler
+  python -m pip install --upgrade pip
 }
 
 function checkout_install_torchdeploy() {
@@ -165,7 +168,6 @@ function checkout_install_torchdeploy() {
   python multipy/runtime/example/generate_examples.py
   git submodule update --init --recursive
   time python -m pip install -e . --install-option="--abicxx"
-  # time python -m pip install --abi-cxx e .
   popd
   popd
 }
