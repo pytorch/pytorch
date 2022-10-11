@@ -2854,7 +2854,11 @@ Tensor as_strided_backward(
   c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
-        at::arange(0, base_size, grad.options().dtype(at::kLong));
+        // TODO: should we symint-ify arange? Need SymScalar.
+        at::arange(
+            0,
+            base_size.guard_int(__FILE__, __LINE__),
+            grad.options().dtype(at::kLong));
   }
 
   // Step (2): use output geometry to scatter gradients into storage
