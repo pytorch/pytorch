@@ -1083,21 +1083,21 @@ class HistogramObserver(UniformQuantizationObserverBase):
         # the input histogram
         # start_idx maps min_val to the histogram bin index.
 
-        hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
+        # Compute the width of histogram bins is a straightforward solution, where
+        # hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
+        # Underflow happens if the numerator is close to the smallest positive subnormal number of FP32
+        # Therefore, we avoid such division operation.
         downsample_rate = int(
             torch.ceil(
-                (combined_max - combined_min) / (self.bins * hist_bin_width)
+                (combined_max - combined_min) * upsample_rate / (self.max_val - self.min_val)
             ).item()
         )
-        e = downsample_rate * (self.bins * hist_bin_width) - (
-            combined_max - combined_min
+        e = downsample_rate * (self.max_val - self.min_val) / upsample_rate - (combined_max - combined_min)
+        start_idx = int(
+            torch.round((self.min_val - combined_min) * self.bins * upsample_rate / (self.max_val - self.min_val)).item()
         )
-        # Relax only the max, not the min, so that for one sided distributions, min stays at zero
         combined_max = combined_max + e
         combined_min = combined_min
-        start_idx = int(
-            torch.round((self.min_val - combined_min) / hist_bin_width).item()
-        )
         return combined_min, combined_max, downsample_rate, start_idx
 
     def _combine_histograms(
