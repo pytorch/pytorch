@@ -4537,6 +4537,18 @@ def sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
                              requires_grad=requires_grad)
         yield SampleInput(tensor, args=args)
 
+# def reference_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
+#     yield from sample_inputs_narrow_copy(
+#         op_info, device, dtype, requires_grad, **kwargs)
+
+#     # Test sparse with input dimension > self.sparse_dim()
+#     # https://github.com/pytorch/pytorch/pull/84493#discussion_r967248150
+#     yield SampleInput(
+#         # s.sparse_dim() == 2
+#         torch.ones(2, 2, 2, 2, dtype=dtype, device=device, requires_grad=requires_grad).to_sparse(2),
+#         args=(3, 0, 1),
+#     )
+
 
 def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
     '''
@@ -12484,6 +12496,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=False,
            supports_autograd=False,
            sample_inputs_func=sample_inputs_narrow_copy,
+           # reference_inputs_func=reference_inputs_narrow_copy,
            skips=(
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -17714,6 +17727,12 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         )
+    ),
+    PythonRefInfo(
+        "_refs.narrow_copy",
+        torch_opinfo_name="narrow_copy",
+        supports_out=True,
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",

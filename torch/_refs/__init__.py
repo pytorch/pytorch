@@ -227,6 +227,7 @@ __all__ = [
     "meshgrid",
     "movedim",
     "narrow",
+    "narrow_copy",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -2646,6 +2647,19 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     return prims.slice_in_dim(a, start, start + length, axis=dim)
+
+
+@register_decomposition(torch.ops.aten.narrow_copy)
+@out_wrapper()
+def narrow_copy(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+    # TODO: This must return a sparse tensor if the input is sparse, but refs
+    # have no sparse support.  See narrow_copy_sparse in core.
+    if a.is_sparse:
+        raise NotImplementedError("narrow_copy ref doesn't support sparse tensors")
+    tmp = torch.narrow(a=a, dim=dim, start=start, length=length)  # type: ignore[call-overload]
+    result = torch.empty_like(tmp)
+    copy_to(result, tmp)
+    return result
 
 
 def _normalize(
