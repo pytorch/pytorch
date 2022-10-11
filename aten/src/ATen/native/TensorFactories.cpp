@@ -1461,15 +1461,15 @@ Tensor chebyshev_window(int64_t window_length,
   chebyshev_window_stub(iter.device_type(), iter, window_length, attenuation);
 
   if (window_length % 2 != 0) {
-    window = at::real(at::native::fft_ifft(window, window_length, 0, "backward"));
-    auto n = (window_length + 1) / 2;
+    window = at::real(at::native::fft_fft(window, window_length, 0, "backward"));
+    auto n = static_cast<int64_t>((window_length + 1) / 2);
     window = window.narrow(0, 0, n);
     window = at::cat({at::flip(window.narrow(0, 1, n-1), {0}), window});
   } else {
     auto j = c10::Scalar(c10::complex<double>(0, 1));
     auto W = (at::arange(window_length, options).mul_(c10::pi<double> / window_length) * j).exp_().mul_(window);
     window = at::real(at::native::fft_fft(W, window_length, 0, "backward"));
-    auto n = (window_length / 2) + 1;
+    auto n = static_cast<int64_t>((window_length / 2) + 1);
     window = at::cat({at::flip(window.narrow(0, 1, n-1), {0}), window.narrow(0, 1, n-1)});
   }
 
