@@ -714,9 +714,6 @@ def xfail_inherited_tests(tests):
     "test_inplace_metadata",
     "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
-    "test_make_fx_model_fwd_bwd_wgtupdate",
-    "test_make_fx_model_fwd_bwd",
-    "test_proxy_tensor",
     "test_trace_subclasses",
 ])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
@@ -1257,6 +1254,7 @@ symbolic_tensor_failures = {
     xfail('min', 'reduction_with_dim'),  # aten.min.dim - couldn't find symbolic meta function/decomposition
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('msort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
+    xfail('nan_to_num', ''),  # Cannot cast FakeTensor(FakeTensor(..., device='meta', size=()), cpu) to number
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d.default - couldn't find symbolic meta func...
