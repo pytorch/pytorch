@@ -79,6 +79,7 @@ Features described in this documentation are classified by release status:
    torch.linalg <linalg>
    torch.monitor <monitor>
    torch.special <special>
+   torch.signal.windows <signal.windows>
    torch.overrides
    torch.package <package>
    profiler
