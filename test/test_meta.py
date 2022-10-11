@@ -791,7 +791,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
     aten.multinomial.default: {f16},  # aten::multinomial
     aten.multinomial.out: {f16},  # aten::multinomial.out
-    aten.native_group_norm.default: {bf16, f16},
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
