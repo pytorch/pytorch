@@ -307,7 +307,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     std::string attr) {
   TORCH_CHECK(
       input_t.ndimension() == 4 || input_t.ndimension() == 5,
-      "Tensor mkldnn_convolution_binary: currently mkldnn inference only support 2d and 3d")
+      "Tensor mkldnn_convolution_pointwise_binary: currently only support 2d and 3d")
   c10::MaybeOwned<Tensor> bias_maybe_owned =
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -320,7 +320,7 @@ Tensor mkldnn_convolution_pointwise_binary(
       output_sizes == other_t.sizes(),
       "Binary Fusion's add should have same shape");
   bool can_be_fused = input_t.scalar_type() == other_t.scalar_type() &&
-      input_t.device() == other_t.device() &&
+      input_t.device() == other_t.device() && groups == 1 &&
       mkldnn_conv_use_channels_last(input_t, weight_t) &&
       ((input_t.scalar_type() == ScalarType::BFloat16 &&
         mkldnn_bf16_device_check()) ||
