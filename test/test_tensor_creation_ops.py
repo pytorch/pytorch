@@ -27,6 +27,7 @@ from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
+
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
     if shape == ():
@@ -64,6 +65,7 @@ def _rand_shape(dim, min_size, max_size):
     for i in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
+
 
 # Test suite for tensor creation ops
 #
@@ -330,24 +332,24 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(result, result_check)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 1 has 3 dimensions"
+                RuntimeError,
+                "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 1 has 3 dimensions"
         ):
             torch.block_diag(torch.tensor(5), torch.tensor([[[6]]]))
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 0 has 4 dimensions"
+                RuntimeError,
+                "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 0 has 4 dimensions"
         ):
             torch.block_diag(torch.tensor([[[[6]]]]))
 
         if device != 'cpu':
             with self.assertRaisesRegex(
-                RuntimeError,
-                (
-                    "torch.block_diag: input tensors must all be on the same device."
-                    " Input 0 is on device cpu and input 1 is on device "
-                )
+                    RuntimeError,
+                    (
+                            "torch.block_diag: input tensors must all be on the same device."
+                            " Input 0 is on device cpu and input 1 is on device "
+                    )
             ):
                 torch.block_diag(torch.ones(2, 2).cpu(), torch.ones(2, 2, device=device))
 
@@ -390,7 +392,8 @@ class TestTensorCreation(TestCase):
             torch.float64
         ]
 
-        for scipy_tensors, torch_type, scipy_type in zip(scipy_tensors_list, expected_torch_types, expected_scipy_types):
+        for scipy_tensors, torch_type, scipy_type in zip(scipy_tensors_list, expected_torch_types,
+                                                         expected_scipy_types):
             torch_tensors = [torch.tensor(t, device=device) for t in scipy_tensors]
             torch_result = torch.block_diag(*torch_tensors)
             self.assertEqual(torch_result.dtype, torch_type)
@@ -472,7 +475,7 @@ class TestTensorCreation(TestCase):
             expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
             error = "Expected object of scalar type {} but got scalar type " \
                     "{} for argument 'out'".format(
-                        complex_dtype_name(expected_dtype), dtype_name(dtype))
+                complex_dtype_name(expected_dtype), dtype_name(dtype))
             with self.assertRaisesRegex(RuntimeError, error):
                 op(a, b, out=out)
 
@@ -575,7 +578,8 @@ class TestTensorCreation(TestCase):
         x = torch.randn((4, 3, 8, 8), device=device)
         y = torch.randn(x.shape, device=device)
         res1 = torch.cat((x, y))
-        res2 = torch.cat((x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
+        res2 = torch.cat(
+            (x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
         # discontiguous channels-last inputs
@@ -839,7 +843,8 @@ class TestTensorCreation(TestCase):
                         # Unless the number of dimensions is less than the corresponding at_least function dimension
                         # Since the original concatenating dimension would shift after applying at_least and would no
                         # longer be the concatenating dimension
-                        if (ndims < at_least_dim or tdim != dim) and torch_input[k].size()[tdim] != torch_input[k + 1].size()[tdim]:
+                        if (ndims < at_least_dim or tdim != dim) and torch_input[k].size()[tdim] != \
+                                torch_input[k + 1].size()[tdim]:
                             valid_dim = False
 
                 # Special case for hstack is needed since hstack works differently when ndims is 1
@@ -1366,7 +1371,6 @@ class TestTensorCreation(TestCase):
                 numpy_grids = np.meshgrid(*(tensor.cpu().numpy() for tensor in tensors), **numpy_kwargs)
                 self.assertEqual(torch_grids, numpy_grids)
 
-
     def test_cartesian_prod(self, device):
         a = torch.tensor([1], device=device)
         b = torch.tensor([1, 2, 3], device=device)
@@ -1540,7 +1544,8 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
+                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(
+                            to_),
                         lambda: t.random_(from_, to_)
                     )
 
@@ -1553,13 +1558,13 @@ class TestTensorCreation(TestCase):
         int64_max_val = torch.iinfo(torch.int64).max
 
         if dtype == torch.double:
-            fp_limit = 2**53
+            fp_limit = 2 ** 53
         elif dtype == torch.float:
-            fp_limit = 2**24
+            fp_limit = 2 ** 24
         elif dtype == torch.half:
-            fp_limit = 2**11
+            fp_limit = 2 ** 11
         elif dtype == torch.bfloat16:
-            fp_limit = 2**8
+            fp_limit = 2 ** 8
         else:
             fp_limit = 0
 
@@ -1613,13 +1618,13 @@ class TestTensorCreation(TestCase):
             tos = [min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1, int64_max_val]
 
         if dtype == torch.double:
-            fp_limit = 2**53
+            fp_limit = 2 ** 53
         elif dtype == torch.float:
-            fp_limit = 2**24
+            fp_limit = 2 ** 24
         elif dtype == torch.half:
-            fp_limit = 2**11
+            fp_limit = 2 ** 11
         elif dtype == torch.bfloat16:
-            fp_limit = 2**8
+            fp_limit = 2 ** 8
         else:
             fp_limit = 0
 
@@ -1663,7 +1668,8 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
+                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(
+                            to_),
                         lambda: t.random_(from_, to_)
                     )
 
@@ -1806,7 +1812,7 @@ class TestTensorCreation(TestCase):
                                  str(torch.tensor(5, dtype=torch.int64, device='cuda:1').device))
                 self.assertEqual('cuda:1',
                                  str(torch.tensor(torch.ones((2, 3), dtype=torch.float32),
-                                     device='cuda:1').device))
+                                                  device='cuda:1').device))
 
                 self.assertEqual('cuda:1',
                                  str(torch.tensor(np.random.randn(2, 3), device='cuda:1').device))
@@ -2038,7 +2044,8 @@ class TestTensorCreation(TestCase):
         float64_min = torch.finfo(torch.float64).min
         g_1 = torch.tensor((float('nan'), 0, int64_min, int64_max, int64_min - 1), dtype=torch.bool)
         self.assertEqual(e, g_1)
-        g_2 = torch.tensor((int64_max + 1, 0, (int64_max + 1) * 2, (int64_max + 1) * 2 + 1, float64_min), dtype=torch.bool)
+        g_2 = torch.tensor((int64_max + 1, 0, (int64_max + 1) * 2, (int64_max + 1) * 2 + 1, float64_min),
+                           dtype=torch.bool)
         self.assertEqual(e, g_2)
         g_3 = torch.tensor((float64_max, 0, float64_max + 1, float64_min - 1, float64_max + 1e291), dtype=torch.bool)
         self.assertEqual(e, g_3)
@@ -2471,7 +2478,7 @@ class TestTensorCreation(TestCase):
             x.new_empty_strided(size, stride, dtype=dtype, device=device)
 
     def test_strided_mismatched_stride_shape(self, device):
-        for shape, strides in [((1, ), ()), ((1, 2), (1, ))]:
+        for shape, strides in [((1,), ()), ((1, 2), (1,))]:
             with self.assertRaisesRegex(RuntimeError, "mismatch in length of strides and shape"):
                 torch.tensor(0.42, device=device).as_strided(shape, strides)
 
@@ -2491,11 +2498,11 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     def test_empty_overflow(self, device):
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty([2, 4, 2**29, 2**29], dtype=torch.float64)
+            torch.empty([2, 4, 2 ** 29, 2 ** 29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
+            torch.empty([8, 8, 2 ** 29, 2 ** 29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
+            torch.empty_strided([8, 8], [2 ** 61, 1], dtype=torch.float64)
 
     def test_eye(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
@@ -2536,7 +2543,7 @@ class TestTensorCreation(TestCase):
         start = -0.0316082797944545745849609375 + (0.8888888888j if dtype.is_complex else 0)
         end = .0315315723419189453125 + (0.444444444444j if dtype.is_complex else 0)
 
-        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2 ** 22]:
             t = torch.linspace(start, end, steps, device=device, dtype=dtype)
             a = np.linspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
@@ -2554,7 +2561,7 @@ class TestTensorCreation(TestCase):
             t = t.cpu()
             self.assertEqual(t, torch.from_numpy(a))
 
-        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2 ** 22]:
             test_fn(torch.linspace, np.linspace, steps)
 
     @dtypes(torch.complex64)
@@ -2573,7 +2580,7 @@ class TestTensorCreation(TestCase):
         start = -0.0316082797944545745849609375
         end = .0315315723419189453125
 
-        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2 ** 22]:
             t = torch.logspace(start, end, steps, device=device, dtype=dtype)
             a = np.logspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
@@ -2646,6 +2653,10 @@ class TestTensorCreation(TestCase):
             return
         for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
+                print(*(kwargs.values()))
+                print(size)
+                print(periodic)
+
                 res = torch_method(size, periodic=periodic, **kwargs, device=device, dtype=dtype)
                 # NB: scipy always returns a float64 result
                 ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
@@ -2689,7 +2700,13 @@ class TestTensorCreation(TestCase):
     @dtypes(torch.float, torch.double, torch.long)
     def test_exponential_window(self, device, dtype):
         for num_test in range(50):
-            self._test_signal_window_functions('exponential', dtype, device)
+            self._test_signal_window_functions(
+                'exponential',
+                dtype,
+                device,
+                center=None,
+                tau=round(random.uniform(0, 2), 2),
+            )
 
     @onlyNativeDeviceTypes
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
@@ -2699,6 +2716,27 @@ class TestTensorCreation(TestCase):
     def test_gaussian_window(self, device, dtype):
         for num_test in range(50):
             self._test_signal_window_functions('gaussian', dtype, device, std=random.random() * 30)
+
+    # @onlyNativeDeviceTypes
+    # @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
+    # @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    # @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
+    # @dtypes(torch.float, torch.double)
+    # def test_dummy(self, device, dtype):
+    #     from scipy import signal
+    #
+    #     NP2TORCH = {
+    #         torch.float64: np.float64,
+    #         torch.float32: np.float32
+    #     }
+    #
+    #     at = 41
+    #     window_length = 100
+    #     w1 = signal.get_window(('chebwin', at), window_length, fftbins=False).astype(NP2TORCH[dtype])
+    #     # w1 = signal.windows.chebwin(100, 100, sym=True).astype(NP2TORCH[dtype])
+    #     w2 = torch.signal.windows.chebyshev_window(window_length, at=at, periodic=False, dtype=dtype, device=device)
+    #
+    #     self.assertEqual(w1, w2, exact_dtype=True)
 
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function
@@ -2958,7 +2996,7 @@ class TestTensorCreation(TestCase):
 
     @dtypes(*all_types_and(torch.bfloat16))
     @dtypesIfCUDA(*integral_types_and(torch.half, torch.bfloat16, torch.float32, torch.float64) if TEST_WITH_ROCM else
-                  all_types_and(torch.half, torch.bfloat16))
+    all_types_and(torch.half, torch.bfloat16))
     def test_logspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
@@ -3397,11 +3435,11 @@ class TestRandomTensorCreation(TestCase):
         self.assertEqual(res2.numel(), 0)
 
         # Test exceptions when n is too large for a floating point type
-        for dtype, small_n, large_n in ((torch.uint8, 2**8, 2**8 + 1),
-                                        (torch.half, 2**11 + 1, 2**11 + 2),
-                                        (torch.float, 2**24 + 1, 2**24 + 2),
-                                        (torch.double, 2**25,  # 2**53 + 1 is too large to run
-                                         2**53 + 2)):
+        for dtype, small_n, large_n in ((torch.uint8, 2 ** 8, 2 ** 8 + 1),
+                                        (torch.half, 2 ** 11 + 1, 2 ** 11 + 2),
+                                        (torch.float, 2 ** 24 + 1, 2 ** 24 + 2),
+                                        (torch.double, 2 ** 25,  # 2**53 + 1 is too large to run
+                                         2 ** 53 + 2)):
             res = torch.empty(0, dtype=dtype, device=device)
             torch.randperm(small_n, out=res)  # No exception expected
             self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res, device=device))
@@ -3445,11 +3483,15 @@ class TestRandomTensorCreation(TestCase):
             regex = 'Expected a .* device type for generator but found .*'
             cuda_t = torch.tensor(n, device='cuda')
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen))
-            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))
+            self.assertRaisesRegex(RuntimeError, regex,
+                                   lambda: torch.randperm(n, device='cuda', generator=cpu_gen, out=cuda_t))
             cpu_t = torch.tensor(n, device='cpu')
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen))
-            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
-            self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
+            self.assertRaisesRegex(RuntimeError, regex,
+                                   lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
+            self.assertRaisesRegex(RuntimeError, regex,
+                                   lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
+
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
@@ -3508,17 +3550,21 @@ class TestLikeTensorCreation(TestCase):
         self.assertEqual(torch.full_like(like, 1., dtype=torch.complex64).dtype,
                          torch.complex64)
 
+
 # Tests for the `frombuffer` function (only work on CPU):
 #   Constructs tensors from Python objects that implement the buffer protocol,
 #   without copying data.
 SIZE = 5
 SHAPE = (SIZE,)
 
+
 def may_require_grad(dtype):
     return dtype.is_floating_point or dtype.is_complex
 
+
 def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
+
 
 class TestBufferProtocol(TestCase):
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
@@ -3675,6 +3721,7 @@ class TestBufferProtocol(TestCase):
         # Assuming little endian machine
         self.assertSequenceEqual(tensor, [255, 255])
 
+
 # Tests for the `asarray` function:
 #   Constructs tensors from a Python object that has one of the following
 #   characteristics:
@@ -3687,12 +3734,18 @@ class TestBufferProtocol(TestCase):
 def get_another_device(device):
     return "cuda" if torch.device(device).type == "cpu" else "cpu"
 
+
 def identity(tensor):
     return tensor
+
+
 def to_numpy(tensor):
     return tensor.numpy()
+
+
 def to_memview(tensor):
     return memoryview(to_numpy(tensor))
+
 
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
@@ -3941,6 +3994,7 @@ class TestAsArray(TestCase):
             original = torch.as_tensor(e)
             t = torch.asarray(e)
             self.assertEqual(t, original)
+
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
