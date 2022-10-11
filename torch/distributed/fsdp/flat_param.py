@@ -1147,7 +1147,7 @@ class FlatParamHandle:
             elif as_params:
                 module.register_parameter(param_name, nn.Parameter(view))
             else:
-                setattr(module, param_name, view)
+                module.register_buffer(param_name, view)
         for i, (
             param_name,
             module,
@@ -1177,7 +1177,7 @@ class FlatParamHandle:
                 assert isinstance(prim_param, nn.Parameter)
                 module.register_parameter(param_name, prim_param)
             else:
-                setattr(module, param_name, prim_param)
+                module.register_buffer(param_name, prim_param)
 
     def _use_unsharded_grad_views(self) -> None:
         """
