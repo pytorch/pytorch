@@ -332,14 +332,14 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(result, result_check)
 
         with self.assertRaisesRegex(
-                RuntimeError,
-                "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 1 has 3 dimensions"
+            RuntimeError,
+            "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 1 has 3 dimensions"
         ):
             torch.block_diag(torch.tensor(5), torch.tensor([[[6]]]))
 
         with self.assertRaisesRegex(
-                RuntimeError,
-                "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 0 has 4 dimensions"
+            RuntimeError,
+            "torch.block_diag: Input tensors must have 2 or fewer dimensions. Input 0 has 4 dimensions"
         ):
             torch.block_diag(torch.tensor([[[[6]]]]))
 
@@ -935,7 +935,7 @@ class TestTensorCreation(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_unpack_double(self, device, dtype):
         # Reference: https://github.com/pytorch/pytorch/issues/33111
-        vals = (2 ** 24 + 1, 2 ** 53 + 1,
+        vals = (2**24 + 1, 2**53 + 1,
                 np.iinfo(np.int64).max, np.iinfo(np.uint64).max, np.iinfo(np.uint64).max + 1,
                 -1e500, 1e500)
         for val in vals:
@@ -1543,7 +1543,8 @@ class TestTensorCreation(TestCase):
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
+                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(
+                            to_),
                         lambda: t.random_(from_, to_)
                     )
 
@@ -1556,13 +1557,13 @@ class TestTensorCreation(TestCase):
         int64_max_val = torch.iinfo(torch.int64).max
 
         if dtype == torch.double:
-            fp_limit = 2 ** 53
+            fp_limit = 2**53
         elif dtype == torch.float:
-            fp_limit = 2 ** 24
+            fp_limit = 2**24
         elif dtype == torch.half:
-            fp_limit = 2 ** 11
+            fp_limit = 2**11
         elif dtype == torch.bfloat16:
-            fp_limit = 2 ** 8
+            fp_limit = 2**8
         else:
             fp_limit = 0
 
@@ -1616,13 +1617,13 @@ class TestTensorCreation(TestCase):
             tos = [min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1, int64_max_val]
 
         if dtype == torch.double:
-            fp_limit = 2 ** 53
+            fp_limit = 2**53
         elif dtype == torch.float:
-            fp_limit = 2 ** 24
+            fp_limit = 2**24
         elif dtype == torch.half:
-            fp_limit = 2 ** 11
+            fp_limit = 2**11
         elif dtype == torch.bfloat16:
-            fp_limit = 2 ** 8
+            fp_limit = 2**8
         else:
             fp_limit = 0
 
@@ -3409,11 +3410,11 @@ class TestRandomTensorCreation(TestCase):
         self.assertEqual(res2.numel(), 0)
 
         # Test exceptions when n is too large for a floating point type
-        for dtype, small_n, large_n in ((torch.uint8, 2 ** 8, 2 ** 8 + 1),
-                                        (torch.half, 2 ** 11 + 1, 2 ** 11 + 2),
-                                        (torch.float, 2 ** 24 + 1, 2 ** 24 + 2),
-                                        (torch.double, 2 ** 25,  # 2**53 + 1 is too large to run
-                                         2 ** 53 + 2)):
+        for dtype, small_n, large_n in ((torch.uint8, 2**8, 2**8 + 1),
+                                        (torch.half, 2**11 + 1, 2**11 + 2),
+                                        (torch.float, 2**24 + 1, 2**24 + 2),
+                                        (torch.double, 2**25,  # 2**53 + 1 is too large to run
+                                         2**53 + 2)):
             res = torch.empty(0, dtype=dtype, device=device)
             torch.randperm(small_n, out=res)  # No exception expected
             self.assertRaises(RuntimeError, lambda: torch.randperm(large_n, out=res, device=device))
