@@ -2634,7 +2634,7 @@ class TestTensorCreation(TestCase):
     def _test_signal_window_functions(self, name, dtype, device, **kwargs):
         import scipy.signal as signal
 
-        torch_method = getattr(torch, name + '_window')
+        torch_method = getattr(torch.signal.windows, name + '_window')
         if not dtype.is_floating_point:
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
@@ -2667,6 +2667,15 @@ class TestTensorCreation(TestCase):
     def test_kaiser_window(self, device, dtype):
         for num_test in range(50):
             self._test_signal_window_functions('kaiser', dtype, device, beta=random.random() * 30)
+
+    @onlyNativeDeviceTypes
+    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
+    @dtypes(torch.float, torch.double, torch.long)
+    def test_cosine_window(self, device, dtype):
+        for num_test in range(50):
+            self._test_signal_window_functions('cosine', dtype, device)
 
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function
