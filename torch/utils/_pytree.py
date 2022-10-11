@@ -124,7 +124,8 @@ class TreeSpec:
         children_specs_str: str = ''
         if len(self.children_specs):
             indent += len(repr_prefix)
-            children_specs_str += self.children_specs[0].__repr__(indent) + ','
+            children_specs_str += self.children_specs[0].__repr__(indent)
+            children_specs_str += ',' if len(self.children_specs) > 1 else ''
             children_specs_str += ','.join(['\n' + ' ' * indent + child.__repr__(indent) for child in self.children_specs[1:]])
         repr_suffix: str = f'{children_specs_str}])'
         return repr_prefix + repr_suffix
