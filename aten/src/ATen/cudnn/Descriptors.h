@@ -7,10 +7,16 @@
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Utils.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at { namespace native {
 
