@@ -66,8 +66,7 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    # This supports symlinks, so we can link domain library tests like functorch
-    # to PyTorch test directory
+    # This supports symlinks, so we can link domain library tests to PyTorch test directory
     all_py_files = [pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)]
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
