@@ -2669,40 +2669,6 @@ class TestTensorCreation(TestCase):
         for num_test in range(50):
             self._test_signal_window_functions('kaiser', dtype, device, beta=random.random() * 30)
 
-    @onlyNativeDeviceTypes
-    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
-    @dtypes(torch.float, torch.double, torch.long)
-    def test_cosine_window(self, device, dtype):
-        for num_test in range(50):
-            self._test_signal_window_functions('cosine', dtype, device)
-
-    @onlyNativeDeviceTypes
-    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
-    @dtypes(torch.float, torch.double, torch.long)
-    def test_exponential_window(self, device, dtype):
-        for num_test in range(50):
-            self._test_signal_window_functions(
-                'exponential',
-                dtype,
-                device,
-                center=None,
-                tau=round(random.uniform(0, 2), 2),
-            )
-
-    @onlyNativeDeviceTypes
-    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
-    @dtypes(torch.float, torch.double, torch.long)
-    def test_gaussian_window(self, device, dtype):
-        for num_test in range(50):
-            self._test_signal_window_functions('gaussian', dtype, device, std=random.random() * 30)
-
-
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
