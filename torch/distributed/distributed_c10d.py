@@ -348,15 +348,13 @@ class _WorldMeta(type):
     """
     # Points to the default PG once initialized.
     @property
-    def WORLD(cls):
+    def WORLD(cls) -> Optional[ProcessGroup]:
         return _world.default_pg
 
 class group(object, metaclass=_WorldMeta):
     pass
 
 class GroupMember(object, metaclass=_WorldMeta):
-    # Alias to group.WORLD for backward compatibility
-    WORLD = group.WORLD
     NON_GROUP_MEMBER = object()
 
 
