@@ -4,8 +4,12 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/core/TensorImpl.h>
+
+#include <numeric>
+#include <functional>
 
 namespace {
 inline void validate_nested_tensor_metadata(
@@ -21,6 +25,45 @@ inline void validate_nested_tensor_metadata(
   TORCH_INTERNAL_ASSERT(
       (size_dim == 0 && (int64_t)offsets.empty()) ||
       (size_dim == 2 && nested_sizes.size(0) == (int64_t)offsets.size()));
+}
+
+/**
+ * Generates a nested key_set from a non-nested tensor.
+ *
+ * When creating a nested tensor from a non-nested tensor
+ * We want to maintain the same keyset as the buffer but
+ * swap non nested keys for nested ones
+ *
+ * @return Appropriate key set for nested tensor
+ */
+inline c10::DispatchKeySet generate_nested_key_set_from_buffer(
+    const at::Tensor& buffer) {
+  auto nested_key_set = buffer.key_set();
+  const bool has_autograd = nested_key_set.has_any(c10::autograd_dispatch_keyset);
+  // Remove non_nested tensor specific keys
+  nested_key_set = nested_key_set -
+      c10::DispatchKeySet{c10::DispatchKey::Dense, c10::DispatchKey::Autograd};
+
+  // Add nested tensor specific keys
+  nested_key_set =
+      nested_key_set | c10::DispatchKeySet{c10::DispatchKey::NestedTensor};
+  nested_key_set =
+      has_autograd ? nested_key_set | c10::autograd_nested : nested_key_set;
+  return nested_key_set;
+}
+
+/**
+ * Generates a the correct view keyset.
+ *
+ * When creating a nested tensor view of base
+ * The appropriate keyset will be dependent on the nested
+ * status of the base
+ *
+ * @return Appropriate key set for nested tensor
+ */
+c10::DispatchKeySet get_view_key_set(const at::Tensor& base) {
+  return base.is_nested() ? base.key_set()
+                          : generate_nested_key_set_from_buffer(base);
 }
 
 } // namespace
@@ -85,14 +128,22 @@ inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
   return strides;
 }
 
-// assume contiguous, we can construct offsets from size
+/**
+   * Create a vector of offsets assuming the nested tensor is contiguous
+   *
+   * This function iterates over the implicit ntensor outer dimension
+   * populating a vector with the num_elements in each implicit tensor.
+   * The first element is always 0 and the length of the returned vector
+   * is n_tensor.
+   *
+   * @return A vector of offsets
+  */
 inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return std::vector<int64_t>();
   }
-  int64_t ntensors = sizes.size(0),
-      orig_dim = sizes.size(1);
+  int64_t ntensors = sizes.size(0), orig_dim = sizes.size(1);
   std::vector<int64_t> offsets(ntensors);
   // nesting scalars has easy offsets
   if (orig_dim == 0) {
@@ -101,28 +152,12 @@ inline std::vector<int64_t> construct_offsets(const at::Tensor& sizes) {
   }
   const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
   offsets[0] = 0;
-  for (int64_t i = 0; i < ntensors - 1; i++) {
-    int64_t row_product = sizes_ptr[0];
-    for (int64_t j = 1; j < orig_dim; j++) {
-      row_product *= sizes_ptr[j];
-    }
+  for (const auto i : c10::irange(ntensors - 1)) {
+    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies<int64_t>());
     offsets[i + 1] = offsets[i] + row_product;
     sizes_ptr += orig_dim;
   }
   return offsets;
-}
-
-// [Note: Nested Tensor Autograd] The Nested Tensor key is a functionality
-// key and therefore getAutogradRelatedKeySetFromBackend will return the
-// wrong autograd key. For this specific impl we make sure to register the
-// correct Autograd key which is AutogradNestedTensor
-c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
-  c10::DispatchKeySet key_set =
-      c10::DispatchKeySet(DispatchKey::NestedTensor) | c10::DispatchKeySet{buffer.key_set().highestBackendKey()};
-
-  // Add AutogradNestedTensor specific keys
-  key_set = key_set | inplace_or_view_ks | autograd_nested;
-  return key_set;
 }
 
 NestedTensorImpl::NestedTensorImpl(
@@ -135,7 +170,7 @@ NestedTensorImpl::NestedTensorImpl(
     : TensorImpl(std::move(storage), key_set, data_type),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
-      offsets_(std::move(offsets)),
+      storage_offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
@@ -145,9 +180,9 @@ NestedTensorImpl::NestedTensorImpl(
       storage_device.is_cpu() || storage_device.is_cuda(),
       "NestedTensorImpl storage must be either CUDA or CPU but got ",
       storage_device);
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_);
+  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, storage_offsets_);
   refresh_dim();
-  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
+  set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 NestedTensorImpl::NestedTensorImpl(
@@ -157,7 +192,7 @@ NestedTensorImpl::NestedTensorImpl(
     std::vector<int64_t>&& offsets)
     : NestedTensorImpl(
           buffer.storage(),
-          generate_nested_key_set(buffer),
+          generate_nested_key_set_from_buffer(buffer),
           buffer.dtype(),
           nested_size_tensor,
           nested_stride_tensor,
@@ -188,15 +223,14 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor,
     std::vector<int64_t>&& offsets)
-    : TensorImpl(impl_type, Storage(base_tensor.storage()), base_tensor.key_set(), base_tensor.dtype()),
+    : TensorImpl(impl_type, Storage(base_tensor.storage()), get_view_key_set(base_tensor), base_tensor.dtype()),
       nested_size_tensor_(std::move(nested_size_tensor)),
       nested_stride_tensor_(std::move(nested_stride_tensor)),
-      offsets_(std::move(offsets)),
+      storage_offsets_(std::move(offsets)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
-  TORCH_INTERNAL_ASSERT(base_tensor.is_nested());
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_);
+  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, storage_offsets_);
   refresh_dim();
-  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
+  set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 void NestedTensorImpl::refresh_dim() {
@@ -249,9 +283,6 @@ c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
 
-c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
-  return sym_sizes_custom();
-}
 c10::SymIntArrayRef NestedTensorImpl::sym_strides_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
@@ -271,7 +302,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    auto r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -286,7 +317,7 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
       data_type_,
       nested_size_tensor_,
       nested_stride_tensor_,
-      std::vector<int64_t>(offsets_));
+      std::vector<int64_t>(storage_offsets_));
 
       copy_tensor_metadata(
           /*src_impl=*/this,

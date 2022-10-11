@@ -597,7 +597,7 @@ mobile::Module _load_for_mobile(
   }
 
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_for_mobile(
+  return _load_for_mobile_impl(
       std::move(rai), device, extra_files, module_load_options);
 }
 
@@ -606,6 +606,7 @@ TORCH_API mobile::Module _load_for_mobile(
     c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
+  // TODO optimize file read for non-flatbuffer models
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_rai_content(rai.get());

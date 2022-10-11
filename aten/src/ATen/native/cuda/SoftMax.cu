@@ -963,7 +963,7 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10:
 
   TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
   int64_t mask_type = mask_type_.value();
-  TORCH_CHECK((mask_type == 0) || (mask_type == 1), "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask)");
+  TORCH_CHECK((mask_type == 0) || (mask_type == 1) || (mask_type == 2), "Mask Type should be 0 (src_mask), 1 (src_key_padding_mask), or 2 (default_mask)");
 
   // If input is [B, H, T, T] and mask is [B, T]
   // we have special fast kernel
@@ -975,6 +975,7 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10:
   // TODO We should have special fast kernel for TxT mask as well
   // mask_type == 0 => mask_ is a src_mask
   bool is_TxT_mask = (mask_type == 0) && input_.dim() == 4 && mask_.dim() == 2 && input_.size(3) == mask_.size(1) && input_.size(2) == mask_.size(0) && mask_.size(0) == mask_.size(1);
+  // If mask_type == 2, then mask_.sizes() must equal input_.sizes()
   TORCH_CHECK(mask_.sizes() == input_.sizes() || is_BxT_mask || is_TxT_mask, "Mask shape should match input. mask: ", mask_.sizes(), " input: ", input_.sizes());
 
   auto input = input_.dim() == 0 ? input_.view(1) : input_;
@@ -992,7 +993,9 @@ Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const c10:
   //     4) dim == input.dim() - 1
   // Otherwise, we fallback to vanilla softmax (where we do not support transformer_mask since converting the mask is expensive)
   if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous() || dim < input.dim()-1) {
-    TORCH_CHECK(mask.sizes() == input.sizes(), "Mask shape should match input shape; transformer_mask is not supported in the fallback case.");
+    if (is_BxT_mask) {
+      mask = mask.view({mask_.size(0), 1, 1, mask_.size(1)}).expand(input.sizes());
+    }
     AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -1061,7 +1064,7 @@ Tensor masked_softmax_backward_cuda(
   auto grad = grad_.contiguous();
   auto output = output_.contiguous();
   auto mask = mask_.contiguous();
-  int64_t dim = dim_.has_value() ? dim_.value() : output.dim() - 1;
+  int64_t dim = dim_.has_value() ? maybe_wrap_dim(dim_.value(), output.dim()) : output.dim() - 1;
 
   grad = grad.dim() == 0 ? grad.view(1) : grad;
   mask = mask.dim() == 0 ? mask.view(1) : mask;
