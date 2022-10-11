@@ -146,26 +146,16 @@ class MetaConverter:
         # constant size across training runs
         make_symbolic = shape_env is not None and not isinstance(t, torch.nn.Parameter)
 
-        def sym(name, x):
+        def sym(x):
             if make_symbolic:
-                return shape_env.create_symint(f"t{arg_cnt}.{name}()", x)
+                return shape_env[x]
             else:
                 return x
 
-        def sym_list(name, xs):
+        def sym_sizes_strides(t):
             if make_symbolic:
-                return [
-                    shape_env.create_symint(f"t{arg_cnt}.{name}({i})", x)
-                    for i, x in enumerate(xs)
-                ]
-            else:
-                return xs
-
-        def sym_size(t):
-            return sym_list("size", t.size())
-
-        def sym_stride(t):
-            return sym_list("stride", t.stride())
+                return shape_env.create_symbolic_sizes_strides(t)
+            return (t.size(), t.stride())
 
         # NB: Although sym_stride variables initially have no correlation
         # with size, we will immediately introduce guards based on contiguity.
@@ -174,7 +164,7 @@ class MetaConverter:
         # variables.
 
         def sym_storage_offset(t):
-            return sym("storage_offset", t.storage_offset())
+            return sym(t.storage_offset())
 
         # see expired-storages
         self.check_expired_count += 1
@@ -231,9 +221,8 @@ class MetaConverter:
                         base = base.view(t.dtype)
 
                     with torch.enable_grad():
-                        r = base.as_strided(
-                            sym_size(t), sym_stride(t), sym_storage_offset(t)
-                        )
+                        sizes, strides = sym_sizes_strides(t)
+                        r = base.as_strided(sizes, strides, sym_storage_offset(t))
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
@@ -257,8 +246,9 @@ class MetaConverter:
                     # meta storage
                     s = self.meta_storage(t.storage())
                     with no_dispatch():
+                        sizes, strides = sym_sizes_strides(t)
                         with torch.no_grad():
-                            r.set_(s, sym_storage_offset(t), sym_size(t), sym_stride(t))
+                            r.set_(s, sym_storage_offset(t), sizes, strides)
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())

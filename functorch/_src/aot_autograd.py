@@ -474,17 +474,20 @@ def create_aot_dispatcher_function(
         # coordinate flags
         config.use_fake_tensor = False
 
-    fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext()
+    if config.use_dynamic_shapes:
+        assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
+
+    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+    fake_mode = FakeTensorMode(shape_env = shape_env) if config.use_fake_tensor else nullcontext()
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
     with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:
                 def convert(x):
-                    return fake_mode.from_tensor(x, shape_env=shape_env)
+                    return fake_mode.from_tensor(x)
 
                 return pytree.tree_map_only(Tensor, convert, flat_args)
             else:
