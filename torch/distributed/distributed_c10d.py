@@ -32,7 +32,7 @@ from torch._C._distributed_c10d import (
     Work
 )
 from torch._six import string_classes
-
+from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
@@ -3321,15 +3321,17 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         group_rank = global_rank
 
     backend = Backend(backend)
-    pg = _new_process_group_helper(
-        group_world_size,
-        group_rank,
-        ranks,
-        backend,
-        default_store,
-        pg_options=pg_options,
-        timeout=timeout,
-    )
+
+    with record_function(f"## process_group:init with ranks: {ranks}"):
+        pg = _new_process_group_helper(
+            group_world_size,
+            group_rank,
+            ranks,
+            backend,
+            default_store,
+            pg_options=pg_options,
+            timeout=timeout,
+        )
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {
