@@ -394,6 +394,14 @@ class FakeTensorTest(TestCase):
             self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
             b = torch.rand([4, 4], device='cuda')
             self.checkType(b.new(device='cuda'), "cuda", [0])
+            self.checkType(a.new(torch.rand([1])), "cpu", [1])
+
+    def test_scalar_inputs(self):
+        with FakeTensorMode():
+            self.checkType(torch.div(3, 2), "cpu", [])
+            ten = torch.zeros(2, dtype=torch.int32) * 2.0
+            self.assertEqual(ten.dtype, torch.float)
+            self.checkType(ten, "cpu", [2])
 
 
 class FakeTensorConstHandling(TestCase):
@@ -455,6 +463,15 @@ class FakeTensorConstHandling(TestCase):
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]
                 ref = fn(inputs)
+
+    def test_fake_tensor_batch_norm_cpu(self):
+        with torch._subclasses.CrossRefFakeMode():
+            m = torch.nn.Sequential(
+                torch.nn.BatchNorm2d(10),
+                torch.nn.ReLU(),
+            )
+            m.eval()
+            out = m(torch.randn([2, 10, 8, 8]))
 
     def test_shared_storage_invalidation(self):
         with FakeTensorMode():
