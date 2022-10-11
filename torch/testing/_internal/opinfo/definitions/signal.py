@@ -185,6 +185,20 @@ def make_signal_windows_opinfo(
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
             *skips,
         ),
     )
