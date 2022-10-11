@@ -11,6 +11,7 @@
 #include <ATen/native/Math.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/SpectralOps.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
@@ -1391,56 +1392,91 @@ Tensor kaiser_window(
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cheb_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ chebyshev_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor cheb_window(int64_t window_length,
+Tensor chebyshev_window(int64_t window_length,
                      c10::optional<ScalarType> dtype,
                      c10::optional<Layout> layout,
                      c10::optional<Device> device,
                      c10::optional<bool> pin_memory) {
-  return native::kaiser_window(
+  return native::chebyshev_window(
       window_length,
       /*periodic=*/true,
-      /*beta=*/12.0,
       dtype,
       layout,
       device,
       pin_memory);
 }
 
-//Tensor cheb_window(int64_t window_length,
-//                   bool periodic,
-//                   double attenuation,
-//                   c10::optional<ScalarType> dtype_opt,
-//                   c10::optional<Layout> layout,
-//                   c10::optional<Device> device,
-//                   c10::optional<bool> pin_memory) {
-//
-//  ScalarType dtype = c10::dtype_or_default(dtype_opt);
-//  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-//
-//  window_function_checks("cheb_window", options, window_length);
-//
-//  // short-circuit for `meta`.
-//  if (device == kMeta) {
-//    return at::empty({window_length}, options);
-//  }
-//
-//  if (window_length == 0) {
-//    return at::empty({0}, options);
-//  }
-//  if (window_length == 1) {
-//    return at::ones({1}, options);
-//  }
-//  if (periodic) {
-//    window_length += 1;
-//  }
-//  auto initial = at::arange(window_length, options);
-//  auto window = at::empty(window_length, options);
-//  auto iter = TensorIterator::unary_op(window, initial);
-//  cheb_window_stub(iter.device_type(), iter, window_length, attenuation);
-//  return periodic ? window.narrow(0, 0, window_length - 1) : window;
-//}
+Tensor chebyshev_window(int64_t window_length,
+                        bool periodic,
+                        c10::optional<ScalarType> dtype,
+                        c10::optional<Layout> layout,
+                        c10::optional<Device> device,
+                        c10::optional<bool> pin_memory) {
+  return native::chebyshev_window(
+      window_length,
+      periodic,
+      /*attenuation=*/40,
+      dtype,
+      layout,
+      device,
+      pin_memory);
+}
+
+Tensor chebyshev_window(int64_t window_length,
+                   bool periodic,
+                   double attenuation,
+                   c10::optional<ScalarType> dtype_opt,
+                   c10::optional<Layout> layout,
+                   c10::optional<Device> device,
+                   c10::optional<bool> pin_memory) {
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
+  TensorOptions options = TensorOptions()
+                              .dtype(dtype)
+                              .layout(layout)
+                              .device(device)
+                              .pinned_memory(pin_memory);
+
+  window_function_checks("chebyshev_window", options, window_length);
+
+  // short-circuit for `meta`.
+  if (device == kMeta) {
+    return at::empty({window_length}, options);
+  }
+
+  if (window_length == 0) {
+    return at::empty({0}, options);
+  }
+  if (window_length == 1) {
+    return at::ones({1}, options);
+  }
+  if (periodic) {
+    window_length += 1;
+  }
+
+  auto initial = at::arange(window_length, options);
+  auto window = at::empty(window_length, options);
+  auto iter = TensorIterator::unary_op(window, initial);
+  chebyshev_window_stub(iter.device_type(), iter, window_length, attenuation);
+
+  if (window_length % 2 != 0) {
+    window = at::real(at::native::fft_ifft(window, window_length, 0, "backward"));
+    auto n = (window_length + 1) / 2;
+    window = window.narrow(0, 0, n);
+    window = at::cat({at::flip(window.narrow(0, 1, n-1), {0}), window});
+  } else {
+    auto j = c10::Scalar(c10::complex<double>(0, 1));
+    auto W = (at::arange(window_length, options).mul_(c10::pi<double> / window_length) * j).exp_().mul_(window);
+    window = at::real(at::native::fft_fft(W, window_length, 0, "backward"));
+    auto n = (window_length / 2) + 1;
+    window = at::cat({at::flip(window.narrow(0, 1, n-1), {0}), window.narrow(0, 1, n-1)});
+  }
+
+  window.div_(window.max());
+
+  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ cosine_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1682,6 +1718,8 @@ Tensor rand(
 
 
 DEFINE_DISPATCH(kaiser_window_stub);
+DEFINE_DISPATCH(chebyshev_window_stub);
+
 
 } // namespace native
 } // namespace at

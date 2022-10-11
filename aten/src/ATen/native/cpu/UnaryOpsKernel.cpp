@@ -457,7 +457,7 @@ static void nan_to_num_kernel(
   });
 }
 
-static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
+static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
     const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
     cpu_kernel(iter, [=](scalar_t a){
@@ -466,24 +466,16 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
   });
 }
 
-//static void cheb_window_kernel(TensorIteratorBase& iter, int64_t window_length, double attenuation){
-//  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "cheb_window_cpu", [&](){
-//    const int64_t n = window_length - 1;
-//    const scalar_t beta = static_cast<scalar_t>(std::cosh(1.0 / n * std::acosh(std::pow(10, attenuation / 20.0))));
-//    cpu_kernel(iter, [=](scalar_t a){
-//      auto x = beta * std::cos(c10::pi<double> * a / window_length);
-//      return chebyshev_polynomial_t_forward(x, n) / std::pow(10, att / 20.0);
-//    });
-//  });
-//}
-
-//static void cosine_window_kernel(TensorIteratorBase& iter, int64_t window_length) {
-//  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "cosine_window_cpu", [&](){
-//    cpu_kernel(iter, [=](scalar_t a){
-//      return std::sin(c10::pi<double> / window_length * (a + 0.5));
-//    });
-//  });
-//}
+static void chebyshev_window_kernel(TensorIteratorBase& iter, int64_t window_length, double attenuation) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "chebyshev_window_cpu", [&](){
+    const int64_t n = window_length - 1;
+    const scalar_t beta = static_cast<scalar_t>(std::cosh(1.0 / n * std::acosh(std::pow(10, attenuation / 20.0))));
+    cpu_kernel(iter, [=](scalar_t a){
+      auto x = beta * static_cast<scalar_t>(std::cos(c10::pi<double> * a / window_length));
+      return static_cast<scalar_t>(chebyshev_polynomial_t_forward(x, n) / std::pow(10, attenuation / 20.0));
+    });
+  });
+}
 
 void rsqrt_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "rsqrt_cpu", [&] {
@@ -754,6 +746,7 @@ REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);
+REGISTER_DISPATCH(chebyshev_window_stub, &CPU_CAPABILITY::chebyshev_window_kernel);
 REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
 REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);

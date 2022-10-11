@@ -1223,7 +1223,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   fft_fill_with_conjugate_symmetry_stub(
       input.device().type(), input.scalar_type(),
       mirror_dims, signal_half_sizes, in_strides, in_data, out_strides, out_data);
-}
+} // namespace
 
 DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 

@@ -2622,6 +2622,21 @@
     CompositeExplicitAutograd: kaiser_window
   autogen: kaiser_window.beta_out
 
+- func: chebyshev_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: chebyshev_window
+  autogen: chebyshev_window.out
+
+- func: chebyshev_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: chebyshev_window
+  autogen: chebyshev_window.periodic_out
+
+- func: chebyshev_window.periodic_attenuation(int window_length, bool periodic, float attenuation, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: chebyshev_window
+  autogen: chebyshev_window.periodic_attenuation_out
+
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
