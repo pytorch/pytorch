@@ -27,7 +27,6 @@ from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
-
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
     if shape == ():
@@ -575,8 +574,7 @@ class TestTensorCreation(TestCase):
         x = torch.randn((4, 3, 8, 8), device=device)
         y = torch.randn(x.shape, device=device)
         res1 = torch.cat((x, y))
-        res2 = torch.cat(
-            (x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
+        res2 = torch.cat((x.contiguous(memory_format=torch.channels_last), y.contiguous(memory_format=torch.channels_last)))
         self.assertEqual(res1, res2)
         self.assertTrue(res2.is_contiguous(memory_format=torch.channels_last))
         # discontiguous channels-last inputs
@@ -840,8 +838,7 @@ class TestTensorCreation(TestCase):
                         # Unless the number of dimensions is less than the corresponding at_least function dimension
                         # Since the original concatenating dimension would shift after applying at_least and would no
                         # longer be the concatenating dimension
-                        if (ndims < at_least_dim or tdim != dim) and torch_input[k].size()[tdim] != \
-                                torch_input[k + 1].size()[tdim]:
+                        if (ndims < at_least_dim or tdim != dim) and torch_input[k].size()[tdim] != torch_input[k + 1].size()[tdim]:
                             valid_dim = False
 
                 # Special case for hstack is needed since hstack works differently when ndims is 1
@@ -1367,6 +1364,7 @@ class TestTensorCreation(TestCase):
                 torch_grids = torch.meshgrid(*tensors, **torch_kwargs)
                 numpy_grids = np.meshgrid(*(tensor.cpu().numpy() for tensor in tensors), **numpy_kwargs)
                 self.assertEqual(torch_grids, numpy_grids)
+
 
     def test_cartesian_prod(self, device):
         a = torch.tensor([1], device=device)
@@ -3459,7 +3457,6 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, device='cpu', generator=cuda_gen, out=cpu_t))
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
 
-
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
     exact_dtype = True
@@ -3516,7 +3513,6 @@ class TestLikeTensorCreation(TestCase):
         self.assertEqual(torch.full_like(like, 1.).dtype, torch.long)
         self.assertEqual(torch.full_like(like, 1., dtype=torch.complex64).dtype,
                          torch.complex64)
-
 
 # Tests for the `frombuffer` function (only work on CPU):
 #   Constructs tensors from Python objects that implement the buffer protocol,
@@ -3684,7 +3680,6 @@ class TestBufferProtocol(TestCase):
         self.assertEqual(tensor.numel(), 2)
         # Assuming little endian machine
         self.assertSequenceEqual(tensor, [255, 255])
-
 
 # Tests for the `asarray` function:
 #   Constructs tensors from a Python object that has one of the following
