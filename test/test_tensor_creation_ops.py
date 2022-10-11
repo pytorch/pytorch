@@ -2579,7 +2579,7 @@ class TestTensorCreation(TestCase):
         start = -0.0316082797944545745849609375
         end = .0315315723419189453125
 
-        for steps in [1, 2, 3, 5, 11, 256, 257, 2 ** 22]:
+        for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             t = torch.logspace(start, end, steps, device=device, dtype=dtype)
             a = np.logspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
@@ -2652,10 +2652,6 @@ class TestTensorCreation(TestCase):
             return
         for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
-                print(*(kwargs.values()))
-                print(size)
-                print(periodic)
-
                 res = torch_method(size, periodic=periodic, **kwargs, device=device, dtype=dtype)
                 # NB: scipy always returns a float64 result
                 ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
@@ -2716,26 +2712,6 @@ class TestTensorCreation(TestCase):
         for num_test in range(50):
             self._test_signal_window_functions('gaussian', dtype, device, std=random.random() * 30)
 
-    # @onlyNativeDeviceTypes
-    # @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
-    # @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    # @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
-    # @dtypes(torch.float, torch.double)
-    # def test_dummy(self, device, dtype):
-    #     from scipy import signal
-    #
-    #     NP2TORCH = {
-    #         torch.float64: np.float64,
-    #         torch.float32: np.float32
-    #     }
-    #
-    #     at = 41
-    #     window_length = 100
-    #     w1 = signal.get_window(('chebwin', at), window_length, fftbins=False).astype(NP2TORCH[dtype])
-    #     # w1 = signal.windows.chebwin(100, 100, sym=True).astype(NP2TORCH[dtype])
-    #     w2 = torch.signal.windows.chebyshev_window(window_length, at=at, periodic=False, dtype=dtype, device=device)
-    #
-    #     self.assertEqual(w1, w2, exact_dtype=True)
 
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function
