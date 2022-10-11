@@ -2849,6 +2849,7 @@ def native_batch_norm(
     return (out, save_mean, save_rstd)
 
 
+@register_decomposition(torch.ops.aten.native_group_norm.default, disable_meta=True)
 def native_group_norm(
     input: Tensor,
     weight: Optional[Tensor],
