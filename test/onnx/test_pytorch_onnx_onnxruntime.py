@@ -12503,7 +12503,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 _: List[float] = x.tolist()
                 return x_firsts
 
-        m = PrintTensorOnMyModel().eval()
+        m = PrintTensorOnMyModel()
         x = torch.randn(10, 5, dtype=input_dtype)
         if input_dtype == torch.cfloat:
             with self.assertRaises(RuntimeError):
