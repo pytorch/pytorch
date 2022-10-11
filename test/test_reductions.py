@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import contextlib
 import torch
 import numpy as np
 
@@ -17,7 +18,7 @@ from torch.testing._internal.common_dtype import (
     integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
+    TEST_WITH_ROCM, TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -2799,9 +2800,14 @@ class TestReductions(TestCase):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
                         bins=4, max=3),
             torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
-        # tensor with nan -- should throw a RuntimeError
+        # tensor with nan; min, max not provided -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
+        # tensor with nan; min, max provided -- nan is ignored
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("nan")], dtype=torch.float, device=device),
+                        bins=4, max=3),
+            torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
         # tensors with min > max -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
@@ -3377,6 +3383,23 @@ as the input tensor excluding its innermost dimension'):
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
+    @onlyCUDA
+    @largeTensorTest("8GB")
+    @dtypes(torch.half, torch.chalf, torch.bfloat16)
+    def test_reductions_large_half_tensors(self, device, dtype):
+        t = torch.ones(2**31, device=device, dtype=dtype)
+        t[2**30:] = -1
+        expected = torch.tensor(0, device=device, dtype=dtype)
+        self.assertEqual(torch.sum(t), expected)
+
+        is_rocm_or_win_and_chalf = (TEST_WITH_ROCM or IS_WINDOWS) and dtype is torch.chalf
+        # On Rocm/Windows:
+        # RuntimeError: "mean_cuda" not implemented for 'ComplexHalf'
+        err_msg = "not implemented for 'ComplexHalf'"
+        ctx = self.assertRaisesRegex(
+            RuntimeError, err_msg) if is_rocm_or_win_and_chalf else contextlib.nullcontext()
+        with ctx:
+            self.assertEqual(torch.mean(t), expected)
 
 instantiate_device_type_tests(TestReductions, globals())
 

@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
+    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm, skipIfTorchDynamo
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -34,7 +34,7 @@ def drosenbrock(tensor):
     x, y = tensor
     return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
-
+@skipIfTorchDynamo()
 class TestOptim(TestCase):
     exact_dtype = True
 
@@ -1127,6 +1127,27 @@ class TestOptim(TestCase):
                 [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)],
             )
 
+    def test_empty_grad(self):
+        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam, torch.optim.AdamW,
+                      torch.optim.Adamax, torch.optim.ASGD, torch.optim.NAdam, torch.optim.RAdam,
+                      torch.optim.RMSprop, torch.optim.Rprop, torch.optim.SGD, torch.optim.SparseAdam]
+
+        for optimizer in optimizers:
+            net = torch.nn.Embedding(5, 1, padding_idx=0, sparse=optimizer is torch.optim.SparseAdam)
+            original_params = (param.detach().clone() for param in net.parameters())
+            # Simulate a batch that only indexes the embedding at padding_idx
+            x = torch.tensor([[0, 0]]).int()
+            y = torch.tensor([[[3.0], [4.0]]])
+            opt = optimizer(net.parameters(), lr=1e-5)
+            torch.nn.MSELoss()(net.forward(x), y).backward()
+
+            opt.step()
+
+            for original_param, param in zip(original_params, net.parameters()):
+                # assert that the parameters have not changed
+                self.assertEqual(original_param, param)
+
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
@@ -1216,6 +1237,28 @@ class TestLRScheduler(TestCase):
         del optim
         self.assertEqual(
             gc.collect(), 0, msg="Optimizer should be garbage-collected on __del__")
+
+    def test_no_cyclic_references_in_step(self):
+        import gc
+        import weakref
+
+        def run():
+            param = torch.empty(10, requires_grad=True)
+            optim = SGD(params=[param], lr=0.5)
+            scheduler = LambdaLR(optim, lambda epoch: 1.0)
+            param.sum().backward()
+            optim.step()
+            scheduler.step()
+
+            return weakref.ref(scheduler)
+
+        # To ensure that there are no reference cycles in scheduler,
+        # we need to turn off the garbage collector. Since gc will
+        # automatically collect unreachable objects.
+        gc.disable()
+        ref = run()
+        assert ref() is None
+        gc.enable()  # restore
 
     def test_old_pattern_warning(self):
         epochs = 35
