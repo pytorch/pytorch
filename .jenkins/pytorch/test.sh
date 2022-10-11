@@ -660,7 +660,6 @@ test_vec256() {
 test_dynamo() {
   pushd ../torchdynamo
   pytest test/dynamo
-  pytest test/inductor
   popd
 }
 
