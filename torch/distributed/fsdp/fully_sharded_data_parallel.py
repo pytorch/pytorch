@@ -1017,9 +1017,15 @@ class FullyShardedDataParallel(nn.Module):
         super().__init__()
 
         self._ignored_modules = self._get_ignored_modules(module, ignored_modules)
+        print(f"ignored modules {self._ignored_modules}")
         ignored_params, self._ignored_param_names = self._get_ignored_params(
             module, self._ignored_modules
         )
+        print(f"ignored param names {self._ignored_param_names}")
+        ignored_buffers, self._ignored_buffer_names = self._get_ignored_params(
+            module, self._ignored_modules, actually_get_buffers=True
+        )
+        print(f"ignored buffer names {self._ignored_buffer_names}")
         self._buffer_names = self._get_buffer_names(module)
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
@@ -1205,18 +1211,43 @@ class FullyShardedDataParallel(nn.Module):
         self,
         root_module: torch.nn.Module,
         ignored_modules: Set[torch.nn.Module],
+        actually_get_buffers: bool = False,
     ) -> Tuple[Set[torch.nn.Parameter], Set[str]]:
         """
         Returns the parameters of the modules in ``ignored_modules``,
         excluding any :class:`FlatParameter` s, and their fully prefixed names,
         both as :class:`set` s.
         """
+        def _get_module_name(module, root_module):
+            for name, m in root_module.named_modules():
+                if m == module:
+                    return name
+            raise ValueError("not fond")
+
+        if actually_get_buffers:
+            ignored_buffers = set()
+            ignored_buffer_names = set()
+            for ignored_module in ignored_modules:
+                ignored_module_name = _get_module_name(ignored_module, root_module)
+                ignored_buffers.update(set(p for p in ignored_module.buffers()))
+                ignored_buffer_names.update(set(f"{ignored_module_name}.{n}" for n, _ in ignored_module.named_buffers()))
+            return ignored_buffers, ignored_buffer_names
+                # ignored_buffers = set(p for p in ignored_module.buffers())
+            # ignored_buffers = set(
+            #     p for m in ignored_modules for p in m.buffers()
+            # )
+            # ignored_buffer_names = set(
+            #     n for m in ignored_modules for n, _ in m.named_buffers()
+            # )
+            # print(f"got {len(ignored_buffers)}")
+            # return ignored_buffers, ignored_buffer_names
         ignored_params = set(
             p
             for m in ignored_modules
             for p in m.parameters()
             if not _is_fsdp_flattened(p)
         )
+        print(f"got {len(ignored_params)} ignored parameters")
         # Conservatively include all shared parameters' names
         param_to_unflat_param_names = _get_param_to_unflat_param_names(
             root_module,
@@ -2200,6 +2231,7 @@ class FullyShardedDataParallel(nn.Module):
         # participate in the all-gather but does not actually save the state
         # dict (e.g. when `rank0_only=True` and `self.rank != 0`)
         if hasattr(self._fsdp_wrapped_module, "flat_param"):
+            print("Returning early")
             return state_dict
 
         offload_to_cpu = self._state_dict_config.offload_to_cpu
@@ -2207,6 +2239,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # Loop only the parameters saved in self._fsdp_wrapped_module to avoid
         # processing buffers.
+        print(f"blah {self._ignored_param_names}")
         for fqn, param_name, module_name in self._param_fqns:
             fqn = f"{prefix}{fqn}"
             clean_key = fqn
@@ -2237,6 +2270,8 @@ class FullyShardedDataParallel(nn.Module):
                         "parameter is managed by FSDP. Please check clone "
                         f"implementation of {fqn}. Error: {str(e)}"
                     )
+            else:
+                print(f"{clean_key} {self._ignored_param_names}")
 
         # Offload the buffer to CPU if needed -- we do not do this in
         # `_summon_full_params()` since without care, that would free
@@ -2255,6 +2290,16 @@ class FullyShardedDataParallel(nn.Module):
                     continue
                 if state_dict[fqn].device != cpu_device:
                     state_dict[fqn] = state_dict[fqn].to(cpu_device)
+        # remove ignored parameters
+        for pname in self._ignored_param_names:
+            if pname in state_dict.keys():
+                state_dict.pop(pname)
+                # state_dict[pname].pop()
+        # remove ignored buffers
+        for pname in self._ignored_buffer_names:
+            if pname in state_dict.keys():
+                state_dict.pop(pname)
+                # state_dict[pname].pop()
         return state_dict
 
     def _local_post_state_dict_hook(
@@ -4352,6 +4397,10 @@ def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Ten
     local_norm.to(dtype=parameters[0].dtype)
     return local_norm
 
+def _get_buffer_to_unflat_buffer_names(
+    model
+):
+    pass # TODO: implement this like below
 
 def _get_param_to_unflat_param_names(
     model: torch.nn.Module,
