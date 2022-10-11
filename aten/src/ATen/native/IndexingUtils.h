@@ -54,7 +54,7 @@ static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices, bool all
       auto scalarType = tensor->scalar_type();
       if (allow_int) {
         if (scalarType != kLong && scalarType != kByte && scalarType != kBool && scalarType != kInt) {
-            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
+            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, int, byte or bool tensors");
         }
       } else {
         if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
