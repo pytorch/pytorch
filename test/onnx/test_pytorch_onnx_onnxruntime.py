@@ -12495,8 +12495,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_print_tensor_within_torch_nn_module(self, input_dtype: torch.dtype):
         class PrintTensorOnMyModel(torch.nn.Module):
             def forward(self, x):
+                # 'print' has side effect calling 'resolve_conj' and 'resolve_neg'.
                 x_firsts = x[:, 0]
                 print(f"x_firsts: {x_firsts}")
+                # 'tolist' has side effect calling 'resolve_conj' and 'resolve_neg'.
+                # Annotation added to pass torch script.
+                _: List[float] = x.tolist()
                 return x_firsts
 
         m = PrintTensorOnMyModel().eval()

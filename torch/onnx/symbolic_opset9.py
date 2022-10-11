@@ -6669,16 +6669,15 @@ def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
 @_onnx_symbolic("aten::resolve_neg")
 @_beartype.beartype
 def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
-    # ONNX does not have operators to manipulate real/imaginary components directly
-    # However, some torch operations use complex operations even when input is real,
+    # ONNX does not have operators to *directly* manipulate real/imaginary components
+    # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
     # which results in failures due to missing operators for complex numbers
-    # e.g. `print(torch.randn(10, 5))` or `print(torch.randn(10, 5, dtype=torch.cfloat)`
-    #      calls aten::resolve_conj, aten::_conj and aten::resolve_neg although input is float
 
-    # This symbolic is a no-op for real numbers, but raises an exception when input is complex
+    # While `aten::_conj` and `aten::conj_phisical` raise exception when input is complex
     if symbolic_helper.is_complex_value(input):
         return symbolic_helper._onnx_unsupported(
             "aten::_conj, aten::conj_physical, aten::resolve_conj, aten::resolve_neg",
             input,
         )
+    # `aten::resolve_conj` and `aten:: resolve_neg` can safely be implemented as no-op
     return input
