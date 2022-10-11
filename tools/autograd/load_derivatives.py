@@ -894,7 +894,7 @@ def saved_variables(
     # find which arguments need to be saved
     saved: List[SavedAttribute] = []
 
-    if ".sizes()" in formula:
+    if ".sizes()" in formula or "->sizes()" in formula:
         raise RuntimeError(
             ".sizes() is not supported in derivative formulas. Instead, please use the SymInt version,"
             + f".sym_sizes(), which returned a c10::SymIntArrayRef. formula={formula}"
@@ -904,7 +904,7 @@ def saved_variables(
             ".size(int) is not supported in derivative formulas. Instead, please use the SymInt version,"
             + f".sym_size(int), which returned a c10::SymIntArrayRef. formula={formula}"
         )
-    if ".strides()" in formula:
+    if ".strides()" in formula or "->strides()" in formula:
         raise RuntimeError(
             ".strides() is not supported in derivative formulas. Instead, please use the SymInt version,"
             + f".sym_strides(), which returned a c10::SymIntArrayRef. formula={formula}"
