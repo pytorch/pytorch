@@ -229,7 +229,7 @@ jobs:
   check_labels:
     runs-on: linux.20_04.16x
     steps:
-      - name: Check out PyTorch
+      - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
@@ -242,7 +242,6 @@ jobs:
           architecture: x64
           cache: 'pip'
           cache-dependency-path: |
-            **/requirements.txt
             **/.github/requirements-gha-cache.txt
 
       - name: Check labels

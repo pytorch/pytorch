@@ -1,6 +1,5 @@
 # Python dependencies required for development
 astunparse
-boto3
 expecttest
 future
 hypothesis
