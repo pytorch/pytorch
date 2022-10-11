@@ -1,7 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/miopen_convolution_add_relu_native.h>
+#include <ATen/ops/miopen_convolution_native.h>
+#include <ATen/ops/miopen_convolution_relu_native.h>
+#include <ATen/ops/miopen_convolution_transpose_native.h>
+#include <ATen/ops/miopen_depthwise_convolution_native.h>
+#include <ATen/ops/squeeze.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
@@ -1570,7 +1587,7 @@ Tensor miopen_convolution_add_relu(
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias.has_value()
           ? bias.value()
-          : at::native::zeros(
+          : at::zeros(
                 {contig_output.size(1)},
                 optTypeMetaToScalarType(contig_output.options().dtype_opt()),
                 contig_output.options().layout_opt(),
@@ -1614,7 +1631,7 @@ Tensor miopen_convolution_relu(
 
     auto _bias = bias.has_value()
             ? bias.value()
-            : at::native::zeros(
+            : at::zeros(
                   {output_t.size(1)},
                   optTypeMetaToScalarType(output_t.options().dtype_opt()),
                   output_t.options().layout_opt(),
@@ -1661,7 +1678,7 @@ Tensor miopen_convolution_relu(
 
     auto _bias = bias.has_value()
             ? bias.value()
-            : at::native::zeros(
+            : at::zeros(
                   {contig_output.size(1)},
                   optTypeMetaToScalarType(contig_output.options().dtype_opt()),
                   contig_output.options().layout_opt(),
