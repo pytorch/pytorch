@@ -18,7 +18,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
+    (IS_FBCODE, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -1776,16 +1776,19 @@ class TestImports(TestCase):
                            "torch.backends._coreml",  # depends on pycoreml
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
-                           "torch.ao.sparsity._experimental.",  # depends on pytorch_lightning, not user-facing
+                           "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.cuda._dynamo_graphs",  # depends on torchdynamo
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
             ignored_modules.append("torch.utils.benchmark")
-        if IS_WINDOWS:
-            # Distributed does not work on Windows
+        if IS_WINDOWS or IS_MACOS:
+            # Distributed does not work on Windows or by default on Mac
             ignored_modules.append("torch.distributed.")
             ignored_modules.append("torch.testing._internal.dist_utils")
+            # And these both end up with transitive dependencies on distributed
+            ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
+            ignored_modules.append("torch.testing._internal.common_fsdp")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):

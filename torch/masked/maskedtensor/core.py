@@ -31,7 +31,7 @@ def is_masked_tensor(a):
     return isinstance(a, MaskedTensor)
 
 
-def _tensors_match(a, b, exact=True):
+def _tensors_match(a, b, exact=True, rtol=1e-05, atol=1e-08):
     if is_masked_tensor(a) or is_masked_tensor(b):
         raise ValueError("Neither `a` nor `b` can be a MaskedTensor.")
     if a.layout != b.layout:
@@ -51,7 +51,7 @@ def _tensors_match(a, b, exact=True):
         )
     if exact:
         return (a.dim() == b.dim()) and torch.eq(a, b).all().item()
-    return (a.dim() == b.dim()) and torch.allclose(a, b)
+    return (a.dim() == b.dim()) and torch.allclose(a, b, rtol=rtol, atol=atol)
 
 
 def _masks_match(a, b):
