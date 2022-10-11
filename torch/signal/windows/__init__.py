@@ -36,6 +36,10 @@ Args:
     periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
         If `False`, returns a symmetric window suitable for use in filter design. Default: `True`.
 
+.. note::
+    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
+    and `periodic` is `False`.
+
 Keyword args:
     {dtype}
     {layout}
@@ -52,10 +56,6 @@ Examples:
     >>> torch.signal.windows.cosine(10,periodic=False)
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540,
     0.1564])
-
-.. note::
-    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
-    and `periodic` is `False`.
 """.format(
         **factory_common_args
     )
@@ -88,6 +88,10 @@ Args:
     """ +
     r"""
 
+.. note::
+    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
+    and `periodic` is `False`.
+
 Keyword args:
     {dtype}
     {layout}
@@ -104,10 +108,6 @@ Examples:
     >>> torch.signal.windows.exponential(10,periodic=False,tau=.5)
     tensor([1.2341e-04, 9.1188e-04, 6.7379e-03, 4.9787e-02, 3.6788e-01, 3.6788e-01,
     4.9787e-02, 6.7379e-03, 9.1188e-04, 1.2341e-04])
-
-.. note::
-    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
-    and `periodic` is `False`.
     """.format(
         **factory_common_args
     )
@@ -133,6 +133,10 @@ Args:
     std (float, optional): the standard deviation of the gaussian. It controls how narrow or wide the window is.
         Default: 0.5.
 
+.. note::
+    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
+    and `periodic` is `False`.
+
 Keyword args:
     {dtype}
     {layout}
@@ -149,10 +153,6 @@ Examples:
     >>> torch.signal.windows.gaussian(10,periodic=False,std=0.9)
     tensor([3.7267e-06, 5.1998e-04, 2.1110e-02, 2.4935e-01, 8.5700e-01, 8.5700e-01,
     2.4935e-01, 2.1110e-02, 5.1998e-04, 3.7267e-06])
-
-.. note::
-    The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
-    and `periodic` is `False`.
 """.format(
         **factory_common_args
     )

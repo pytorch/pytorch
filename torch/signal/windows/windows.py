@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 from torch import Tensor
+from torch._torch_docs import factory_common_args
 from torch.types import _dtype, _device, _layout
 
 __all__ = [
@@ -11,8 +12,6 @@ __all__ = [
     'exponential',
     'gaussian',
 ]
-
-_eps = 1e-10  # Used to fix floating point errors
 
 
 def _window_function_checks(function_name: str, window_length: int, dtype: _dtype, layout: _layout) -> None:
@@ -38,20 +37,6 @@ def _window_function_checks(function_name: str, window_length: int, dtype: _dtyp
         raise RuntimeError(f'{function_name} is not implemented for sparse types, got: {layout}')
     if not is_floating_type(dtype) and not is_complex_type(dtype):
         raise RuntimeError(f'{function_name} expects floating point dtypes, got: {dtype}')
-
-
-def _window_length_check(desired_length, output_length):
-    r"""Performs window length check.
-     This function should be called after computing windows with `torch.arange`
-     if the step is floating point.
-
-     Args:
-         desired_length (int): desired length of the window.
-         output_length (int): output length of the window.
-     """
-    if desired_length != output_length:
-        warnings.warn(('The difference in length is subject to floating points rounding errors.'
-                       f'Expected length: {output_length}. Output length: {desired_length}'))
 
 
 def exponential(window_length: int,
@@ -86,17 +71,15 @@ def exponential(window_length: int,
 
     """
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
-    to avoid inconsistency, we advise adding a small epsilon to end in such cases.
+    thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
-    k = torch.arange(center * constant,
-                     (center + (window_length - 1)) * constant + _eps,
-                     constant,
+    k = torch.arange(start=center * constant,
+                     end=(center + (window_length - 1)) * constant + constant / 2,
+                     step=constant,
                      dtype=dtype,
                      layout=layout,
                      device=device,
                      requires_grad=requires_grad)
-
-    _window_length_check(window_length, k.size()[0])
 
     return torch.exp(-torch.abs(k))
 
@@ -123,17 +106,15 @@ def cosine(window_length: int,
 
     """
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
-    to avoid inconsistency, we advise adding a small epsilon to end in such cases.
+    thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
-    k = torch.arange(start * constant,
-                     (start + (window_length - 1)) * constant + _eps,
+    k = torch.arange(start=start * constant,
+                     end=(start + (window_length - 1)) * constant + constant / 2,
                      step=constant,
                      dtype=dtype,
                      layout=layout,
                      device=device,
                      requires_grad=requires_grad)
-
-    _window_length_check(window_length, k.size()[0])
 
     return torch.sin(k)
 
@@ -162,16 +143,14 @@ def gaussian(window_length: int,
 
     """
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
-    to avoid inconsistency, we advise adding a small epsilon to end in such cases.
+    thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
-    k = torch.arange(start * constant,
-                     (start + (window_length - 1)) * constant + _eps,
+    k = torch.arange(start=start * constant,
+                     end=(start + (window_length - 1)) * constant + constant / 2,
                      step=constant,
                      dtype=dtype,
                      layout=layout,
                      device=device,
                      requires_grad=requires_grad)
-
-    _window_length_check(window_length, k.size()[0])
 
     return torch.exp(-k ** 2)
