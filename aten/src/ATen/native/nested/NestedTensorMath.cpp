@@ -87,7 +87,9 @@ std::vector<at::Tensor> NestedTensor_unbind(
 }
 
 Tensor& NestedTensor_relu_(Tensor& self) {
-  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
   at::relu_(buffer);
   return self;
 }
@@ -97,7 +99,9 @@ Tensor NestedTensor_relu(const Tensor& self) {
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
-  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
   at::gelu_(buffer, approximate);
   return self;
 }
@@ -712,11 +716,11 @@ Tensor clone_nested(
   else if (memory_format == c10::MemoryFormat::Contiguous) {
     const Tensor& self_buffer = self_ptr->get_unsafe_storage_as_tensor(),
         sizemat = self_ptr->get_nested_size_tensor();
-    Tensor output_buffer = at::empty_like(self_buffer);
+    Tensor output_buffer = at::empty(self.numel(), self_buffer.options());
     Tensor output = wrap_buffer(output_buffer, sizemat);
     std::vector<Tensor> self_unbind = self.unbind(),
         output_unbind = output.unbind();
-    for (int64_t i = 0; i < self_ptr->size(0); i++) {
+    for (const int64_t i: c10::irange(self_ptr->size(0))) {
       output_unbind[i].copy_(self_unbind[i]);
     }
     return output;
