@@ -692,7 +692,24 @@ class OpDTypes(Enum):
     unsupported_backward = 3  # Test only unsupported backward dtypes
     any_one = 4  # Test precisely one supported dtype
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
+    any_common_cpu_cuda_one = 6  # Test precisely one supported dtype that is common to both cuda and cpu
 
+
+# Arbitrary order
+ANY_DTYPE_ORDER = (
+    torch.float32,
+    torch.float64,
+    torch.complex64,
+    torch.complex128,
+    torch.float16,
+    torch.bfloat16,
+    torch.long,
+    torch.int32,
+    torch.int16,
+    torch.int8,
+    torch.uint8,
+    torch.bool
+)
 
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
@@ -760,33 +777,25 @@ class ops(_TestParametrizer):
             elif self.opinfo_dtypes == OpDTypes.supported:
                 dtypes = op.supported_dtypes(device_cls.device_type)
             elif self.opinfo_dtypes == OpDTypes.any_one:
-                # Arbitrary order
-                dtype_order = (
-                    torch.float32,
-                    torch.float64,
-                    torch.complex64,
-                    torch.complex128,
-                    torch.float16,
-                    torch.bfloat16,
-                    torch.long,
-                    torch.int32,
-                    torch.int16,
-                    torch.int8,
-                    torch.uint8,
-                    torch.bool
-                )
-
                 # Tries to pick a dtype that supports both forward or backward
                 supported = op.supported_dtypes(device_cls.device_type)
                 supported_backward = op.supported_backward_dtypes(device_cls.device_type)
                 supported_both = supported.intersection(supported_backward)
                 dtype_set = supported_both if len(supported_both) > 0 else supported
-                for dtype in dtype_order:
+                for dtype in ANY_DTYPE_ORDER:
                     if dtype in dtype_set:
                         dtypes = {dtype}
                         break
                 else:
                     dtypes = {}
+            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_cuda_one:
+                # Tries to pick a dtype that supports both CPU and CUDA
+                supported = op.dtypes.intersection(op.dtypesIfCUDA)
+                if supported:
+                    dtypes = {next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)}
+                else:
+                    dtypes = {}
+
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:

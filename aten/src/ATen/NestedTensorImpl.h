@@ -12,6 +12,8 @@
 
 namespace at {
 namespace native {
+struct NestedTensorImpl;
+inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
@@ -49,8 +51,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   const Tensor& get_nested_stride_tensor() const {
     return nested_stride_tensor_;
   }
-  const std::vector<int64_t>& get_offsets() const {
-    return offsets_;
+  const std::vector<int64_t>& get_storage_offsets() const {
+    return storage_offsets_;
   }
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
@@ -81,6 +83,20 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
    * @return A newly constructed view tensor
    */
   at::Tensor get_buffer() const {
+    TORCH_CHECK(
+        nested_tensor_impl_is_contiguous(this),
+        "NestedTensor must be contiguous to get buffer.");
+    return get_unsafe_storage_as_tensor();
+  }
+  /**
+   * If possible use get_buffer() instead. This function returns the storage
+   * as a tensor directly, which is not safe to use in general. If using this
+   * function, The caller must ensure to account for nested_sizes,
+   * nested_strides and storage_offsets.
+   *
+   * @return A newly constructed view tensor
+   */
+  at::Tensor get_unsafe_storage_as_tensor() const {
     auto buffer_key_set_ = generate_buffer_key_set();
     const auto buffer_size = get_buffer_size();
     auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
@@ -149,7 +165,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Some strong enough constraints are:
   // 1. every underlying tensor is contiguous in memory
   //    && nesting in ascending order
-  std::vector<int64_t> offsets_;
+  std::vector<int64_t> storage_offsets_;
   // NOTE: -1 here means the size is missing
   // TODO: maybe we can remove this metadata since
   //       we can compute it from `nested_size_tensor_`
@@ -210,7 +226,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   }
   const Tensor &sizemat = nt->get_nested_size_tensor(),
                &stridemat = nt->get_nested_stride_tensor();
-  const auto& offsets = nt->get_offsets();
+  const auto& offsets = nt->get_storage_offsets();
   int64_t orig_dim = sizemat.size(1);
   // nesting scalars
   if (orig_dim == 0) {
