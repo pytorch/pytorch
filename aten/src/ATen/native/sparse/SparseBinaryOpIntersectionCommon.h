@@ -93,9 +93,56 @@ struct KernelLauncher {
   }
 };
 
+TensorIterator make_value_selection_intersection_iter(
+    const Tensor& lhs_values,
+    const Tensor& lhs_select_idx,
+    const Tensor& rhs_values,
+    const Tensor& rhs_select_idx) {
+  const auto res_values_sizes = [&]() -> std::vector<int64_t> {
+    auto sizes = infer_size(
+        // keep nnz dim
+        lhs_values.sizes(),
+        // remove nnz dim for smooth broadcasting
+        rhs_values.sizes().slice(1));
+    // update nnz dim to be the lenght of an index
+    sizes[0] = lhs_select_idx.numel();
+    return sizes;
+  }();
+  auto res_values = at::empty(res_values_sizes, lhs_values.options());
+
+  const auto restride_idx = [&res_values](const Tensor& idx) -> Tensor {
+    auto idx_sizes = std::vector<int64_t>(res_values.dim(), 1);
+    auto idx_strides = std::vector<int64_t>(res_values.dim(), 0);
+    idx_sizes[0] = idx.numel();
+    idx_strides[0] = 1;
+    return idx.as_strided(idx_sizes, idx_strides);
+  };
+
+  const auto restride_values = [&lhs_select_idx](const Tensor& values) -> Tensor {
+    auto values_sizes = at::DimVector(values.sizes());
+    auto values_strides = at::DimVector(values.strides());
+    values_sizes[0] = lhs_select_idx.numel();
+    values_strides[0] = 0;
+    return values.as_strided(values_sizes, values_strides);
+  };
+
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_owned_output(res_values)
+    .add_owned_input(restride_values(lhs_values))
+    .add_owned_input(restride_idx(lhs_select_idx))
+    .add_owned_input(restride_values(rhs_values))
+    .add_owned_input(restride_idx(rhs_select_idx))
+    .build();
+
+  return iter;
+}
+
 template <
   template <typename func_t> class kernel_t,
-  typename binary_op_t,
+  typename value_selection_intersection_kernel_t,
   typename index_t = int64_t,
   typename hash_t = int64_t,
   typename offset_t = int64_t>
@@ -446,18 +493,24 @@ void _sparse_binary_op_intersection_kernel_impl(
   }();
 
   const auto res_indices = selected_source_sparse_indices;
-  // TODO: fuse 3 next kernel calls into 1.
-  const auto selected_source_values = source._values().index_select(0, selected_source);
-  const auto selected_probably_coalesced_values = probably_coalesced._values().index_select(0, selected_probably_coalesced);
-  const auto res_values = binary_op_t::apply(selected_source_values, selected_probably_coalesced_values)
-    // no-op for out-of-place calls, but we still need to cast when the op is supposed to be performed in-place
-    // but binary_op_t promotes types. For example, let the op == mul, x.dtype == int8, y.dtype == uint8,
-    // then mul(x, y).dtype == int16, while x.mul_(y).dtype == int8 and y.mul_(x).dtype == uint8.
-    .to(res.scalar_type());
+
+  // Value intersection
+  const auto binary_op_res_dtype = at::result_type(
+      source._values(),
+      probably_coalesced._values());
+  auto res_values = value_selection_intersection_kernel_t::apply(
+      source._values().to(binary_op_res_dtype), // promote for better accuracy
+      selected_source,
+      probably_coalesced._values().to(binary_op_res_dtype), // promote for better accuracy
+      selected_probably_coalesced);
+  // Convert back if the promoted dtype is different from res.dtype.
+  // This could happen for in-place usage cases.
+  res_values = res_values.to(res.scalar_type());
+
   const auto res_sparse_dim = source.sparse_dim();
   const auto res_dense_dim = res_values.dim() - 1;
   const auto res_shape = broadcasted_shape;
-  const auto res_nnz = selected_source_values.size(0);
+  const auto res_nnz = selected_source.numel();
 
   auto* res_sparse_impl = get_sparse_impl(res);
   res_sparse_impl->raw_resize_(res_sparse_dim, res_dense_dim, res_shape);
@@ -479,7 +532,7 @@ void _sparse_binary_op_intersection_kernel_impl(
 
 template <
   template <typename func_t> class kernel_t,
-  typename binary_op_t>
+  typename value_selection_intersection_kernel_t>
 void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
@@ -522,7 +575,7 @@ void _sparse_binary_op_intersection_kernel_out(
       using index_t = index_t2;
       using hash_t = index_t1;
       using offset_t = index_t0;
-      _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_t, index_t, hash_t, offset_t>(
+      _sparse_binary_op_intersection_kernel_impl<kernel_t, value_selection_intersection_kernel_t, index_t, hash_t, offset_t>(
           res, x, y, broadcasted_shape, commutes_with_sum);
   });
 }
