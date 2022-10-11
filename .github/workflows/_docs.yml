@@ -48,6 +48,9 @@ jobs:
           - docs_type: python
             # It takes less than 30m to finish python docs unless there are issues
             timeout-minutes: 30
+          - docs_type: functorch
+            # It takes less than 15m to finish functorch docs unless there are issues
+            timeout-minutes: 15
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -143,3 +146,13 @@ jobs:
           s3-bucket: doc-previews
           path: cppdocs/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
+
+      - name: Upload functorch Docs Preview
+        uses: seemethere/upload-artifact-s3@v5
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'functorch' && steps.build-docs.outcome == 'success' }}
+        with:
+          retention-days: 14
+          s3-bucket: doc-previews
+          if-no-files-found: error
+          path: functorch_ghpages/nightly/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/functorchdocs

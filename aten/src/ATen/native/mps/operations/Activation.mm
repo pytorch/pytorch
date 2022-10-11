@@ -777,16 +777,17 @@ TORCH_IMPL_FUNC(threshold_backward_out_mps)(
 
 MPSGraphTensor* normcdf (MPSGraph* mpsGraph, MPSGraphTensor *inputTensor) {
     // (1.0f + erf(x*SQRT1_2)) * 0.5f * x;
+    auto dataType = [inputTensor dataType];
     const float SQRT1_2 = 0.707106781186547524400844362104849039f;
-    MPSGraphTensor *sqrt1_2 = [mpsGraph constantWithScalar:SQRT1_2
-                                                        shape:@[@1]
-                                                     dataType:MPSDataTypeFloat32];
-    MPSGraphTensor *onef = [mpsGraph constantWithScalar:1.0f
-                                                  shape:@[@1]
-                                              dataType:MPSDataTypeFloat32];
-    MPSGraphTensor *halff = [mpsGraph constantWithScalar:0.5f
-                                                    shape:@[@1]
-                                                dataType:MPSDataTypeFloat32];
+    MPSGraphTensor *sqrt1_2 = [mpsGraph constantWithScalar: SQRT1_2
+                                                        shape: @[@1]
+                                                     dataType: dataType];
+    MPSGraphTensor *onef = [mpsGraph constantWithScalar: 1.0f
+                                                  shape: @[@1]
+                                              dataType: dataType];
+    MPSGraphTensor *halff = [mpsGraph constantWithScalar: 0.5f
+                                                    shape: @[@1]
+                                                dataType: dataType];
 
     MPSGraphTensor *erfTensor = [mpsGraph multiplicationWithPrimaryTensor: inputTensor
                                                           secondaryTensor: sqrt1_2
@@ -807,6 +808,7 @@ TORCH_IMPL_FUNC(gelu_out_mps) (
   ) {
   using namespace mps;
   TORCH_CHECK(output.is_mps());
+  TORCH_CHECK(c10::isFloatingType(self.scalar_type()), "GELU is only implemented for floating types");
 
   // Empty output
   if(output.numel() == 0)
@@ -899,6 +901,7 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps) (
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
+          auto dataType = getMPSDataType(self.scalar_type());
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
@@ -906,15 +909,15 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps) (
                                                                   getMPSDataType(grad.scalar_type()),
                                                                   getMPSShape(grad));
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
-                                                                  getMPSDataType(self.scalar_type()),
+                                                                  dataType,
                                                                   getMPSShape(self));
           MPSGraphTensor* cdf = normcdf(mpsGraph, inputTensor);
-          MPSGraphTensor *halff = [mpsGraph constantWithScalar:-0.5f
-                                                    shape:@[@1]
-                                                dataType:MPSDataTypeFloat32];
-          MPSGraphTensor *betaf = [mpsGraph constantWithScalar:kBeta
-                                                    shape:@[@1]
-                                                dataType:MPSDataTypeFloat32];
+          MPSGraphTensor *halff = [mpsGraph constantWithScalar: -0.5f
+                                                    shape: @[@1]
+                                                dataType: dataType];
+          MPSGraphTensor *betaf = [mpsGraph constantWithScalar :kBeta
+                                                    shape :@[@1]
+                                                dataType:dataType];
           MPSGraphTensor *pdfMul = [mpsGraph squareWithTensor : inputTensor
                                                     name : nil];
           pdfMul = [mpsGraph multiplicationWithPrimaryTensor : pdfMul
