@@ -3,13 +3,25 @@ import numpy as np
 
 from torch import Tensor
 from torch._prims_common import is_float_dtype
-from torch._torch_docs import factory_common_args
+from torch._torch_docs import factory_common_args, parse_kwargs, merge_dicts
 
 __all__ = [
     'cosine',
     'exponential',
     'gaussian',
 ]
+
+window_common_args = merge_dicts(
+    parse_kwargs(
+        """
+    M (int): the length of the output window.
+        In other words, the number of points of the exponential window.
+    sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
+        If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.
+"""
+    ),
+    factory_common_args
+)
 
 
 def _add_docstr(*args):
@@ -23,11 +35,13 @@ def _add_docstr(*args):
     Args:
         args (str):
     """
+
     def decorator(o):
         o.__doc__ = ""
         for arg in args:
             o.__doc__ += arg
         return o
+
     return decorator
 
 
@@ -62,16 +76,12 @@ The exponential window is defined as follows:
     r"""
 
 Args:
-    M (int): the length of the output window.
-        In other words, the number of points of the exponential window.
+    {M}
     center (float, optional): where the center of the window will be located.
         In other words, at which sample the peak of the window can be found.
         Default: `M / 2` if `sym` is `False`, else `(M - 1) / 2`.
     tau (float, optional): the decay value. Default: 1.0.
-    sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
-        If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.
-    """ +
-    r"""
+    {sym}
 
 .. note::
     The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
@@ -94,7 +104,7 @@ Examples:
     tensor([4.5400e-05, 3.3546e-04, 2.4788e-03, 1.8316e-02, 1.3534e-01, 1.0000e+00,
         1.3534e-01, 1.8316e-02, 2.4788e-03, 3.3546e-04])
     """.format(
-        **factory_common_args
+        **window_common_args
     ),
 )
 def exponential(
@@ -160,10 +170,8 @@ Where `M` is the length of the window.
     r"""
 
 Args:
-    M (int): the length of the output window.
-        In other words, the number of points of the cosine window.
-    sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
-        If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.
+    {M}
+    {sym}
 
 .. note::
     The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
@@ -186,7 +194,7 @@ Examples:
     tensor([0.1423, 0.4154, 0.6549, 0.8413, 0.9595, 1.0000, 0.9595, 0.8413, 0.6549,
         0.4154])
 """.format(
-        **factory_common_args
+        **window_common_args,
     ),
 )
 def cosine(M: int,
@@ -237,12 +245,10 @@ The gaussian window is defined as follows:
     r"""
 
 Args:
-    M (int): the length of the output window.
-        In other words, the number of points of the cosine window.
+    {M}
     std (float, optional): the standard deviation of the gaussian. It controls how narrow or wide the window is.
         Default: 1.0.
-    sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
-        If `True`, returns a symmetric window suitable for use in filter design. Default: `True`
+    {sym}
 
 .. note::
     The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
@@ -265,7 +271,7 @@ Examples:
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00,
         5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
 """.format(
-        **factory_common_args
+        **window_common_args,
     ),
 )
 def gaussian(M: int,
