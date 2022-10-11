@@ -229,12 +229,11 @@ jobs:
   check_labels:
     runs-on: linux.20_04.16x
     steps:
-      - name: Check out repo
-        id: checkout
-        uses: actions/checkout@v2
+      - name: Check out PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
-          fetch-depth: 0
-          token: ${{ secrets.MERGEBOT_TOKEN }}
+          submodules: false
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v4
