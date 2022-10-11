@@ -340,11 +340,12 @@ class TestOperators(TestCase):
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
-        xfail('to_sparse', ''),  # Could not run 'aten::sum.dim_IntList'
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('masked.cumprod',
+             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
     ))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
@@ -395,6 +396,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
+        xfail("native_batch_norm"),
 
         xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
     }))
@@ -403,6 +405,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
+        tol1('nn.functional.batch_norm',
+             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
@@ -643,16 +647,17 @@ class TestOperators(TestCase):
         xfail("nn.functional.batch_norm", 'without_cudnn'),
         # view doesn't work on sparse
         xfail("to_sparse"),
+        xfail("native_batch_norm"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjpvjp', (
         tol1('linalg.svd',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
         tol1('linalg.lu_factor',
              {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
         tol1('svd',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
     ))
     def test_vmapvjpvjp(self, device, dtype, op):
         # Since, we test `vjpvjp` independently,
@@ -725,6 +730,7 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
+        skip("native_batch_norm"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
@@ -759,9 +765,9 @@ class TestOperators(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjp', (
         tol1('linalg.svd',
-             {torch.float32: tol(atol=1.5e-04, rtol=1e-04)}, device_type="cuda"),
+             {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
         tol1('svd',
-             {torch.float32: tol(atol=1.5e-04, rtol=1e-04)}, device_type="cuda"),
+             {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
     ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
@@ -833,6 +839,7 @@ class TestOperators(TestCase):
         # erroring because running_mean and running_var aren't differentiable
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
+        xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
     }
 
@@ -901,7 +908,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
-        xfail('istft'),  # col2im fallback
         xfail('polar'),  # complex fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
@@ -984,6 +990,7 @@ class TestOperators(TestCase):
         xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('unfold'),
+        xfail('unfold_copy'),
         xfail('vdot'),
         xfail('nn.functional.dropout'),
         xfail('fft.ihfft2'),
@@ -998,7 +1005,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.max_pool3d'),
-        xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
@@ -1032,6 +1038,7 @@ class TestOperators(TestCase):
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
+        xfail("native_batch_norm"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1097,6 +1104,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
+        xfail("native_batch_norm"),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1197,11 +1205,15 @@ class TestOperators(TestCase):
         tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
         tol1('masked.cumprod',
-             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+             {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
         tol1('linalg.vander',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
+        tol1('nn.functional.group_norm',
+             {torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+        tol2('linalg.pinv', 'hermitian',
+             {torch.float32: tol(atol=5e-03, rtol=5e-03)}),
     ))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1340,6 +1352,10 @@ class TestOperators(TestCase):
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition
         xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
+        # RuntimeError: Batch norm got a batched tensor as
+        # input while the running_mean or running_var, which will be updated in
+        # place, were not batched.
+        xfail("native_batch_norm"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1349,6 +1365,8 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -1583,6 +1601,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
+        tol2('linalg.pinv', 'hermitian',
+             {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
