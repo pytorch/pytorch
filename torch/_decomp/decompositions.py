@@ -1644,7 +1644,7 @@ def cudnn_batch_norm_backward(
     epsilon: float,
     reserveSpace: Tensor,
 ):
-    return aten.native_batch_norm_backward.default(
+    return native_batch_norm_backward(
         grad_output,
         input,
         weight,
