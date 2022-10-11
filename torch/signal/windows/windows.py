@@ -1,7 +1,5 @@
 import torch
 
-import numpy as np
-
 from torch import Tensor
 from torch.types import _dtype, _device, _layout
 
