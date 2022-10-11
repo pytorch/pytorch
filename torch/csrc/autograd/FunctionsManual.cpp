@@ -1811,9 +1811,9 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
 
 Tensor split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    IntArrayRef split_sizes,
+    c10::SymIntArrayRef split_sizes,
     int64_t dim,
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sizes,
     const at::TensorOptions& options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
 
@@ -1827,7 +1827,7 @@ Tensor split_with_sizes_backward(
       auto length = split_sizes[j];
       auto grad_size = sizes.vec();
       grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros(grad_size, options);
+      grads_all_defined[j] = at::zeros_symint(grad_size, options);
     }
   }
 
@@ -1837,17 +1837,17 @@ Tensor split_with_sizes_backward(
 
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    int64_t split_size,
+    c10::SymInt split_size,
     int64_t dim,
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sym_sizes,
     const at::TensorOptions& options) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-  int64_t dim_size = sizes[dim];
+  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
+  auto dim_size = sym_sizes[dim];
   int64_t num_splits = grads.size();
-  std::vector<int64_t> split_sizes(num_splits, split_size);
+  std::vector<c10::SymInt> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
       split_size - (split_size * num_splits - dim_size);
-  return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
+  return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
 Tensor max_pool_double_backward(
@@ -2839,7 +2839,6 @@ Tensor as_strided_backward(
 
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
-      // TODO: symint-ify. Do we need a min() and max() for SymInts?
       input_geometry.sym_storage_offset().min(sym_storage_offset);
   auto inp_effective_offset =
       input_geometry.sym_storage_offset() - shared_offset;
@@ -2855,11 +2854,7 @@ Tensor as_strided_backward(
   c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
-        // TODO: should we symint-ify arange? Need SymScalar.
-        at::arange(
-            0,
-            base_size.guard_int(__FILE__, __LINE__),
-            grad.options().dtype(at::kLong));
+        at::arange(0, base_size, grad.options().dtype(at::kLong));
   }
 
   // Step (2): use output geometry to scatter gradients into storage

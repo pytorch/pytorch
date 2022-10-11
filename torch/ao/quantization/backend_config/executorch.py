@@ -181,7 +181,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     ]
     share_qparams_op_configs: List[BackendPatternConfig] = []
     for op in share_qparams_ops:
-        share_qparams_ops.append(
+        share_qparams_op_configs.append(
             BackendPatternConfig(op)
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
