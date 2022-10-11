@@ -156,14 +156,14 @@ class FlatParameter(nn.Parameter):
             entry; see :class:`ParamInfo`.
         _numels (Tuple[int, ...]): Each parameter's numel.
         _shapes (Tuple[torch.Size, ...]): Each parameter's shape.
-        _prefixed_param_names (Tuple[str, ...]): Each parameter's name prefixed
-            with the parent module names starting from the module passed to
+        _fqns (Tuple[str, ...]): Each original parameter's name prefixed with
+            the parent module names starting from the module passed to
             construct this flattened parameter via :class:`FlatParamHandle`;
             the prefixed names are guaranteed to be unique within the subtree
-            rooted in that module.
+            rooted in that module. We refer to these names as FQNs.
         _num_params (int): Number of original parameters flattened into this
             flattened parameter; this is the length of ``_param_infos``,
-            ``_numels``, ``_shapes``, and ``_prefixed_param_names``.
+            ``_numels``, ``_shapes``, and ``_fqns``.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
         _param_extensions (Tuple[Optional[Any], ...]): Parameter extensions
@@ -242,7 +242,7 @@ class FlatParameter(nn.Parameter):
         self._param_infos = tuple(param_infos)
         self._numels = tuple(numels)
         self._shapes = tuple(shapes)
-        self._prefixed_param_names = tuple(prefixed_param_names)
+        self._fqns = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
         assert (params is None) == (shared_params is None)
@@ -656,7 +656,7 @@ class FlatParamHandle:
             else slice(0, 0)
         )
         return FlatParamShardMetadata(
-            self.flat_param._prefixed_param_names[sl],
+            self.flat_param._fqns[sl],
             self.flat_param._shapes[sl],
             self.flat_param._numels[sl],
             self.flat_param._shard_param_offsets[:],  # type: ignore[attr-defined]
@@ -1194,7 +1194,7 @@ class FlatParamHandle:
         ):
             p_assert(
                 hasattr(module, param_name),
-                f"{self.flat_param._prefixed_param_names[i]} is missing",
+                f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
             param.grad = view
