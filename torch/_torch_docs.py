@@ -5141,7 +5141,9 @@ Example::
            bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
                       tensor([0.0000, 0.5000, 1.0000])))
 
-""",
+""".format(
+        **common_args
+    ),
 )
 # TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
 torch.histogramdd.__module__ = "torch"
