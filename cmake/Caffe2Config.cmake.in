@@ -89,13 +89,7 @@ if(@USE_CUDA@)
   set(CAFFE2_USE_CUDA @USE_CUDA@)
   set(CAFFE2_USE_CUDNN @USE_CUDNN@)
   set(CAFFE2_USE_TENSORRT @USE_TENSORRT@)
-
-  # Add current directory to module path so we pick up FindCUDAToolkit.cmake
-  set(old_CMAKE_MODULE_PATH CMAKE_MODULE_PATH)
-  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
   include("${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake")
-  set(CMAKE_MODULE_PATH old_CMAKE_MODULE_PATH)
-
   if(@CAFFE2_USE_CUDA@ AND NOT CAFFE2_USE_CUDA)
     message(FATAL_ERROR
       "Your installed Caffe2 version uses CUDA but I cannot find the CUDA "
