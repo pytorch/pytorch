@@ -83,6 +83,11 @@ def exponential(window_length: int,
         center = -(window_length if periodic else window_length - 1) / 2.0
 
     constant = 1 / tau
+
+    """
+    Note that non-integer step is subject to floating point rounding errors when comparing against end; 
+    to avoid inconsistency, we advise adding a small epsilon to end in such cases.
+    """
     k = torch.arange(center * constant,
                      (center + (window_length - 1)) * constant + _eps,
                      constant,
