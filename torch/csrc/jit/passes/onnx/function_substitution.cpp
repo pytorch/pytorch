@@ -85,7 +85,7 @@ void functionCallSubstitution(Block* block) {
     Node* cur = *it++;
     switch (cur->kind()) {
       case prim::CallFunction: {
-        AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
+        TORCH_INTERNAL_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();

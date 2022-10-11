@@ -28,7 +28,7 @@ def _maybe_convert_to_dtype(
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
-        return utils.dtype_to_type(dtype)(a)
+        return utils.dtype_to_type_ctor(dtype)(a)
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
     # Passthrough None because some functions wrapped with type promotion

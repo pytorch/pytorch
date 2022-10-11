@@ -61,6 +61,14 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
 
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor)
 {
+  // Rounding is a no-op for integral types, and also a reasonable workaround
+  // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
+  // See https://github.com/pytorch/pytorch/issues/84995
+  bool isFloatInput = ([inputTensor dataType] & MPSDataTypeFloatBit) != 0;
+  if (!isFloatInput) {
+    return inputTensor;
+  }
+
   MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
                                                    dataType:inputTensor.dataType];
   MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
@@ -174,6 +182,25 @@ TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
       };
       runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
     }
+}
+
+TORCH_IMPL_FUNC(frac_out_mps) (const Tensor& self, const Tensor& output) {
+  TORCH_CHECK(isFloatingType(self.scalar_type()), "frac_out_mps is only implemented for floating types");
+  mps::unary_op(self, output, "frac_out_mps",
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+                  auto zeroTensor = [mpsGraph constantWithScalar:0.0
+                                                       dataType:inputTensor.dataType];
+                  auto predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                             secondaryTensor:zeroTensor
+                                                                        name:nil];
+                  auto truncTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
+                                                     truePredicateTensor:[mpsGraph ceilWithTensor :inputTensor name:nil]
+                                                    falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
+                                                                    name:nil];
+                  return [mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                               secondaryTensor:truncTensor
+                                                   name: nil];
+                });
 }
 
 } // namespace native

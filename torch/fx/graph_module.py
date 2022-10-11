@@ -16,6 +16,8 @@ from pathlib import Path
 import os
 import warnings
 
+__all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_graph_module", "GraphModule"]
+
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
 # Using _exec_with_source will add it to our local cache
@@ -377,6 +379,9 @@ class GraphModule(torch.nn.Module):
         self._tracer_extras = {}
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
+
+        # Dictionary to store metadata
+        self.meta : Dict[str, Any] = {}
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842

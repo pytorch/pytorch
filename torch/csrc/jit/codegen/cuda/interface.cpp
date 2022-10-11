@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/TensorShape.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>
@@ -41,12 +43,8 @@ class NVFuserEnabler {
 
  public:
   static bool nvfuserCanBeEnabled() {
-#ifdef USE_ROCM
-    return false;
-#else
     return at::globalContext().hasCUDA() &&
         NVFuserPassManager::isRegistered() && getExecutorMode();
-#endif
   }
 
  private:
@@ -843,8 +841,7 @@ RegisterOperators reg_expand_copy({
                 "alias ops, should be restored after fusion pass!");
             IValue self, size, implicit;
             pop(stack, self, size, implicit);
-            push(
-                stack, at::native::expand(self.toTensor(), size.toIntVector()));
+            push(stack, self.toTensor().expand(size.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),
