@@ -885,7 +885,6 @@ class FakeTensorMode(TorchDispatchMode):
     def functions_with_cpp_meta_impl_that_support_symint(self):
         return [
             aten.empty_strided.default,
-            aten.as_strided_scatter.default,
             aten.as_strided.default,
             aten.zeros.default,
             aten.detach.default,
