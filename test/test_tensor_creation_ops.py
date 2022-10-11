@@ -2700,27 +2700,6 @@ class TestTensorCreation(TestCase):
         for num_test in range(50):
             self._test_signal_window_functions('gaussian', dtype, device, std=random.random() * 30)
 
-    @onlyNativeDeviceTypes
-    @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
-    @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
-    @dtypes(torch.float, torch.double)
-    def test_dummy(self, device, dtype):
-        from scipy import signal
-
-        NP2TORCH = {
-            torch.float64: np.float64,
-            torch.float32: np.float32
-        }
-
-        at = 41
-        window_length = 100
-        w1 = signal.get_window(('chebwin', at), window_length, fftbins=False).astype(NP2TORCH[dtype])
-        # w1 = signal.windows.chebwin(100, 100, sym=True).astype(NP2TORCH[dtype])
-        w2 = torch.signal.windows.chebyshev_window(window_length, at=at, periodic=False, dtype=dtype, device=device)
-
-        self.assertEqual(w1, w2, exact_dtype=True)
-
     def test_tensor_factories_empty(self, device):
         # ensure we can create empty tensors from each factory function
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
