@@ -250,7 +250,11 @@ test_dynamo_shard() {
 }
 
 test_inductor() {
-  time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
+  # TODO: enable inductor on core tests
+  # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
+  pushd ../torchdynamo
+  pytest test/inductor
+  popd
 }
 
 test_python_gloo_with_tls() {
@@ -659,7 +663,7 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest test
+  pytest test/dynamo
   popd
 }
 

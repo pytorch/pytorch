@@ -831,18 +831,19 @@ Tensor logcumsumexp_backward(
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
-  IntArrayRef sizes;
+  c10::SymIntArrayRef sizes;
   at::TensorOptions o;
   for (const auto& v : grads) {
     if (v.defined()) {
-      sizes = v.sizes();
+      sizes = v.sym_sizes();
       o = static_cast<Tensor>(v).options();
       break;
     }
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }

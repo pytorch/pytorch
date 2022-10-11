@@ -86,7 +86,7 @@ function get_bazel() {
 }
 
 function install_triton {
-  TRITON_VERSION=889d9e34a114b1fe2e8871d21e713794344d12d3
+  TRITON_VERSION=d3c925db8a81ca74f14680876b9311e7d079c5a1
   pip_install -U "git+https://github.com/openai/triton@${TRITON_VERSION}#subdirectory=python"
 }
 
