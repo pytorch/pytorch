@@ -1315,7 +1315,7 @@ class FullyShardedDataParallel(nn.Module):
         )
         if len(devices) > 1:
             raise RuntimeError(
-                f"FSDP only supports single device modules but got params on {devices}"
+                f"FSDP only supports single device modules but got params on {[(name, param.device) for name, param in module.named_parameters()]}"
             )
 
     def _get_device_from_device_id(
