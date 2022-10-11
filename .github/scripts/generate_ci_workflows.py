@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Iterable
 
 import jinja2
 
@@ -304,13 +304,13 @@ def main() -> None:
     )
 
     # not ported yet
-    # template_and_workflows = [
-    #     (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
-    #     (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
-    #     (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
-    #     (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_SMOKE_WORKFLOWS),
-    #     (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
-    # ]
+    template_and_workflows = [
+        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
+        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
+        (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
+        (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_SMOKE_WORKFLOWS),
+        (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
+    ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
     for w in existing_workflows:
@@ -319,12 +319,12 @@ def main() -> None:
         except Exception as e:
             print(f"Error occurred when deleting file {w}: {e}")
 
-    # for template, workflows in template_and_workflows:
-    #     # added Iterable check to appease the mypy gods
-    #     if not isinstance(workflows, Iterable):
-    #         raise Exception(f"How is workflows not iterable? {workflows}")
-    #     for workflow in workflows:
-    #         workflow.generate_workflow_file(workflow_template=template)
+    for template, workflows in template_and_workflows:
+        # added Iterable check to appease the mypy gods
+        if not isinstance(workflows, Iterable):
+            raise Exception(f"How is workflows not iterable? {workflows}")
+        for workflow in workflows:
+            workflow.generate_workflow_file(workflow_template=template)
 
 if __name__ == "__main__":
     main()

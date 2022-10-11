@@ -49,16 +49,16 @@ namespace c10 {
   _(prim, oneDNNFusionGuard)         \
   _(prim, FunctionalGraph)           \
   _(prim, add_optional)              \
-  _(prim, expand_copy)               \
-  _(prim, expand_as_copy)            \
-  _(prim, flatten_copy)              \
+  _(prim, view_copy)                 \
   _(prim, permute_copy)              \
   _(prim, reshape_copy)              \
   _(prim, squeeze_copy)              \
   _(prim, t_copy)                    \
   _(prim, transpose_copy)            \
   _(prim, unsqueeze_copy)            \
-  _(prim, view_copy)                 \
+  _(prim, flatten_copy)              \
+  _(prim, expand_copy)               \
+  _(prim, expand_as_copy)            \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \
