@@ -402,6 +402,7 @@ class TestAOTAutograd(AOTTestCase):
 
         self.assertEqual(ref_out, test_out)
 
+    @unittest.skipIf(torch.version.hip is not None, "cudnn_batch_norm not available on rocm")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_batch_norm_amp(self):
         device = "cuda"
