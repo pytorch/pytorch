@@ -248,13 +248,13 @@ class TestExpandedWeightFunctional(TestCase):
         input = torch.randint(0, num_embedding, (batch_size, 5, 5), device=device)
         return self._test_model(partial(model, num_embedding=num_embedding), batch_size, input, device)
 
-    def _test_conv_model(self, model, input_size, num_dim, device, loss_reduction="sum"):
+    def _test_conv_model(self, model, input_size, num_dim, device, loss_reduction="sum", atol=1e-4, rtol=5e-5):
         batch_size = 32
         input_ending = [input_size] * num_dim
         input = torch.randn([batch_size, 3] + input_ending, device=device)
-        return self._test_model(partial(model, num_dim=num_dim), batch_size, input, device, loss_reduction)
+        return self._test_model(partial(model, num_dim=num_dim), batch_size, input, device, loss_reduction, atol, rtol)
 
-    def _test_model(self, model, batch_size, input, device, loss_reduction="sum"):
+    def _test_model(self, model, batch_size, input, device, loss_reduction="sum", atol=1e-4, rtol=5e-5):
         model = model(10).to(device)
         targets = torch.randint(0, 10, (batch_size,), device=device)
         criterion = CrossEntropyLoss(reduction=loss_reduction)
@@ -273,8 +273,11 @@ class TestExpandedWeightFunctional(TestCase):
 
         expected = [torch.stack(grad) for grad in zip(*expected)]
         for (res, exp) in zip(result, expected):
-            self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
+            self.assertEqual(res, exp, atol=atol, rtol=rtol)
 
+    def _compute_tolerances(self, device):
+        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        return (9e-3, 5e-5) if is_cuda_sm86 else (1e-4, 5e-5)
 
     def test_cnn_model_sum(self, device):
         def convnet(num_classes, num_dim):
@@ -295,7 +298,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Linear(128, num_classes, bias=True),
             )
 
-        return self._test_conv_model(convnet, 28, 2, device)
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(convnet, 28, 2, device, atol=atol, rtol=rtol)
 
     def test_cnn_model_mean(self, device):
         def convnet(num_classes, num_dim):
@@ -315,8 +319,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(128, num_classes, bias=True),
             )
-
-        return self._test_conv_model(convnet, 28, 2, device, loss_reduction="mean")
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(convnet, 28, 2, device, loss_reduction="mean", atol=atol, rtol=rtol)
 
     @parametrize('num_dim', [1, 2, 3])
     def test_instance_norm_model(self, num_dim, device):
@@ -329,7 +333,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
             )
-        return self._test_conv_model(instance_norm_model, 7, num_dim, device)
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(instance_norm_model, 7, num_dim, device, atol=atol, rtol=rtol)
 
     @parametrize('num_dim', [1, 2, 3])
     def test_group_norm_model(self, num_dim, device):
@@ -341,7 +346,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
             )
-        return self._test_conv_model(group_norm_model, 7, num_dim, device)
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(group_norm_model, 7, num_dim, device, atol=atol, rtol=rtol)
 
     @parametrize('num_dim', [1, 2, 3])
     def test_layer_norm_model(self, num_dim, device):
@@ -354,7 +360,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
             )
-        return self._test_conv_model(layer_norm_model, 7, num_dim, device)
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(layer_norm_model, 7, num_dim, device, atol=atol, rtol=rtol)
 
     def test_embedding_model(self, device):
         def embedding_model(num_classes, num_embedding):

@@ -580,6 +580,9 @@ class TestModule(TestCase):
     @skipIfMps
     @modules(module_db)
     def test_memory_format(self, device, dtype, module_info, training):
+        is_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        # TODO tighten it to a specific module
+        atol, rtol = (3e-3, 7e-3) if is_sm86 else (None, None)
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
@@ -666,7 +669,7 @@ class TestModule(TestCase):
 
                         # === Compare outputs to (contiguous, contiguous) output. ===
                         if input_mem_format != torch.contiguous_format or module_mem_formats != torch.contiguous_format:
-                            self.assertEqual(outputs, desired_outputs)
+                            self.assertEqual(outputs, desired_outputs, rtol=rtol, atol=atol)
 
                         # === Check mem format of output. ===
                         _check_out_mem_format(outputs, input_mem_format, module_mem_format)
