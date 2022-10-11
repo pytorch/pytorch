@@ -81,6 +81,11 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 
+@register_meta(aten.randint.default)
+def meta_randint(high, size, *, dtype=torch.long, **kwargs):
+    return torch.empty(size, dtype=dtype, **kwargs)
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
@@ -110,8 +115,14 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@register_meta([aten.max.default, aten.min.default])
+@register_meta([aten.max.default, aten.max.unary_out])
+@out_wrapper()
 def meta_max(self):
+    return self.new_empty(())
+
+
+@register_meta([aten.min.default])
+def meta_min(self):
     return self.new_empty(())
 
 
@@ -586,6 +597,26 @@ def meta_adaptive_avg_pool3d(self, output_size):
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
 
+@register_meta(aten._adaptive_avg_pool2d_backward.default)
+def meta__adaptive_avg_pool2d_backward(grad_out, self):
+    ndim = grad_out.ndim
+    for i in range(1, ndim):
+        check(
+            grad_out.size(i) > 0,
+            lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
+                      size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
+        )
+    check(
+        ndim == 3 or ndim == 4,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
+    )
+    check(
+        self.dtype == grad_out.dtype,
+        lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
+    )
+    return self.new_empty(self.shape)
+
+
 @register_meta(aten.repeat_interleave.Tensor)
 def meta_repeat_interleave_Tensor(repeats, output_size=None):
     if output_size is None:
@@ -633,8 +664,8 @@ def meta_index_Tensor(self, indices):
     for i, index in enumerate(indices):
         if index is not None:
             check(
-                index.dtype in [torch.long, torch.int8, torch.bool],
-                lambda: "tensors used as indices must be long, byte or bool tensors",
+                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
             if index.dtype in [torch.int8, torch.bool]:
                 nonzero = index.nonzero()
