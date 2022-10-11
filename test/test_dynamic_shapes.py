@@ -374,17 +374,17 @@ class f(torch.nn.Module):
     def forward(self, a_1: f32[t0.size(0),t0.size(1)], b_1: f32[t1.size(0),t0.size(1)]):
 
         # No stacktrace found for following nodes
-        sym_size: Symint(t0.size(0)) = torch.ops.aten.sym_size(a_1, 0)
-        sym_size_1: Symint(t1.size(0)) = torch.ops.aten.sym_size(b_1, 0)
-        add: Symint(t0.size(0) + t1.size(0)) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
-        sym_size_2: Symint(t0.size(1)) = torch.ops.aten.sym_size(a_1, 1)
-        sym_size_3: Symint(t0.size(1)) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
-        add_1: Symint(2*t0.size(1)) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
+        sym_size: Sym(t0.size(0)) = torch.ops.aten.sym_size(a_1, 0)
+        sym_size_1: Sym(t1.size(0)) = torch.ops.aten.sym_size(b_1, 0)
+        add: Sym(t0.size(0) + t1.size(0)) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
+        sym_size_2: Sym(t0.size(1)) = torch.ops.aten.sym_size(a_1, 1)
+        sym_size_3: Sym(t0.size(1)) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
+        add_1: Sym(2*t0.size(1)) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
         new_empty: f32[t0.size(0) + t1.size(0),2*t0.size(1)] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: f32[t0.size(0) + t1.size(0),2*t0.size(1)] = native_dropout[0]
         getitem_1: b8[t0.size(0) + t1.size(0),2*t0.size(1)] = native_dropout[1];  native_dropout = None
-        return (getitem, getitem_1)""")
+        return (getitem, getitem_1)""")  # noqa: B950
 
 
 if __name__ == '__main__':
