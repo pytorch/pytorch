@@ -4,6 +4,10 @@
 import tempfile
 import torch
 from torch.ao.nn.sparse.quantized.dynamic.linear import Linear
+from torch.testing._internal.common_quantization import (
+    skipIfNoFBGEMM,
+    skipIfNoQNNPACK,
+)
 from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     override_quantized_engine,
@@ -12,7 +16,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import TestCase
 
 class TestQlinearPackedParams(TestCase):
-    def test_qlinear_packed_params(self, allow_non_zero_zero_points=False):
+    def qlinear_packed_params_test(self, allow_non_zero_zero_points=False):
         # copied from https://pytorch.org/docs/stable/sparse.html#csr-tensor-operations,
         # so row/col block indices match that example, but with blocks and
         # scaled rows
@@ -154,11 +158,19 @@ class TestQlinearPackedParams(TestCase):
                     self.assertEqual(y1, y2)
 
 
+    @skipIfNoFBGEMM
+    def test_qlinear_packed_params_fbgemm(self):
+        torch.manual_seed(0)
+        with override_quantized_engine('fbgemm'):
+            self.qlinear_packed_params_test(allow_non_zero_zero_points=False)
+
+
+    @skipIfNoQNNPACK
     def test_qlinear_packed_params_qnnpack(self):
         torch.manual_seed(0)
         with override_quantized_engine('qnnpack'):
             with override_cpu_allocator_for_qnnpack(qengine_is_qnnpack()):
-                self.test_qlinear_packed_params(allow_non_zero_zero_points=True)
+                self.qlinear_packed_params_test(allow_non_zero_zero_points=True)
 
     def test_qlinear_packed_params_fbgemm_qnnpack_cross_compatibility(self):
         torch.manual_seed(0)
@@ -224,7 +236,8 @@ class TestQlinearPackedParams(TestCase):
             return ((s0_updated, s1), weight_bias)
 
         # Test Fbgemm -> Qnnpack
-        packed_params_data_1a, file_buff_1 = make_lin_get_state_weight_bias_and_save()
+        with override_quantized_engine('fbgemm'):
+            packed_params_data_1a, file_buff_1 = make_lin_get_state_weight_bias_and_save()
 
         with override_quantized_engine('qnnpack'):
             with override_cpu_allocator_for_qnnpack(qengine_is_qnnpack()):
@@ -240,7 +253,8 @@ class TestQlinearPackedParams(TestCase):
             with override_cpu_allocator_for_qnnpack(qengine_is_qnnpack()):
                 packed_params_data_2a, file_buff_2 = make_lin_get_state_weight_bias_and_save()
 
-        packed_params_data_2b = load_get_state_weight_bias(file_buff_2)
+        with override_quantized_engine('fbgemm'):
+            packed_params_data_2b = load_get_state_weight_bias(file_buff_2)
 
         self.assertEqual(
             packed_params_data_with_int32_indices(packed_params_data_2a),

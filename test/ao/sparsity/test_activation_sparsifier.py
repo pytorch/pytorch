@@ -5,10 +5,10 @@ import copy
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 import logging
 import torch
-from torch.ao.sparsity._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
+from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.ao.sparsity.sparsifier.utils import module_to_fqn
+from torch.ao.pruning.sparsifier.utils import module_to_fqn
 from typing import List
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
