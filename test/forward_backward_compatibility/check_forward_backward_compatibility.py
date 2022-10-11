@@ -289,6 +289,7 @@ ALLOW_LIST = [
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_tensor", datetime.date(2022, 10, 15)),
+    ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
 
 ]
 
