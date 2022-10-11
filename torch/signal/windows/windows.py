@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from torch import Tensor
-from torch._prims_common import is_float_dtype, is_complex_dtype
+from torch._prims_common import is_float_dtype
 from torch._torch_docs import factory_common_args
 from torch.types import _dtype, _device, _layout
 

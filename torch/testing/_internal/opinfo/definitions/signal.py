@@ -6,7 +6,6 @@ from itertools import product
 from typing import List
 
 import torch
-from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import TEST_SCIPY
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
@@ -14,7 +13,7 @@ from torch.testing._internal.opinfo.core import (
     OpInfo,
     SampleInput,
 )
-from torch.testing._legacy import floating_types_and, floating_types
+from torch.testing._legacy import floating_types_and
 
 if TEST_SCIPY:
     import scipy.signal
@@ -36,7 +35,7 @@ def sample_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs)
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
-            **kwargs
+            **kwargs,
         )
 
     # For sizes larger than 1 we need to test both symmetric and non-symmetric windows.
@@ -50,18 +49,13 @@ def sample_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs)
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
-            **kwargs
+            **kwargs,
         )
 
 
 def sample_inputs_gaussian_window(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_window(
-        op_info,
-        device,
-        dtype,
-        requires_grad,
-        random.uniform(0, 3),  # std,
-        **kwargs
+        op_info, device, dtype, requires_grad, random.uniform(0, 3), **kwargs  # std,
     )
 
 
@@ -75,7 +69,14 @@ def error_inputs_window(op_info, device, *args, **kwargs):
 
     # Tests for window tensors that are not torch.strided, for instance, torch.sparse_coo.
     yield ErrorInput(
-        SampleInput(3, *args, layout=torch.sparse_coo, device=device, dtype=torch.float32, **kwargs),
+        SampleInput(
+            3,
+            *args,
+            layout=torch.sparse_coo,
+            device=device,
+            dtype=torch.float32,
+            **kwargs,
+        ),
         error_type=ValueError,
         error_regex="is implemented for strided tensors only, got: torch.sparse_coo",
     )
@@ -109,12 +110,7 @@ def error_inputs_exponential_window(op_info, device, **kwargs):
 
 def error_inputs_gaussian_window(op_info, device, **kwargs):
     # Yield common error inputs
-    yield from error_inputs_window(
-        op_info,
-        device,
-        0.5,  # std
-        **kwargs
-    )
+    yield from error_inputs_window(op_info, device, 0.5, **kwargs)  # std
 
     # Tests for negative standard deviations
     yield ErrorInput(
@@ -125,7 +121,7 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
 
 
 def make_signal_windows_opinfo(
-        name, variant_test_name, ref, sample_inputs_func, error_inputs_func, *, skips=()
+    name, variant_test_name, ref, sample_inputs_func, error_inputs_func, *, skips=()
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
