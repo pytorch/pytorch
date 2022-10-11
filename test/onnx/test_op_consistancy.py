@@ -321,10 +321,16 @@ class TestConsistency(common_utils.TestCase):
             requires_grad=False,
         )
 
-        for (cpu_sample, opset) in itertools.product(samples, TESTED_OPSETS):
-            model = SingleOpModel(op, cpu_sample.kwargs)
+        for i, (opset, cpu_sample) in enumerate(
+            itertools.product(TESTED_OPSETS, samples)
+        ):
+            with self.subTest(opset=opset, sample=i):
+                # Print the sample input to help debug failures. They should
+                # appear only when a test fails.
+                print("Testing with sample: f{cpu_sample}")
 
-            with self.subTest(sample=cpu_sample, opset=opset):
+                model = SingleOpModel(op, cpu_sample.kwargs)
+                model.eval()
 
                 context_manager = contextlib.nullcontext()
                 # Skip opset specific fails
@@ -339,8 +345,8 @@ class TestConsistency(common_utils.TestCase):
 
                 # Run the test
                 inputs = (cpu_sample.input, *cpu_sample.args)
-                with context_manager:
 
+                with context_manager:
                     if dtype == torch.bfloat16:
                         # Only export to ONNX without running with onnxruntime because
                         # the CPU execution path for bfloat16 is not implemented in onnxruntime.

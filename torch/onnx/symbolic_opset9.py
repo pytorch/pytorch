@@ -447,9 +447,19 @@ def _trunc_divide(g: jit_utils.GraphContext, self, other):
 @_beartype.beartype
 def floor_divide(g: jit_utils.GraphContext, self, other):
     quotient = true_divide(g, self, other)
-    self_type = _type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type()
     floor = g.op("Floor", quotient)
-    return g.op("Cast", floor, to_i=self_type)
+    self_type = self.type().scalarType()
+    other_type = other.type().scalarType()
+    if self_type is not None and other_type is not None:
+        self_torch_type = _type_utils.JitScalarType.from_name(self_type).dtype()
+        other_torch_type = _type_utils.JitScalarType.from_name(other_type).dtype()
+        output_torch_type = torch.promote_types(self_torch_type, other_torch_type)
+        return g.op(
+            "Cast",
+            floor,
+            to_i=_type_utils.JitScalarType.from_dtype(output_torch_type).onnx_type(),
+        )
+    return floor
 
 
 @_onnx_symbolic("aten::floordiv")
