@@ -1,5 +1,5 @@
 import torch
-import numpy as np
+from math import sqrt
 
 from torch import Tensor
 from torch._prims_common import is_float_dtype
@@ -298,7 +298,7 @@ def gaussian(M: int,
 
     start = -(M if not sym else M - 1) / 2.0
 
-    constant = 1 / (std * np.sqrt(2))
+    constant = 1 / (std * sqrt(2))
 
     """
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
