@@ -110,7 +110,7 @@ def run_timing(batch_size, D, H, L, writer):
 
 
 if __name__ == "__main__":
-    iters = 1
+    iters = 100
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
