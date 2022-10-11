@@ -940,11 +940,7 @@ if TEST_WITH_TORCHDYNAMO:
     torchdynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
     torchdynamo.config.cache_size_limit = 8
-    if TEST_WITH_TORCHINDUCTOR:
-        import torchinductor.config
-        torchdynamo.config.raise_on_assertion_error = True
-        torchinductor.config.triton.autotune = False  # too slow
-        torchinductor.config.fallback_random = True  # fallback to reduce randomness
+
 
 def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
     def decorator(fn):
