@@ -1658,6 +1658,9 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE:
+        # TODO
+        return
+
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:
