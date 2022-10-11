@@ -33,7 +33,7 @@ class ActivationWrapper(torch.nn.Module):
         )
 
     def forward(self, *args, **kwargs):
-        raise ValueError("Implement me")
+        raise ValueError("Subclasses should implement forward().")
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to wrapped module."""
@@ -103,7 +103,7 @@ class OffloadWrapper(ActivationWrapper):
 
 class CheckpointWrapper(ActivationWrapper):
     """
-    An nn.Module that wraps another nn.Module with checkpointing. Note that this
+    An ``nn.Module`` that wraps another ``nn.Module`` with checkpointing. Note that this
     module is not meant to be used directly, but instead it is to be used
     through the ``checkpoint_wrapper`` function.
     """
@@ -115,7 +115,7 @@ class CheckpointWrapper(ActivationWrapper):
         *checkpoint_fn_args,
         **checkpoint_fn_kwargs,
     ):
-        super().__init__()
+        super().__init__(mod)
         self.checkpoint_impl = checkpoint_impl
         if checkpoint_fn is None:
             # use torch.utils.checkpoint
