@@ -182,10 +182,10 @@ def make_signal_windows_opinfo(
                 "test_op_has_batch_rule",
             ),
             DecorateInfo(
-                unittest.skip("Skipped"),
+                unittest.skip("Skipped!"),
+                "TestSchemaCheckModeOpInfo"
                 "test_schema_correctness",
-                "TestSchemaCheckModeOpInfo",
-                dtypes=[torch.float16],
+                dtypes=[torch.float16]
             ),
             *skips,
         ),
