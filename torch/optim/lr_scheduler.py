@@ -535,8 +535,8 @@ class LinearLR(_LRScheduler):
 
     def __init__(self, optimizer, start_factor=1.0 / 3, end_factor=1.0, total_iters=5, last_epoch=-1,
                  verbose=False):
-        if start_factor > 1.0 or start_factor < 0:
-            raise ValueError('Starting multiplicative factor expected to be between 0 and 1.')
+        if start_factor > 1.0 or start_factor <= 0:
+            raise ValueError('Starting multiplicative factor expected to be greater than 0 and less or equal to 1.')
 
         if end_factor > 1.0 or end_factor < 0:
             raise ValueError('Ending multiplicative factor expected to be between 0 and 1.')
@@ -554,7 +554,7 @@ class LinearLR(_LRScheduler):
         if self.last_epoch == 0:
             return [group['lr'] * self.start_factor for group in self.optimizer.param_groups]
 
-        if (self.last_epoch > self.total_iters):
+        if self.last_epoch > self.total_iters:
             return [group['lr'] for group in self.optimizer.param_groups]
 
         return [group['lr'] * (1. + (self.end_factor - self.start_factor) /
