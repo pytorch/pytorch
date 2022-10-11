@@ -73,7 +73,7 @@ The exponential window is defined as follows:
 .. math::
     w(n) = \exp{\left(-\frac{|n - c|}{\tau}\right)}
 
-Where `c` is the center of the window.
+where `c` is the center of the window.
     """,
     r"""
 
@@ -228,10 +228,10 @@ The gaussian window is defined as follows:
 
 .. math::
     w(n) = \exp{\left(-\left(\frac{n}{2\sigma}\right)^2\right)}
-
-{normalization}
     """,
     r"""
+
+{normalization}
 
 Args:
     {M}

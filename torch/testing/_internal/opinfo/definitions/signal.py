@@ -103,15 +103,18 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
 def make_signal_windows_ref(fn):
     r"""Wrapper for signal window references.
 
-    Particularly used for window references that don't have a matching signature with
+    Discards keyword arguments for window reference functions that don't have a matching signature with
     torch, e.g., gaussian window.
     """
 
-    def _fn(*args, **kwargs):
-        # Remove torch-specific kwargs
-        for torch_key in {"device", "layout", "dtype", "requires_grad"}:
-            if torch_key in kwargs:
-                kwargs.pop(torch_key)
+    def _fn(
+        *args,
+        dtype=None,
+        device=None,
+        layout=torch.strided,
+        requires_grad=False,
+        **kwargs,
+    ):
         return fn(*args, **kwargs)
 
     return _fn
