@@ -17,7 +17,7 @@
 #define TEST_PACKED_ROW_BLOCK_SIZEXCOL_BLOCK_SIZE_SPARSE_OP(MR, \
     NR, row_block_size, col_block_size, \
     prepacking_kernel, compute_kernel_w32, compute_kernel_w16, compute_kernel_w8) \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -38,7 +38,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
 \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4_strided_a) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4_strided_a) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -60,7 +60,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4_strided_c) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4_strided_c) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -82,7 +82,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4_qmin128) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4_qmin128) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -104,7 +104,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4_qmax128) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4_qmax128) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -126,7 +126,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4_azp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4_azp0) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -148,7 +148,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4_bzp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4_bzp0) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -170,7 +170,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_4_nozp) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_4_nozp) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -193,7 +193,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -214,7 +214,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8_strided_a) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8_strided_a) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -236,7 +236,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8_strided_c) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8_strided_c) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -258,7 +258,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8_qmin128) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8_qmin128) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -280,7 +280,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8_qmax128) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8_qmax128) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -302,7 +302,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8_azp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8_azp0) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -324,7 +324,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8_bzp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8_bzp0) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -346,7 +346,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_lt_8_nozp) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_lt_8_nozp) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -369,7 +369,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -390,7 +390,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8_strided_a) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8_strided_a) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -412,7 +412,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8_strided_c) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8_strided_c) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -434,7 +434,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8_qmin128) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8_qmin128) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -456,7 +456,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8_qmax128) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8_qmax128) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -478,7 +478,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8_azp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8_azp0) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -500,7 +500,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8_bzp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8_bzp0) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -522,7 +522,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_eq_8_nozp) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_eq_8_nozp) { \
   TEST_REQUIRES_ARM_NEON; \
   GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
       .mr(MR) \
@@ -545,7 +545,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
       compute_kernel_w8); \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_gt_8) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_gt_8) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 9; k < 16; k++) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -568,7 +568,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_gt_8_strided_a) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_gt_8_strided_a) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 9; k < 16; k++) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -592,7 +592,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_gt_8_strided_c) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_gt_8_strided_c) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 9; k < 16; k++) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -616,7 +616,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_gt_8_azp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_gt_8_azp0) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 9; k < 16; k++) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -640,7 +640,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_gt_8_bzp0) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_gt_8_bzp0) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 9; k < 16; k++) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -664,7 +664,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_gt_8_nozp) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_gt_8_nozp) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 9; k < 16; k++) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -689,7 +689,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_gt_8_subtile) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_gt_8_subtile) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 9; k < 16; k++) { \
     for (uint32_t m = 1; m <= MR; m++) { \
@@ -717,7 +717,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_div_8) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_div_8) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 16; k < 128; k += 8) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -740,7 +740,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_div_8_strided_a) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_div_8_strided_a) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 16; k < 128; k += 8) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -764,7 +764,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_div_8_strided_c) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_div_8_strided_c) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 16; k < 128; k += 8) { \
     GemmBlockSparseMicrokernelTester tester = GemmBlockSparseMicrokernelTester() \
@@ -788,7 +788,7 @@ TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARC
   } \
 } \
  \
-TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH3232_NEON, packedA_k_div_8_subtile) { \
+TEST(Q8GEMM__##MR ## x ##NR ## c##row_block_size ## x ##col_block_size ## __AARCH32_NEON, packedA_k_div_8_subtile) { \
   TEST_REQUIRES_ARM_NEON; \
   for (size_t k = 16; k < 128; k += 24) { \
     for (uint32_t m = 1; m <= MR; m++) { \
