@@ -183,9 +183,9 @@ def make_signal_windows_opinfo(
             ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestSchemaCheckModeOpInfo"
+                "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
-                dtypes=[torch.float16]
+                dtypes=[torch.float16],
             ),
             *skips,
         ),
