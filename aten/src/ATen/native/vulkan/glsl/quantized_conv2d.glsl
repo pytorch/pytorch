@@ -2,6 +2,10 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+// TILE_SIZE = (1, 1, 1)
+// WEIGHT_STORAGE = IMAGE
+// WEIGHT_STORAGE_LAYOUT = OC4,H,IC4,W,4ic,4oc
+
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */

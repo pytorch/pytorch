@@ -2,6 +2,10 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+// TILE_SIZE = (2, 2, 1)
+// WEIGHT_STORAGE = IMAGE
+// WEIGHT_STORAGE_LAYOUT = OC4,IC4,4ic,4oc
+
 /*
  * Output Image
  */

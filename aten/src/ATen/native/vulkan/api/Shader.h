@@ -3,6 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Types.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <c10/util/hash.h>
 
@@ -70,6 +71,24 @@ struct ShaderSource final {
 };
 
 bool operator==(const ShaderSource& _1, const ShaderSource& _2);
+
+struct ShaderInfo final {
+  ShaderSource shader_src;
+  c10::SmallVector<uint32_t, 4> tile_size;
+  StorageType weight_storage_type{StorageType::Unknown};
+  std::string weight_storage_layout;
+
+  explicit ShaderInfo() = default;
+  explicit ShaderInfo(std::string, const char*);
+  explicit ShaderInfo(
+      std::string,
+      const uint32_t*,
+      const uint32_t,
+      const std::vector<VkDescriptorType>&,
+      const std::vector<uint32_t>& tile_size,
+      const StorageType weight_storage_type,
+      const std::string weight_storage_layout);
+};
 
 class ShaderModule final {
  public:

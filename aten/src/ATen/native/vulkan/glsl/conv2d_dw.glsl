@@ -2,6 +2,11 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+// TILE_SIZE = (1, 1, 1)
+// WEIGHT_STORAGE = IMAGE
+// WEIGHT_STORAGE_LAYOUT = OC4,H,IC,W,4oc
+// Note that for DW kernel IC = 1 so the weight layout is really OC4, H, W, 4oc
+
 layout(std430) buffer;
 
 /*
