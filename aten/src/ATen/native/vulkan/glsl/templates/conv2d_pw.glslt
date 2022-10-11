@@ -1,8 +1,4 @@
-#version 450 core
-#define PRECISION $precision
-#define FORMAT $format
-
-// TILE_SIZE = (2, 2, 1)
+// TILE_SIZE = ($TILE_SIZE_X, $TILE_SIZE_Y, 1)
 // WEIGHT_STORAGE = IMAGE
 // WEIGHT_STORAGE_LAYOUT = OC4,IC4,4ic,4oc
 
@@ -46,10 +42,69 @@ uBlock;
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 /*
- * Computes a 2D pointwise convolution of a 2x2 output tile. Calculating an
- * output tile for pointwise convolution is more efficient because the kernel
- * size is only 1x1, making it much easier to re-use loaded texels from uKernel.
+ * For explanation on how this shader works, see below for tile size of 2x2
  */
+void main() {
+  const ivec3 gpos = ivec3(gl_GlobalInvocationID);
+
+  ivec3 pos[$TILE_SIZE_X * $TILE_SIZE_Y];
+  for (int y = 0, i = 0; y < $TILE_SIZE_Y; ++y) {
+    for (int x = 0; x < $TILE_SIZE_X; ++x) {
+      pos[i] = ivec3(gpos.x * $TILE_SIZE_X + x, gpos.y * $TILE_SIZE_Y + y, gpos.z);
+      i++;
+    }
+  }
+
+  if (any(greaterThanEqual(pos[0], uBlock.out_extents.xyz))) {
+    return;
+  }
+
+  ivec2 ipos[$TILE_SIZE_X * $TILE_SIZE_Y];
+  for (int i = 0; i < $TILE_SIZE_X * $TILE_SIZE_Y; ++i) {
+    ipos[i] = pos[i].xy * uBlock.stride - uBlock.padding;
+  }
+
+  vec4 sum[$TILE_SIZE_X * $TILE_SIZE_Y];
+  sum[0] = texelFetch(uBias, ivec3(gpos.z, 0, 0), 0);
+  for (int i = 1; i < $TILE_SIZE_X * $TILE_SIZE_Y; ++i) {
+    sum[i] = sum[0];
+  }
+
+  const int ic_aligned = uBlock.overlay_region.z;
+  for (int z = 0, z4 = 0; z < ic_aligned; z += 4, ++z4) {
+    vec4 in_tex[$TILE_SIZE_X * $TILE_SIZE_Y];
+    const vec4 ktex_0 = texelFetch(uKernel, ivec3(z + 0, gpos.z, 0), 0);
+    const vec4 ktex_1 = texelFetch(uKernel, ivec3(z + 1, gpos.z, 0), 0);
+    const vec4 ktex_2 = texelFetch(uKernel, ivec3(z + 2, gpos.z, 0), 0);
+    const vec4 ktex_3 = texelFetch(uKernel, ivec3(z + 3, gpos.z, 0), 0);
+
+    for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+      in_tex[i] = texelFetch(uInput, ivec3(ipos[i], z4), 0);
+    }
+
+    for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+      sum[i] = fma(in_tex[i].xxxx, ktex_0, sum[i]);
+      sum[i] = fma(in_tex[i].yyyy, ktex_1, sum[i]);
+      sum[i] = fma(in_tex[i].zzzz, ktex_2, sum[i]);
+      sum[i] = fma(in_tex[i].wwww, ktex_3, sum[i]);
+    }
+  }
+
+  for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+    if (all(lessThan(pos[i], uBlock.out_extents.xyz))) {
+      imageStore(
+          uOutput,
+          pos[i],
+          clamp(sum[i], uBlock.clamp_thresh.x, uBlock.clamp_thresh.y));
+    }
+  }
+}
+
+
+/*
+ * Following is an example of a 2D pointwise convolution of a 2x2 output tile. 
+ * Template parameters substituation above with TILE_SIZE_X=2 and TILE_SIZE_Y=2
+ * should code something similar to below
 void main() {
   const ivec3 gpos = ivec3(gl_GlobalInvocationID);
 
@@ -147,3 +202,4 @@ void main() {
     }
   }
 }
+*/
