@@ -228,7 +228,7 @@ jobs:
 
   check-labels:
     name: Check labels
-    runs-on: linux.20_04.16x
+    runs-on: ubuntu-20.04
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
