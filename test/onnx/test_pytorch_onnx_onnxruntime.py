@@ -9075,7 +9075,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"output_1": [1]},
         )
 
-    @skipScriptTest(min_opset_version=11)  # dynamic split support addded in 11
+    @skipScriptTest(
+        skip_before_opset_version=11, reason="dynamic split support addded in 11"
+    )
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
