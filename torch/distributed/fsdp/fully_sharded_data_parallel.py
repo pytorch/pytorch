@@ -151,15 +151,20 @@ class ShardingStrategy(Enum):
               ``DistributedDataParallel`` API. The gradients are synchronized
               via all-reduce after the backward computation. The unsharded
               optimizer states are updated locally.
-    HYBRID_SHARD(future support): Apply ``FULL_SHARD`` intra-node and
-                                  ``NO_SHARD`` inter-node.
+    HYBRID_SHARD: Apply ``FULL_SHARD`` intra-node and
+                  ``NO_SHARD`` inter-node. Note that if this strategy is
+                  selected, user is expected to pass in the process group
+                  over which to shard over as ``process_group`` argument into
+                  FSDP, usually a group over a single node, which can be generated
+                  via ``dist.new_subgroups()``. Internally, FSDP will create the
+                  appropriate inter-node process groups over which to replicate
+                  the sharded model.
 
     """
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
-    # TODO
-    # HYBRID_SHARD = auto()
+    HYBRID_SHARD = auto()
 
 
 @dataclass
@@ -761,6 +766,7 @@ sharding_strategy_map = {
     ShardingStrategy.NO_SHARD: HandleShardingStrategy.NO_SHARD,
     ShardingStrategy.FULL_SHARD: HandleShardingStrategy.FULL_SHARD,
     ShardingStrategy.SHARD_GRAD_OP: HandleShardingStrategy.SHARD_GRAD_OP,
+    ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
 }
 
 
@@ -842,11 +848,18 @@ class FullyShardedDataParallel(nn.Module):
         module (nn.Module):
             module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
-            process group for sharding
+            process group over which to shard wrapped modules over.
         sharding_strategy (Optional[ShardingStrategy]):
             Config sharding algorithm, different sharding algorithm has trade
             off between memory saving and communication overhead. ``FULL_SHARD``
-            will be chosen if sharding_strategy is not specified.
+            will be chosen if sharding_strategy is not specified. Note that if
+            ``HYBRID_SHARD`` is specified, user is expected to pass in a process
+            group over which to shard over, usually a process group over a
+            single node, which can be generated via ``dist.new_subgroups()``. In
+            addition, if ``HYBRID_SHARD`` is specified it must be consistent across
+            all FSDP instances that belong to the same root, i.e. mixing and matching
+            sharding strategies including ``HYBRID_SHARD`` is unsupported at the
+            moment.
         cpu_offload (Optional[CPUOffload]):
             CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
@@ -1858,6 +1871,35 @@ class FullyShardedDataParallel(nn.Module):
         for handle in self._handles:
             self._init_param_attributes(handle)
         self._exec_order_data.init(self, self.process_group)
+        # Initialize inter-node process group for hybrid shard comm. We assume
+        # passed in process group is the process group over which the model is
+        # sharded, and initialize the iter-node PG here for shard replication.
+        if self.sharding_strategy == ShardingStrategy.HYBRID_SHARD:
+            assert self._is_root
+            sharding_backend = dist.get_backend(self.process_group)
+            # TODO - we are using the overall world size here, but user may wish
+            # to tune this.
+            world_size = dist.get_world_size()
+            # Assuming fully homogeneous setup
+            num_devices = torch.cuda.device_count()
+            num_distinct_nodes = world_size // num_devices
+            my_local_rank = (dist.get_rank() % num_devices)
+            for local_rank in range(num_devices):
+                ranks_for_inter_group = [
+                    local_rank + (i * num_devices) for i in range(num_distinct_nodes)
+                ]
+                # every rank always needs to call dist.new_group
+                grp = dist.new_group(
+                    ranks=ranks_for_inter_group, backend=sharding_backend
+                )
+                if local_rank == my_local_rank:
+                    self._inter_node_pg = grp
+                    print(
+                        f"Global rank {dist.get_rank()} with local_rank {local_rank} assigned to inter-group with ranks {ranks_for_inter_group} "
+                    )
+                    self._inter_node_averaging_state = default_hooks.DefaultState(
+                        process_group=self._inter_node_pg
+                    )
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances
         inconsistent_limit_all_gathers = False
@@ -1871,6 +1913,13 @@ class FullyShardedDataParallel(nn.Module):
                     "set yet or should have been set to `False`"
                 )
                 fsdp_module._is_root = False
+                if self.sharding_strategy == ShardingStrategy.HYBRID_SHARD:
+                    assert hasattr(self, '_inter_node_pg')
+                    assert hasattr(self, '_inter_node_averaging_state')
+                    fsdp_module._inter_node_pg = self._inter_node_pg
+                    fsdp_module._inter_node_averaging_state = default_hooks.DefaultState(
+                        process_group=fsdp_module._inter_node_pg,
+                    )
                 fsdp_module._streams = self._streams
                 fsdp_module._exec_order_data = self._exec_order_data
                 if fsdp_module.limit_all_gathers != self.limit_all_gathers:
@@ -2756,7 +2805,9 @@ class FullyShardedDataParallel(nn.Module):
             # for backward computation (though this may not be true)
             free_unsharded_flat_params = [
                 not self._is_root
-                and handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
+                and handle._config.sharding_strategy in [
+                    HandleShardingStrategy.FULL_SHARD, HandleShardingStrategy.HYBRID_SHARD
+                ]
                 for handle in self._handles
             ]
             reshard_fn = functools.partial(
@@ -3487,6 +3538,10 @@ class FullyShardedDataParallel(nn.Module):
                     input_flattened = F.pad(grad_flatten, [0, num_pad])
                     output = torch.zeros_like(chunks[0])
                     self._communication_hook(self._communication_hook_state, input_flattened, output)
+                    if self.sharding_strategy == ShardingStrategy.HYBRID_SHARD:
+                        torch.cuda.synchronize()
+                        default_hooks.allreduce_hook(state=self._inter_node_averaging_state, grad=output)
+                        torch.cuda.synchronize()
 
                     self._cast_grad_to_param_dtype(output, param)
 
@@ -3580,7 +3635,10 @@ class FullyShardedDataParallel(nn.Module):
     def _should_free_unsharded_flat_param(self, handle: FlatParamHandle):
         return (
             (self._sync_gradients and handle.uses_sharded_strategy)
-            or handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
+            or handle._config.sharding_strategy in [
+                HandleShardingStrategy.FULL_SHARD,
+                HandleShardingStrategy.HYBRID_SHARD,
+            ]
         )
 
     def _queue_wait_for_post_backward(self) -> None:
