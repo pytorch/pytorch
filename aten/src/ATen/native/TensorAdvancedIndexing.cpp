@@ -1365,7 +1365,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  auto result = grad.new_zeros(self.sizes());
+  auto result = grad.new_zeros_symint(self.sym_sizes());
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if index tensor is a Tensor Subclass.
   if (isTensorSubclassLike(index)) {

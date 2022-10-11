@@ -875,6 +875,8 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
+TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
+
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
@@ -908,7 +910,7 @@ TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
-    num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "3"))
+    num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
     # other libraries take up about 11% of space per process
     torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
@@ -938,13 +940,11 @@ if TEST_WITH_TORCHDYNAMO:
     torchdynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
     torchdynamo.config.cache_size_limit = 8
-
-if TEST_WITH_TORCHINDUCTOR:
-    import torchdynamo
-    import torchinductor.config
-    torchdynamo.config.raise_on_assertion_error = True
-    torchinductor.config.triton.autotune = False  # too slow
-    torchinductor.config.fallback_random = True  # fallback to reduce randomness
+    if TEST_WITH_TORCHINDUCTOR:
+        import torchinductor.config
+        torchdynamo.config.raise_on_assertion_error = True
+        torchinductor.config.triton.autotune = False  # too slow
+        torchinductor.config.fallback_random = True  # fallback to reduce randomness
 
 def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
     def decorator(fn):
@@ -1480,7 +1480,6 @@ class CudaMemoryLeakCheck():
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
-                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.empty_cache()
                 break
 
@@ -1502,8 +1501,6 @@ class CudaMemoryLeakCheck():
         discrepancy_detected = False
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
-            # avoid counting cublasWorkspace allocations
-            torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:

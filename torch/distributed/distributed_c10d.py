@@ -1328,6 +1328,12 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
         None, if not async_op or if not part of the group
 
     """
+    warnings.warn(
+        "torch.distributed.broadcast_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast_multigpu")
         return
@@ -1425,6 +1431,12 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
         None, if not async_op or if not part of the group
 
     """
+    warnings.warn(
+        "torch.distributed.all_reduce_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         return
 
@@ -1551,6 +1563,11 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group.
 
     """
+    warnings.warn(
+        "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+    )
     _check_tensor_list(tensors, "tensor")
     _ensure_all_tensors_same_dtype(tensors)
     if _rank_not_in_group(group):
@@ -1609,6 +1626,12 @@ def reduce_multigpu(
         None, otherwise
 
     """
+    warnings.warn(
+        "torch.distributed.reduce_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("reduce_multigpu")
         return
@@ -1722,6 +1745,12 @@ def all_gather_multigpu(
         None, if not async_op or if not part of the group
 
     """
+    warnings.warn(
+        "torch.distributed.all_gather_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather_multigpu")
         return
@@ -2398,6 +2427,11 @@ def all_gather_coalesced(
     performance improvements but users of this function should take extra care
     to ensure that each node passes in tensors whose shapes match across nodes.
     """
+    warnings.warn(
+        "torch.distributed.all_gather_coalesced will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+    )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
     if _rank_not_in_group(group):
@@ -2522,6 +2556,27 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
+    .. note:: Note that all Tensors in scatter_list must have the same size.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> tensor_size = 2
+        >>> t_ones = torch.ones(tensor_size)
+        >>> t_fives = torch.ones(tensor_size) * 5
+        >>> output_tensor = torch.zeros(tensor_size)
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     # Only tensors, all of which must be the same size.
+        >>>     scatter_list = [t_ones, t_fives]
+        >>> else:
+        >>>     scatter_list = None
+        >>> dist.scatter(output_tensor, scatter_list, src=0)
+        >>> # Rank i gets scatter_list[i]. For example, on rank 1:
+        >>> output_tensor
+        tensor([5., 5.])
+
     """
     _check_single_tensor(tensor, "tensor")
 
@@ -2618,6 +2673,12 @@ def reduce_scatter_multigpu(
         None, if not async_op or if not part of the group.
 
     """
+    warnings.warn(
+        "torch.distributed.reduce_scatter_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("reduce_scatter_multigpu")
         return
