@@ -937,6 +937,11 @@ if(USE_ASAN)
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
 endif()
 
+if(USE_TSAN)
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=thread")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=thread")
+endif()
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
   include(CheckCSourceCompiles)
   check_c_source_compiles("#include <arm_neon.h>
@@ -1133,10 +1138,6 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(DIRECTORY
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
-      DESTINATION share/cmake/Caffe2/
-      COMPONENT dev)
-  install(FILES
-      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
