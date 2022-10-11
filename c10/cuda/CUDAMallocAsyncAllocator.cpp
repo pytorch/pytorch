@@ -721,7 +721,7 @@ void resetPeakStats(int device) {
       cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
 }
 
-std::vector<SegmentInfo> snapshot() {
+SnapshotInfo snapshot() {
   TORCH_CHECK(
       false,
       "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
