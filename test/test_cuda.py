@@ -3569,6 +3569,7 @@ torch.cuda.synchronize()
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
+                     IS_WINDOWS or # appears to still be broken on Windows as of 11.4+
                      int(torch.version.cuda.split(".")[0]) < 11 or
                      (int(torch.version.cuda.split(".")[0]) == 11 and
                       int(torch.version.cuda.split(".")[1]) < 4),
