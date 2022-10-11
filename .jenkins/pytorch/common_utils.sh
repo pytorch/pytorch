@@ -123,6 +123,10 @@ function clone_pytorch_xla() {
   fi
 }
 
+function install_filelock() {
+  pip_install filelock
+}
+
 function install_torchdynamo() {
   local commit
   commit=$(get_pinned_commit torchdynamo)
