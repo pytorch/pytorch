@@ -234,7 +234,7 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
   std::vector<Dimname> outnames;
   auto tensor_names = tensor.names();
   for (const auto d : c10::irange(tensor.dim())) {
-    if (tensor.sizes()[d] != 1) {
+    if (tensor.sym_sizes()[d] != 1) {
       outnames.push_back(tensor_names[d]);
     }
   }
