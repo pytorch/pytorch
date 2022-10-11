@@ -226,6 +226,38 @@ jobs:
             false
           fi
 
+  check_labels:
+    runs-on: linux.20_04.16x
+    steps:
+      - name: Check out repo
+        id: checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+          architecture: x64
+          cache: 'pip'
+          cache-dependency-path: |
+            **/requirements.txt
+            **/.github/requirements-gha-cache.txt
+        run: |
+          pip install -r requirements.txt
+          pip install boto3==1.19.12
+          pip install pyyaml==6.0
+
+      - name: Check labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+        run: |
+          set -ex
+          python3 .github/scripts/check_labels.py "${PR_NUM}"
+
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
