@@ -25,6 +25,7 @@ try:
     import sympy
 
     importlib.import_module("functorch")
+    importlib.import_module("filelock")
 
     import torch._inductor.config
     from functorch.compile import config as functorch_config
@@ -43,7 +44,7 @@ except (ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch")
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 
 HAS_CPU = False
@@ -3873,4 +3874,4 @@ if HAS_CUDA:
 if __name__ == "__main__":
     from torch._dynamo.testing import run_tests
 
-    run_tests()
+    run_tests(needs="filelock")

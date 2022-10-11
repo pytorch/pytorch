@@ -4,6 +4,7 @@ import functools
 import importlib
 import logging
 import os.path
+import sys
 import types
 import unittest
 from unittest.mock import patch
@@ -36,7 +37,12 @@ def run_tests(needs=()):
         TEST_WITH_TORCHDYNAMO,
     )
 
-    if TEST_WITH_TORCHDYNAMO or IS_WINDOWS or TEST_WITH_CROSSREF:
+    if (
+        TEST_WITH_TORCHDYNAMO
+        or IS_WINDOWS
+        or TEST_WITH_CROSSREF
+        or sys.version_info >= (3, 11)
+    ):
         return  # skip testing
 
     if isinstance(needs, str):
