@@ -1596,6 +1596,5 @@ Tensor rand(
 
 DEFINE_DISPATCH(kaiser_window_stub);
 
-
 } // namespace native
 } // namespace at

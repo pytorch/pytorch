@@ -457,7 +457,7 @@ static void nan_to_num_kernel(
   });
 }
 
-static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta) {
+static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
     const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
     cpu_kernel(iter, [=](scalar_t a){
