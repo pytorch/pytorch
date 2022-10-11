@@ -1,4 +1,7 @@
+import warnings
+
 import torch
+import numpy as np
 
 from torch import Tensor
 from torch.types import _dtype, _device, _layout
@@ -35,6 +38,20 @@ def _window_function_checks(function_name: str, window_length: int, dtype: _dtyp
         raise RuntimeError(f'{function_name} expects floating point dtypes, got: {dtype}')
 
 
+def _window_length_check(desired_length, output_length):
+    r"""Performs window length check.
+     This function should be called after computing windows with `torch.arange`
+     if the step is floating point.
+
+     Args:
+         desired_length (int): desired length of the window.
+         output_length (int): output length of the window.
+     """
+    if desired_length != output_length:
+        warnings.warn(('The difference in length is subject to floating points rounding errors.'
+                       f'Expected length: {output_length}. Output length: {desired_length}'))
+
+
 def exponential(window_length: int,
                 periodic: bool = True,
                 center: float = None,
@@ -46,7 +63,7 @@ def exponential(window_length: int,
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('exponential_window', window_length, dtype, layout)
+    _window_function_checks('exponential', window_length, dtype, layout)
 
     if window_length == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
@@ -57,16 +74,24 @@ def exponential(window_length: int,
     if periodic and center is not None:
         raise ValueError('Center must be \'None\' for periodic equal True')
 
+    if tau <= 0:
+        raise ValueError(f'Tau cannot must be positive, got: {tau} instead.')
+
     if center is None:
         center = -(window_length if periodic else window_length - 1) / 2.0
 
-    k = torch.arange(start=center,
-                     end=center + window_length,
-                     dtype=dtype, layout=layout,
+    constant = 1 / tau
+    k = torch.arange(center * constant,
+                     (center * constant + window_length * constant),  # Distributive property does not apply
+                     constant,
+                     dtype=dtype,
+                     layout=layout,
                      device=device,
                      requires_grad=requires_grad)
 
-    return torch.exp(-torch.abs(k) / tau)
+    _window_length_check(window_length, k.size()[0])
+
+    return torch.exp(-torch.abs(k))
 
 
 def cosine(window_length: int,
@@ -78,7 +103,7 @@ def cosine(window_length: int,
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('cosine_window', window_length, dtype, layout)
+    _window_function_checks('cosine', window_length, dtype, layout)
 
     if window_length == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
@@ -86,19 +111,27 @@ def cosine(window_length: int,
     if window_length == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    start = .5
-    k = torch.arange(start,
-                     start + window_length,
+    start = 0.5
+    constant = torch.pi / (window_length + 1 if periodic else window_length)
+
+    """
+    Note that non-integer step is subject to floating point rounding errors when comparing against end; 
+    to avoid inconsistency, we advise adding a small epsilon to end in such cases.
+    """
+    k = torch.arange(start * constant,
+                     (start * constant + window_length * constant),  # Distributive property does not apply
+                     step=constant,
                      dtype=dtype,
                      layout=layout,
                      device=device,
                      requires_grad=requires_grad)
-    return torch.sin(torch.pi / (window_length + 1 if periodic else window_length) * k)
+
+    return torch.sin(k)
 
 
 def gaussian(window_length: int,
              periodic: bool = True,
-             std: float = 0.5,
+             std: float = 1.,
              dtype: _dtype = None,
              layout: _layout = torch.strided,
              device: _device = None,
@@ -106,7 +139,7 @@ def gaussian(window_length: int,
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('cosine_window', window_length, dtype, layout)
+    _window_function_checks('gaussian', window_length, dtype, layout)
 
     if window_length == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
@@ -116,11 +149,20 @@ def gaussian(window_length: int,
 
     start = -(window_length if periodic else window_length - 1) / 2.0
 
-    k = torch.arange(start,
-                     start + window_length,
+    constant = 1 / (std * np.sqrt(2))
+
+    """
+    Note that non-integer step is subject to floating point rounding errors when comparing against end; 
+    to avoid inconsistency, we advise adding a small epsilon to end in such cases.
+    """
+    k = torch.arange(start * constant,
+                     (start * constant + window_length * constant),  # Distributive property does not apply here.
+                     step=constant,
                      dtype=dtype,
                      layout=layout,
                      device=device,
                      requires_grad=requires_grad)
 
-    return torch.exp(-(k / std) ** 2 / 2)
+    _window_length_check(window_length, k.size()[0])
+
+    return torch.exp(-k ** 2)
