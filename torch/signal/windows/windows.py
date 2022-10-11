@@ -1,6 +1,8 @@
 import torch
+import numpy as np
 
 from torch import Tensor
+from torch._prims_common import is_float_dtype, is_complex_dtype
 from torch._torch_docs import factory_common_args
 from torch.types import _dtype, _device, _layout
 
@@ -40,18 +42,11 @@ def _window_function_checks(function_name: str, window_length: int, dtype: _dtyp
          dtype (:class:`torch.dtype`): the desired data type of the window tensor.
          layout (:class:`torch.layout`): the desired layout of the window tensor.
      """
-
-    def is_floating_type(t: _dtype) -> bool:
-        return t == torch.float32 or t == torch.bfloat16 or t == torch.float64 or t == torch.float16
-
-    def is_complex_type(t: _dtype) -> bool:
-        return t == torch.complex64 or t == torch.complex128 or t == torch.complex32
-
     if window_length < 0:
         raise ValueError(f'{function_name} requires non-negative window_length, got window_length={window_length}')
     if layout is not torch.strided:
-        raise ValueError(f'{function_name} is not implemented for sparse types, got: {layout}')
-    if not is_floating_type(dtype) and not is_complex_type(dtype):
+        raise ValueError(f'{function_name} is implemented for strided tensors only, got: {layout}')
+    if not is_float_dtype(dtype):
         raise ValueError(f'{function_name} expects floating point dtypes, got: {dtype}')
 
 
@@ -68,22 +63,22 @@ The exponential window is defined as follows:
     r"""
 
 Args:
-    window_length (int): the length of the output window.
-        In other words, the number of points of the ee window.
-    periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
-        If `False`, returns a symmetric window suitable for use in filter design. Default: `True`.
-    center (float, optional): his value defines where the center of the window will be located.
+    M (int): the length of the output window.
+        In other words, the number of points of the exponential window.
+    center (float, optional): where the center of the window will be located.
         In other words, at which sample the peak of the window can be found.
         Default: `window_length / 2` if `periodic` is `True` (default), else `(window_length - 1) / 2`.
     tau (float, optional): the decay value.
         For `center = 0`, it's suggested to use :math:`\tau = -\frac{(M - 1)}{\ln(x)}`,
         if `x` is the fraction of the window remaining at the end. Default: 1.0.
+    sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
+        If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.
     """ +
     r"""
 
 .. note::
     The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
-    and `periodic` is `False`.
+    and `sym` is `True`.
 
 Keyword args:
     {dtype}
@@ -105,34 +100,27 @@ Examples:
         **factory_common_args
     ),
 )
-def exponential(window_length: int,
-                periodic: bool = True,
-                center: float = None,
-                tau: float = 1.0,
-                *,
-                dtype: _dtype = None,
-                layout: _layout = torch.strided,
-                device: _device = None,
-                requires_grad: bool = False) -> Tensor:
+def exponential(M: int, center: float = None, tau: float = 1.0, sym: bool = True, *, dtype: _dtype = None,
+                layout: _layout = torch.strided, device: _device = None, requires_grad: bool = False) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('exponential', window_length, dtype, layout)
+    _window_function_checks('exponential', M, dtype, layout)
 
-    if window_length == 0:
+    if M == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if window_length == 1:
+    if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
-
-    if periodic and center is not None:
-        raise ValueError('Center must be \'None\' for periodic equal True')
 
     if tau <= 0:
         raise ValueError(f'Tau must be positive, got: {tau} instead.')
 
+    if not sym and center is not None:
+        raise ValueError('Center must be \'None\' for non-symmetric windows')
+
     if center is None:
-        center = -(window_length if periodic else window_length - 1) / 2.0
+        center = -(M if not sym else M - 1) / 2.0
 
     constant = 1 / tau
 
@@ -141,7 +129,7 @@ def exponential(window_length: int,
     thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
     k = torch.arange(start=center * constant,
-                     end=(center + (window_length - 1)) * constant + constant / 2,
+                     end=(center + (M - 1)) * constant + constant / 2,
                      step=constant,
                      dtype=dtype,
                      layout=layout,
@@ -166,14 +154,14 @@ Where `M` is the length of the window.
     r"""
 
 Args:
-    window_length (int): the length of the output window.
+    M (int): the length of the output window.
         In other words, the number of points of the cosine window.
-    periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
-        If `False`, returns a symmetric window suitable for use in filter design. Default: `True`.
+    sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
+        If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.
 
 .. note::
     The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
-    and `periodic` is `False`.
+    and `sym` is `True`.
 
 Keyword args:
     {dtype}
@@ -195,8 +183,8 @@ Examples:
         **factory_common_args
     ),
 )
-def cosine(window_length: int,
-           periodic: bool = True,
+def cosine(M: int,
+           sym: bool = True,
            *,
            dtype: _dtype = None,
            layout: _layout = torch.strided,
@@ -205,23 +193,23 @@ def cosine(window_length: int,
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('cosine', window_length, dtype, layout)
+    _window_function_checks('cosine', M, dtype, layout)
 
-    if window_length == 0:
+    if M == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if window_length == 1:
+    if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
     start = 0.5
-    constant = torch.pi / (window_length + 1 if periodic else window_length)
+    constant = torch.pi / (M + 1 if not sym else M)
 
     """
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
     thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
     k = torch.arange(start=start * constant,
-                     end=(start + (window_length - 1)) * constant + constant / 2,
+                     end=(start + (M - 1)) * constant + constant / 2,
                      step=constant,
                      dtype=dtype,
                      layout=layout,
@@ -243,16 +231,15 @@ The gaussian window is defined as follows:
     r"""
 
 Args:
-    window_length (int): the length of the output window.
+    M (int): the length of the output window.
         In other words, the number of points of the cosine window.
-    periodic (bool, optional): If `True`, returns a periodic window suitable for use in spectral analysis.
-        If `False`, returns a symmetric window suitable for use in filter design. Default: `True`
-    std (float, optional): the standard deviation of the gaussian. It controls how narrow or wide the window is.
-        Default: 0.5.
+    std (float): the standard deviation of the gaussian. It controls how narrow or wide the window is.
+    sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
+        If `True`, returns a symmetric window suitable for use in filter design. Default: `True`
 
 .. note::
     The window is normalized to 1 (maximum value is 1), however, the 1 doesn't appear if `M` is even
-    and `periodic` is `False`.
+    and `sym` is `True`.
 
 Keyword args:
     {dtype}
@@ -274,9 +261,9 @@ Examples:
         **factory_common_args
     ),
 )
-def gaussian(window_length: int,
-             periodic: bool = True,
-             std: float = 1.,
+def gaussian(M: int,
+             std: float,
+             sym: bool = True,
              *,
              dtype: _dtype = None,
              layout: _layout = torch.strided,
@@ -285,27 +272,27 @@ def gaussian(window_length: int,
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    _window_function_checks('gaussian', window_length, dtype, layout)
+    _window_function_checks('gaussian', M, dtype, layout)
 
-    if window_length == 0:
+    if M == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if window_length == 1:
+    if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
     if std <= 0:
         raise ValueError(f'Standard deviation must be positive, got: {std} instead.')
 
-    start = -(window_length if periodic else window_length - 1) / 2.0
+    start = -(M if not sym else M - 1) / 2.0
 
-    constant = 1 / (std * torch.sqrt(torch.tensor(2)).item())
+    constant = 1 / (std * np.sqrt(2))
 
     """
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
     thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
     k = torch.arange(start=start * constant,
-                     end=(start + (window_length - 1)) * constant + constant / 2,
+                     end=(start + (M - 1)) * constant + constant / 2,
                      step=constant,
                      dtype=dtype,
                      layout=layout,

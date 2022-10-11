@@ -1,5 +1,6 @@
 import random
 import unittest
+from functools import partial
 
 from itertools import product
 from typing import List
@@ -13,124 +14,126 @@ from torch.testing._internal.opinfo.core import (
     OpInfo,
     SampleInput,
 )
+from torch.testing._legacy import floating_types_and, floating_types
 
 if TEST_SCIPY:
     import scipy.signal
 
 
-def sample_inputs_window(op_info, device, dtype, requires_grad, *, kws=({},), **kwargs):
-    _kwargs = dict(
-        kwargs, **{"device": device, "dtype": dtype, "requires_grad": requires_grad}
-    )
-    sizes = [0, 1, 2, 5, 10, 50, 100, 1024, 2048]
-    for size, periodic, k in product(sizes, (True, False), kws):
-        yield SampleInput(size, periodic=periodic, **k, **_kwargs)
+def sample_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs):
+    r"""Base function used to create sample inputs for windows.
+
+    For additional required args you should use *args, as well as **kwargs for
+    additional keyword arguments.
+    """
+
+    # Test a window size of length zero and one.
+    # If it's either symmetric or not doesn't matter in these sample inputs.
+    for size in [0, 1]:
+        yield SampleInput(
+            size,
+            *args,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            **kwargs
+        )
+
+    # For sizes larger than 1 we need to test both symmetric and non-symmetric windows.
+    # Note: sample input tensors must be kept rather small.
+    sizes = [2, 5, 10, 50]
+    for size, sym in product(sizes, (True, False)):
+        yield SampleInput(
+            size,
+            *args,
+            sym=sym,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            **kwargs
+        )
 
 
 def sample_inputs_gaussian_window(op_info, device, dtype, requires_grad, **kwargs):
-    kws = [{"std": random.uniform(0, 3)} for _ in range(50)]
     yield from sample_inputs_window(
-        op_info, device, dtype, requires_grad, kws=kws, **kwargs
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        random.uniform(0, 3),  # std,
+        **kwargs
     )
 
 
-def sample_inputs_exponential_window(op_info, device, dtype, requires_grad, **kwargs):
-    kws = [{"center": None, "tau": random.uniform(0, 10)} for _ in range(50)]
-    yield from sample_inputs_window(
-        op_info, device, dtype, requires_grad, kws=kws, **kwargs
-    )
-
-
-def error_inputs_window(op_info, device, **kwargs):
-    tmp_kwargs = dict(
-        kwargs,
-        **{
-            "device": device,
-        },
-    )
-
+def error_inputs_window(op_info, device, *args, **kwargs):
+    # Tests for windows that have a negative size
     yield ErrorInput(
-        SampleInput(-1, kwargs=tmp_kwargs),
+        SampleInput(-1, *args, dtype=torch.float32, device=device, **kwargs),
         error_type=ValueError,
         error_regex="requires non-negative window_length, got window_length=-1",
     )
 
-    tmp_kwargs = dict(
-        kwargs,
-        **{
-            "layout": torch.sparse_coo,
-        },
-    )
-
+    # Tests for window tensors that are not torch.strided, for instance, torch.sparse_coo.
     yield ErrorInput(
-        SampleInput(3, kwargs=tmp_kwargs),
+        SampleInput(3, *args, layout=torch.sparse_coo, device=device, dtype=torch.float32, **kwargs),
         error_type=ValueError,
-        error_regex="is not implemented for sparse types, got: torch.sparse_coo",
+        error_regex="is implemented for strided tensors only, got: torch.sparse_coo",
     )
 
-    tmp_kwargs = kwargs
-    tmp_kwargs.update(
-        {
-            "dtype": torch.long,
-        }
-    )
-
+    # Tests for window tensors that are not floating point dtypes, for instance, torch.long.
     yield ErrorInput(
-        SampleInput(3, kwargs=tmp_kwargs),
+        SampleInput(3, *args, dtype=torch.long, device=device, **kwargs),
         error_type=ValueError,
         error_regex="expects floating point dtypes, got: torch.int64",
     )
 
 
 def error_inputs_exponential_window(op_info, device, **kwargs):
-    tmp_kwargs = dict(kwargs, **{"dtype": torch.float32})
+    # Yield common error inputs
+    yield from error_inputs_window(op_info, device, 0.5, **kwargs)
 
-    yield from error_inputs_window(op_info, device, **tmp_kwargs)
-
-    tmp_kwargs.update({"device": device})
-
-    tmp_kwargs = dict(tmp_kwargs, **{"tau": -1})
-
+    # Tests for negative decay values.
     yield ErrorInput(
-        SampleInput(3, kwargs=tmp_kwargs),
+        SampleInput(3, tau=-1, dtype=torch.float32, device=device, **kwargs),
         error_type=ValueError,
         error_regex="Tau must be positive, got: -1 instead.",
     )
 
-    tmp_kwargs = dict(tmp_kwargs, **{"center": 1})
-
+    # Tests for non-symmetric windows and a given center value.
     yield ErrorInput(
-        SampleInput(3, kwargs=tmp_kwargs),
+        SampleInput(3, center=1, sym=False, dtype=torch.float32, device=device),
         error_type=ValueError,
-        error_regex="Center must be 'None' for periodic equal True",
+        error_regex="Center must be 'None' for non-symmetric windows",
     )
 
 
 def error_inputs_gaussian_window(op_info, device, **kwargs):
-    tmp_kwargs = dict(kwargs, **{"dtype": torch.float32, "device": device})
+    # Yield common error inputs
+    yield from error_inputs_window(
+        op_info,
+        device,
+        0.5,  # std
+        **kwargs
+    )
 
-    yield from error_inputs_window(op_info, device, **kwargs)
-
-    tmp_kwargs = dict(tmp_kwargs, **{"std": -1})
-
+    # Tests for negative standard deviations
     yield ErrorInput(
-        SampleInput(3, kwargs=tmp_kwargs),
+        SampleInput(3, -1, dtype=torch.float32, device=device, **kwargs),
         error_type=ValueError,
         error_regex="Standard deviation must be positive, got: -1 instead.",
     )
 
 
 def make_signal_windows_opinfo(
-    name, variant_test_name, sample_inputs_func, error_inputs_func, *, skips=()
+        name, variant_test_name, ref, sample_inputs_func, error_inputs_func, *, skips=()
 ):
+    r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
         name=name,
         variant_test_name=variant_test_name,
-        ref=scipy.signal.get_window if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.float, torch.double, torch.long),
-        dtypesIfCUDA=all_types_and(
-            torch.float, torch.double, torch.bfloat16, torch.half, torch.long
-        ),
+        ref=ref if TEST_SCIPY else None,
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_func,
         error_inputs_func=error_inputs_func,
         supports_out=False,
@@ -141,10 +144,11 @@ def make_signal_windows_opinfo(
 
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
-        "signal.windows.cosine",
-        "signal.windows.cosine_default",
-        sample_inputs_window,
-        error_inputs_window,
+        name="signal.windows.cosine",
+        variant_test_name="signal.windows.cosine_default",
+        ref=scipy.signal.windows.cosine,
+        sample_inputs_func=sample_inputs_window,
+        error_inputs_func=error_inputs_window,
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -183,10 +187,11 @@ op_db: List[OpInfo] = [
         ),
     ),
     make_signal_windows_opinfo(
-        "signal.windows.exponential",
-        "signal.windows.exponential_default",
-        sample_inputs_exponential_window,
-        error_inputs_exponential_window,
+        name="signal.windows.exponential",
+        variant_test_name="signal.windows.exponential_default",
+        ref=scipy.signal.windows.exponential,
+        sample_inputs_func=partial(sample_inputs_window, tau=random.uniform(0, 10)),
+        error_inputs_func=error_inputs_exponential_window,
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -225,10 +230,11 @@ op_db: List[OpInfo] = [
         ),
     ),
     make_signal_windows_opinfo(
-        "signal.windows.gaussian",
-        "signal.windows.gaussian_default",
-        sample_inputs_gaussian_window,
-        error_inputs_gaussian_window,
+        name="signal.windows.gaussian",
+        variant_test_name="signal.windows.gaussian_default",
+        ref=scipy.signal.windows.gaussian,
+        sample_inputs_func=sample_inputs_gaussian_window,
+        error_inputs_func=error_inputs_gaussian_window,
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
