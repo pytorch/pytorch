@@ -4,6 +4,7 @@ import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from torch.fx.experimental.proxy_tensor import is_sym_node
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -387,6 +388,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     with torch.no_grad():
         with track_graph_compiling("joint"):
             fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
+            fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
+            # we only need to bookkeep the symints that are saved for bw, not any symints
+            # the user forward might have returned in its own output
+            fw_outs = fw_outs[_num_outs:]
+            symint_outs = [n for n in fw_outs if is_sym_node(n)]
+            _num_symints = len(symint_outs)
 
         if config.debug_graphs:
             print("====== Forward graph ======")
@@ -401,6 +408,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         compiled_fw = compiled_fw_func
         compiled_bw = None
         num_outs = _num_outs
+        num_symints = _num_symints
 
         @staticmethod
         @disable_torchdynamo
@@ -409,14 +417,21 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 CompiledFunction.compiled_fw, deduped_flat_tensor_args
             )
             num_outs = CompiledFunction.num_outs
-            ctx.save_for_backward(*fw_outs[num_outs:])
+            num_symints = CompiledFunction.num_symints
+            # Partitioners must put symint arguments at the end separate from tensor arguments
+            if num_symints > 0:
+                ctx.save_for_backward(*fw_outs[num_outs:-num_symints])
+                ctx.symints = fw_outs[-num_symints:]
+            else:
+                ctx.save_for_backward(*fw_outs[num_outs:])
+                ctx.symints = []
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
         @disable_torchdynamo
         def backward(ctx, *flat_args):
-            contiguous_args = [t.contiguous() for t in flat_args]
-            all_args = list(ctx.saved_tensors) + list(contiguous_args)
+            contiguous_args = [t.contiguous() if torch.is_tensor(t) else t for t in flat_args]
+            all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             if CompiledFunction.compiled_bw is None:
                 with track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
@@ -479,7 +494,7 @@ def create_aot_dispatcher_function(
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
-    with preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+    with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:
@@ -538,7 +553,7 @@ class PytreeThunk:
             return x
         return pytree.tree_unflatten(x, self.spec)
 
-KNOWN_TYPES = [torch.Tensor, int, str, float, bool]
+KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymIntNode, torch.SymFloatNode]
 
 
 def aot_function(

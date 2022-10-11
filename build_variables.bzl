@@ -659,6 +659,7 @@ def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
+    "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",

@@ -43,6 +43,17 @@ struct DisableFuncTorch {
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
 };
 
+struct MultithreadingEnabled {
+  MultithreadingEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
+  }
+  ~MultithreadingEnabled() {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
+  }
+  bool old_;
+};
+
 struct EnableTorchFunction {
   EnableTorchFunction()
       : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
@@ -354,6 +365,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_DisablePythonDispatcher")
       .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
+  py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
+      .def(py::init<bool>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
