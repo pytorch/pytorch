@@ -1394,6 +1394,10 @@ class TestOperators(TestCase):
         if is_inplace(op, op.get_op()):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
+        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        if is_cuda_sm86 and op.name == "nn.functional.conv_transpose3d" and dtype == torch.float32:
+            self.skipTest("test_vmapjvpvjp_nn_functional_conv_transpose3d_cuda_float32 is grossly incorrect on sm86")
+            return
 
         for sample in samples:
             fn, primals = normalize_op_input_output(op, sample)

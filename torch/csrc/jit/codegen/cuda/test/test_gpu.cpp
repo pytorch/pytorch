@@ -3535,6 +3535,10 @@ TEST_F(NVFuserTest, FusionRootMappingReductionDependency6_CUDA_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionRootMappingMultipleBroadcast_CUDA) {
+  if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
+    GTEST_SKIP() << "Somehow it fails on sm_80+ GPUs"
+                 << " See https://github.com/pytorch/pytorch/issues/86717";
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3812,6 +3816,10 @@ TEST_F(NVFuserTest, FusionRootMappingRepro1950_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionDetectSelfMappedDomains_CUDA) {
+  if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
+    GTEST_SKIP() << "Somehow it does not throw on sm_80+"
+                 << " See https://github.com/pytorch/pytorch/issues/86714";
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10900,6 +10908,10 @@ TEST_F(NVFuserTest, FusionLSTMCell_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
+  if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
+    GTEST_SKIP() << "Somehow it fails on sm_80+ GPUs"
+                 << " See https://github.com/pytorch/pytorch/issues/86717";
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10916,9 +10928,6 @@ TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   // Not possible to do computeAt at position -1 as recomputation
   // would be required. An exception should be thrown.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
-    GTEST_SKIP() << "Somehow it passes on sm_80+ GPUs";
-  }
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
 }
 

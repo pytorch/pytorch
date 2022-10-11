@@ -81,11 +81,11 @@ ViewInfo ViewInfo::chain(
     } else {
       // current_view has a view_func and but it's parent doesn't have one
       if (base.unsafeGetTensorImpl()->support_as_strided()) {
-        auto size = base.sizes().vec();
-        auto stride = base.strides().vec();
-        auto storage_offset = base.storage_offset();
+        auto size = base.sym_sizes().vec();
+        auto stride = base.sym_strides().vec();
+        auto storage_offset = base.sym_storage_offset();
         view_func = [=](const at::Tensor& root_base) {
-          auto temp = root_base.as_strided(size, stride, storage_offset);
+          auto temp = root_base.as_strided_symint(size, stride, storage_offset);
           return view_func(temp);
         };
       } else {
@@ -111,12 +111,12 @@ ViewInfo ViewInfo::chain(
     // if current_view doesn't have a view_func but it's parent has one
     // Copy parent view function to gain ownership
     auto prev_view_fn = view_fn_;
-    auto size = tensor.sizes().vec();
-    auto stride = tensor.strides().vec();
-    auto storage_offset = tensor.storage_offset();
+    auto size = tensor.sym_sizes().vec();
+    auto stride = tensor.sym_strides().vec();
+    auto storage_offset = tensor.sym_storage_offset();
     view_func = [=](const at::Tensor& root_base) {
       auto temp = prev_view_fn(root_base);
-      return temp.as_strided(size, stride, storage_offset);
+      return temp.as_strided_symint(size, stride, storage_offset);
     };
   }
 
