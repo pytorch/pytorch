@@ -50,6 +50,7 @@ argument, except for `torch.tensor`. This covers the following ops:
   * :func:`torch.eye`
   * :func:`torch.full`
   * :func:`torch.full_like`
+  * :func:`torch.cosine_window`
   * :func:`torch.hamming_window`
   * :func:`torch.hann_window`
   * :func:`torch.linspace`
