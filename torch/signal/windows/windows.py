@@ -89,8 +89,8 @@ Examples:
     tensor([0.0067, 0.0183, 0.0498, 0.1353, 0.3679, 1.0000, 0.3679, 0.1353, 0.0498,
     0.0183])
 
-    >>> # Generate a symmetric exponential window and decay factor equal to .5
-    >>> torch.signal.windows.exponential(10,periodic=False,tau=.5)
+    >>> # Generate a periodic exponential window and decay factor equal to .5
+    >>> torch.signal.windows.exponential(10,sym=False,tau=.5)
     tensor([1.2341e-04, 9.1188e-04, 6.7379e-03, 4.9787e-02, 3.6788e-01, 3.6788e-01,
     4.9787e-02, 6.7379e-03, 9.1188e-04, 1.2341e-04])
     """.format(
@@ -182,7 +182,7 @@ Examples:
     0.4154])
 
     >>> # Generate a symmetric cosine window.
-    >>> torch.signal.windows.cosine(10,periodic=False)
+    >>> torch.signal.windows.cosine(10,sym=False)
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540,
     0.1564])
 """.format(
@@ -260,8 +260,8 @@ Examples:
     tensor([1.9287e-22, 1.2664e-14, 1.5230e-08, 3.3546e-04, 1.3534e-01, 1.0000e+00,
     1.3534e-01, 3.3546e-04, 1.5230e-08, 1.2664e-14])
 
-    >>> # Generate a symmetric gaussian window and standard deviation equal to 0.9.
-    >>> torch.signal.windows.gaussian(10,periodic=False,std=0.9)
+    >>> # Generate a periodic gaussian window and standard deviation equal to 0.9.
+    >>> torch.signal.windows.gaussian(10,sym=False,std=0.9)
     tensor([3.7267e-06, 5.1998e-04, 2.1110e-02, 2.4935e-01, 8.5700e-01, 8.5700e-01,
     2.4935e-01, 2.1110e-02, 5.1998e-04, 3.7267e-06])
 """.format(
