@@ -245,10 +245,6 @@ jobs:
           cache-dependency-path: |
             **/requirements.txt
             **/.github/requirements-gha-cache.txt
-        run: |
-          pip install -r requirements.txt
-          pip install boto3==1.19.12
-          pip install pyyaml==6.0
 
       - name: Check labels
         env:
