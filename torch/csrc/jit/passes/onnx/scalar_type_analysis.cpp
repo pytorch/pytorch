@@ -292,7 +292,7 @@ static void UpdateScalarTypeForInputs(
         const_node->t_(attr::value, new_val);
         const_node->insertBefore(n);
         const_node->output()->setType(TensorType::create(new_val));
-        const_node->copyMetadata(input->node());
+        const_node->copyMetadata(n);
         n->replaceInputWith(input, const_node->output());
       } else {
         Node* cast_node = n->owningGraph()->create(onnx::Cast);
