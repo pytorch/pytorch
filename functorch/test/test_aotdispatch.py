@@ -738,6 +738,8 @@ symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('broadcast_tensors', ''),  # 'int' and 'torch._C.SymIntNode'
     xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('cdouble'),  # RuntimeError: aten.view_as_real.default - couldn't find symbolic meta function/decomposition
+    xfail('cfloat'),  # RuntimeError: aten.view_as_real.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel

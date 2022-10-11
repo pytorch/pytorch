@@ -14161,7 +14161,7 @@ op_db: List[OpInfo] = [
         )),
     UnaryUfuncInfo(
         'cdouble',
-        op=lambda x, *args, **kwargs: x.cdouble(*args, **kwargs),
+        op=torch.Tensor.cdouble,
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
         supports_out=False,
         sample_inputs_func=sample_inputs_conversion,
@@ -14174,7 +14174,7 @@ op_db: List[OpInfo] = [
         )),
     UnaryUfuncInfo(
         'cfloat',
-        op=lambda x, *args, **kwargs: x.cfloat(*args, **kwargs),
+        op=torch.Tensor.cfloat,
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
         supports_out=False,
         sample_inputs_func=sample_inputs_conversion,
