@@ -42,7 +42,7 @@ def _window_function_checks(function_name: str, M: int, dtype: torch.dtype, layo
          layout (:class:`torch.layout`): the desired layout of the window tensor.
      """
     if M < 0:
-        raise ValueError(f'{function_name} requires non-negative window_length, got window_length={M}')
+        raise ValueError(f'{function_name} requires non-negative window length, got M={M}')
     if layout is not torch.strided:
         raise ValueError(f'{function_name} is implemented for strided tensors only, got: {layout}')
     if not is_float_dtype(dtype):
@@ -66,7 +66,7 @@ Args:
         In other words, the number of points of the exponential window.
     center (float, optional): where the center of the window will be located.
         In other words, at which sample the peak of the window can be found.
-        Default: `window_length / 2` if `periodic` is `True` (default), else `(window_length - 1) / 2`.
+        Default: `M / 2` if `sym` is `False`, else `(M - 1) / 2`.
     tau (float, optional): the decay value. Default: 1.0.
     sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
         If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.

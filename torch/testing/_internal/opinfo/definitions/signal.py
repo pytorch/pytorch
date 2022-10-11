@@ -57,7 +57,7 @@ def error_inputs_window(op_info, device, *args, **kwargs):
     yield ErrorInput(
         SampleInput(-1, *args, dtype=torch.float32, device=device, **kwargs),
         error_type=ValueError,
-        error_regex="requires non-negative window_length, got window_length=-1",
+        error_regex="requires non-negative window length, got M=-1",
     )
 
     # Tests for window tensors that are not torch.strided, for instance, torch.sparse_coo.
