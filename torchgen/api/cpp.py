@@ -20,6 +20,7 @@ from torchgen.api.types import (
     NamedCType,
     OptionalCType,
     optionalIntArrayRefT,
+    optionalSymIntArrayRefT,
     scalarT,
     SpecialArgName,
     symIntArrayRefT,
@@ -169,6 +170,11 @@ def argumenttype_type(
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
         elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
             return NamedCType(binds, BaseCType(optionalIntArrayRefT))
+        elif isinstance(t.elem, ListType) and str(t.elem.elem) == "SymInt":
+            if symint:
+                return NamedCType(binds, BaseCType(optionalSymIntArrayRefT))
+            else:
+                return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, symint=symint)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):

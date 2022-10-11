@@ -28,6 +28,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
+from torch.testing._internal.opinfo.core import SampleInput
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -1775,7 +1776,7 @@ class TestImports(TestCase):
                            "torch.backends._coreml",  # depends on pycoreml
                            "torch.contrib.",  # something weird
                            "torch.testing._internal.distributed.",  # just fails
-                           "torch.ao.sparsity._experimental.",  # depends on pytorch_lightning, not user-facing
+                           "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.cuda._dynamo_graphs",  # depends on torchdynamo
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
@@ -1813,6 +1814,68 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
         self.assertEquals(out, "")
+
+class TestOpInfos(TestCase):
+    def test_sample_input(self) -> None:
+        a, b, c, d, e = [object() for _ in range(5)]
+
+        # Construction with natural syntax
+        s = SampleInput(a, b, c, d=d, e=e)
+        assert s.input is a
+        assert s.args == (b, c)
+        assert s.kwargs == dict(d=d, e=e)
+
+        # Construction with explicit args and kwargs
+        s = SampleInput(a, args=(b,), kwargs=dict(c=c, d=d, e=e))
+        assert s.input is a
+        assert s.args == (b,)
+        assert s.kwargs == dict(c=c, d=d, e=e)
+
+        # Construction with a mixed form will error
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, c, args=(d, e))
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, c, kwargs=dict(d=d, e=e))
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, args=(b, c), d=d, e=e)
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, c=c, kwargs=dict(d=d, e=e))
+
+        # Mixing metadata into "natural" construction will error
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, name="foo")
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, output_process_fn_grad=lambda x: x)
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, broadcasts_input=True)
+
+        # But when only input is given, metadata is allowed for backward
+        # compatibility
+        s = SampleInput(a, broadcasts_input=True)
+        assert s.input is a
+        assert s.broadcasts_input
+
+    def test_sample_input_metadata(self) -> None:
+        a, b = [object() for _ in range(2)]
+        s1 = SampleInput(a, b=b)
+        self.assertIs(s1.output_process_fn_grad(None), None)
+        self.assertFalse(s1.broadcasts_input)
+        self.assertEqual(s1.name, "")
+
+        s2 = s1.with_metadata(
+            output_process_fn_grad=lambda x: a,
+            broadcasts_input=True,
+            name="foo",
+        )
+        self.assertIs(s1, s2)
+        self.assertIs(s2.output_process_fn_grad(None), a)
+        self.assertTrue(s2.broadcasts_input)
+        self.assertEqual(s2.name, "foo")
 
 
 if __name__ == '__main__':
