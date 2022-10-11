@@ -242,6 +242,13 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return dispatch_common_(__FUNCTION__, other);
   }
 
+  virtual SymIntNode min(const SymIntNode& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+  virtual SymIntNode max(const SymIntNode& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
   virtual SymIntNode ceil() override {
     return dispatch_common_(__FUNCTION__);
   }
@@ -315,6 +322,7 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   }
 
   SymIntNode ceil() override;
+  SymIntNode floor() override;
 
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
@@ -339,6 +347,12 @@ SymFloatNode PythonSymIntNodeImpl::sym_float() {
 SymIntNode PythonSymFloatNodeImpl::ceil() {
   py::gil_scoped_acquire acquire;
   auto r = getPyObj().attr("ceil")();
+  return c10::make_intrusive<PythonSymIntNodeImpl>(r);
+}
+
+SymIntNode PythonSymFloatNodeImpl::floor() {
+  py::gil_scoped_acquire acquire;
+  auto r = getPyObj().attr("floor")();
   return c10::make_intrusive<PythonSymIntNodeImpl>(r);
 }
 
@@ -1474,6 +1488,18 @@ void initJITBindings(PyObject* module) {
           .def(
               "__ceil__",
               [](c10::SymIntNode a) -> c10::SymIntNode { return a->ceil(); })
+          .def(
+              "__min__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->min(snb);
+              })
+          .def(
+              "__max__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->max(snb);
+              })
           .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
           .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
           // Intentionally don't set file line, as the Python backtrace matters
@@ -1573,6 +1599,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "__ceil__",
           [](c10::SymFloatNode a) -> c10::SymIntNode { return a->ceil(); })
+      .def(
+          "__floor__",
+          [](c10::SymFloatNode a) -> c10::SymIntNode { return a->floor(); })
       .def(
           "get_pyobj",
           [](c10::SymFloatNode a) -> py::object {
