@@ -1,7 +1,9 @@
 #include <ATen/FunctionalStorageImpl.h>
 
+#include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/util/Exception.h>
 #include <vector>
 
@@ -89,14 +91,27 @@ bool Alias::apply_updates() {
   return any_updates;
 }
 
+c10::SymInt get_nbytes(const Tensor& value) {
+  if (value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    // Today, the two implementations of SymInt are in Python (proxy tensor),
+    // and lazy tensor (LTC/XLA).
+    // LTC hasn't implemented SymInt support yet though (torch::lazy::SymIntNodeImpl).
+    // Once it does, we should remove this check.
+    if (value.key_set().has(c10::DispatchKey::Python)) {
+      return value.storage().sym_nbytes();
+    }
+  }
+  // XLA storage objects also do not properly track nbytes.
+  return at::detail::computeStorageNbytes(value.sizes(), value.strides(), value.dtype().itemsize(), value.storage_offset());
+}
+
 FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& value)
   : c10::StorageImpl(
       c10::StorageImpl::use_byte_size_t(),
-      value.numel() * value.dtype().itemsize(),
+      get_nbytes(value),
       DataPtr{nullptr, value.device()},
-      // Using a null allocator, since FunctionalTensorImpl's aren't resizeable.
-      nullptr,
-      /*resizeable=*/false
+      GetAllocator(kMeta),
+      /*resizeable=*/true
     ),
     alias_(Alias(value))
   {}

@@ -37,6 +37,20 @@ private:
 
 const Generator& getDefaultMPSGenerator();
 
+struct MPSScalar {
+  id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
+
+  size_t size = 0;
+  ScalarType type = ScalarType::Undefined;
+  c10::DataPtr buffer; // stores MTLBuffer (frees buffer if MPSScalar instance goes out of scope)
+  union {
+    float f; // MPS doesn't support 'double'
+    at::Half h;
+    int64_t i;
+    bool b;
+  } value {};
+};
+
 void runMPSGraph(
     MPSStream* mpsStream,
     MPSGraph* mpsGraph,
@@ -45,10 +59,10 @@ void runMPSGraph(
 
 MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
+MPSScalar   getMPSScalar(const Scalar& scalar, ScalarType type);
 std::string getMPSTypeString(ScalarType scalar_type);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = true);
-double getMPSScalarValue(const Tensor& t);
+std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = false);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
@@ -87,7 +101,7 @@ void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
 MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
-MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType);
+MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
 MPSGraph* make_mps_graph();
 void printTensorNDArray(const Tensor& t);
@@ -188,6 +202,11 @@ struct MPSGraphCache
       }
     });
     return result;
+  }
+
+  template<typename T>
+  inline T* CreateCachedGraphAs(const std::string& key, CreateCachedGraphBlock createCacheBlock, void* view_ptr = nullptr) {
+    return static_cast<T *>(CreateCachedGraph(key, createCacheBlock, view_ptr));
   }
 
   MPSCachedGraph* LookUp(const std::string& key) const {

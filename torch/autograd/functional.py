@@ -3,6 +3,8 @@ from typing import Tuple, List
 from . import forward_ad as fwAD
 from torch._vmap_internals import _vmap
 
+__all__ = ["vjp", "jvp", "jacobian", "hessian", "hvp", "vhp"]
+
 # Utility functions
 
 def _as_tuple_nocheck(x):
@@ -240,6 +242,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
         >>> v = torch.ones(4)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> vjp(exp_reducer, inputs, v)
         (tensor([5.7817, 7.2458, 5.7830, 6.7782]),
          tensor([[1.4458, 1.3962, 1.3042, 1.6354],
@@ -336,6 +339,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.exp().sum(dim=1)
         >>> inputs = torch.rand(4, 4)
         >>> v = torch.ones(4, 4)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> jvp(exp_reducer, inputs, v)
         (tensor([6.3090, 4.6742, 7.9114, 8.2106]),
          tensor([6.3090, 4.6742, 7.9114, 8.2106]))
@@ -535,6 +539,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
         >>> def exp_reducer(x):
         ...   return x.exp().sum(dim=1)
         >>> inputs = torch.rand(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> jacobian(exp_reducer, inputs)
         tensor([[[1.4917, 2.4352],
                  [0.0000, 0.0000]],
@@ -744,6 +749,7 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
         >>> def pow_reducer(x):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> hessian(pow_reducer, inputs)
         tensor([[[[5.2265, 0.0000],
                   [0.0000, 0.0000]],
@@ -847,6 +853,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> vhp(pow_reducer, inputs, v)
         (tensor(0.5591),
          tensor([[1.0689, 1.2431],
@@ -936,6 +943,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
         ...   return x.pow(3).sum()
         >>> inputs = torch.rand(2, 2)
         >>> v = torch.ones(2, 2)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> hvp(pow_reducer, inputs, v)
         (tensor(0.1448),
          tensor([[2.0239, 1.6456],

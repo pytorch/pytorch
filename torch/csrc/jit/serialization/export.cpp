@@ -57,26 +57,30 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 const static int kInvalidOpsetVersion = -1;
+const static int kMainOpsetVersion = 17;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
-constexpr static std::array<int64_t, 17> kOpsetVersionToIRVersion = {
-    kInvalidOpsetVersion,
-    3,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    kInvalidOpsetVersion,
-    3,
-    3,
-    3,
-    3,
-    4,
-    5,
-    6,
-    7,
-    7,
-    7,
-    8,
-    8};
+constexpr static std::array<int64_t, kMainOpsetVersion + 1>
+    kOpsetVersionToIRVersion = {
+        kInvalidOpsetVersion,
+        3, // opset 1
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        kInvalidOpsetVersion,
+        3, // opset 5
+        3, // opset 6
+        3, // opset 7
+        3, // opset 8
+        4, // opset 9
+        5, // opset 10
+        6, // opset 11
+        7, // opset 12
+        7, // opset 13
+        7, // opset 14
+        8, // opset 15
+        8, // opset 16
+        8, // opset 17
+};
 
 std::string getNodeStackTraceString(const Node* n) {
   return n->sourceRange().str();
@@ -422,7 +426,11 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
     case at::kBFloat16:
       return onnx::TensorProto_DataType_BFLOAT16;
     default:
-      AT_ERROR("unexpected tensor scalar type");
+      TORCH_CHECK(
+          false,
+          "ScalarType ",
+          toString(at_type),
+          " is an unexpected tensor scalar type");
   }
 }
 
@@ -885,15 +893,24 @@ void GraphEncoder::EncodeNode(
         !node->kind().is_attr());
   }
   node_proto->set_op_type(node->kind().toUnqualString());
+  const auto node_name_attribute_symbol =
+      Symbol::attr(::torch::onnx::kOnnxNodeNameAttribute);
   if (add_node_names) {
-    auto node_name =
+    std::string node_name =
         node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
+    if (node->hasAttribute(node_name_attribute_symbol)) {
+      node_name = node->s(node_name_attribute_symbol);
+    }
     node_proto->set_name(node_name);
     onnx_node_name_map_[node] = node_name;
     num_op_nodes_++;
   }
   auto attrs_it = node_attr_to_name_.find(node);
   for (auto attr_name : node->attributeNames()) {
+    if (attr_name == node_name_attribute_symbol) {
+      // Skip the node name attribute.
+      continue;
+    }
     if (attrs_it != node_attr_to_name_.end()) {
       auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
       if (attr_it != attrs_it->second.end()) {

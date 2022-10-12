@@ -64,7 +64,7 @@ TEST(BooleanUnmaskTest, Test) {
   auto& unmasked_data = unmasked_data_blob->Get<TensorCPU>();
   EXPECT_EQ(unmasked_data.numel(), 1);
 
-  CHECK_EQ(unmasked_data.data<float>()[0], 1.0f);
+  TORCH_CHECK_EQ(unmasked_data.data<float>()[0], 1.0f);
 }
 
 } // namespace caffe2

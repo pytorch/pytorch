@@ -49,6 +49,7 @@ class DistributedSampler(Sampler[T_co]):
 
     Example::
 
+        >>> # xdoctest: +SKIP
         >>> sampler = DistributedSampler(dataset) if is_distributed else None
         >>> loader = DataLoader(dataset, shuffle=(sampler is None),
         ...                     sampler=sampler)

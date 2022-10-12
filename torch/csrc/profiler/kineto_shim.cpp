@@ -6,6 +6,8 @@
 #include <libkineto.h>
 #endif
 
+#include <c10/util/Exception.h>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -49,11 +51,13 @@ const DeviceAndResource kineto_ids() {
 }
 
 void addMetadata(
-    activity_t* activity,
+    const activity_t* activity,
     const std::string& key,
     const std::string& value) {
 #ifdef USE_KINETO
-  activity->addMetadata(key, value);
+  // ActivityTraceInterface returns const pointers, so we have to cast away the
+  // constness to add metadata.
+  const_cast<activity_t*>(activity)->addMetadata(key, value);
 #endif // USE_KINETO
 }
 
@@ -112,7 +116,7 @@ TraceWrapper::operator bool() const {
 
 ActivityTraceWrapper::ActivityTraceWrapper(
     std::unique_ptr<interface_trace_t>&& trace)
-    : trace_(std::move(trace)), saved_{false} {}
+    : trace_(std::move(trace)) {}
 
 ActivityTraceWrapper::operator bool() const {
 #ifdef USE_KINETO
@@ -217,7 +221,7 @@ void prepareTrace(
   ExperimentalConfigWrapper configWrap(config);
 
   // Experimental Configuration options are present
-  if (config.hasOptions() && configWrap.assertValid(activities)) {
+  if (config && configWrap.assertValid(activities)) {
     configWrap.prepareTraceWithExperimentalOptions();
     return;
   }
@@ -278,7 +282,6 @@ void recordThreadInfo() {
 
 namespace autograd {
 namespace profiler {
-#ifdef USE_KINETO
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
   // fallthrough
   switch (activity_type) {
@@ -297,13 +300,14 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::PYTHON_FUNCTION:
       return c10::DeviceType::CPU;
     default: {
-      LOG(WARNING) << "Unknown activity type (" << (uint8_t)activity_type
-                   << "), assuming CPU device";
+      TORCH_WARN(
+          "Unknown activity type (",
+          (uint8_t)activity_type,
+          "), assuming CPU device");
       return c10::DeviceType::CPU;
     }
   }
 }
-#endif // USE_KINETO
 
 void addMetadataJson(const std::string& key, const std::string& value) {
 #ifdef USE_KINETO

@@ -129,6 +129,7 @@ def define_tools_targets(
             "autograd/templates/python_functions.cpp",
             "autograd/templates/python_functions.h",
             "autograd/templates/python_linalg_functions.cpp",
+            "autograd/templates/python_nested_functions.cpp",
             "autograd/templates/python_nn_functions.cpp",
             "autograd/templates/python_return_types.cpp",
             "autograd/templates/python_sparse_functions.cpp",
@@ -259,5 +260,18 @@ def define_tools_targets(
         contacts = contacts,
         deps = [
             ":gen_operators_yaml_lib",
+        ],
+    )
+
+    python_test(
+        name = "test_codegen",
+        srcs = [
+            "test/test_codegen.py",
+        ],
+        contacts = contacts,
+        visibility = ["PUBLIC"],
+        deps = [
+            torchgen_deps,
+            ":autograd",
         ],
     )

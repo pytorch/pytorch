@@ -170,7 +170,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             expected_warning=UserWarning,
             expected_regex="Trying to ignore the top-level module passed into "
             "the FSDP constructor itself will result in all parameters being "
-            "ignored and is not supported",
+            "ignored",
         ):
             FSDP(model, ignored_modules=[model])
 

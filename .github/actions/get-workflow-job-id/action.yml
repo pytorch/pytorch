@@ -15,7 +15,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+    - uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
       id: get-job-id
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}

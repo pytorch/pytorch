@@ -46,6 +46,35 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_cummin_helper",
 ]
 
+# All of these operators don't have any tensor like returns
+FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
+    "_assert_async",  # no return
+    "_dimI",  # returns an int
+    "_dimV",  # returns an int
+    "_has_same_storage_numel",  # returns a boolean
+    "_linalg_check_errors",  # no return
+    "_local_scalar_dense",  # returns a Scalar
+    "_nested_tensor_from_mask_left_aligned",  # returns a boolean
+    "_nnz",  # returns an int
+    "_use_cudnn_ctc_loss",  # returns a boolean
+    "_use_cudnn_ctc_loss.Tensor",  # returns a boolean
+    "_validate_compressed_sparse_indices",  # no return
+    "allclose",  # returns a boolean
+    "dense_dim",  # returns an int
+    "equal",  # returns a boolean
+    "is_coalesced",  # returns an boolean
+    "is_pinned",  # returns a boolean
+    "is_same_size",  # returns a boolean
+    "is_set_to",  # returns a boolean
+    "q_per_channel_axis",  # returns an int
+    "q_scale",  # returns a float
+    "q_zero_point",  # returns an int
+    "qscheme",  # returns a QScheme
+    "record_stream",  # no return
+    "sparse_dim",  # returns an int
+    "_nested_tensor_offsets",  # returns a vector of ints
+]
+
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # polygamma and polygamma.out both exist, but have a
     # pre-self arg (while polygamma_ does not)
@@ -72,6 +101,11 @@ def pre_group_native_functions(
     return pre_grouped_native_functions
 
 
+# Returns the out variant overload name given a base function overload name
+def get_expected_out_variant_overload_name(overload_name: Optional[str]) -> str:
+    return "out" if not overload_name else f"{overload_name}_out"
+
+
 # Helper function: given an inplace FunctionSchema, generate its corresponding out= variant
 # Example before:
 #   _add_relu_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
@@ -87,7 +121,7 @@ def self_to_out_signature(func: FunctionSchema) -> FunctionSchema:
     # - an "out" overload name
     return FunctionSchema(
         name=func.name.remove_inplace().with_overload(
-            "out" if not func.name.overload_name else f"{func.name.overload_name}_out"
+            get_expected_out_variant_overload_name(func.name.overload_name)
         ),
         arguments=func.arguments.remove_self_annotation().with_out_args(
             [
@@ -103,27 +137,37 @@ def self_to_out_signature(func: FunctionSchema) -> FunctionSchema:
     )
 
 
-# Helper function: given a mutable FunctionSchema, generate its corresponding out= variant
+# Helper function: given a functional FunctionSchema, generate its corresponding out= variant
 # Example before:
-#   _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)  # noqa: B950
+#   _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None,
+#       bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
 # Example after:
-#   _fused_moving_avg_obs_fq_helper.out(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False, *, Tensor(e!) out0, Tensor(f!) out1) -> (Tensor(e!), Tensor(f!))  # noqa: B950
-def mutable_to_out_signature(func: FunctionSchema) -> FunctionSchema:
-    # Generating an out= schema from a mutable schema.
-    assert func.kind() == SchemaKind.mutable
-    # The new out= schema has:
-    # - Any non-aliased tensor-like returns are converted to mutable, aliased out= arguments
-    #   (if the argument is a tensor then we also return it for method chaining,
-    #   otherwise we return nothing)
-    # - an "out" overload name
-    #
-    # Note that:
-    # (1) This also means that we can *only* generate an out= variant from a mutable schema
-    #     if the mutable schema has at least one tensor-like non-aliasing return.
-    # (2) The generated out= variant still has mutable positional arguments,
-    #     but if necessary we could probably add another out= variant that also
-    #     functionalizes the mutable arguments (a functional_out variant)
+#   _to_copy._out(Tensor self, *, bool non_blocking=False, MemoryFormat? memory_format=None,
+#       Tensor(a!) out) -> Tensor(a!)
+def functional_to_out_signature(func: FunctionSchema) -> FunctionSchema:
+    # Generating an out= schema from a functional schema.
+    assert func.kind() == SchemaKind.functional
 
+    new_returns, new_out_args = generate_out_args_from_schema(func)
+    # The new out= schema has:
+    # - one or more new out argument(s) with the same type as returns (but with a mutable annotation)
+    # - The returns now alias the out= arguments
+    # - an "_out" overload name
+    return FunctionSchema(
+        name=func.name.with_overload(
+            get_expected_out_variant_overload_name(func.name.overload_name)
+        ),
+        arguments=func.arguments.signature().with_out_args(
+            new_out_args,
+        ),
+        returns=tuple(new_returns),
+    )
+
+
+# Helper function: given a function schema, generate corresponding out arguments, also the updated return annotations.
+def generate_out_args_from_schema(
+    func: FunctionSchema,
+) -> Tuple[List[Return], List[Argument]]:
     # More of a sanity check - our existing restrictions on schemas should enforce that
     # mutable schema kinds never return their mutable arguments.
     assert not any(
@@ -151,7 +195,7 @@ def mutable_to_out_signature(func: FunctionSchema) -> FunctionSchema:
     for (i, r) in enumerate(func.returns):
         if r.type.is_tensor_like():
             new_out = Argument(
-                name=f"out{i}",
+                name="out" if len(func.returns) == 1 else f"out{i}",
                 type=r.type,
                 default=None,
                 annotation=Annotation.parse(f"{valid_annotations[i]}!"),
@@ -166,10 +210,35 @@ def mutable_to_out_signature(func: FunctionSchema) -> FunctionSchema:
                 new_returns.append(new_ret)
         else:
             new_returns.append(r)
+    return new_returns, new_out_args
+
+
+# Helper function: given a mutable FunctionSchema, generate its corresponding out= variant
+# Example before:
+#   _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)  # noqa: B950
+# Example after:
+#   _fused_moving_avg_obs_fq_helper._out(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False, *, Tensor(e!) out0, Tensor(f!) out1) -> (Tensor(e!), Tensor(f!))  # noqa: B950
+def mutable_to_out_signature(func: FunctionSchema) -> FunctionSchema:
+    # Generating an out= schema from a mutable schema.
+    assert func.kind() == SchemaKind.mutable
+    # The new out= schema has:
+    # - Any non-aliased tensor-like returns are converted to mutable, aliased out= arguments
+    #   (if the argument is a tensor then we also return it for method chaining,
+    #   otherwise we return nothing)
+    # - an "out" overload name
+    #
+    # Note that:
+    # (1) This also means that we can *only* generate an out= variant from a mutable schema
+    #     if the mutable schema has at least one tensor-like non-aliasing return.
+    # (2) The generated out= variant still has mutable positional arguments,
+    #     but if necessary we could probably add another out= variant that also
+    #     functionalizes the mutable arguments (a functional_out variant)
+
+    new_returns, new_out_args = generate_out_args_from_schema(func)
 
     return FunctionSchema(
         name=func.name.remove_inplace().with_overload(
-            "out" if not func.name.overload_name else f"{func.name.overload_name}_out"
+            get_expected_out_variant_overload_name(func.name.overload_name)
         ),
         arguments=func.arguments.with_out_args(new_out_args),
         returns=tuple(new_returns),
@@ -218,19 +287,33 @@ def generate_function(
             func = self_to_out_signature(f.func)
         elif f.func.kind() == SchemaKind.mutable:
             func = mutable_to_out_signature(f.func)
+        elif f.func.kind() == SchemaKind.functional:
+            func = functional_to_out_signature(f.func)
         else:
             raise AssertionError(
-                "We only bother generating out= functions from either inplace or mutable variants"
+                "We only bother generating out= functions from either inplace or mutable or functional variants"
             )
     else:
         raise AssertionError(
             "We currently only generate either functional or out= NativeFunctions"
         )
 
+    # Generated kernel naming convention for out: <op_name>_<overload_name>. The reason for this is to
+    # disambiguate operator with the same name but different overload name, e.g., `randn.names_out` and
+    # `randn.generator_with_names_out`.
+    kernel_name = (
+        func.name.unambiguous_name()
+        if func.kind() == SchemaKind.out
+        else cpp.name(func)
+    )
+    if f.func.has_symint():
+        kernel_name += "_symint"
     backend_metadata = {
         DispatchKey.CompositeExplicitAutograd: {
             func.name: BackendMetadata(
-                cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
+                kernel=kernel_name,
+                structured=False,
+                cpp_namespace=DEFAULT_KERNEL_NAMESPACE,
             )
         }
     }
@@ -257,11 +340,12 @@ def generate_function(
             cpp_no_default_args=set(),
             is_abstract=f.is_abstract,
             has_composite_implicit_autograd_kernel=False,
+            has_composite_implicit_autograd_nested_tensor_kernel=False,
             has_composite_explicit_autograd_kernel=True,
             has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
-            tags=set(["generated"]),
+            tags=set(["generated"]) | (f.tags & {"nondeterministic_seeded"}),
             namespace=f.namespace,
         ),
         backend_metadata,
@@ -293,20 +377,15 @@ def add_generated_native_functions(
         # We automatically generate a few native functions that don't exist in the yaml, for a few reasons:
         # (1) If an operator has an inplace/out= variant but no functional variant, we can generate
         #     a simple functional variant that the functionalization pass can consume.
-        # (2) If an operator has an inplace and functional but no out= variant, we generate an out=
+        # (2) If an operator has an inplace or functional but no out= variant, we generate an out=
         #     variant, mostly so we can easily pair up functions into NativeFunctionsGroup,
         #     while maintaining the constraint that the out= variant is "required".
-        #
-        # For now, we don't bother generated NativeFunctions for existing operators
-        # that only have a functional variant.
-        if has_mutable or has_inplace or has_out:
+        if has_mutable or has_inplace or has_out or has_functional:
 
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
-            has_view_ops = (
-                has_inplace and "inplace_view" in d[SchemaKind.inplace].tags
-            ) or any(f.is_view_op for f in d.values())
+            has_view_ops = any(f.is_view_op for f in d.values())
             # Don't generate the other variants for CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly
@@ -350,6 +429,8 @@ def add_generated_native_functions(
                 else d[SchemaKind.mutable]
                 if has_mutable
                 else d[SchemaKind.out]
+                if has_out
+                else d[SchemaKind.functional]
             )
 
             # Note: [Mutable ops that cannot get an out variant]
@@ -359,20 +440,27 @@ def add_generated_native_functions(
             # There are only two functions that don't fit this criteria today though,
             # and they both look like they should be fixed to be out= variants,
             # so if feels safer to ban this schema all-together
-            gets_out_variant = not has_out and (
-                base_fn.func.kind() == SchemaKind.inplace
-                or any(r.type.is_tensor_like() for r in base_fn.func.returns)
+            base_fn_valid = base_fn.func.kind() == SchemaKind.inplace or any(
+                r.type.is_tensor_like() for r in base_fn.func.returns
             )
-            if not has_out and not gets_out_variant:
+            # Note: [Loosen the assertion that all functional should have out variant]
+            # By design all functional operators should have our variants. The needs_out check
+            # is loosening this requirement, changing it to only generate out variant if there's
+            # an `autogen` block in the native function, in the long run it should be removed.
+            # FIXME: Remove this after figuring out CI job failures related to min, max, mean
+            needs_out = any("out" in str(op_name) for op_name in base_fn.autogen)
+            gets_out_variant = not has_out and base_fn_valid and needs_out
+            if not has_out and not base_fn_valid:
                 if (
                     str(base_fn.func.name)
                     not in MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT
+                    and str(base_fn.func.name)
+                    not in FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT
                 ):
                     raise AssertionError(
-                        f"""Found a mutable operator that we could not generate an out= variant for: {str(base_fn.func)}.
-These operators are problematic, because we can't easily auto-generate functionalization code for them. If you really need
-the operator have the schema mentioned, that add the name of the operator to the allow-list. Otherwise if possible,
-please convert it to an inplace operator"""
+                        f"""Found an operator that we could not generate an out= variant for: {str(base_fn.func)}.
+This type of operators don't have tensor-like return, making it difficult to generate a proper out= variant. If
+out= variant is not needed, please add the function name into FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT list."""
                     )
 
             # Generate an out= variant
@@ -471,7 +559,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
 
     clone_mutable_inputs_str = "\n".join(clone_mutable_inputs)
     return f"""
-{sig.defn()} {{
+{sig.defn(name=sig.name() + ("_symint" if g.out.func.has_symint() else ""))} {{
   {clone_mutable_inputs_str}
   {maybe_assign}at::_ops::{target_f.func.name.unambiguous_name()}::call({exprs});
   {ret_str}
@@ -529,8 +617,9 @@ def gen_composite_out_kernel(g: NativeFunctionsGroup) -> Optional[str]:
 
     copy_outs_str = "\n".join(copy_outs)
 
+    # Kernel name needs to follow the naming convention defined in `generate_function()`
     return f"""
-{sig.defn()} {{
+{sig.defn(name=g.out.func.name.unambiguous_name() + ("_symint" if g.out.func.has_symint() else ""))} {{
   auto {out_name} = at::_ops::{g.functional.func.name.unambiguous_name()}::call({exprs});
   {copy_outs_str}
   {return_str(g.out.func.returns, rets)}

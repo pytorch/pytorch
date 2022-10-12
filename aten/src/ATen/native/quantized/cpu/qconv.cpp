@@ -1,9 +1,13 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
 #include <cmath>
 #include <vector>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/Context.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/SmallVector.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
@@ -14,6 +18,19 @@
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_affine_quantized_native.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/quantize_per_channel_native.h>
+#include <ATen/ops/quantize_per_tensor_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -725,17 +742,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
 
 
     // Original bias was float, so we requantize it here.
-    at::Tensor qbias;
-    if (per_channel()) {
-      auto bias_quant_scales =
-          weight_contig.q_per_channel_scales() * act_input_scale;
-      auto bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel(
-          bias, bias_quant_scales, bias_zp, 0, c10::kQInt32);
-    } else {
-      qbias = at::native::quantize_per_tensor(
-          bias, weight_contig.q_scale() * act_input_scale, 0, c10::kQInt32);
-    }
+    at::Tensor qbias = quant_utils::QuantizeBias(per_channel(), bias, weight_contig, act_input_scale);
 
     status = at::native::xnnp_utils::xnnp_create_convolution2d_nhwc(
         padding()[0],
@@ -937,21 +944,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
-    at::Tensor qbias;
     // Original bias was float, so we requantize it here.
-    if (convolution_op->per_channel) {
-      at::Tensor bias_quant_scales =
-          weight_contig.q_per_channel_scales() * act_input_scale;
-      at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel(
-          bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
-    } else {
-      qbias = at::native::quantize_per_tensor(
-          bias_fp32,
-          weight_contig.q_scale() * act_input_scale,
-          0,
-          c10::kQInt32);
-    }
+    at::Tensor qbias = quant_utils::QuantizeBias(convolution_op->per_channel, bias_fp32, weight_contig, act_input_scale);
 
     // Update the input scale to not pack again.
     input_scale = act_input_scale;
@@ -1250,49 +1244,98 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   const ideep::dims& dilates = dilation().vec();
   const ideep::dims& padding_l = padding().vec();
   const ideep::dims& padding_r = padding().vec();
-  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/act.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
+  double input_scale = act.q_scale();
+  int64_t input_zp = act.q_zero_point();
+  // Scales of ONEDNN and PyTorch are reciprocal
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input_scale);
   const ideep::scale_t& weights_scales = weights.get_scale();
-  const ideep::scale_t& dst_scales = ideep::scale_t(weights_scales.size(), 1.0/output_scale); // Scales of ONEDNN and PyTorch are reciprocal
-  const ideep::zero_point_t src_zero_points = ideep::zero_point_t(1, act.q_zero_point());
+  int64_t scale_size = weights_scales.size();
+  double inv_output_scale = 1.0/output_scale;
+  const ideep::zero_point_t src_zero_points = ideep::zero_point_t(1, input_zp);
   const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
   ideep::attr_t op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
-  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL}); // runtime src zero point
-  if (with_bias) {
-    // Bias might be modified outside (e.g. by quantization bias correction).
-    // If so, update the prepacked bias as well.
-    if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
-      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
-    }
-    const auto& b = bias_.value();
-    if (transpose()) {
+  // Since src zero point is unknown, set runtime value here
+  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL});
+
+  // Bias might be modified outside (e.g. by quantization bias correction).
+  // If so, update the prepacked bias as well.
+  if (with_bias && bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
+    bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
+  }
+  const auto& b = with_bias ? bias_.value() : ideep::tensor();
+  int num_threads = at::get_num_threads();
+  if (transpose()) {
+    // Primitive cache is initialized when called for the first time
+    // and won't be updated afterwards.
+    PrimitiveCacheKey cache_key = std::make_tuple(
+        input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads);
+    c10::call_once(*cache_initialized_flag, [&](){
+        DeconvParams params;
+        ideep::convolution_transpose_forward::prepare(
+            params, src, weights, b, dst_dims, dst,
+            strides, padding_l, padding_r, dilates, groups(),
+            src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
+            src_zero_points, dst_zero_points, op_attr,
+            dnnl::algorithm::deconvolution_direct,
+            dnnl::prop_kind::forward_inference,
+            ideep::u8s8, ideep::engine::cpu_engine());
+        get_deconv_cache() = DeconvPrimitiveCache(
+            cache_key, params.pd, b, params.bias_attr, params.input_zero_point);
+        onednn_utils::try_reorder(
+            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+    });
+    if (get_deconv_cache().hit(cache_key)) {
+      Deconv& primitive = get_deconv_cache().get_primitive();
+      DeconvDesc& pd = get_deconv_cache().get_primitive_desc();
+      auto& src_zp_tensor = get_deconv_cache().get_src_zp_tensor();
+      auto& expected_bias = get_deconv_cache().get_bias();
+      ideep::convolution_transpose_forward::compute(
+          pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
+    } else {
       ideep::convolution_transpose_forward::compute_v2(
           src, weights, b, dst_dims, dst,
           strides, padding_l, padding_r, dilates,
-          groups(), src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
-          op_attr, dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
+          groups(), src_scales, weights_scales,
+          ideep::scale_t(scale_size, inv_output_scale),
+          src_zero_points, dst_zero_points, op_attr,
+          dnnl::algorithm::deconvolution_direct,
+          dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
+    }
+  } else {  // not transposed
+    PrimitiveCacheKey cache_key = std::make_tuple(
+        input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads);
+    c10::call_once(*cache_initialized_flag, [&](){
+        src.set_zero_point(src_zero_points);
+        dst.set_zero_point(dst_zero_points);
+        ConvParams params;
+        ideep::convolution_forward::prepare(
+            params, src, weights, b, dst_dims, dst,
+            strides, dilates, padding_l, padding_r, groups(),
+            src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
+            op_attr, dnnl::algorithm::convolution_direct,
+            dnnl::prop_kind::forward_inference,
+            ideep::u8s8, ideep::engine::cpu_engine());
+        get_conv_cache() = ConvPrimitiveCache(cache_key, params.pd, b, params.bias_attr);
+        onednn_utils::try_reorder(
+            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+    });
+    // If hit, use cached data. If miss, fall back to normal path.
+    if (get_conv_cache().hit(cache_key)) {
+      ConvDesc& pd = get_conv_cache().get_primitive_desc();
+      Conv& primitive = get_conv_cache().get_primitive();
+      auto& src_zp_tensor = get_conv_cache().get_src_zp_tensor();
+      auto& expected_bias = get_conv_cache().get_bias();
+      ideep::convolution_forward::compute(
+          pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
     } else {
       ideep::convolution_forward::compute_v2(
           src, weights, b, dst_dims, dst,
           strides, dilates, padding_l, padding_r, groups(),
-          src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
-          op_attr, dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-          ideep::u8s8, ideep::engine::cpu_engine());
-    }
-  } else {
-    if (transpose()) {
-      ideep::convolution_transpose_forward::compute_v2(
-          src, weights, dst_dims, dst,
-          strides, padding_l, padding_r, dilates,
-          groups(), src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
-          op_attr, dnnl::algorithm::deconvolution_direct, dnnl::prop_kind::forward_inference,
-          ideep::u8s8, ideep::engine::cpu_engine());
-    } else {
-      ideep::convolution_forward::compute_v2(
-          src, weights, dst_dims, dst,
-          strides, dilates, padding_l, padding_r, groups(),
-          src_scales, weights_scales, dst_scales, src_zero_points, dst_zero_points,
-          op_attr, dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+          src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
+          src_zero_points, dst_zero_points, op_attr,
+          dnnl::algorithm::convolution_direct,
+          dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
     }
   }

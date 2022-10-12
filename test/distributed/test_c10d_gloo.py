@@ -215,7 +215,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo._Options()
-        opts._timeout = 5.0
+        opts._timeout = 50.0
         opts._devices = [create_device(interface=LOOPBACK)]
         opts._threads = threads
         return opts
@@ -2232,6 +2232,11 @@ class ReducerTest(TestCase):
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    @property
+    def device(self):
+        return "cpu"
+
+
     def setUp(self):
         super(CommTest, self).setUp()
         self._spawn_processes()
@@ -2338,6 +2343,89 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_gloo_warn_not_in_group(self):
         self._test_warn_not_in_group(backend="gloo")
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_gloo_rank_membership(self):
+        self._test_rank_membership(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_tensor_dtype_mismatch(self):
+        self._test_tensor_dtype_mismatch(backend="gloo")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="gloo")
+
+class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+    @requires_gloo()
+    def test_collectives(self):
+        self._test_collectives(backend="gloo")
+
+class CompilerTest(test_c10d_common.CompilerTest):
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _get_default_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+        )
+        return dist.distributed_c10d._get_default_group()
+
+    def test_allreduce_work_wait_cpu(self):
+        self._test_allreduce_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_allreduce_work_wait_gpu(self):
+        self._test_allreduce_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_allgather_work_wait_cpu(self):
+        self._test_allgather_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_work_wait_gpu(self):
+        self._test_allgather_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_broadcast_work_wait_cpu(self):
+        self._test_broadcast_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_work_wait_gpu(self):
+        self._test_broadcast_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_scatter_work_wait_cpu(self):
+        self._test_scatter_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_scatter_work_wait_gpu(self):
+        self._test_scatter_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    def test_nested_comm_tensor_wrapping(self):
+        self._test_nested_comm_tensor_wrapping(torch.ones(2, 2) * self.rank)
+
+    def test_consecutive_comm_work_wait_cpu(self):
+        self._test_consecutive_comm_work_wait(torch.ones(2, 2) * self.rank)
+
+    @skip_if_lt_x_gpu(2)
+    def test_consecutive_comm_work_wait_gpu(self):
+        self._test_consecutive_comm_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
 
 if __name__ == "__main__":
     assert (

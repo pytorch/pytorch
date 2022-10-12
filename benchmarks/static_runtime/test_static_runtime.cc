@@ -325,8 +325,8 @@ TEST(StaticRuntime, ClampIntTensor) {
         a = torch.clamp(inp, min, max).clone()
         return (a)
   )JIT";
-  auto a = at::randint(0, 20, {2, 3});
-  auto b = at::randint(0, 20, {4, 3, 2});
+  auto a = at::randint(0, 20, {2, 3}, at::kFloat);
+  auto b = at::randint(0, 20, {4, 3, 2}, at::kFloat);
   auto min = 5.0f;
   auto max = 5.0f;
   testStaticRuntime(src, {a, min, max});
@@ -2164,7 +2164,12 @@ TEST(StaticRuntime, Permute) {
   c10::List<int64_t> dims_b{0, 2, 1};
   std::vector<IValue> args_b{b, dims_b};
 
+  auto c = at::randn({3, 3, 3});
+  c10::List<int64_t> dims_c{0, -1, 1};
+  std::vector<IValue> args_c{c, dims_c};
+
   testStaticRuntime(permute_script, args_a);
+  testStaticRuntime(permute_script, args_c);
   testStaticRuntime(permute_script, args_a, args_b);
 
   permute_script = R"JIT(
@@ -2504,11 +2509,29 @@ TEST(StaticRuntime, Index_Put) {
   )JIT";
 
   auto a = at::randn({2});
-  auto indicies_a = std::make_tuple(torch::tensor({0}, at::kLong));
+  auto indices_a = std::make_tuple(torch::tensor({0}, at::kLong));
   auto values_a = at::randn({1});
 
-  std::vector<IValue> args0{a, indicies_a, values_a, false};
+  std::vector<IValue> args0{a, indices_a, values_a, false};
   testStaticRuntime(index_put_str, args0);
+
+  const auto index_put_non_optional_str = R"JIT(
+    def forward(self, a: Tensor, indices: List[Tensor], values: Tensor, accumulate: bool):
+        return torch.index_put(a, indices, values, accumulate).clone()
+  )JIT";
+
+  auto indices_b = c10::List<at::Tensor>{torch::tensor({0}, at::kLong)};
+  std::vector<IValue> args1{a, indices_b, values_a, false};
+  testStaticRuntime(index_put_non_optional_str, args1);
+
+  const auto index_put_list_construct = R"JIT(
+    def forward(self, a: Tensor, indices: Tensor, values: Tensor, accumulate: bool):
+        indices: List[Optional[Tensor]] = [indices]
+        return torch.index_put(a, indices, values, accumulate).clone()
+  )JIT";
+
+  std::vector<IValue> args2{a, torch::tensor({0}, at::kLong), values_a, false};
+  testStaticRuntime(index_put_list_construct, args2);
 }
 
 TEST(StaticRuntime, Item) {
@@ -2590,23 +2613,28 @@ TEST(StaticRuntime, JIT_Aten_Numel) {
 }
 
 TEST(StaticRuntime, JIT_Aten_List) {
-  const std::string script = R"IR(
+  const auto script_str = R"IR(
     graph(%a: str):
-        %1 : int = prim::Constant[value=0]()
         %ret: str[] = aten::list(%a)
         return (%ret)
   )IR";
-
-  auto graph = std::make_shared<Graph>();
-  std::unordered_map<std::string, Value*> vmap;
-  vmap.reserve(0);
-  parseIR(script, graph.get(), vmap);
-  torch::jit::StaticModule smodule(graph);
-
-  string a = "abcd";
+  std::string a = "abcd";
   std::vector<IValue> args0{a};
+  testStaticRuntime(script_str, args0);
 
-  testStaticRuntime(script, args0);
+  // Update the result of aten::list to ensure that a deep copy
+  // took place
+  const auto script_list = R"IR(
+    graph(%a : int[]):
+        %idx : int = prim::Constant[value=0]()
+        %value : int = prim::Constant[value=42]()
+        %res : int[] = aten::list(%a)
+        %updated : int[] = aten::_set_item(%res, %idx, %value)
+        return (%res, %a)
+  )IR";
+
+  std::vector<IValue> args1{c10::List<int64_t>{1, 2, 3}};
+  testStaticRuntime(script_list, args1);
 }
 
 TEST(StaticRuntime, JIT_Aten_Range_Length) {
@@ -2826,9 +2854,9 @@ TEST(StaticRuntime, RemainderTensor) {
   )JIT";
 
   std::vector<IValue> args1 = {
-      at::randint(0, 10, {2, 2}), at::randint(0, 10, {2, 2})};
+      at::randint(0, 10, {2, 2}), at::randint(1, 10, {2, 2})};
   std::vector<IValue> args2 = {
-      at::randint(0, 10, {3, 6}), at::randint(0, 10, {3, 6})};
+      at::randint(0, 10, {3, 6}), at::randint(1, 10, {3, 6})};
 
   // Use allclose and equalnan since outputs may be NaN.
   testStaticRuntime(
@@ -3646,4 +3674,53 @@ TEST(StaticRuntime, ClampNaNToNum) {
   // Non-NNC path
   testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
   testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
+}
+
+TEST(StaticRuntime, PrepackWeights) {
+  const std::string src = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %none: NoneType = prim::Constant()
+        %result: Tensor = fb::quantized_linear_unpacked_weight_v2(%input, %weight, %bias, %scale, %zero_point)
+        %dequantized: Tensor = aten::dequantize(%result)
+        return (%dequantized)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  PrepackWeights(graph);
+  ASSERT_TRUE(graphHasOp(graph, "quantized::linear"));
+  ASSERT_TRUE(graphHasOp(graph, "quantized::linear_prepack"));
+  ASSERT_FALSE(graphHasOp(graph, "fb::quantized_linear_unpacked_weight_v2"));
+
+  auto scale = at::tensor({2}, at::kFloat);
+  auto zero_point = at::tensor({3}, at::kLong);
+
+  auto weight =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
+  auto input =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
+  auto args1 = std::vector<IValue>{input, weight, c10::nullopt, scale, zero_point};
+
+  auto weight_2 =
+      at::quantize_per_tensor(torch::randn({8, 3}), 2, 3, torch::kQInt8);
+  auto input_2 =
+      at::quantize_per_tensor(torch::randn({9, 3}), 2, 3, torch::kQUInt8);
+  auto bias_2 = torch::randn({3}, torch::kFloat);
+  auto args2 = std::vector<IValue>{input, weight, bias_2, scale, zero_point};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args2);
+}
+
+TEST(StaticRuntime, IfReturningTuple) {
+  const auto src = R"JIT(
+    def forward(self, x, y, cond: bool, idx: int):
+        if cond:
+            tup = (x, y)
+        else:
+            tup = (x, x)
+        return tup[idx]
+  )JIT";
+
+  std::vector<IValue> args{at::randn({3}), at::randn({3}), true, 0};
+  testStaticRuntime(src, args);
 }

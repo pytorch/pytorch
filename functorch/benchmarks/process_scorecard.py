@@ -8,7 +8,7 @@ nops = len(ops)
 pivot_op_shape = df.pivot_table(values="time", index=["operator", "shape"], columns=["fuser"])
 pivot_speedups = (pivot_op_shape.T / pivot_op_shape["eager"]).T
 
-plt.rcParams["figure.figsize"] = (20,100)
+plt.rcParams["figure.figsize"] = (20, 100)
 fig, axs = plt.subplots(nops)
 plt.subplots_adjust(hspace=0.5)
 for idx, op in enumerate(ops):

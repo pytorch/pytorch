@@ -54,7 +54,7 @@ OPERATOR_SCHEMA(VideoInput)
 
           int index = 0;
           vector<TensorShape> out(output_size);
-          CHECK_GT(crop_size, 0);
+          TORCH_CHECK_GT(crop_size, 0);
           batch_size *= clip_per_video;
           if (get_rgb) {
             out[index++] = CreateTensorShape(

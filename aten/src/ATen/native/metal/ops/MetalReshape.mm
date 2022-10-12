@@ -16,7 +16,8 @@ namespace native {
 namespace metal {
 
 API_AVAILABLE(ios(11.0), macos(10.13))
-Tensor view(const Tensor& input, IntArrayRef size) {
+Tensor view(const Tensor& input, c10::SymIntArrayRef sym_size) {
+  auto size = c10::asIntArrayRefSlow(sym_size);
   TORCH_CHECK(input.is_metal());
   auto inferred_size = at::infer_size(size, input.numel());
   auto stride =
@@ -63,7 +64,7 @@ Tensor view(const Tensor& input, IntArrayRef size) {
 
 Tensor reshape(const Tensor& input, IntArrayRef shape) {
   TORCH_CHECK(input.is_metal());
-  return view(input, shape);
+  return view(input, c10::fromIntArrayRefSlow(shape));
 }
 
 Tensor flatten_using_ints(

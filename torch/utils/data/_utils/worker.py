@@ -223,13 +223,13 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             np.random.seed(np_seed)
 
         from torch.utils.data import IterDataPipe
-        from torch.utils.data.graph_settings import apply_shuffle_seed
+        from torch.utils.data.graph_settings import apply_random_seed
 
         shared_rng = torch.Generator()
         if isinstance(dataset, IterDataPipe):
             assert shared_seed is not None
             shared_rng.manual_seed(shared_seed)
-            dataset = apply_shuffle_seed(dataset, shared_rng)
+            dataset = apply_random_seed(dataset, shared_rng)
 
         global _worker_info
         _worker_info = WorkerInfo(id=worker_id, num_workers=num_workers,
@@ -277,7 +277,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 if isinstance(dataset, IterDataPipe):
                     assert r.seed is not None
                     shared_rng.manual_seed(r.seed)
-                    dataset = apply_shuffle_seed(dataset, shared_rng)
+                    dataset = apply_random_seed(dataset, shared_rng)
 
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(

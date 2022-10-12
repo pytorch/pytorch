@@ -161,14 +161,14 @@ const auto& tscores = Input(0);
 
       // Pick the first `detections_per_im_` boxes with highest scores
       auto all_scores_sorted = get_all_scores_sorted();
-      DCHECK_GT(all_scores_sorted.size(), detections_per_im_);
+      TORCH_DCHECK_GT(all_scores_sorted.size(), detections_per_im_);
 
       // Reconstruct keeps from `all_scores_sorted`
       for (auto& cur_keep : keeps) {
         cur_keep.clear();
       }
       for (int i = 0; i < detections_per_im_; i++) {
-        DCHECK_GT(all_scores_sorted.size(), i);
+        TORCH_DCHECK_GT(all_scores_sorted.size(), i);
         auto& cur = all_scores_sorted[i];
         keeps[cur.first].push_back(cur.second);
       }

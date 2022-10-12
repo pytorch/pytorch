@@ -279,8 +279,9 @@ class Inputs : public IterVisitor {
   }
 
   void handle(Val* val) override {
-    // If there's no definition to val, or val is within the provided inputs
-    if (val->definition() == nullptr ||
+    // If there's no definition to val, or val is created inside the fusion, or
+    // val is within the provided inputs
+    if (val->definition() == nullptr || val->definition()->inputs().empty() ||
         std::find(all_inputs_.begin(), all_inputs_.end(), val) !=
             all_inputs_.end()) {
       // if not already placed in the inputs
@@ -400,7 +401,6 @@ void BackwardVisitor::traverseFrom(
   }
 
   auto vals = AllVals::get(fusion, from);
-
   auto exprs = StmtSort::getExprs(fusion, from);
 
   {
@@ -843,7 +843,7 @@ std::vector<Statement*> StmtSort::getStmts(
 }
 
 void InputsOf::handle(Val* v) {
-  if (v->definition() == nullptr) {
+  if (v->definition() == nullptr || v->definition()->inputs().empty()) {
     if (grabbed_inputs.emplace(v).second) {
       ordered_inputs.push_back(v);
     }

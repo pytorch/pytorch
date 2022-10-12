@@ -47,43 +47,44 @@ class HierarchicalModelAverager(averagers.ModelAverager):
                                                 (default: ``None``)
 
     Example::
-        >>>  from collections import OrderedDict
-        >>>  import torch
-        >>>  import torch.distributed as dist
-        >>>  from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import (
-        >>>      PostLocalSGDState,
-        >>>      post_localSGD_hook,
-        >>>  )
-        >>>  import torch.distributed.algorithms.model_averaging.hierarchical_model_averager as hierarchicalSGD
-        >>>  import torch.nn as nn
+        >>> # xdoctest: +SKIP('undefined rank')
+        >>> from collections import OrderedDict
+        >>> import torch
+        >>> import torch.distributed as dist
+        >>> from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import (
+        >>>     PostLocalSGDState,
+        >>>     post_localSGD_hook,
+        >>> )
+        >>> import torch.distributed.algorithms.model_averaging.hierarchical_model_averager as hierarchicalSGD
+        >>> import torch.nn as nn
         >>>
-        >>>  dist.init_process_group("nccl", rank=rank, world_size=16)
-        >>>  torch.cuda.set_device(rank)
-        >>>  module = nn.Linear(1, 1, bias=False).to(rank)
-        >>>  model = nn.parallel.DistributedDataParallel(
-        >>>     module, device_ids=[rank], output_device=rank
-        >>>  )
-        >>>  # Register a post-localSGD communication hook.
-        >>>  # Assume that each machine has 4 GPUs, then each intra-machine subgroup has a size of 4.
-        >>>  subgroup, _ = dist.new_subgroups()
-        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
-        >>>  model.register_comm_hook(state, post_localSGD_hook)
+        >>> dist.init_process_group("nccl", rank=rank, world_size=16)
+        >>> torch.cuda.set_device(rank)
+        >>> module = nn.Linear(1, 1, bias=False).to(rank)
+        >>> model = nn.parallel.DistributedDataParallel(
+        >>>    module, device_ids=[rank], output_device=rank
+        >>> )
+        >>> # Register a post-localSGD communication hook.
+        >>> # Assume that each machine has 4 GPUs, then each intra-machine subgroup has a size of 4.
+        >>> subgroup, _ = dist.new_subgroups()
+        >>> state = PostLocalSGDState(process_group=None, subgroup=subgroup, start_localSGD_iter=100)
+        >>> model.register_comm_hook(state, post_localSGD_hook)
         >>>
-        >>>  # Average parameters among each group of 8 processes every 4 iterations, and among all
-        >>>  # the 16 processes every 16 iterations.
-        >>>  averager = hierarchicalSGD.HierarchicalModelAverager(
-        >>>      period_group_size_dict=OrderedDict([(4, 8), (16, 16)]), warmup_steps=100)
-        >>>  # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
-        >>>  # In the first 100 steps, run global gradient averaging like normal DDP at every step.
-        >>>  # After 100 steps, run model averaging at two levels.
-        >>>  for step in range(0, 200):
-        >>>     optimizer.zero_grad()
-        >>>     loss = loss_fn(output, labels)
-        >>>     loss.backward()
-        >>>     optimizer.step()
-        >>>     # Average parameters after ``optimizer.step()``.
-        >>>     # Thus, the inter-node communication only occurs periodically after ``warmup_steps``.
-        >>>     averager.average_parameters(model.parameters())
+        >>> # Average parameters among each group of 8 processes every 4 iterations, and among all
+        >>> # the 16 processes every 16 iterations.
+        >>> averager = hierarchicalSGD.HierarchicalModelAverager(
+        >>>     period_group_size_dict=OrderedDict([(4, 8), (16, 16)]), warmup_steps=100)
+        >>> # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
+        >>> # In the first 100 steps, run global gradient averaging like normal DDP at every step.
+        >>> # After 100 steps, run model averaging at two levels.
+        >>> for step in range(0, 200):
+        >>>    optimizer.zero_grad()
+        >>>    loss = loss_fn(output, labels)
+        >>>    loss.backward()
+        >>>    optimizer.step()
+        >>>    # Average parameters after ``optimizer.step()``.
+        >>>    # Thus, the inter-node communication only occurs periodically after ``warmup_steps``.
+        >>>    averager.average_parameters(model.parameters())
 
     .. warning ::
         The last group size in the dict must be the size of the provided ``process_group``,

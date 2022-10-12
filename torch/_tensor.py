@@ -25,11 +25,10 @@ from torch.overrides import (
     has_torch_function_unary,
     has_torch_function_variadic,
 )
+from torch.utils.dlpack import DLDeviceType
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    # functools.wraps doesn't work well with methods in python 2
-    method_assignments = ("__name__", "__doc__")
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
@@ -158,10 +157,10 @@ class Tensor(torch._C._TensorBase):
                             f"Unsupported qscheme {self.qscheme()} in deepcopy"
                         )
                     # TODO: Once we decide to break serialization FC, no longer
-                    # need to wrap with _TypedStorage
+                    # need to wrap with TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        torch.storage._TypedStorage(
-                            wrap_storage=new_storage._untyped(), dtype=self.dtype
+                        torch.storage.TypedStorage(
+                            wrap_storage=new_storage.untyped(), dtype=self.dtype
                         ),
                         self.storage_offset(),
                         self.size(),
@@ -255,7 +254,7 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.storage, (self,), self)
 
-        return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
+        return torch.TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
@@ -324,10 +323,10 @@ class Tensor(torch._C._TensorBase):
                     f"Serialization is not supported for tensors of type {self.qscheme()}"
                 )
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with _TypedStorage
+            # need to wrap with TypedStorage
             args_qtensor = (
-                torch.storage._TypedStorage(
-                    wrap_storage=self.storage()._untyped(), dtype=self.dtype
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage().untyped(), dtype=self.dtype
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -382,10 +381,10 @@ class Tensor(torch._C._TensorBase):
             return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with _TypedStorage
+            # need to wrap with TypedStorage
             args = (
-                torch.storage._TypedStorage(
-                    wrap_storage=self.storage()._untyped(), dtype=self.dtype
+                torch.storage.TypedStorage(
+                    wrap_storage=self.storage().untyped(), dtype=self.dtype
                 ),
                 self.storage_offset(),
                 tuple(self.size()),
@@ -638,6 +637,16 @@ class Tensor(torch._C._TensorBase):
 
         return solve(self, other)
 
+    def lstsq(self, other):
+        from ._linalg_utils import lstsq
+
+        return lstsq(self, other)
+
+    def eig(self, eigenvectors=False):
+        from ._linalg_utils import eig
+
+        return eig(self, eigenvectors=eigenvectors)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -763,16 +772,16 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(
                 Tensor.split, (self,), self, split_size, dim=dim
             )
-        if isinstance(split_size, int):
-            return super(Tensor, self).split(split_size, dim)
-        elif isinstance(split_size, Tensor):
+        if isinstance(split_size, Tensor):
             try:
                 split_size = int(split_size)
-                return super(Tensor, self).split(split_size, dim)
             except ValueError:
-                return super(Tensor, self).split_with_sizes(split_size, dim)
+                pass
+
+        if isinstance(split_size, int):
+            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
-            return super(Tensor, self).split_with_sizes(split_size, dim)
+            return torch._VF.split_with_sizes(self, split_size, dim)
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
@@ -912,8 +921,10 @@ class Tensor(torch._C._TensorBase):
         return iter(self.unbind(0))
 
     def __hash__(self):
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__hash__, (self,), self)
+        # Do NOT handle __torch_function__ here as user's default
+        # implementation that handle most functions will most likely do it wrong.
+        # It can be easily overridden by defining this method on the user
+        # subclass if needed.
         return id(self)
 
     def __dir__(self):
@@ -1020,7 +1031,7 @@ class Tensor(torch._C._TensorBase):
             torch.int64: "<i8",
         }[self.dtype]
 
-        itemsize = self.storage().element_size()
+        itemsize = self.element_size()
 
         shape = tuple(self.shape)
         if self.is_contiguous():
@@ -1135,34 +1146,10 @@ class Tensor(torch._C._TensorBase):
         )
 
     def unflatten(self, dim, sizes):
-        r"""Expands the dimension :attr:`dim` of the :attr:`self` tensor over multiple dimensions
-        of sizes given by :attr:`sizes`.
+        r"""
+        unflatten(dim, sizes) -> Tensor
 
-        * :attr:`sizes` is the new shape of the unflattened dimension and it can be a `Tuple[int]` as well
-          as `torch.Size` if :attr:`self` is a `Tensor`, or `namedshape` (Tuple[(name: str, size: int)])
-          if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number
-          of elements in the original dim being unflattened.
-
-        Args:
-            dim (Union[int, str]): Dimension to unflatten
-            sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
-
-        Examples:
-            >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
-            torch.Size([3, 2, 2, 1])
-            >>> torch.randn(3, 4, 1).unflatten(1, (-1, 2)).shape # the size -1 is inferred from the size of dimension 1
-            torch.Size([3, 2, 2, 1])
-            >>> torch.randn(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2)))
-            tensor([[[-1.1772,  0.0180],
-                    [ 0.2412,  0.1431]],
-                    [[-1.1819, -0.8899],
-                    [ 1.5813,  0.2274]]], names=('A', 'B1', 'B2'))
-            >>> torch.randn(2, names=('A',)).unflatten('A', (('B1', -1), ('B2', 1)))
-            tensor([[-0.8591],
-                    [ 0.3100]], names=('B1', 'B2'))
-
-        .. warning::
-            The named tensor API is experimental and subject to change.
+        See :func:`torch.unflatten`.
 
         """
         if has_torch_function_unary(self):
@@ -1176,7 +1163,9 @@ class Tensor(torch._C._TensorBase):
             isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))
         ):
             names, sizes = unzip_namedshape(sizes)
-        return super(Tensor, self).unflatten(dim, sizes, names)
+            return super(Tensor, self).unflatten(dim, sizes, names)
+        else:
+            return super(Tensor, self).unflatten(dim, sizes)
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""
@@ -1217,7 +1206,7 @@ class Tensor(torch._C._TensorBase):
 
             >>> renamed_imgs = imgs.rename(None)
             >>> renamed_imgs.names
-            (None,)
+            (None, None, None, None)
 
             >>> renamed_imgs = imgs.rename('batch', 'channel', 'height', 'width')
             >>> renamed_imgs.names
@@ -1331,30 +1320,30 @@ class Tensor(torch._C._TensorBase):
             if self.device.type == "cuda":
                 stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
-                if stream != torch.cuda.current_stream:
+                sync_stream = torch.cuda.current_stream()
+                if stream != sync_stream:
                     event = torch.cuda.Event()
-                    event.record(torch.cuda.current_stream())
+                    event.record(sync_stream)
                     stream.wait_event(event)
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
-        # Avoid circular import
-        from torch.utils.dlpack import DLDeviceType
-
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
-        idx = self.device.index if self.device.index is not None else 0
-        if self.device.type == "cuda" and torch.version.hip is not None:
+        device = self.device
+        idx = device.index if device.index is not None else 0
+        torch_device_type = device.type
+        if torch_device_type == "cuda" and torch.version.hip is not None:
             device_type = DLDeviceType.kDLROCM
-        elif self.device.type == "cpu" and self.is_pinned():
+        elif torch_device_type == "cpu" and self.is_pinned():
             device_type = DLDeviceType.kDLCPUPinned
-        elif self.device.type == "cuda":
+        elif torch_device_type == "cuda":
             device_type = DLDeviceType.kDLGPU
-        elif self.device.type == "cpu":
+        elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
         else:
             raise ValueError(
-                "Unknown device type {} for Dlpack".format(self.device.type)
+                "Unknown device type {} for Dlpack".format(torch_device_type)
             )
         return (device_type, idx)
 

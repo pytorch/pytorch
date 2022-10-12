@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/python_engine.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 

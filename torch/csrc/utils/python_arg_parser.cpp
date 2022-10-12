@@ -92,6 +92,7 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "sub",          "sub_",          "sub_out",
       "subtract",     "subtract_",     "subtract_out", // alias of sub
       "true_divide",  "true_divide_",  "true_divide_out",
+      "to",           "_to_copy",      "copy_",
       "floor_divide", "floor_divide_", "floor_divide_out"};
   return allowed.find(name) != allowed.end();
 }
@@ -290,9 +291,12 @@ auto handle_torch_function_no_python_arg_parser(
   PyObject* mode_obj = nullptr;
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  const auto& maybe_mode = is_torch_function
-      ? at::impl::PythonTorchFunctionTLS::get_mode()
-      : at::impl::TorchDispatchModeTLS::get_state();
+  auto get_mode = [&]() {
+    return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
+                             : c10::impl::TorchDispatchModeTLS::get_mode();
+  };
+
+  const auto& maybe_mode = get_mode();
   if (maybe_mode) {
     mode_obj = maybe_mode->ptr(getPyInterpreter());
     TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
@@ -335,6 +339,9 @@ auto handle_torch_function_no_python_arg_parser(
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
+      if (!torch_function) {
+        TORCH_INTERNAL_ASSERT(0);
+      }
 
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
@@ -370,8 +377,15 @@ auto handle_torch_function_no_python_arg_parser(
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
-    ss << "no implementation found for '" << module_name << "." << func_name
-       << "' on types that implement " << torch_function_name_str << ": [";
+    ss << "no implementation found for '";
+    if (module_name && func_name) {
+      ss << module_name << "." << func_name;
+    } else {
+      py::handle fn = torch_api_function;
+      ss << py::str(fn.attr("__module__")) << "."
+         << py::str(fn.attr("__name__"));
+    }
+    ss << "' on types that implement " << torch_function_name_str << ": [";
     for (auto& arg : overloaded_args) {
       ss << py::repr(get_type_of_overloaded_arg(arg.ptr()));
       if (!arg.is(overloaded_args.back())) {
@@ -385,8 +399,9 @@ auto handle_torch_function_no_python_arg_parser(
       // If a user forcibly changes the mode in a non-lexical way
       // in the inner context, the mode could be invalid here.  So just be
       // a bit safe, it doesn't cost us anything since this is error reporting
-      const auto& maybe_mode = at::impl::PythonTorchFunctionTLS::get_mode();
-      TORCH_INTERNAL_ASSERT(mode_obj == maybe_mode->ptr(getPyInterpreter()));
+      const auto& maybe_mode = get_mode();
+      TORCH_INTERNAL_ASSERT(
+          maybe_mode && mode_obj == maybe_mode->ptr(getPyInterpreter()));
       ss << " nor was it found on the currently active mode "
          << py::repr(mode_obj);
     }
@@ -649,12 +664,29 @@ bool is_float_or_complex_list(PyObject* obj) {
 
 static bool is_int_list(PyObject* obj, int broadcast_size) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
-    if (PySequence_Size(obj) == 0) {
+    auto len = PySequence_Size(obj);
+    if (len == 0) {
       return true;
     }
 
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
+    bool int_first = false;
     if (THPUtils_checkIndex(item.ptr())) {
+      // we still have to check that the rest of items are NOT symint nodes
+      int_first = true;
+    }
+
+    // Make sure none of the later arguments are SymInt
+    // NB: do NOT check that the later arguments are ints, as this is
+    // BC-breaking for FX
+    for (int i = 1; i < len; i++) {
+      if (torch::is_symint_node(
+              py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
+        return false;
+      }
+    }
+
+    if (int_first) {
       return true;
     }
 
@@ -708,9 +740,16 @@ auto FunctionParameter::check(
       if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
         return true;
       }
-      return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
+      if (allow_numbers_as_tensors) {
+        return THPUtils_checkScalar(obj);
+      }
+      return false;
     }
     case ParameterType::SCALAR:
+      if (THPUtils_checkScalar(obj)) {
+        return true;
+      }
+      // fallthrough
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
@@ -1227,10 +1266,14 @@ bool FunctionSignature::parse(
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
   // expand((5,3))
+  int int_list_overload = false;
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
     allow_varargs_intlist = true;
+    if (params[0].type_ == ParameterType::INT_LIST) {
+      int_list_overload = true;
+    }
   }
 
   if (nargs > max_pos_args && !allow_varargs_intlist) {
@@ -1287,7 +1330,8 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-        is_int_or_symint(obj)) {
+        ((int_list_overload ? is_int_list(args, param.size)
+                            : is_int_or_symint_list(args, param.size)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
@@ -1446,6 +1490,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return THPVariable_Unpack(obj);
   }
 
+  bool save_symint = false;
   at::Scalar scalar;
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
@@ -1455,6 +1500,18 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
+    // NB: we DO NOT put symbolic ints/floats into the Scalar itself,
+    // because although Scalar supports SymInt/SymFloat, the subsequent
+    // conversion to Tensor does not.  Instead, do it out of band.
+  } else if (torch::is_symint_node(py::handle(obj))) {
+    save_symint = true;
+    // This scalar value doesn't matter, it shouldn't ever actually
+    // get read out.  Make it a big and weird looking number to help
+    // people figure out if there's aproblem.
+    scalar = at::Scalar(7777777);
+  } else if (torch::is_symfloat_node(py::handle(obj))) {
+    save_symint = true;
+    scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add
@@ -1469,6 +1526,14 @@ at::Tensor PythonArgs::tensor_slow(int i) {
 
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+
+  if (save_symint) {
+    auto py_tensor = py::cast(tensor);
+    if (PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) < 0) {
+      throw python_error();
+    }
+  }
+
   return tensor;
 }
 
@@ -1500,6 +1565,15 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   if (PyComplex_Check(arg)) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
+
+  if (torch::is_symint_node(arg)) {
+    return at::Scalar(py::cast<c10::SymInt>(arg));
+  }
+
+  if (torch::is_symfloat_node(arg)) {
+    return at::Scalar(py::cast<c10::SymFloat>(arg));
+  }
+
   return at::Scalar(THPUtils_unpackDouble(arg));
 }
 

@@ -1,6 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -9,7 +10,14 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
-#include <torch/custom_class.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/aminmax.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/quantize_per_tensor.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -236,7 +244,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
     at::Tensor input,
     bool reduce_range) {
   if (reduce_range) {
-    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+    TORCH_WARN_ONCE("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
   }
 
   using at::Tensor;
@@ -415,14 +423,21 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Resize output Tensor
   output.resize_(output_sizes);
 
-  // Call the fp16 gemm interface
-  fbgemm::cblas_gemm_compute(
-      fbgemm::matrix_op_t::NoTranspose,
-      M,
-      input_ptr,
-      packed_weight_fp16,
-      0.0f,
-      output.data_ptr<float>());
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (const auto task_id : c10::irange(begin, end)) {
+      // Call the fp16 gemm interface
+      fbgemm::cblas_gemm_compute(
+          /*transa=*/fbgemm::matrix_op_t::NoTranspose,
+          /*m=*/static_cast<int>(M),
+          /*A=*/input_ptr,
+          /*Bp=*/packed_weight_fp16,
+          /*beta=*/0.0f,
+          /*C=*/output.data_ptr<float>(),
+          /*thread_id=*/static_cast<int>(task_id),
+          /*num_threads=*/num_tasks);
+    }
+  });
 
   // Add bias term
   if (bias_.has_value()) {
@@ -496,10 +511,21 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   x.init(input_desc, input_contig.data_ptr());
   // Find quantization parameters
   float x_max = 0, x_min = 0;
-  if (input.numel() > 0) {
-    x_min = input_contig.min().item<float>();
-    x_max = input_contig.max().item<float>();
+#ifdef USE_FBGEMM
+  // Use FBGEMM's FindMinMax if available since it's faster
+  fbgemm::FindMinMax(
+      /*m=*/input_contig.data_ptr<float>(),
+      /*min=*/&x_min,
+      /*max=*/&x_max,
+      /*len=*/input.numel());
+#else
+  if (input_contig.numel() > 0) {
+    Tensor t_min, t_max;
+    std::tie(t_min, t_max) = at::aminmax(input_contig);
+    x_max = t_max.item<float>();
+    x_min = t_min.item<float>();
   }
+#endif
   const int precision = 8;
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
@@ -524,18 +550,37 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   ideep::tensor y({dst_dims, ideep::tensor::data_type::f32,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
-  if (bias_.has_value()) {
+  bool with_bias = bias_.has_value();
+  if (with_bias) {
     // Bias might be modified outside (e.g. by quantization bias correction).
     // If so, update the prepacked bias as well.
     if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
       bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
-    const ideep::tensor b = bias_.value();
-    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f,
-                                      src_scales, weights_scales, ideep::scale_t(),
-                                      src_zero_point, ideep::zero_point_t(), op_attr);
+  }
+  const auto& b = with_bias ? bias_.value() : ideep::tensor();
+  // Primitive cache is initialized when called for the first time
+  // and won't be updated afterwards.
+  int num_threads = at::get_num_threads();
+  PrimitiveCacheKey cache_key = std::make_tuple(
+      q_params.scale, q_params.zero_point, input_dims, 1.0, 0, num_threads);
+  c10::call_once(*cache_initialized_flag, [&](){
+      LinearParams params;
+      ideep::matmul_forward::prepare</*is_dynamic=*/true>(
+          params, x, w, b, y, 1.0f, 1.0f,
+          src_scales, weights_scales, ideep::scale_t(),
+          src_zero_point, ideep::zero_point_t(), op_attr);
+      get_cache() = LinearPrimitiveCache(cache_key, params);
+      onednn_utils::try_reorder(
+          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+  });
+  if (get_cache().hit_dynamic(cache_key)) {
+    LinearParams& params = get_cache().get_param();
+    ideep::matmul_forward::compute_dynamic(
+        params, x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
+        ideep::scale_t(), src_zero_point, ideep::zero_point_t());
   } else {
-    ideep::matmul_forward::compute_v2(x, w, y, 1.0f, 1.0f,
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f,
                                       src_scales, weights_scales, ideep::scale_t(),
                                       src_zero_point, ideep::zero_point_t(), op_attr);
   }

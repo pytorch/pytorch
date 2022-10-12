@@ -1,14 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
-#include <torch/custom_class.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>         // for _empty_affine_q...
+#include <ATen/ops/_empty_affine_quantized_native.h>  // for empty_affine_qu...
+#include <ATen/ops/empty.h>                           // for empty
+#include <ATen/ops/quantize_per_channel_native.h>     // for quantize_per_ch...
+#include <ATen/ops/quantize_per_tensor_native.h>      // for quantize_per_te...
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/util/irange.h>
 
@@ -328,8 +342,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
         orig_weight, xnnp_weight);
 
     // Original bias was float, so we requantize it here.
-    at::Tensor qbias = at::native::quantize_per_tensor(
-          bias_, orig_weight.q_scale() * input_scale, 0, c10::kQInt32);
+    at::Tensor qbias = quant_utils::QuantizeBias(false, bias_, orig_weight, input_scale);
 
     // output limits
    auto output_min = kReluFused
@@ -476,18 +489,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     }
     // Original bias was float, so we requantize it here.
     const bool is_per_channel = orig_weight.qscheme() == at::kPerChannelAffine;
-    at::Tensor qbias;
-    // Original bias was float, so we requantize it here.
-    if (is_per_channel) {
-      at::Tensor bias_quant_scales =
-          weight_contig.q_per_channel_scales() * input_scale;
-      at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel(
-          bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
-    } else {
-      qbias = at::native::quantize_per_tensor(
-          bias_fp32, weight_contig.q_scale() * input_scale, 0, c10::kQInt32);
-    }
+    at::Tensor qbias = quant_utils::QuantizeBias(is_per_channel, bias_fp32, weight_contig, input_scale);
 
     // Update the input scale to not pack again.
     this->input_scale = input_scale;
@@ -640,10 +642,13 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   ideep::tensor x(input_desc, input_contig->data_ptr<c10::quint8>());
   auto dst_dims = {M, N};
-  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input.q_scale());
+  double input_scale = input.q_scale();
+  int64_t input_zero_point = input.q_zero_point();
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input_scale);
   const ideep::scale_t& weights_scales = w.get_scale();
-  const ideep::scale_t& dst_scales = ideep::scale_t(1, 1.0/output_scale); // Scales of ONEDNN and PyTorch are reciprocal
-  const ideep::zero_point_t& src_zero_point = ideep::zero_point_t(1, input.q_zero_point());
+  // Scales of ONEDNN and PyTorch are reciprocal
+  const ideep::scale_t& dst_scales = ideep::scale_t(1, 1.0/output_scale);
+  const ideep::zero_point_t& src_zero_point = ideep::zero_point_t(1, input_zero_point);
   const ideep::zero_point_t& dst_zero_point = ideep::zero_point_t(1, output_zero_point);
   // Compute: Use ideep::matmul_forward to support asymmetric quantization
   // Allocate output Tensor
@@ -655,20 +660,39 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   if (output.numel() == 0) {
     return output;
   }
-  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+  ideep::tensor y({dst_dims, ideep::tensor::data_type::u8,
+                   {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
-  if (bias_.has_value()) {
+  bool with_bias = bias_.has_value();
+  if (with_bias) {
     // Bias might be modified outside (e.g. by quantization bias correction).
     // If so, update the prepacked bias as well.
     if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
       bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
-    const auto& b = bias_.value();
-    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
-                                      src_zero_point, dst_zero_point, op_attr);
+  }
+  const auto& b = with_bias ? bias_.value() : ideep::tensor();
+  // Primitive cache is initialized when called for the first time
+  // and won't be updated afterwards.
+  int num_threads = at::get_num_threads();
+  PrimitiveCacheKey cache_key = std::make_tuple(
+      input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads);
+  c10::call_once(*cache_initialized_flag, [&](){
+      LinearParams params;
+      ideep::matmul_forward::prepare</*is_dynamic=*/false>(
+          params, x, w, b, y, 1.0f, 1.0f,
+          src_scales, weights_scales, dst_scales,
+          src_zero_point, dst_zero_point, op_attr);
+      get_cache() = LinearPrimitiveCache(cache_key, params);
+      onednn_utils::try_reorder(
+          w, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+  });
+  if (get_cache().hit(cache_key)) {
+    LinearParams& params = get_cache().get_param();
+    ideep::matmul_forward::compute(params, x, w, b, y);
   } else {
-    ideep::matmul_forward::compute_v2(x, w, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
-                                      src_zero_point, dst_zero_point, op_attr);
+    ideep::matmul_forward::compute_v2(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales,
+                                      dst_scales, src_zero_point, dst_zero_point, op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = N;

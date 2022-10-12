@@ -489,9 +489,12 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
     image = Image.fromarray(tensor)
     if rois is not None:
         image = draw_boxes(image, rois, labels=labels)
-    image = image.resize((scaled_width, scaled_height), Image.ANTIALIAS)
+    try:
+        ANTIALIAS = Image.Resampling.LANCZOS
+    except AttributeError:
+        ANTIALIAS = Image.ANTIALIAS
+    image = image.resize((scaled_width, scaled_height), ANTIALIAS)
     import io
-
     output = io.BytesIO()
     image.save(output, format="PNG")
     image_string = output.getvalue()
@@ -571,12 +574,11 @@ def audio(tag, tensor, sample_rate=44100):
     import wave
 
     fio = io.BytesIO()
-    wave_write = wave.open(fio, "wb")
-    wave_write.setnchannels(1)
-    wave_write.setsampwidth(2)
-    wave_write.setframerate(sample_rate)
-    wave_write.writeframes(array.data)
-    wave_write.close()
+    with wave.open(fio, "wb") as wave_write:
+        wave_write.setnchannels(1)
+        wave_write.setsampwidth(2)
+        wave_write.setframerate(sample_rate)
+        wave_write.writeframes(array.data)
     audio_string = fio.getvalue()
     fio.close()
     audio = Summary.Audio(
