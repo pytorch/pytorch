@@ -911,7 +911,9 @@ def add(
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
-        if not utils.is_weakly_lesser_type(type(alpha), python_type):
+        if python_type != bool and not utils.is_weakly_lesser_type(
+            type(alpha), python_type
+        ):
             msg = (
                 "alpha argument of type {0} cannot be safely cast to type {1}!".format(
                     type(alpha), python_type
