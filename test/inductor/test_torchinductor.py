@@ -55,7 +55,12 @@ try:
 
     CppCodeCache.load("")
     HAS_CPU = True
-except (CalledProcessError, OSError, torch._inductor.exc.InvalidCxxCompiler):
+except (
+    CalledProcessError,
+    OSError,
+    torch._inductor.exc.InvalidCxxCompiler,
+    torch._inductor.exc.CppCompileError,
+):
     pass
 
 aten = torch.ops.aten
