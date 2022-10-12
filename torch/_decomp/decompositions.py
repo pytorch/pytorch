@@ -1776,11 +1776,10 @@ def index_add_(
     alpha: NumberType = 1,
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
-    # Fails incorrectly for bool tensor
-    # utils.check(
-    # index.ndim <= 1,
-    # lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    # )
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         utils.check(
