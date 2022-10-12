@@ -34,6 +34,7 @@ def parse_args() -> Any:
 
 def main() -> None:
     args = parse_args()
+    print(args.pr_num)
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
