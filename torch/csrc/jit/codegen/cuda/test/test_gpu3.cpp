@@ -5101,11 +5101,11 @@ TEST_F(NVFuserTest, FusionInsertMagicZero1_CUDA) {
       tv2->toString());
 }
 
-TEST_F(NVFuserTest, FusionRepro1860_CUDA) {
+TEST_F(NVFuserTest, FusionExpandRepro1860_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr;
   FusionGuard fg(&fusion);
-  std::vector<bool> contiguity{true, false, false};
+  std::vector<bool> contiguity{false, false, false};
 
   std::vector<int64_t> shape{1, -1, -1};
   TensorView* tv0 = makeContigConcreteTensor(shape);
@@ -6505,6 +6505,54 @@ TEST_F(NVFuserTest, FusionSimpleAmperePipeline_CUDA) {
   auto cg_outputs = fe.runFusion({input1});
 
   testValidate(&fusion, cg_outputs, {input1}, {input1}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandedInput_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = TensorViewBuilder()
+                        .ndims(3)
+                        .shape({-1, -1, -1})
+                        .contiguity({false, false, true})
+                        .expanded({false, true, false})
+                        .build();
+  auto expanded_extent = tv0->axis(1)->expandedExtent();
+  fusion->addInput(tv0);
+  fusion->addInput(expanded_extent);
+  auto tv1 = set(tv0);
+  fusion->addOutput(tv1);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({4096, 1, 3}, options).expand({-1, 7, -1});
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({t0, 7});
+
+  testValidate(fusion, cg_outputs, {t0, 7}, {t0}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandedInputThrow_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = TensorViewBuilder()
+                        .ndims(3)
+                        .shape({3, 7, 3})
+                        .contiguity({false, false, true})
+                        .expanded({false, true, false})
+                        .build();
+  fusion->addInput(tv0);
+  auto tv1 = set(tv0);
+  tv1->domain()->setContiguity({true, true, true});
+  fusion->addOutput(tv1);
+
+  EXPECT_THAT(
+      [&]() { GpuLower lower(fusion); },
+      ::testing::ThrowsMessage<c10::Error>(::testing::HasSubstr(
+          "The expanded dim and the dim before it can not be contiguous.")));
 }
 
 // Test file size should be up to 10K LoC. Create a new file for more tests.

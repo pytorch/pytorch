@@ -681,7 +681,7 @@ TensorDomain* createViewDomain(
       new_root_domain,
       new_rfactor_domain,
       new_rfactor_domain,
-      std::vector<bool>(new_rfactor_domain.size(), true));
+      TensorDomain::getContiguousContiguity(new_rfactor_domain));
 }
 
 } // namespace

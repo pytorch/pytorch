@@ -584,6 +584,9 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   TensorViewBuilder& shape(std::vector<Val*> shape);
   TensorViewBuilder& shape(const std::vector<int64_t>& shape);
 
+  //! Set if a dimension is expanded
+  TensorViewBuilder& expanded(std::vector<bool> expanded);
+
   //! Creates a new TensorView with the specified options
   TensorView* build() const;
 
@@ -592,6 +595,7 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   DataType dtype_ = DataType::Float;
   std::vector<bool> contiguity_;
   std::vector<Val*> shape_;
+  std::vector<bool> expanded_;
 };
 
 } // namespace cuda

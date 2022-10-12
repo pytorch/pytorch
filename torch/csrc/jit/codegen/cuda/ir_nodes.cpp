@@ -2522,6 +2522,21 @@ std::vector<IterDomain*> TensorDomain::noBroadcasts(
   return noBroadcastDomain;
 }
 
+std::vector<bool> TensorDomain::getContiguousContiguity(
+    const std::vector<IterDomain*>& rfactor_domain) {
+  // The expanded dim and the dim before it can not be contiguous
+  std::vector<bool> contiguity(rfactor_domain.size(), true);
+  for (auto i : c10::irange(rfactor_domain.size())) {
+    if (rfactor_domain[i]->hasExpandedExtent()) {
+      contiguity[i] = false;
+      if (i > 0) {
+        contiguity[i - 1] = false;
+      }
+    }
+  }
+  return contiguity;
+}
+
 bool TensorDomain::hasBroadcast(const std::vector<IterDomain*>& td) {
   for (auto id : td)
     if (id->isBroadcast())
@@ -2613,7 +2628,7 @@ TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
       new_root_domain,
       rfactor_domain,
       rfactor_domain,
-      std::vector<bool>(rfactor_domain.size(), true));
+      TensorDomain::getContiguousContiguity(rfactor_domain));
 }
 
 // TODO: Rfactor a Welford

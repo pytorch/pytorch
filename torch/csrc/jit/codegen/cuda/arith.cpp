@@ -247,7 +247,7 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
 
   return IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
+          out_domain, TensorDomain::getContiguousContiguity(out_domain)),
       dtype);
 }
 
@@ -281,8 +281,9 @@ Val* newValLike(Val* val, DataType dtype) {
 
   const ValType vtype = val->getValType().value();
 
-  if (vtype == ValType::TensorView)
+  if (vtype == ValType::TensorView) {
     return newOutputTV({val}, dtype);
+  }
 
   return newScalar(vtype, dtype);
 }
@@ -1134,7 +1135,7 @@ static TensorView* newForReduction(
   }
 
   TensorDomain* td = IrBuilder::create<TensorDomain>(
-      new_domain, std::vector<bool>(new_domain.size(), true));
+      new_domain, TensorDomain::getContiguousContiguity(new_domain));
 
   data_type =
       data_type == DataType::Null ? tv->getDataType().value() : data_type;
@@ -1327,7 +1328,7 @@ TensorView* broadcast(
 
   TensorView* out_tensor = IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
+          out_domain, TensorDomain::getContiguousContiguity(out_domain)),
       inp->getDataType().value());
   IrBuilder::create<BroadcastOp>(out_tensor, inp, is_broadcast_dim);
   return out_tensor;
@@ -1397,7 +1398,7 @@ TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
 
   TensorView* out_tensor = IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
+          out_domain, TensorDomain::getContiguousContiguity(out_domain)),
       inp->getDataType().value());
   if (!expanded) {
     IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_tensor, inp);
@@ -1457,7 +1458,7 @@ TensorView* expand_as(TensorView* inp, TensorView* other) {
 
   TensorView* out_tensor = IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
+          out_domain, TensorDomain::getContiguousContiguity(out_domain)),
       inp->getDataType().value());
   if (!expanded) {
     IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_tensor, inp);
@@ -2008,7 +2009,7 @@ TensorView* shift(
 
   out = IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
-          out_dom, std::vector<bool>(out_dom.size(), true)),
+          out_dom, TensorDomain::getContiguousContiguity(out_dom)),
       inp->getDataType().value());
 
   IrBuilder::create<ShiftOp>(out, inp, offsets, pad_width);
@@ -2032,7 +2033,7 @@ TensorDomain* generateTensorDomainWithStrides(
        std::all_of(
            strides.begin(), strides.end(), [](int s) { return s == 1; }))) {
     return IrBuilder::create<TensorDomain>(
-        root_domains, std::vector<bool>(root_domains.size(), true));
+        root_domains, TensorDomain::getContiguousContiguity(root_domains));
   }
 
   for (const auto i : c10::irange(root_domains.size())) {
@@ -2049,13 +2050,11 @@ TensorDomain* generateTensorDomainWithStrides(
     strided_domains.push_back(split_out.second);
   }
 
-  auto contig_vector_size = strided_domains.size();
-
   auto strided_td = IrBuilder::create<TensorDomain>(
       root_domains,
       strided_domains,
       strided_domains,
-      std::vector<bool>(contig_vector_size, true));
+      TensorDomain::getContiguousContiguity(strided_domains));
 
   return strided_td;
 }
@@ -2198,7 +2197,7 @@ TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp) {
   auto out = IrBuilder::create<TensorView>(
       inp->container(),
       IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
+          out_domain, TensorDomain::getContiguousContiguity(out_domain)),
       out_type);
 
   IrBuilder::create<ViewAsScalar>(inp->container(), out, inp, id);
@@ -2267,7 +2266,7 @@ static TensorView* newForMma(
   }
 
   TensorDomain* td = IrBuilder::create<TensorDomain>(
-      new_domain, std::vector<bool>(new_domain.size(), true));
+      new_domain, TensorDomain::getContiguousContiguity(new_domain));
 
   return IrBuilder::create<TensorView>(td, data_type);
 }
