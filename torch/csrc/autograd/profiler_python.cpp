@@ -209,7 +209,7 @@ struct Config<CallType::PyModuleCall> {
   using key_t = PyModuleSelf;
   using cls_t = PyModuleCls;
   using ephemeral_t = PyFrameObject*;
-  using info_t = std::pair<cls_t, std::vector<std::pair<std::string, void*>>>;
+  using info_t = std::pair<cls_t, std::vector<ParameterInfo>>;
   struct cache_t {
     c10::optional<CodeLocation> location_; // nn.Module.forward;
     ska::flat_hash_map<key_t, info_t> modules_and_params_;
@@ -233,8 +233,8 @@ struct Config<CallType::PyOptimizerCall> {
   using ephemeral_t = PyFrameObject*;
   struct info_t {
     cls_t cls_;
-    std::vector<void*> params_;
-    std::vector<std::pair<std::string, void*>> states_;
+    std::vector<TensorMetadata> params_;
+    std::vector<std::pair<std::string, TensorMetadata>> states_;
   };
   struct cache_t {
     c10::optional<CodeLocation>
@@ -268,6 +268,52 @@ class Callsite {
   key_t value_;
   Config<CallType::PyCall>::key_t caller_;
 };
+
+void check_and_store(
+    const pybind11::handle& name,
+    const pybind11::handle& param_handle,
+    std::vector<ParameterInfo>& storeroom) {
+  auto param_ptr = param_handle.ptr();
+  if (py::isinstance<py::str>(name) && THPVariable_CheckExact(param_ptr)) {
+    const auto& param = THPVariable_Unpack(param_ptr);
+    auto grad_ptr = py::getattr(param_handle, "grad", py::none()).ptr();
+    c10::optional<TensorMetadata> grad_metadata;
+
+    if (THPVariable_CheckExact(grad_ptr)) {
+      grad_metadata = c10::optional<TensorMetadata>(
+          TensorMetadata(THPVariable_Unpack(grad_ptr)));
+    } else {
+      grad_metadata = c10::nullopt;
+    }
+
+    storeroom.push_back(
+        {name.cast<std::string>(), TensorMetadata(param), grad_metadata});
+  }
+}
+
+void check_and_store(
+    const pybind11::handle& name,
+    const pybind11::handle& param_handle,
+    std::vector<std::pair<std::basic_string<char>, TensorMetadata>>&
+        storeroom) {
+  auto param_ptr = param_handle.ptr();
+  if (py::isinstance<py::str>(name) && THPVariable_CheckExact(param_ptr)) {
+    const auto& param = THPVariable_Unpack(param_ptr);
+
+    storeroom.emplace_back(name.cast<std::string>(), param);
+  }
+}
+
+void check_and_store(
+    const pybind11::handle& param_handle,
+    std::vector<TensorMetadata>& storeroom) {
+  auto param_ptr = param_handle.ptr();
+  if (THPVariable_CheckExact(param_ptr)) {
+    const auto& param = THPVariable_Unpack(param_ptr);
+
+    storeroom.emplace_back(param);
+  }
+}
 
 // ============================================================================
 // == Type specific store and load implementations. ===========================
@@ -356,15 +402,9 @@ void ValueCache::store<CallType::PyModuleCall>(
     auto cls = set_class<CallType::PyModuleCall>(this, cache, key, frame);
 
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
-    std::vector<std::pair<std::string, void*>> params_;
+    std::vector<ParameterInfo> params_;
     for (auto& it : params) {
-      auto t = it.second.ptr();
-      if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(t)) {
-        auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
-        if (storage) {
-          params_.emplace_back(it.first.cast<std::string>(), storage->data());
-        }
-      }
+      check_and_store(it.first, it.second, params_);
     }
     cache.modules_and_params_[key] = make_pair(cls, params_);
   }
@@ -395,8 +435,23 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     auto cls = set_class<CallType::PyOptimizerCall>(this, cache, key, frame);
     py::list param_groups_handle =
         py::handle((PyObject*)key).attr("param_groups");
-    std::vector<void*> params_;
-    std::vector<std::pair<std::string, void*>> states_;
+    std::vector<TensorMetadata> params_;
+    // param_groups is a list of dict
+    for (auto& param_group : param_groups_handle) {
+      for (auto& param :
+           py::cast<py::dict>(param_group).attr("get")("params")) {
+        check_and_store(param, params_);
+      }
+    }
+    std::vector<std::pair<std::string, TensorMetadata>> states_;
+    py::dict state_handle = py::handle((PyObject*)key).attr("state");
+    for (auto& it : state_handle) {
+      TORCH_INTERNAL_ASSERT(
+          py::isinstance<py::dict>(it.second), "Expects a dict type element");
+      for (auto& state_elem : py::cast<py::dict>(it.second)) {
+        check_and_store(state_elem.first, state_elem.second, states_);
+      }
+    }
 
     cache.optimizer_data_[key] = {cls, params_, states_};
   }
@@ -683,9 +738,9 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     // to all the prior frames onto our event stack. (We stop at depth=128)
     std::vector<PyFrameObject*> current_stack;
     auto frame = PyEval_GetFrame();
-    Py_INCREF(frame);
     size_t depth = 0; // Make sure we can't infinite loop.
     while (frame != nullptr && depth <= 128) {
+      Py_INCREF(frame);
       current_stack.push_back(frame);
       frame = PyFrame_GetBack(frame);
       depth++;

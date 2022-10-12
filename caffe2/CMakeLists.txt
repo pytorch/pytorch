@@ -1147,9 +1147,6 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
-install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
-  DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
-  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 install(FILES
   "${TORCH_SRC_DIR}/script.h"
   "${TORCH_SRC_DIR}/extension.h"
@@ -1157,12 +1154,6 @@ install(FILES
   "${TORCH_SRC_DIR}/library.h"
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-if(USE_DEPLOY)
-  install(FILES
-    "${TORCH_SRC_DIR}/deploy.h"
-    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-endif()
-
 if(BUILD_TEST)
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
@@ -1316,25 +1307,6 @@ if(BUILD_LITE_INTERPRETER)
   endif()
 endif()
 
-
-# For torch/csrc/distributed/c10d
-function(include_torch_lib_dir target)
-  target_include_directories(${target} PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-endfunction()
-
-include_torch_lib_dir(torch_cpu)
-if(USE_ROCM)
-  include_torch_lib_dir(torch_hip)
-elseif(USE_CUDA)
-  if(BUILD_SPLIT_CUDA)
-    include_torch_lib_dir(torch_cuda_cpp)
-  else()
-    include_torch_lib_dir(torch_cuda)
-  endif()
-endif()
-if(BUILD_PYTHON)
-    include_torch_lib_dir(torch_python)
-endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set

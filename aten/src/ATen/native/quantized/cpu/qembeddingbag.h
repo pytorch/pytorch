@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
+#include <cstdint>
 
 namespace at {
 namespace native {

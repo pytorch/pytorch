@@ -10,7 +10,7 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     DTypeWithConstraints,
 )
-from torch.ao.quantization.fake_quantize import FakeQuantize
+from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
@@ -190,7 +190,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         quantize_op = torch.quantize_per_tensor_dynamic
         # TODO: get reduce range from observer
         # reduce_range = activation_post_process.reduce_range
-        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        reduce_range = torch.backends.quantized.engine in ("fbgemm", "x86")
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     elif dtype == torch.float16:
         node_type = "call_method"
@@ -954,6 +954,19 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         for user in list(last_getitem.users.keys()):
             user.replace_input_with(last_getitem, new_input)
 
+def _get_observer_from_activation_post_process(
+    activation_post_process: Union[ObserverBase, FakeQuantizeBase],
+) -> ObserverBase:
+    """
+    If `activation_post_process` is an observer, return the observer.
+    If `activation_post_process` is a fake quantize, return the internal observer.
+    """
+    if isinstance(activation_post_process, ObserverBase):
+        return activation_post_process
+    else:
+        assert isinstance(activation_post_process, FakeQuantizeBase)
+        return activation_post_process.activation_post_process  # type: ignore[return-value]
+
 def _qconfig_satisfies_dtype_config_constraints(
         qconfig: QConfigAny,
         dtype_with_constraints: DTypeWithConstraints,
@@ -969,14 +982,15 @@ def _qconfig_satisfies_dtype_config_constraints(
     If `qconfig` or `dtype_with_constraints.dtype` is None, or the dtypes do not match, return True.
     """
     def _activation_post_process_satisfies_dtype_config_constraints(
-            activation_post_process: Union[ObserverBase, FakeQuantize],
+            activation_post_process: Union[ObserverBase, FakeQuantizeBase],
             dtype_with_constraints: DTypeWithConstraints,
             debug_string: str) -> bool:
-        app_quant_min = getattr(activation_post_process, "quant_min", None)
-        app_quant_max = getattr(activation_post_process, "quant_max", None)
+        observer = _get_observer_from_activation_post_process(activation_post_process)
+        app_quant_min = getattr(observer, "quant_min", None)
+        app_quant_max = getattr(observer, "quant_max", None)
         # TODO: for now, just use the existing eps value as scale_min. In the future, we should
         # resolve the differences between the two, either by renaming eps or some other way
-        app_scale_min = getattr(activation_post_process, "eps", None)
+        app_scale_min = getattr(observer, "eps", None)
         backend_quant_min = dtype_with_constraints.quant_min_lower_bound
         backend_quant_max = dtype_with_constraints.quant_max_upper_bound
         backend_scale_min = dtype_with_constraints.scale_min_lower_bound

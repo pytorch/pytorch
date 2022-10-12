@@ -149,7 +149,7 @@ class TracerBase:
                 def no_node(arg):
                     if isinstance(arg, Node):
                         raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
-                                           "Node. Got key: {k}")
+                                           f"Node. Got key: {k}")
                 map_aggregate(k, no_node)
 
                 r[k] = self.create_arg(v)

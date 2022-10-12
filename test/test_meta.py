@@ -4,7 +4,7 @@ import torch
 import os
 from enum import Enum
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.meta_utils import MetaConverter
 import torch.utils._python_dispatch
 from torch.testing._internal.common_utils import (
@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
-    onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torchgen.utils import YamlLoader
@@ -217,7 +216,6 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
         test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
-        # NOTE: stride checking is currently disabled
         # See https://github.com/pytorch/pytorch/issues/78050
         if should_check_strides(func):
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
@@ -340,6 +338,15 @@ def run_meta_crossref(
         if func is torch.tensor_split:
             # Use original indices_or_sections, this argument is data dependent
             meta_args = (meta_args[0], args[1]) + meta_args[2:]
+        elif func is torch.Tensor.__getitem__:
+            # Ensure boolean tensors use original
+            assert len(args) == 2
+            flat_args, _ = tree_flatten(args[1])
+            flat_meta_args, spec = tree_flatten(meta_args[1])
+            flat_new_args = []
+            for a, ma in zip(flat_args, flat_meta_args):
+                flat_new_args.append(a if isinstance(a, torch.Tensor) and a.dtype in [torch.int8, torch.bool] else ma)
+            meta_args = (meta_args[0], tree_unflatten(flat_new_args, spec))
         elif func is torch.ops.aten.repeat_interleave.Tensor:
             if kwargs.get("output_size", None) is None:
                 meta_args = args
@@ -426,6 +433,7 @@ meta_function_expected_failures = {
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.matrix_exp : {f64, c128, c64, bf16, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
+    torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
     torch.repeat_interleave : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.take : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
@@ -546,6 +554,8 @@ meta_function_device_expected_failures = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
+    torch.native_batch_norm: {bf16},
+    torch.native_layer_norm: {bf16},
 }
 
 meta_function_device_expected_failures['cuda'] = {
@@ -572,6 +582,11 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
+}
+
+meta_function_device_skips['cpu'] = {
+    torch.narrow_copy: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},
+    torch.native_batch_norm: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {
@@ -684,7 +699,6 @@ meta_dispatch_expected_failures = {
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.col2im.default : {c64, f32, f64, c128},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.grid_sampler_3d.default : {f32, f64},
@@ -693,7 +707,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.log_sigmoid_forward.output : {bf16, f32, f64},
     aten.logcumsumexp.default : {bf16, f32, f64},
     aten.logcumsumexp.out : {bf16, f32, f64},
     aten.max_pool3d_with_indices.default : {f32, f64},
@@ -734,6 +747,12 @@ meta_dispatch_skips = {
 meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
+meta_dispatch_device_expected_failures['cpu'] = {
+    aten.narrow_copy.out: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::narrow_copy.out
+    aten.native_batch_norm.default: {bf16},
+    aten.native_layer_norm.default: {bf16},
+}
+
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
@@ -751,7 +770,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
-    aten.log_sigmoid_forward.output: {f16},  # aten::log_sigmoid_forward.output
+    aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
     aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
     aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -772,6 +791,11 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.unique_consecutive.default: {f16},  # aten::unique_consecutive
     aten.unique_dim.default: {f16},  # aten::unique_dim
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
+}
+
+meta_dispatch_device_skips['cpu'] = {
+    aten._embedding_bag_forward_only.default: {f16, f32, f64},
+    aten.native_batch_norm.default: {f32, f64},
 }
 
 meta_dispatch_device_skips['cuda'] = {
@@ -836,7 +860,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 @skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
@@ -855,7 +878,6 @@ class TestMeta(TestCase):
                     func(*args, **kwargs, out=expected)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)

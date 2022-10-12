@@ -69,7 +69,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     # so we have to modify the weight observer to default_weight_observer or another
     # per tensor supported observer.
     # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
+    if backend in ("fbgemm", "x86"):
         qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight)
     else:
         qconfig_transpose = qconfig
@@ -126,7 +126,7 @@ def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86", "fbgemm" (default), "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     # TODO: add assert for backend choices
@@ -138,7 +138,7 @@ def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMappi
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86", "fbgemm" (default), "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)

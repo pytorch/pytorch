@@ -970,6 +970,10 @@ def main():
         'typing_extensions',
     ]
 
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
+
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -988,10 +992,6 @@ def main():
     extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
 
     install_requires += extra_install_requires
-
-    extras_require = {
-        'opt-einsum': ['opt-einsum>=3.3']
-    }
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
@@ -1062,8 +1062,6 @@ def main():
         'include/c10/cuda/impl/*.h',
         'include/c10/hip/*.h',
         'include/c10/hip/impl/*.h',
-        'include/c10d/*.h',
-        'include/c10d/*.hpp',
         'include/caffe2/**/*.h',
         'include/torch/*.h',
         'include/torch/csrc/*.h',
@@ -1091,9 +1089,6 @@ def main():
         'include/torch/csrc/autograd/generated/*.h',
         'include/torch/csrc/autograd/utils/*.h',
         'include/torch/csrc/cuda/*.h',
-        'include/torch/csrc/deploy/*.h',
-        'include/torch/csrc/deploy/interpreter/*.h',
-        'include/torch/csrc/deploy/interpreter/*.hpp',
         'include/torch/csrc/distributed/c10d/exception.h',
         'include/torch/csrc/distributed/rpc/*.h',
         'include/torch/csrc/jit/*.h',
@@ -1135,6 +1130,8 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        "_inductor/codegen/*.h",
+        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',

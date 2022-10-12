@@ -2,6 +2,7 @@ import torch
 import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast
 import operator
+import math
 import functools
 from functools import lru_cache, partial
 import traceback
@@ -109,6 +110,9 @@ class PySymInt(object):
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
+    def clone(self):
+        return PySymInt(self.expr, self.shape_env, constant=self.constant)
+
     def __str__(self):
         return f"{self.expr}"
 
@@ -165,11 +169,34 @@ if HAS_SYMPY:
                 return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            if isinstance(base, FloorDiv):
+                return FloorDiv(base.args[0], base.args[1] * divisor)
+
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
+
+    class Ceil(sympy.Function):
+        """
+        sympy doesn't have its own ceil(), so rolling one here.
+        We maintain this so that we can simplify a sympy.Rational into a sympy.Float.
+        sympy.Float isn't supported.
+        """
+        nargs = (1,)
+
+        @classmethod
+        def eval(cls, a):
+            if isinstance(a, sympy.Integer):
+                return a
+            elif isinstance(a, sympy.core.symbol.Symbol) and a.is_scalar:
+                # TODO: do we need to simplify expr's first? (e.g. if we have 3/3), is is_scalar() true?
+                return a
+            elif isinstance(a, sympy.Rational):
+                return a.floor() + 1
+            else:
+                raise NotImplementedError("math.ceil() not supported for type: " + str(type(a)))
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -188,9 +215,14 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
+    'ceil': lambda a: Ceil(a)
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv"}
+unary_magic_methods = {
+    'ceil'
+}
+
+float_magic_methods = {"add", "sub", "mul", "truediv", "ceil"}
 
 def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
@@ -212,11 +244,31 @@ def _make_magic(method, func, py_type):
             # PySymBool, this is a type error
             return py_type(out, self.shape_env)
 
+    def unary_magic_impl(self):
+        if SYM_FUNCTION_MODE:
+            if method in ["ceil"]:
+                op = getattr(math, method)
+            else:
+                op = getattr(operator, method)
+            return _handle_sym_dispatch(op, (self,), {})
+        # TODO: consider constant prop here
+        expr = self.shape_env.replace(self.expr)
+        out = func(expr)
+        out = sympy.expand(out)
+        if method in ["ceil"]:
+            return PySymInt(out, self.shape_env)
+        else:
+            return py_type(out, self.shape_env)
+
     # this should be wrapped transparently into torch.SymIntNode
-    setattr(py_type, method, magic_impl)
-    setattr(py_type, f"__{method}__", magic_impl)
-    if method in reflectable_magic_methods:
-        setattr(py_type, f"__r{method}__", magic_impl)
+    if method in unary_magic_methods:
+        setattr(py_type, method, unary_magic_impl)
+        setattr(py_type, f"__{method}__", unary_magic_impl)
+    else:
+        setattr(py_type, method, magic_impl)
+        setattr(py_type, f"__{method}__", magic_impl)
+        if method in reflectable_magic_methods:
+            setattr(py_type, f"__r{method}__", magic_impl)
 
 for method, func in magic_methods.items():
     _make_magic(method, func, PySymInt)
@@ -266,6 +318,9 @@ class ShapeEnv(object):
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
+        # Duck-shaping says that if two input tensors have the same size,
+        # they get assigned the same symbolic variable
+        self.val_to_symint: Dict[int, torch.SymIntNode] = {}
 
     def _get_key(self):
         """
@@ -274,17 +329,27 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
+    # NB: This is only called for input symbolic sizes; intermediate symbolic
+    # sizes are allocated via a different mechanism
     def create_symint(self, name, val):
+        assert val >= 0
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
 
-        # Currently we don't put 0/1 specialization in guards but perhaps we should
+        # TODO: Put 0/1 specialization in guards
         if val == 0 or val == 1:
             return val
+        # This implements duck-shaping: input sizes that match are assigned
+        # the same symint
+        # TODO: Create a guard whenever this happens
+        # TODO: But how do I represent the guard in this case?
+        if val in self.val_to_symint:
+            return self.val_to_symint[val]
         sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         self.var_to_val[sympy_expr] = sympy.Integer(val)
+        self.val_to_symint[val] = cpp_sym_int
         return cpp_sym_int
 
     def evaluate_guards_for_args(self, *args):

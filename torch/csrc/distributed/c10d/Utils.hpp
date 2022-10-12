@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
 #include <winsock2.h>

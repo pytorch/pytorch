@@ -1366,13 +1366,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
-            dist.Backend._plugins["DUMMY"],
+            dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
 
+    class Options:
+        def __init__(self):
+            pass
+
+        def create(self):
+            pass
+
     @staticmethod
-    def create_dummy(store, rank, size, timeout):
-        return DummyProcessGroup(rank, size)
+    def create_dummy(store, group_rank, group_size, timeout):
+        return DummyProcessGroup(group_rank, group_size)
 
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
@@ -1456,7 +1463,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         device = "cuda" if backend == "nccl" else "cpu"
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
-        collective(tensor, *args)
+        # multi tensor collectives
+        if collective == dist.all_gather:
+            collective([tensor], tensor, *args)
+        else:
+            collective(tensor, *args)
 
     # TODO: backend will be replaced with a non specified backend
     def _test_collectives(self, backend):
@@ -1468,8 +1479,10 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             store=store,
         )
         collectives_and_args = [
+            (dist.reduce, self.rank),
             (dist.broadcast, self.rank),
-            (dist.all_reduce,)
+            (dist.all_reduce,),
+            (dist.all_gather,)
         ]
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):

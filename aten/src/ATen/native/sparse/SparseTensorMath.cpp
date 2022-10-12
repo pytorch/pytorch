@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
@@ -372,14 +373,14 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
   return norm_sparse(self, p, IntArrayRef{}, false, c10::nullopt);
 }
 
-Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, OptionalIntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.has_value() && dim.value().size() > 0) {
+  if (dim.size() > 0) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
-    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.value().size();
+    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
     if (passed_full_reduction_check) {
-      auto dim_ = dim.value().vec();
+      auto dim_ = dim.vec();
       maybe_wrap_dims(dim_, ndim);
       std::vector<bool> dims_check(ndim, false);
       // Need to check for duplicates, and fail if any are found
@@ -1285,6 +1286,9 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha
 ) {
+  AT_ASSERT(r.layout() == kStrided, "addmm_sparse_dense: expected strided result tensor, got tensor with layout ", r.layout());
+  AT_ASSERT(sparse_.layout() == kSparse, "addmm_sparse_dense: expected sparse tensor, got tensor with layout ", sparse_.layout());
+
   // TODO: This error message seems awfully opaque
   TORCH_CHECK(
       t.is_cpu(),
@@ -1407,8 +1411,12 @@ Tensor _sparse_mm(
   if (mat1.is_sparse() && mat2.is_sparse()) {
     return at::_sparse_sparse_matmul(mat1, mat2);
   }
-  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
-  return at::_sparse_addmm(t, mat1, mat2, 0, 1);
+  if (mat1.is_sparse() || at::sparse_csr::is_sparse_compressed(mat1)) {
+    Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
+    return at::_sparse_addmm(t, mat1, mat2, 0, 1);
+  }
+  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat1.options());
+  return at::_sparse_addmm(t.transpose(-2, -1), mat2.transpose(-2, -1), mat1.transpose(-2, -1), 0, 1).transpose(-2, -1);
 }
 
 // NB: Despite its suggestive name, this actually only exists so that
