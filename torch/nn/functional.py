@@ -4583,24 +4583,43 @@ def triplet_margin_with_distance_loss(
             reduction=reduction,
         )
 
-    distance_function = distance_function if distance_function is not None else pairwise_distance
+    # Check validity of reduction mode
+    if reduction not in ("mean", "sum", "none"):
+        raise ValueError(f"{reduction} is not a valid value for reduction")
 
-    positive_dist = distance_function(anchor, positive)
-    negative_dist = distance_function(anchor, negative)
+    # Check dimensions
+    a_dim = anchor.ndim
+    p_dim = positive.ndim
+    n_dim = negative.ndim
+    if not (a_dim == p_dim and p_dim == n_dim):
+        raise RuntimeError(
+            (f"The anchor, positive, and negative tensors are expected to have "
+             f"the same number of dimensions, but got: anchor {a_dim}D, "
+             f"positive {p_dim}D, and negative {n_dim}D inputs"))
 
+    # Calculate loss
+    if distance_function is None:
+        distance_function = torch.pairwise_distance
+
+    dist_pos = distance_function(anchor, positive)
+    dist_neg = distance_function(anchor, negative)
+    # The distance swap is described in the paper "Learning shallow
+    # convolutional feature descriptors with triplet losses" by V. Balntas, E.
+    # Riba et al.  If True, and if the positive example is closer to the
+    # negative example than the anchor is, swaps the positive example and the
+    # anchor in the loss computation.
     if swap:
-        swap_dist = distance_function(positive, negative)
-        negative_dist = torch.min(negative_dist, swap_dist)
+        dist_swap = distance_function(positive, negative)
+        dist_neg = torch.minimum(dist_neg, dist_swap)
+    loss = torch.clamp_min(margin + dist_pos - dist_neg, 0)
 
-    output = torch.clamp(positive_dist - negative_dist + margin, min=0.0)
-
-    reduction_enum = _Reduction.get_enum(reduction)
-    if reduction_enum == 1:
-        return output.mean()
-    elif reduction_enum == 2:
-        return output.sum()
-    else:
-        return output
+    # Apply reduction
+    if reduction == "sum":
+        return torch.sum(loss)
+    elif reduction == "mean":
+        return torch.mean(loss)
+    else:  # reduction == "none"
+        return loss
 
 
 def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
