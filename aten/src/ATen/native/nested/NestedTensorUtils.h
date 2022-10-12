@@ -137,6 +137,19 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
   const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
   return NestedTensor_get_strides(self_ptr);
 }
+
+inline void check_numel_equals_buffer_size(const at::Tensor& self) {
+  auto self_impl = get_nested_tensor_impl(self);
+  TORCH_CHECK(
+      self.numel() == self_impl -> get_buffer_size(),
+      "Number of elements in nested tensor must match number of elements in buffer.");
+}
+
+inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
+  TORCH_CHECK(
+      self_ptr-> numel() == self_ptr -> get_buffer_size(),
+      "Number of elements in nested tensor must match number of elements in buffer.");
+}
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Data structures and functions for generically applying a function on a nested tensor.
 namespace impl {
