@@ -214,7 +214,7 @@ class Embedding(Module):
             num_embeddings=rows,
             embedding_dim=cols,
             _weight=embeddings,
-            _freeze=freeze
+            _freeze=freeze,
             padding_idx=padding_idx,
             max_norm=max_norm,
             norm_type=norm_type,
