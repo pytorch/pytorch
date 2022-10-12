@@ -15,6 +15,7 @@
 #else
 #include <ATen/ops/pad.h>
 #include <ATen/ops/permute.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at {
