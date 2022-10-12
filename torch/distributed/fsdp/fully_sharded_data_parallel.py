@@ -2023,12 +2023,12 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not self._is_root:
             return
-        default_stream = self._streams["computation"]
-        self._streams["unshard"].wait_stream(default_stream)
-        # Having the pre-all-gather stream wait for the default stream even if
-        # we do not leverage the pre-all-gather stream is tolerable since this
-        # only runs once per iteration
-        self._streams["pre_unshard"].wait_stream(default_stream)
+        computation_stream = self._streams["computation"]
+        self._streams["unshard"].wait_stream(computation_stream)
+        # Having the pre-all-gather stream wait for the computation stream even
+        # if we do not leverage the pre-all-gather stream is tolerable since
+        # this only runs once per iteration
+        self._streams["pre_unshard"].wait_stream(computation_stream)
 
     def _prefetch_handles(
         self,
@@ -3442,7 +3442,7 @@ class FullyShardedDataParallel(nn.Module):
             if not self._sync_gradients:
                 return
 
-            # Wait for all ops in the default stream (e.g. gradient
+            # Wait for all ops in the computation stream (e.g. gradient
             # computation) to finish before reduce-scattering the gradient
             self._streams["post_backward"].wait_stream(self._streams["computation"])
 
