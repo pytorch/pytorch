@@ -1034,7 +1034,6 @@ symbolic_aot_autograd_failures = {
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('max', 'reduction_no_dim'),  # aten.logical_or_.default - couldn't find symbolic meta function/dec...
     xfail('max', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('mean', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('median', ''),  # could not find kernel
     xfail('meshgrid', 'list_of_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
@@ -1084,9 +1083,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'nearest'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
-    xfail('nn.functional.kl_div', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.l1_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.linear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.local_response_norm', ''),  # aten.fill.Scalar - couldn't find symbolic meta functio...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices_backward.default - couldn't find s...
@@ -1100,7 +1096,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.mse_loss', ''),  # Unable to cast Python instance to C++ type (#define PYBIND11_DETA...
     xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
-    xfail('nn.functional.multilabel_soft_margin_loss', ''),  # Cannot call sizes() on tensor with symbolic si...
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pad', 'circular'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1110,12 +1105,9 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.poisson_nll_loss', ''),  # aten.add_.Tensor - couldn't find symbolic meta function/d...
     xfail('nn.functional.prelu', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
-    xfail('nn.functional.triplet_margin_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.triplet_margin_with_distance_loss', ''),  # Cannot call sizes() on tensor with symbo...
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1163,7 +1155,6 @@ symbolic_aot_autograd_failures = {
     xfail('split', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('split', 'list_args'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('split_with_sizes', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('squeeze', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
