@@ -6,6 +6,7 @@ on:
     paths:
       - Dockerfile
       - docker.Makefile
+      - .github/workflows/docker-release.yml
   push:
     branches:
       - nightly
