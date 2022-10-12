@@ -673,7 +673,7 @@ test_inductor() {
   # TODO: enable inductor on core tests
   # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
   pushd ../torchdynamo
-  pytest test/inductor
+  pytest test/inductor -v
   popd
 }
 
