@@ -252,6 +252,7 @@ jobs:
 
       - name: Check labels
         env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.number }}
         run: |
           set -ex
