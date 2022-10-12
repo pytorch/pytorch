@@ -1677,10 +1677,7 @@ def where(
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
-    result = torch.empty_like(
-        a, requires_grad=a.requires_grad, memory_format=memory_format
-    )
-    copy_to(result, a)
+    result = prims.clone(a, memory_format=memory_format)
     return result
 
 
