@@ -1654,10 +1654,7 @@ op_db: List[OpInfo] = [
         supports_out=True,
         sample_inputs_func=sample_inputs_linalg_lstsq,
         error_inputs_func=error_inputs_lstsq,
-        decorators=[
-            skipCUDAIfNoMagma,
-            skipCPUIfNoLapack,
-        ],
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
