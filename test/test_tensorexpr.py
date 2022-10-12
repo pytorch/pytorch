@@ -1334,7 +1334,7 @@ class TestTensorExprFuser(BaseTestClass):
             scripted = torch.jit.script(test)
             out = warmup_and_run_forward(scripted, x)
             self.assertLastGraphAllFused()
-            assert torch.equal(out, test(x))        
+            assert torch.equal(out, test(x))
 
     def test_transpose(self):
         @torch.jit.script
