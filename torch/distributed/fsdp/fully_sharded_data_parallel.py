@@ -2001,6 +2001,8 @@ class FullyShardedDataParallel(nn.Module):
         computation. This should only be called on the root FSDP instance."""
         assert self._is_root
         assert torch.cuda.is_available()
+        # Default stream for computation.
+        self._streams["computation"] = torch.cuda.current_stream()
         # Stream for unshard logic, including allocating the all-gather
         # destination tensors and the all-gathers themselves.
         self._streams["unshard"] = torch.cuda.Stream()
@@ -2019,12 +2021,12 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not self._is_root:
             return
-        current_stream = torch.cuda.current_stream()
-        self._streams["unshard"].wait_stream(current_stream)
+        computation_stream = self._streams["computation"]
+        self._streams["unshard"].wait_stream(computation_stream)
         # Having the pre-all-gather stream wait for the current stream even if
         # we do not leverage the pre-all-gather stream is tolerable since this
         # only runs once per iteration
-        self._streams["pre_unshard"].wait_stream(current_stream)
+        self._streams["pre_unshard"].wait_stream(computation_stream)
 
     def _prefetch_handles(
         self,
@@ -2818,7 +2820,7 @@ class FullyShardedDataParallel(nn.Module):
             self._unshard(handles)
             handles_key = tuple(handles)
             self._needs_pre_forward_unshard[handles_key] = False
-            torch.cuda.current_stream().wait_stream(self._streams["unshard"])
+            self._streams["computation"].wait_stream(self._streams["unshard"])
             self._prefetch_handles(handles_key)
 
     def _post_forward(
@@ -3062,7 +3064,7 @@ class FullyShardedDataParallel(nn.Module):
         self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
         self._unshard(self._handles)
-        torch.cuda.current_stream().wait_stream(self._streams["unshard"])
+        self._streams["computation"].wait_stream(self._streams["unshard"])
         if with_grads:
             self._unshard_grads(self._handles)
 
@@ -3325,7 +3327,7 @@ class FullyShardedDataParallel(nn.Module):
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
                 self._unshard(_handles)
-                torch.cuda.current_stream().wait_stream(self._streams["unshard"])
+                self._streams["computation"].wait_stream(self._streams["unshard"])
 
                 # Set this to `False` to ensure that a mistargeted prefetch
                 # does not actually unshard these handles
@@ -3439,7 +3441,7 @@ class FullyShardedDataParallel(nn.Module):
 
             # Wait for all ops in the current stream (e.g. gradient
             # computation) to finish before reduce-scattering the gradient
-            self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+            self._streams["post_backward"].wait_stream(self._streams["computation"])
 
             with torch.cuda.stream(self._streams["post_backward"]):
                 orig_grad_data = param.grad.data
@@ -3539,7 +3541,7 @@ class FullyShardedDataParallel(nn.Module):
                         grad.detach(), non_blocking=True
                     )
                     # Don't let this memory get reused until after the transfer.
-                    grad.data.record_stream(torch.cuda.current_stream())
+                    grad.data.record_stream(self._streams["post_backward"])
 
                 # After _post_backward_hook returns, orig_grad_data will eventually
                 # go out of scope, at which point it could otherwise be freed for
@@ -3578,7 +3580,7 @@ class FullyShardedDataParallel(nn.Module):
             grad.data = grad.data.to(dtype=param.dtype)
             # Do not let the low precision gradient memory get reused until
             # the cast to full parameter precision completes
-            low_prec_grad_data.record_stream(torch.cuda.current_stream())
+            low_prec_grad_data.record_stream(self._streams["post_backward"])
 
     def _should_free_unsharded_flat_param(self, handle: FlatParamHandle):
         return (
@@ -3611,14 +3613,14 @@ class FullyShardedDataParallel(nn.Module):
         # module.
 
         if self._sync_gradients:
-            torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
+            self._streams["computation"].wait_stream(self._streams["post_backward"])
             if self.cpu_offload.offload_params:
                 # We need to wait for the non-blocking GPU ->
                 # CPU grad transfers to finish. We need to do this for GPU -> CPU
                 # copies because when grad is on CPU, it won't wait for any CUDA
                 # stream to finish GPU -> CPU copies unless we explicitly block the
                 # host-side with synchronize().
-                torch.cuda.current_stream().synchronize()
+                self._streams["computation"].synchronize()
         self._exec_order_data.next_iter()
 
         # A backward pass is done, clean up below.
