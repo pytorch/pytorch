@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 from typing import Any, List
 
 from export_pytorch_labels import get_pytorch_labels
@@ -33,8 +34,8 @@ def parse_args() -> Any:
 
 
 def main() -> None:
+    print(os.environ.get("GH_RUN_URL"))
     args = parse_args()
-    print(args.pr_num)
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
