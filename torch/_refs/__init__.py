@@ -2822,13 +2822,13 @@ def native_batch_norm(
         rstd = torch.rsqrt(var + eps)
         out = (input - mean) * rstd
 
-        squeeze_rstd = prims.squeeze(rstd, reduction_dims)
-        if input.device.type != "cpu":
-            save_mean = prims.convert_element_type(running_mean, compute_dtype)
-            save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
-        else:
+        if input.device.type == "cpu" or input.device.type == "meta":
             save_mean = torch.empty([0], device=running_mean.device)
             save_rstd = torch.empty([0], device=rstd.device)
+        else:
+            squeeze_rstd = prims.squeeze(rstd, reduction_dims)
+            save_mean = prims.convert_element_type(running_mean, compute_dtype)
+            save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
 
     if weight is None and bias is not None:
         unsqueeze_bias = _unsqueeze_multiple(bias, reduction_dims)
@@ -2891,9 +2891,8 @@ def native_group_norm(
         out = out * unsqueeze_weight + unsqueeze_bias
 
     out = prims.convert_element_type(out, input.dtype)
-    if input.device.type == "cpu":
-        mean = prims.convert_element_type(mean, input.dtype)
-        rstd = prims.convert_element_type(rstd, input.dtype)
+    mean = prims.convert_element_type(mean, input.dtype)
+    rstd = prims.convert_element_type(rstd, input.dtype)
 
     mean = prims.squeeze(mean, reduction_dims)
     rstd = prims.squeeze(rstd, reduction_dims)

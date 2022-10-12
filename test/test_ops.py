@@ -1627,7 +1627,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.mse_loss',
         '_refs.expand_as',
         '_refs.instance_norm',
-        '_refs.native_group_norm',
         '_refs.var',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
