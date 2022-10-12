@@ -282,7 +282,6 @@ static void UpdateScalarTypeForInputs(
     if (input_scalar_type && (*input_scalar_type != scalar_type)) {
       Node* cast_node = n->owningGraph()->create(onnx::Cast);
       cast_node->addInput(input);
-      cast_node->copyMetadata(n);
       cast_node->i_(attr::to, onnx_type);
       cast_node->insertBefore(n);
       cast_node->output()->setType(CreateProfiledTensorTypeWithScalarType(
