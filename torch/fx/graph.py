@@ -468,7 +468,7 @@ class CodeGen(object):
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
-                    body.append('\n# No stacktrace found for following nodes \n')
+                    body.append('\n# No stacktrace found for following nodes\n')
 
         def stringify_shape(shape : torch.Size) -> str:
             return f"[{','.join(str(x) for x in shape)}]"
@@ -582,7 +582,7 @@ class CodeGen(object):
 
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
-        code = ''.join(body)
+        code = ''.join(body).lstrip('\n')
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
 {wrap_stmts}

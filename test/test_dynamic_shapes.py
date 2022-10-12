@@ -372,7 +372,6 @@ class TestPySymInt(TestCase):
         self.assertExpectedInline(mock_stdout.getvalue().strip(), """\
 class f(torch.nn.Module):
     def forward(self, a_1: f32[t0.size(0),t0.size(1)], b_1: f32[t1.size(0),t0.size(1)]):
-
         # No stacktrace found for following nodes
         sym_size: Sym(t0.size(0)) = torch.ops.aten.sym_size(a_1, 0)
         sym_size_1: Sym(t1.size(0)) = torch.ops.aten.sym_size(b_1, 0)
