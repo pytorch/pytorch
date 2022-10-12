@@ -1784,7 +1784,7 @@ def index_add_(
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         utils.check(
-            type(alpha) == bool
+            python_type == bool
             or utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
