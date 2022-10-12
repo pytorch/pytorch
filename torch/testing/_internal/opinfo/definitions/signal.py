@@ -199,6 +199,13 @@ def make_signal_windows_opinfo(
                 dtypes=[torch.float16],
                 device_type="cpu",
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestNNCOpInfo",
+                "test_nnc_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
             *skips,
         ),
     )

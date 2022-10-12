@@ -78,8 +78,8 @@ Features described in this documentation are classified by release status:
    torch.jit <jit>
    torch.linalg <linalg>
    torch.monitor <monitor>
-   torch.special <special>
    torch.signal <signal>
+   torch.special <special>
    torch.overrides
    torch.package <package>
    profiler
