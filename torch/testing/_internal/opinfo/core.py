@@ -317,16 +317,21 @@ class ErrorInput(object):
         self.error_regex = error_regex
 
 
+@dataclass
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
 
-    def __init__(self, alias_name):
-        self.name = alias_name
-        self.op = _getattr_qual(torch, alias_name)
-        self.method_variant = getattr(torch.Tensor, alias_name, None)
-        self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
+    def __init__(self, name, op=None, is_attribute=False):
+        self.name = name
+        self.op = op if op is not None else _getattr_qual(torch, name)
+        if is_attribute:
+            self.method_variant = None
+            self.inplace_variant = None
+        else:
+            self.method_variant = getattr(torch.Tensor, name, None)
+            self.inplace_variant = getattr(torch.Tensor, name + "_", None)
 
     def __call__(self, *args, **kwargs):
         return self.op(*args, **kwargs)
@@ -1059,7 +1064,7 @@ class OpInfo(object):
             )
 
         if self.aliases is not None:
-            self.aliases = tuple(AliasInfo(a) for a in self.aliases)  # type: ignore[assignment]
+            self.aliases = tuple((a if type(a) is AliasInfo else AliasInfo(a)) for a in self.aliases)  # type: ignore[assignment]
         else:
             self.aliases = ()
 

@@ -3295,22 +3295,14 @@ std::vector<Tensor> meshgrid(TensorList tensors,
   return grids;
 }
 
-// Numpy-style `a.T`: returns the tensor
-// with dims reversed
+// Used to implement NumPy-style `x.T`.  Now this is an alias for `x.t`.
+//
+// The use of `x.T` on tensors of dimension other than 2 to reverse their shape
+// was deprecated and removed.  Consider `x.mT` to transpose batches of matrices
+// or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions
+// of a tensor.
 Tensor numpy_T(const Tensor &self) {
-  const auto n = self.dim();
-  if (n != 2 && n != 0) {
-    TORCH_WARN_ONCE(
-        "The use of `x.T` on tensors of dimension other than 2 to reverse their shape is deprecated ",
-        "and it will throw an error in a future release. Consider `x.mT` to transpose batches of matrices ",
-        "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
-    );
-  }
-  DimVector transpose_dims;
-  for (int64_t i = n - 1; i >= 0; --i) {
-    transpose_dims.push_back(i);
-  }
-  return self.permute(transpose_dims);
+  return self.t();
 }
 
 Tensor matrix_H(const Tensor &self) {

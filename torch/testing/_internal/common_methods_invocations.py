@@ -894,7 +894,8 @@ def error_inputs_isclose(op, device, **kwargs):
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    return (SampleInput(make_arg((1, 2))),
+    return (SampleInput(make_arg((M, M))),
+            SampleInput(make_arg((1, 2))),
             SampleInput(make_arg((2,))),
             SampleInput(make_arg(())))
 
@@ -1698,7 +1699,7 @@ def sample_inputs_adjoint(self, device, dtype, requires_grad, **kwargs):
     shapes = ((1, 2, 3), (), (M, M), (S, S, S), (S, M, S), (M, S, M, S))
     return (SampleInput(make_arg(shape)) for shape in shapes)
 
-def sample_inputs_T(self, device, dtype, requires_grad, **kwargs):
+def sample_inputs_H(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     shapes = ((), (M, M))
@@ -15020,17 +15021,6 @@ op_db: List[OpInfo] = [
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
-    OpInfo('T',
-           op=lambda x: x.T,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
-           supports_out=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           skips=(
-               # lambda impl
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),),
-           sample_inputs_func=sample_inputs_T),
     OpInfo('H',
            op=lambda x: x.H,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -15043,7 +15033,7 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),),
-           sample_inputs_func=sample_inputs_T),
+           sample_inputs_func=sample_inputs_H),
     OpInfo('mT',
            op=lambda x: x.mT,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -15661,6 +15651,7 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo('t',
+           aliases=(AliasInfo(name='T', op=lambda x: x.T, is_attribute=True),),
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
            supports_forward_ad=True,
@@ -17817,6 +17808,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
+    ),
+    PythonRefInfo(
+        "_refs.T",
+        torch_opinfo_name="t",  # TODO: alias, move to _refs.t once ref aliases are tested
     ),
     PythonRefInfo(
         "_refs.unfold",

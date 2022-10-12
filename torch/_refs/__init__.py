@@ -239,6 +239,7 @@ __all__ = [
     "swap_axes",  # alias for transpose
     "squeeze",
     "t",
+    "T",
     "tensor_split",
     "transpose",
     "unfold",
@@ -3513,6 +3514,9 @@ def t(a: TensorLikeType):
             f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
         )
     return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
+
+
+T = torch.t  # alias
 
 
 @register_decomposition(torch.ops.aten.transpose, disable_meta=True)
