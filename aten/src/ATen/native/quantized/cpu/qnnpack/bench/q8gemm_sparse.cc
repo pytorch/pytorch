@@ -466,7 +466,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c1x4_prepacked__aarch32_neon, 4,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon(
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
@@ -512,7 +512,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 4x8c8x1_prepacked__aarch32_neon, 4,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon(
+        pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA_w32__aarch32_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 2) * (k_blocks << 2) * mr(),
@@ -585,7 +585,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA__aarch64_neon(
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA_w32__aarch64_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),
@@ -630,7 +630,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c8x1_prepacked__aarch64_neon, 8,
       for (uint32_t n = 0, channel_offset = 0; n < nc();
           n += nr(), channel_offset += nr()) {
         const uint32_t nrr = min(nc() - n, nr());
-        pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon(
+        pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon(
             mrr,
             nrr,
             a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),

@@ -19,7 +19,7 @@
 #  |params     | 16
 #  |-----------|
 
-# void pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon(
+# void pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon(
 #     size_t mr,
 #     size_t nr,
 #     const uint8_t* a_packed,
@@ -31,7 +31,7 @@
 #     size_t c_stride,
 #     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_dynamic_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon
 
     STP d15, d14, [sp, -16]
     STP d13, d12, [sp, -32]
@@ -403,8 +403,16 @@ k_loop:
 
     RET
 
-END_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon
+END_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits
 #endif
+
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w16__aarch64_neon
+    RET
+END_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w16__aarch64_neon
+
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w8__aarch64_neon
+    RET
+END_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w8__aarch64_neon
