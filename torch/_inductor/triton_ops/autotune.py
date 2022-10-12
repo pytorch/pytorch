@@ -110,7 +110,8 @@ class CachingAutotuner(KernelInterface):
                 # set_device(current_device())  # TODO(jansel): is this needed?
                 grid_0, grid_1, grid_2 = grid(grid_meta)
                 bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                              stream, bin.cu_function, {', '.join(call_args)})
+                              stream, bin.cu_function, None, None, None,
+                              {', '.join(call_args)})
             """.lstrip(),
             scope,
         )

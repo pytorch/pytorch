@@ -939,7 +939,7 @@ class Scheduler:
         - Estimate of the saved memory operations
         - Fusions closer together in original order
         """
-        memory_score = self.score_fusion_memory(node1, node1)
+        memory_score = self.score_fusion_memory(node1, node2)
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),

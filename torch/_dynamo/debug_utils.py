@@ -169,7 +169,7 @@ def generate_compiler_repro_string(gm, args):
     model_str += (
         "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
     )
-    model_str += "mod = make_fx(Repro())(*args)\n"
+    model_str += 'mod = make_fx(Repro().to(device="cuda"))(*args)\n'
     return model_str
 
 
@@ -482,18 +482,18 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
-    if only_fwd:
-        fp64_ref = None
-    else:
+    try:
         fp64_model, fp64_examples = cast_to_fp64(
             copy.deepcopy(gm), clone_inputs(example_inputs)
         )
         fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
+    except Exception:
+        log.warning("Could not generate fp64 outputs")
+        fp64_ref = None
 
     res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
 
     passing = same(ref, res, fp64_ref, tol=0.001, equal_nan=True)
-    # import pdb; pdb.set_trace()
     return passing
 
 

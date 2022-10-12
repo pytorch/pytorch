@@ -7,6 +7,7 @@ import numpy
 
 import torch._C
 import torch.nn
+import torch.onnx.operators
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -42,6 +43,11 @@ tensor_dunder_fns = [
 ]
 
 torch_special_class_types = (torch._C.Generator,)
+
+REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
+    torch.onnx.operators.shape_as_tensor,
+    torch._shape_as_tensor,
+]
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -215,6 +221,10 @@ class TorchVariable(VariableTracker):
             and args[0].size is not None
         ):
             return ConstantVariable(product(args[0].size), **options)
+        elif self.value in REWRITE_OPS_TO_TENSOR_SIZE_METHOD:
+            assert len(args) == 1
+            assert isinstance(args[0], TensorVariable)
+            return args[0].call_method(tx, "size", [], {})
         elif self.value in (
             torch.nn.modules.utils._single,
             torch.nn.modules.utils._pair,

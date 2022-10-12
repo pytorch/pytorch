@@ -396,6 +396,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
+        self.init_optimizer(device, model.parameters())
+
         self.validate_model(model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
 
@@ -441,6 +443,7 @@ class HuggingfaceRunner(BenchmarkRunner):
             pred = mod(**cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
+        self.optimizer_step()
         if collect_outputs:
             return collect_results(mod, pred, loss, cloned_inputs)
         return None

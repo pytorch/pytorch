@@ -240,7 +240,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}_{testing}.csv"
                     cmd = f"python benchmarks/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    cmd = f"{cmd} {base_cmd} --no-skip --quiet --dashboard"
+                    cmd = f"{cmd} {base_cmd} --no-skip --dashboard"
 
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"

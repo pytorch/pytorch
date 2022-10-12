@@ -129,7 +129,7 @@ class DDPOptimizer:
                         # for some reason the isinstance check is necessary if I split one node per submod
                         # - even though I supposedly wrapped the output in a tuple in those cases, the real
                         # compiled module was still returning a tensor
-                        if self.unwrap_singleton_tuple and isinstance(x, tuple):
+                        if self.unwrap_singleton_tuple and isinstance(x, (tuple, list)):
                             return x[0]
                         return x
 
@@ -139,6 +139,8 @@ class DDPOptimizer:
                         if not isinstance(sn.args[0], tuple):
                             unwrap_singleton_tuple = True
                             sn.args = (sn.args,)
+                submod.recompile()
+
                 wrapper = WrapperModule(
                     self.compiler(submod, args),
                     unwrap_singleton_tuple,

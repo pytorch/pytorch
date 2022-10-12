@@ -133,6 +133,7 @@ inductor_skips["cuda"] = {
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "broadcast_tensors": {f16, f32, f64},
+    "dsplit": {f16, f32, f64},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
     "erf": {f64},
@@ -142,28 +143,18 @@ inductor_skips["cuda"] = {
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
     "nn.functional.poisson_nll_loss": {f64},
-    "nn.functional.selu": {f64},
-    "nn.functional.silu": {f64},
     "nn.functional.tanhshrink": {f16, f64},
     "nn.functional.conv_transpose3d": {f16, f64},
     "nn.functional._scaled_dot_product_attention": {f64},
-    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
     "special.ndtr": {f64},
-    "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
     "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
-    # failed since moving PyTorch pin https://github.com/pytorch/torchdynamo/pull/1453
-    "dsplit": {f16, f32, f64},
-    "hsplit": {f16, f32, f64},
 }
-
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -207,8 +198,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f32, f64},
     "fft.rfft2": {f32, f64},
     "fft.rfftn": {f32, f64},
-    "index_add": {f16, f32, f64},
-    "index_copy": {f16, f32, f64},
+    "index_add": {f16},
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -242,7 +232,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.gelu": {f64},
-    "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.pairwise_distance": {f16},
@@ -321,8 +310,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.rfft": {f16, f32, f64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
-    "index_add": {f16, f32, f64},
-    "index_copy": {f16, f32, f64},
     "index_put": {f16, f32, f64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
@@ -351,7 +338,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.grid_sample": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
-    "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
@@ -381,6 +367,46 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
+}
+
+inductor_gradient_expected_failures_single_sample = defaultdict(dict)
+
+inductor_gradient_expected_failures_single_sample["cuda"] = {
+    "amax": {f16, f32, f64},
+    "amin": {f16, f32, f64},
+    "asin": {f16},
+    "cumprod": {f16},
+    "linalg.vector_norm": {f64, f64},
+    "linalg.householder_product": {f32},
+    "linalg.lu": {f32, f64},
+    "kron": {f16},
+    "masked.amax": {f16, f32, f64},
+    "masked.amin": {f16, f32, f64},
+    "max.reduction_no_dim": {f16, f32, f64},
+    "median": {f16, f32, f64},
+    "min.reduction_no_dim": {f16, f32, f64},
+    "nan_to_num": {f16, f32, f64},
+    "nanmean": {f16, f32, f64},
+    "nanmedian": {f16, f32, f64},
+    "nanquantile": {f32, f64},
+    "nansum": {f16, f32, f64},
+    "native_batch_norm": {f16, f32, f64},
+    "native_layer_norm": {f16, f32, f64},
+    "nn.functional._scaled_dot_product_attention": {f16},
+    "nn.functional.avg_pool2d": {f16, f32, f64},
+    "nn.functional.batch_norm.without_cudnn": {f16},
+    "nn.functional.batch_norm": {f16},
+    "nn.functional.cosine_similarity": {f16},
+    "nn.functional.instance_norm": {f16},
+    "nn.functional.normalize": {f16},
+    "nn.functional.softsign": {f16},
+    "nn.functional.local_response_norm": {f16},
+    "norm.inf": {f64},
+    "outer": {f16},
+    "quantile": {f32, f64},
+    "scatter_reduce.amax": {f16, f32, f64},
+    "scatter_reduce.amin": {f16, f32, f64},
+    "tanh": {f16},
 }
 
 inductor_should_fail_with_exception = defaultdict(dict)
@@ -420,6 +446,11 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    "gradient": {"check_gradient": False},  # segfault on check_gradient
+    # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
+    "linalg.solve_triangular": {"check_gradient": False},
+    "linalg.lu_factor": {"check_gradient": False},
+    "linalg.lu_factor_ex": {"check_gradient": False},
 }
 
 # Always test with all sample for following ops
@@ -429,6 +460,7 @@ inductor_all_samples = {
     "index_put",
     "index_copy",
     "scatter_reduce.sum",
+    "select_scatter",
 }
 
 
@@ -468,18 +500,22 @@ class TestInductorOpInfo(TestCase):
             self.skipTest(f"{op_name} in {dtype} not supported")
         elif dtype in inductor_expected_failures_single_sample[device_type].get(
             op_name, set()
+        ) or dtype in inductor_gradient_expected_failures_single_sample[
+            device_type
+        ].get(
+            op_name, set()
         ):
             test_expect = TestExpect.XFAILURE
         else:
             test_expect = TestExpect.SUCCESS
 
-        additional_kwargs = {}
+        overridden_kwargs = {}
         if op_name in inductor_override_kwargs:
-            additional_kwargs = inductor_override_kwargs[op_name]
+            overridden_kwargs = inductor_override_kwargs[op_name]
         elif (op_name, device_type) in inductor_override_kwargs:
-            additional_kwargs = inductor_override_kwargs[(op_name, device_type)]
+            overridden_kwargs = inductor_override_kwargs[(op_name, device_type)]
         elif (op_name, device_type, dtype) in inductor_override_kwargs:
-            additional_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
+            overridden_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
 
         func = op.get_op()
 
@@ -514,24 +550,35 @@ class TestInductorOpInfo(TestCase):
                 if device_type == "cuda":
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
+                    adjusted_kwargs = {
+                        "check_lowp": False,
+                        "nopython": True,
+                        "copy_to_cuda": False,
+                        "reference_in_float": False,
+                        "check_gradient": requires_grad,
+                    }
+                    adjusted_kwargs.update(overridden_kwargs)
+
                     self.check_model_cuda(
                         fn,
                         args,
                         kwargs,
-                        check_lowp=False,
-                        nopython=True,
-                        copy_to_cuda=False,
-                        reference_in_float=False,
-                        **additional_kwargs,
+                        **adjusted_kwargs,
                     )
                 elif device_type == "cpu":
+                    adjusted_kwargs = {
+                        "check_lowp": False,
+                        "nopython": True,
+                        # skip checking gradient on CPU for now
+                        "check_gradient": False,
+                    }
+                    adjusted_kwargs.update(overridden_kwargs)
+
                     self.check_model(
                         fn,
                         args,
                         kwargs,
-                        check_lowp=False,
-                        nopython=True,
-                        **additional_kwargs,
+                        **adjusted_kwargs,
                     )
 
         except Exception as e:

@@ -144,6 +144,31 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
+def compute_grads(args, kwrags, results, grads):
+    def gather_leaf_tensors(args, kwargs):
+        args, _ = tree_flatten(args)
+        kwargs, _ = tree_flatten(kwargs)
+        args = args + kwargs
+        leaf_tensors = [
+            arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
+        ]
+        return leaf_tensors
+
+    flat_results, _ = tree_flatten(results)
+    flat_diff_results = [r for r in flat_results if r.requires_grad]
+    assert len(flat_diff_results) > 0
+
+    leaf_tensors = gather_leaf_tensors(args, kwrags)
+    assert len(leaf_tensors) > 0
+    return torch.autograd.grad(
+        flat_diff_results,
+        leaf_tensors,
+        grads,
+        allow_unused=True,
+        retain_graph=True,
+    )
+
+
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
 @patch("torch._dynamo.config.raise_on_backend_error", True)
 def check_model(
@@ -160,6 +185,7 @@ def check_model(
     copy_to_cuda=True,
     reference_in_float=True,
     assert_equal=True,
+    check_gradient=False,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -219,9 +245,9 @@ def check_model(
 
     assert type(actual) == type(correct)
 
+    correct_flat, correct_spec = tree_flatten(correct)
+    actual_flat, _ = tree_flatten(actual)
     if reference_in_float:
-        correct_flat, correct_spec = tree_flatten(correct)
-        actual_flat, _ = tree_flatten(actual)
         correct_flat = tuple(
             y.to(x.dtype)
             if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
@@ -240,9 +266,6 @@ def check_model(
             exact_dtype=exact_dtype,
         )
     else:
-        correct_flat, _ = tree_flatten(correct)
-        actual_flat, _ = tree_flatten(actual)
-
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
                 assert correct_val.device == actual_val.device
@@ -251,6 +274,29 @@ def check_model(
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
+
+    if check_gradient:
+
+        # generate random unit norm gradients
+        grads = [
+            torch.rand(r.shape, device=r.device, dtype=r.dtype)
+            for r in correct_flat
+            if r.requires_grad
+        ]
+        for g in grads:
+            g /= g.norm()
+
+        correct_grad = compute_grads(ref_inputs, ref_kwargs, correct, grads)
+        actual_grad = compute_grads(example_inputs, kwargs, actual, grads)
+
+        self.assertEqual(
+            actual_grad,
+            correct_grad,
+            atol=atol,
+            rtol=rtol,
+            equal_nan=True,
+            exact_dtype=exact_dtype,
+        )
 
     torch._dynamo.reset()
 
@@ -270,6 +316,7 @@ def check_model_cuda(
     copy_to_cuda=True,
     reference_in_float=True,
     assert_equal=True,
+    check_gradient=False,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -297,6 +344,7 @@ def check_model_cuda(
         nopython=nopython,
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
+        check_gradient=check_gradient,
     )
 
     if check_lowp:
@@ -322,6 +370,7 @@ def check_model_cuda(
             nopython=nopython,
             reference_in_float=reference_in_float,
             assert_equal=assert_equal,
+            check_gradient=check_gradient,
         )
 
 
@@ -1028,6 +1077,31 @@ class CommonTemplate:
                 torch.randint(-10, -1, [100, 100]),
             ),
         )
+
+    def test_div8(self):
+        def fn(a, b):
+            return (
+                aten.div(a, b, rounding_mode=None),
+                aten.div(a, b, rounding_mode="floor"),
+                aten.div(a, b, rounding_mode="trunc"),
+                a / b,
+                a // b,
+            )
+
+        self.common(fn, (1024, 100))
+
+    def test_both_scalars(self):
+        def fn(a, b):
+            return (
+                aten.add(a, b),
+                aten.add(b, a),
+                aten.sub(a, b),
+                aten.sub(b, a),
+                aten.mul(a, b),
+                aten.mul(b, a),
+            )
+
+        self.common(fn, (4, 3.3), reference_in_float=False)
 
     def test_sum_keepdims(self):
         def fn(a, b):
@@ -2194,13 +2268,14 @@ class CommonTemplate:
                 torch.index_select(torch.index_select(a, 2, b), 1, b),
             )
 
-        self.common(
-            fn,
-            (
-                torch.randn(8, 8, 8),
-                torch.tensor([0, 0, 2, 1], dtype=torch.int64),
-            ),
-        )
+        for ind_dtype in (torch.int32, torch.int64):
+            self.common(
+                fn,
+                (
+                    torch.randn(8, 8, 8),
+                    torch.tensor([0, 0, 2, 1], dtype=ind_dtype),
+                ),
+            )
 
     # https://github.com/pytorch/torchdynamo/issues/467
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)

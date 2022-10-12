@@ -745,8 +745,8 @@ def same(
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
                 return torch.allclose(
-                    ref.view(dtype=torch.uint8),
-                    res.view(dtype=torch.uint8),
+                    ref.to(dtype=torch.uint8),
+                    res.to(dtype=torch.uint8),
                     atol=tol,
                     rtol=tol,
                     equal_nan=equal_nan,
@@ -774,17 +774,20 @@ def same(
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
                 res_error = rmse(fp64_ref, res).item()
-                multiplier = 2
+                multiplier = 2.0
 
-                # if fp64_ref.numel() < 500:
-                #     # In the presence of noise, noise might dominate our error
-                #     # metric for smaller tensors.
-                #     multiplier = 2.5
+                if fp64_ref.numel() < 1000 or (
+                    ref.ndim == 4 and ref.shape[-1] == ref.shape[-2] == 1
+                ):
+                    # In the presence of noise, noise might dominate our error
+                    # metric for smaller tensors.
+                    # Similary, for 1x1 kenerls, there seems to be high noise with amp.
+                    multiplier = 3.0
 
-                passes_test = res_error <= (multiplier * ref_error + 1e-5)
+                passes_test = res_error <= (multiplier * ref_error + 1e-4)
                 if not passes_test:
                     log.error(
-                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f}"
+                        f"RMSE (res-fp64): {res_error:.5f}, (ref-fp64): {ref_error:.5f} and shape={res.size()}"
                     )
                     # import pdb; pdb.set_trace()
                 return passes_test
