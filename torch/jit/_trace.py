@@ -668,13 +668,14 @@ def trace(
             <torch.jit.trace_module>` for details).
 
     Keyword arguments:
-        example_inputs (tuple or torch.Tensor or None):  A tuple of example inputs that
-            will be passed to the function while tracing. The resulting trace
-            can be run with inputs of different types and shapes assuming the
-            traced operations support those types and shapes. `example_inputs`
-            may also be a single Tensor in which case it is automatically
-            wrapped in a tuple. When the value is None, example_kwarg_inputs should
-            be specified.
+        example_inputs (tuple or torch.Tensor or None, optional): A tuple of example
+            inputs that will be passed to the function while tracing.
+            Default: ``None``. Either this argument or ``example_kwarg_inputs``
+            should be specified. The resulting trace can be run with inputs of
+            different types and shapes assuming the traced operations support those
+            types and shapes. `example_inputs` may also be a single Tensor in which
+            case it is automatically wrapped in a tuple. When the value is None,
+            ``example_kwarg_inputs`` should be specified.
 
         check_trace (``bool``, optional): Check if the same inputs run through
             traced code produce the same outputs. Default: ``True``. You might want
@@ -699,9 +700,12 @@ def trace(
             and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
-        example_kwarg_inputs (dict): This parameter is a pack of keyword arguments
-            example inputs that will be passed to the function while tracing. The dict
-            will be unpacking by the arguments name of the traced function.
+        example_kwarg_inputs (dict, optional): This parameter is a pack of keyword
+            arguments example inputs that will be passed to the function while tracing.
+            Default: ``None``. Either this argument or ``example_inputs`` should be
+            specified. The dict will be unpacking by the arguments name of the traced
+            function. If the keys of the dict don't not match with the traced
+            function'a arguments name, a runtime exception will be raised.
 
     Returns:
         If `func` is `nn.Module` or ``forward`` of `nn.Module`, `trace` returns
