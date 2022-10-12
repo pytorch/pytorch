@@ -179,9 +179,9 @@ Tensor mkldnn_linear_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
-    std::string attr,
-    std::vector<c10::optional<at::Scalar>> scalars,
-    c10::optional<std::string> algorithm) {
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
   auto input = input_t.contiguous();
   auto input_size = input.sizes();
 
@@ -251,7 +251,7 @@ Tensor mkldnn_linear_pointwise_binary(
     const Tensor& other_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
-    std::string attr) {
+    c10::string_view attr) {
   auto input = input_t.contiguous();
 
   auto it_binary = fusion_binary_alg_map().find(attr);
