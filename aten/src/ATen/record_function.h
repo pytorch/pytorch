@@ -597,9 +597,9 @@ void record_function_with_scope_and_debug_handle(
 // launch to let the profiler bind the outputs to the op that produced
 // them.  Note that guard is declared by RECORD_FUNCTION so this macro
 // needs to be called from the same scope as RECORD_FUNCTION
-#define RECORD_OUTPUTS(outputs) \
-  if (guard.needsOutputs()) {   \
-    guard.setOutputs(           \
+#define RECORD_OUTPUTS(outputs)                                    \
+  if (guard.needsOutputs()) {                                      \
+    guard.setOutputs(                                              \
         std::vector<c10::IValue>(outputs.begin(), outputs.end())); \
   }
 
