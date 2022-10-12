@@ -831,18 +831,19 @@ Tensor logcumsumexp_backward(
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
-  IntArrayRef sizes;
+  c10::SymIntArrayRef sizes;
   at::TensorOptions o;
   for (const auto& v : grads) {
     if (v.defined()) {
-      sizes = v.sizes();
+      sizes = v.sym_sizes();
       o = static_cast<Tensor>(v).options();
       break;
     }
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }
@@ -871,15 +872,15 @@ Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
 
 std::vector<Tensor> cat_tensors_backward(
     const Tensor& grad,
-    const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<std::vector<c10::SymInt>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim) {
   std::vector<Tensor> grad_inputs(sizes.size());
   if (!grad.defined()) {
     return grad_inputs;
   }
-  dim = at::legacy_cat_wrap_dim(dim, sizes);
-  int64_t accumulate = 0;
+  dim = at::legacy_cat_wrap_dim_symint(dim, sizes);
+  c10::SymInt accumulate = 0;
 
   Tensor grad_;
   bool grad_is_complex = grad.is_complex();
@@ -896,13 +897,13 @@ std::vector<Tensor> cat_tensors_backward(
     }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<int64_t>({0})) {
+    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
       grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
     auto size = shape[dim];
     accumulate += size;
-    grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
+    grad_inputs[i] = grad_val.narrow_symint(dim, accumulate - size, size);
   }
   return grad_inputs;
 }
