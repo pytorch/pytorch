@@ -10710,8 +10710,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # AssertionError: Booleans mismatch: True is not False
@@ -16945,6 +16946,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
+        aliases=('_refs.special.expit',),
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
