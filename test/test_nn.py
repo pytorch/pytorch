@@ -337,6 +337,9 @@ class TestNN(NNTestCase):
         output.sum().backward()
 
     def test_hook_backward_pre_and_full(self):
+        # Test to make sure that the grad_outputs
+        # updated by backward_pre_hook are received by
+        # the backward_full_hook
         module = torch.nn.Sigmoid()
 
         cnt = {'backward_cnt': 0}
@@ -491,34 +494,39 @@ class TestNN(NNTestCase):
         def hook(mod, grad_input, grad_output):
             hook_called[0] += 1
 
+        def hook_pre(mod, grad_output):
+            hook_called[0] += 1
+
         inp = torch.rand(10, requires_grad=True)
         mod = MyModule()
-        mod.register_full_backward_hook(hook)
+        for hook_fn, register_fn in [(hook, mod.register_full_backward_hook),
+                                     (hook_pre, mod.register_backward_pre_hook)]:
+            hook_called[0] = 0
+            with register_fn(hook_fn):
+                # No inplace should work
+                mod(inp, False).sum().backward()
+                self.assertEqual(hook_called[0], 1)
 
-        # No inplace should work
-        mod(inp, False).sum().backward()
-        self.assertEqual(hook_called[0], 1)
+                # Input inplace error should throw an error
+                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                            "a view and is being modified inplace."):
+                    mod(inp.clone(), True)
 
-        # Input inplace error should throw an error
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                    "a view and is being modified inplace."):
-            mod(inp.clone(), True)
+                # Input inplace error should throw an error if we try to re-use the view after they have
+                # been modified
+                local_inp = inp.clone()
+                out = mod(local_inp, False)
+                local_inp[0] *= 1
+                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                            "a view and its base or another view"):
+                    # Any operation involving the view will fail here
+                    mod.inp + 2
 
-        # Input inplace error should throw an error if we try to re-use the view after they have
-        # been modified
-        local_inp = inp.clone()
-        out = mod(local_inp, False)
-        local_inp[0] *= 1
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                    "a view and its base or another view"):
-            # Any operation involving the view will fail here
-            mod.inp + 2
-
-        # Output inplace error should throw an error
-        out = mod(inp, False)
-        with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
-                                    "and is being modified inplace."):
-            out += 1
+                # Output inplace error should throw an error
+                out = mod(inp, False)
+                with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
+                                            "and is being modified inplace."):
+                    out += 1
 
     def test_hook_non_full_warning(self):
         def noop(*args):
