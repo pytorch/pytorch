@@ -14,11 +14,11 @@ namespace at {
 // [-dim_post_expr, dim_post_expr-1].
 using c10::maybe_wrap_dim;
 
-static inline int64_t maybe_wrap_dim(int64_t dim, TensorImpl* tensor) {
+inline int64_t maybe_wrap_dim(int64_t dim, TensorImpl* tensor) {
   return maybe_wrap_dim(dim, tensor->dim());
 }
 
-static inline int64_t maybe_wrap_dim(int64_t dim, TensorList tensors) {
+inline int64_t maybe_wrap_dim(int64_t dim, TensorList tensors) {
   if (tensors.size() == 0) {
     // can't wrap empty TensorList; rely on underlying implementation to throw
     // error if necessary.
@@ -27,7 +27,7 @@ static inline int64_t maybe_wrap_dim(int64_t dim, TensorList tensors) {
   return maybe_wrap_dim(dim, tensors[0].dim());
 }
 
-static inline int64_t maybe_wrap_dim(
+inline int64_t maybe_wrap_dim(
     int64_t dim,
     const std::vector<std::vector<int64_t>>& tensor_sizes) {
   if (tensor_sizes.size() == 0) {
@@ -40,7 +40,7 @@ static inline int64_t maybe_wrap_dim(
 
 // wrap each dim in the dims array, taking dim_post_expr as the true number of
 // dimensions
-static inline void maybe_wrap_dims_n(
+inline void maybe_wrap_dims_n(
     int64_t* dims,
     int64_t ndims,
     int64_t dim_post_expr) {
@@ -81,7 +81,7 @@ inline void maybe_wrap_dims(Container& dims, int64_t dim_post_expr) {
 // for backwards compatibility, but only for this specific size (i.e. other
 // empty sizes are not skipped).
 template <typename T>
-static inline int64_t _legacy_cat_wrap_dim(
+inline int64_t _legacy_cat_wrap_dim(
     int64_t dim,
     const std::vector<std::vector<T>>& tensor_sizes) {
   for (auto& sizes : tensor_sizes) {
@@ -93,19 +93,19 @@ static inline int64_t _legacy_cat_wrap_dim(
   return dim;
 }
 
-static int64_t legacy_cat_wrap_dim(
+inline int64_t legacy_cat_wrap_dim(
     int64_t dim,
     const std::vector<std::vector<int64_t>>& tensor_sizes) {
   return _legacy_cat_wrap_dim<int64_t>(dim, tensor_sizes);
 }
 
-static int64_t legacy_cat_wrap_dim_symint(
+inline int64_t legacy_cat_wrap_dim_symint(
     int64_t dim,
     const std::vector<std::vector<c10::SymInt>>& tensor_sizes) {
   return _legacy_cat_wrap_dim<c10::SymInt>(dim, tensor_sizes);
 }
 
-static inline int64_t legacy_cat_wrap_dim(
+inline int64_t legacy_cat_wrap_dim(
     int64_t dim,
     const MaterializedITensorListRef& tensors) {
   for (const Tensor& tensor : tensors) {
@@ -118,7 +118,7 @@ static inline int64_t legacy_cat_wrap_dim(
 }
 
 // wrap negative dims in a vector
-static inline void wrap_all_dims(
+inline void wrap_all_dims(
     std::vector<int64_t>& dims_to_wrap,
     int64_t tensor_total_dims) {
   for (const auto i : c10::irange(dims_to_wrap.size())) {
