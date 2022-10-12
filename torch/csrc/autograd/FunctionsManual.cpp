@@ -1808,9 +1808,9 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
 
 Tensor split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    c10::SymIntArrayRef split_sizes,
+    IntArrayRef split_sizes,
     int64_t dim,
-    c10::SymIntArrayRef sizes,
+    IntArrayRef sizes,
     const at::TensorOptions& options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
 
@@ -1824,7 +1824,7 @@ Tensor split_with_sizes_backward(
       auto length = split_sizes[j];
       auto grad_size = sizes.vec();
       grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros_symint(grad_size, options);
+      grads_all_defined[j] = at::zeros(grad_size, options);
     }
   }
 
@@ -1834,14 +1834,14 @@ Tensor split_with_sizes_backward(
 
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    c10::SymInt split_size,
+    int64_t split_size,
     int64_t dim,
-    c10::SymIntArrayRef sizes,
+    IntArrayRef sizes,
     const at::TensorOptions& options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
-  auto dim_size = sizes[dim];
+  int64_t dim_size = sizes[dim];
   int64_t num_splits = grads.size();
-  std::vector<c10::SymInt> split_sizes(num_splits, split_size);
+  std::vector<int64_t> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
       split_size - (split_size * num_splits - dim_size);
   return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
@@ -2837,7 +2837,6 @@ Tensor as_strided_backward(
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
       std::min(input_geometry.sym_storage_offset(), sym_storage_offset);
-      input_geometry.sym_storage_offset().min(sym_storage_offset);
   auto inp_effective_offset =
       input_geometry.sym_storage_offset() - shared_offset;
   auto out_effective_offset = sym_storage_offset - shared_offset;
@@ -5620,7 +5619,7 @@ Tensor lu_unpack_backward(
   if (!L_grad.defined() && !U_grad.defined()) {
     return {};
   }
-  const auto k = m.min(n);
+  const auto k = std::min(m, n);
 
   // Getters for the principal and complementary part of the matrices
   const auto get_L1 = [m, k](const Tensor& L) {
