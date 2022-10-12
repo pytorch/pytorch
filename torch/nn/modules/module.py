@@ -1287,6 +1287,8 @@ class Module:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
+        if '_backward_pre_hooks' not in self.__dict__:
+            self._backward_pre_hooks = OrderedDict()
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
