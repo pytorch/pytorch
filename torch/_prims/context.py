@@ -267,6 +267,39 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             prims_mode_cls=functools.partial(NvfuserPrimsMode, skip_ops=skip_ops),
         )
 
+    # TODO: remove this once version from _decomp/decompositions.py is working
+    # with this context manager
+    # This is a workaround for AOT Autograd graphs
+    def _cudnn_batch_norm(
+        self,
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    ):
+        a, b, c = torch.ops.nvprims.native_batch_norm(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            training,
+            exponential_average_factor,
+            epsilon,
+        )
+        if training:
+            return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
+        return (
+            a,
+            weight.new_zeros((0,)),
+            weight.new_zeros((0,)),
+            input.new_zeros((0,), dtype=torch.uint8),
+        )
+
     def _is_var_mean(self, func):
         return "torch.var_mean" == torch.overrides.resolve_name(func) or (
             (
@@ -281,6 +314,9 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             func == torch.ops.aten.native_batch_norm.default
             or func == torch.ops.aten.native_batch_norm
         )
+
+    def _is_cudnn_batch_norm(self, func):
+        return func == torch.ops.aten.cudnn_batch_norm.default
 
     def _is_rand_like(self, func):
         result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
@@ -300,6 +336,10 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
+
+        if orig_func == torch.ops.aten.cudnn_batch_norm.default or orig_func == torch.ops.aten.cudnn_batch_norm:
+            with self:
+                return self._cudnn_batch_norm(*args, **kwargs)
 
         if self._is_native_batch_norm(orig_func):
             return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
