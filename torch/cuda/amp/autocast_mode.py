@@ -18,12 +18,14 @@ class autocast(torch.amp.autocast_mode.autocast):
     """
 
     def __init__(self, enabled : bool = True, dtype : torch.dtype = torch.float16, cache_enabled : bool = True):
+        device = "cuda" if enabled else "cpu"
         if torch._jit_internal.is_scripting():
+     
             self._enabled = enabled
-            self.device = "cuda"
+            self.device = device
             self.fast_dtype = dtype
             return
-        super().__init__("cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
+        super().__init__(device, enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
