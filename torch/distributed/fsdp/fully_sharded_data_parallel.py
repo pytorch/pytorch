@@ -1570,13 +1570,13 @@ class FullyShardedDataParallel(nn.Module):
             if event:
                 event.synchronize()
         any_ran_pre_unshard = False
-        with torch.cuda.stream(self._streams["pre_all_gather"]):
+        with torch.cuda.stream(self._streams["pre_unshard"]):
             for handle in handles:
                 ran_pre_unshard = handle.pre_unshard()
                 any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
         if any_ran_pre_unshard:
-            self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
-        with torch.cuda.stream(self._streams["all_gather"]):
+            self._streams["unshard"].wait_stream(self._streams["pre_unshard"])
+        with torch.cuda.stream(self._streams["unshard"]):
             for handle in handles:
                 handle.unshard()
                 handle.post_unshard()
@@ -2001,12 +2001,15 @@ class FullyShardedDataParallel(nn.Module):
         computation. This should only be called on the root FSDP instance."""
         assert self._is_root
         assert torch.cuda.is_available()
-        # Stream for all-gathering parameters.
-        self._streams["all_gather"] = torch.cuda.Stream()
-        # Stream for overlapping grad reduction with the backward pass.
+        # Stream for unshard logic, including allocating the all-gather
+        # destination tensors and the all-gathers themselves.
+        self._streams["unshard"] = torch.cuda.Stream()
+        # Stream for overlapping gradient reduction with the backward pass
+        # gradient computation.
         self._streams["post_backward"] = torch.cuda.Stream()
-        # Stream for pre-all-gather copies (e.g. H2D or precision cast).
-        self._streams["pre_all_gather"] = torch.cuda.Stream()
+        # Stream for pre-unshard logic, namely allocations and writes for
+        # CPU offloading (H2D copy) and mixed precision (low precision cast).
+        self._streams["pre_unshard"] = torch.cuda.Stream()
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -2017,11 +2020,11 @@ class FullyShardedDataParallel(nn.Module):
         if not self._is_root:
             return
         current_stream = torch.cuda.current_stream()
-        self._streams["all_gather"].wait_stream(current_stream)
+        self._streams["unshard"].wait_stream(current_stream)
         # Having the pre-all-gather stream wait for the current stream even if
         # we do not leverage the pre-all-gather stream is tolerable since this
         # only runs once per iteration
-        self._streams["pre_all_gather"].wait_stream(current_stream)
+        self._streams["pre_unshard"].wait_stream(current_stream)
 
     def _prefetch_handles(
         self,
@@ -2815,7 +2818,7 @@ class FullyShardedDataParallel(nn.Module):
             self._unshard(handles)
             handles_key = tuple(handles)
             self._needs_pre_forward_unshard[handles_key] = False
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+            torch.cuda.current_stream().wait_stream(self._streams["unshard"])
             self._prefetch_handles(handles_key)
 
     def _post_forward(
@@ -3059,7 +3062,7 @@ class FullyShardedDataParallel(nn.Module):
         self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
         self._unshard(self._handles)
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+        torch.cuda.current_stream().wait_stream(self._streams["unshard"])
         if with_grads:
             self._unshard_grads(self._handles)
 
@@ -3322,7 +3325,7 @@ class FullyShardedDataParallel(nn.Module):
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
                 self._unshard(_handles)
-                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+                torch.cuda.current_stream().wait_stream(self._streams["unshard"])
 
                 # Set this to `False` to ensure that a mistargeted prefetch
                 # does not actually unshard these handles
