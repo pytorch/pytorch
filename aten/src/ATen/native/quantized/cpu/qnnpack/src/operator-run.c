@@ -213,11 +213,38 @@ static void compute_q8gemm_prepacked_sparse_dq(
           &context->quantization_params);
       break;
     case pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t:
+      context->ukernel_w16(
+          mr_block_size,
+          nr_block_size,
+          a_packed,
+          context->kernel_values,
+          context->kernel_row_values_w16 + kernel_row_values_shift,
+          context->kernel_col_indices_w16,
+          bias,
+          c,
+          c_stride,
+          output_channel_index,
+          &context->quantization_params);
+      break;
     case pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t:
+      context->ukernel_w8(
+          mr_block_size,
+          nr_block_size,
+          a_packed,
+          context->kernel_values,
+          context->kernel_row_values_w8 + kernel_row_values_shift,
+          context->kernel_col_indices_w8,
+          bias,
+          c,
+          c_stride,
+          output_channel_index,
+          &context->quantization_params);
+      break;
     case pytorch_qnnp_sparse_matrix_indices_dtype_invalid:
       pytorch_qnnp_log_error(
-          "Currently only uint32_t is supported for sparse matrix indices dtype");
-      break;
+          "Invalid indices dtype specified for "
+          "operator-run compute_q8gemm_prepacked_sparse_dq");
+      assert(false);
   }
 }
 
