@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 from torch._C import device, dtype, layout
 
@@ -38,11 +38,12 @@ class ProfilerActivity(Enum):
     CUDA = ...
 
 class _EventType(Enum):
-    Allocation = ...
+    TorchOp = ...
     Backend = ...
+    Allocation = ...
+    OutOfMemory = ...
     PyCall = ...
     PyCCall = ...
-    TorchOp = ...
     Kineto = ...
 
 class _ExperimentalConfig:
@@ -71,6 +72,8 @@ class _ProfilerEvent:
     start_tid: int
     start_time_ns: int
     children: List[_ProfilerEvent]
+
+    # TODO(robieta): remove in favor of `self.typed`
     extra_fields: Union[
         _ExtraFields_TorchOp,
         _ExtraFields_Backend,
@@ -81,6 +84,18 @@ class _ProfilerEvent:
         _ExtraFields_Kineto,
     ]
 
+    @property
+    def typed(
+        self,
+    ) -> Union[
+        Tuple[Literal[_EventType.TorchOp], _ExtraFields_TorchOp],
+        Tuple[Literal[_EventType.Backend], _ExtraFields_Backend],
+        Tuple[Literal[_EventType.Allocation], _ExtraFields_Allocation],
+        Tuple[Literal[_EventType.OutOfMemory], _ExtraFields_OutOfMemory],
+        Tuple[Literal[_EventType.PyCall], _ExtraFields_PyCall],
+        Tuple[Literal[_EventType.PyCCall], _ExtraFields_PyCCall],
+        Tuple[Literal[_EventType.Kineto], _ExtraFields_Kineto],
+    ]: ...
     @property
     def name(self) -> str: ...
     @property
@@ -154,10 +169,32 @@ class _NNModuleInfo:
     @property
     def cls_name(self) -> str: ...
 
+class _OptimizerInfo:
+    @property
+    def parameters(
+        self,
+    ) -> List[
+        Tuple[
+            # Parameter
+            _TensorMetadata,
+            #
+            # Gradient (if present during optimizer.step())
+            Optional[_TensorMetadata],
+            #
+            # Optimizer state for Parameter as (name, tensor) pairs
+            List[Tuple[str, _TensorMetadata]],
+        ]
+    ]: ...
+
 class _ExtraFields_PyCCall:
-    callsite: _PyFrameState
-    caller: _PyFrameState
-    module: Optional[_NNModuleInfo]
+    @property
+    def callsite(self) -> _PyFrameState: ...
+    @property
+    def caller(self) -> _PyFrameState: ...
+    @property
+    def module(self) -> Optional[_NNModuleInfo]: ...
+    @property
+    def optimizer(self) -> Optional[_OptimizerInfo]: ...
 
 class _ExtraFields_PyCall:
     caller: _PyFrameState
