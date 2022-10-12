@@ -478,7 +478,7 @@ def create_aot_dispatcher_function(
         assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
 
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
-    fake_mode = FakeTensorMode(shape_env = shape_env) if config.use_fake_tensor else nullcontext()
+    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
 

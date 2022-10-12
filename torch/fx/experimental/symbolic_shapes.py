@@ -320,7 +320,7 @@ class ShapeEnv(object):
         self.divisible: Set["sympy.Expr"] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: Dict[int, "sympy.Expr"] = {0: 0, 1: 1}
+        self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
 
     def _get_key(self):
         """
@@ -331,7 +331,7 @@ class ShapeEnv(object):
 
     def create_symbolic_sizes_strides(self, ex: torch.Tensor):
         size = [self[i] for i in ex.size()]
-        stride = [None] * len(size)
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
                 stride[i] = sympy.Integer(val)
@@ -359,7 +359,7 @@ class ShapeEnv(object):
                     ]
                 )[0]
                 stride[i] = self[val]
-
+        assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]
 
     def create_symintnode(self, expr: Union["sympy.Expr", int]):
