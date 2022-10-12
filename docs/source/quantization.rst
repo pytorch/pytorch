@@ -103,7 +103,7 @@ There are three types of quantization supported:
 3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
-Please see our `Introduction to Quantization on Pytorch
+Please see our `Introduction to Quantization on PyTorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
