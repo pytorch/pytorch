@@ -330,7 +330,7 @@ class ShapeEnv(object):
         return (len(self.replacements), len(self.divisible))
 
     def create_symbolic_sizes_strides(self, ex: torch.Tensor):
-        size = [self[i] for i in ex.size()]
+        size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -358,23 +358,21 @@ class ShapeEnv(object):
                         if stride[i] is None
                     ]
                 )[0]
-                stride[i] = self[val]
+                stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
     def create_symintnode(self, expr: Union["sympy.Expr", int]):
-        if isinstance(expr, int):
-            return expr
         py_sym_int = PySymInt(expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         return cpp_sym_int
 
-    def __getitem__(self, val: int) -> "sympy.Expr":
+    def create_symbol(self, val: int) -> "sympy.Expr":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
         if val < 0:
             # all variables are positive
-            return -self[-val]
+            return -self.create_symbol(-val)
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
         # TODO: Create a guard whenever this happens

@@ -148,7 +148,7 @@ class MetaConverter:
 
         def sym(x):
             if make_symbolic:
-                return shape_env[x]
+                return shape_env.create_symbol(x)
             else:
                 return x
 

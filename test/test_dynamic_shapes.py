@@ -205,7 +205,7 @@ class TestPySymInt(TestCase):
         y = create_symbolic_tensor("y", torch.randn(5, 4, 1), shape_env)
         LAST_DIM = 2
         z = x.narrow_copy(LAST_DIM, 0, y.shape[LAST_DIM])
-        self.assertTrue(z.shape[2] == int(y.shape[2]))
+        self.assertTrue(z.shape[2] == y.shape[2])
 
         # arithmetic expr with two symints
         z = x.narrow_copy(LAST_DIM, 0, x.shape[LAST_DIM] - y.shape[LAST_DIM])

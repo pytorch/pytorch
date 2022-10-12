@@ -271,6 +271,7 @@ class AOTConfig:
     bw_compiler: Callable
     partition_fn: Callable
     decompositions: Dict[Callable, Callable]
+    num_params_buffers: int
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
@@ -486,10 +487,14 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:
-                def convert(x):
-                    return fake_mode.from_tensor(x)
+                def convert(idx, x):
+                    if not isinstance(x, torch.Tensor):
+                        return x
+                    if idx < aot_config.num_params_buffers and config.static_weight_shapes:
+                        return fake_mode.from_tensor(x, static_shapes=True)
+                    return fake_mode.from_tensor(x, static_shapes=False)
 
-                return pytree.tree_map_only(Tensor, convert, flat_args)
+                return [convert(idx, x) for idx, x in enumerate(flat_args)]
             else:
                 return flat_args
 
@@ -550,6 +555,7 @@ def aot_function(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
+    num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
 ) -> Callable:
@@ -613,6 +619,7 @@ def aot_function(
         bw_compiler=bw_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
+        num_params_buffers=num_params_buffers,
     )
     cached_res = None
 
@@ -697,7 +704,10 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         params_and_buffers = {**named_params, **named_buffers}
         return stateless.functional_call(mod, params_and_buffers, args, kwargs)
 
-    compiled_f = aot_function(functional_call, *args, **kwargs)
+    named_params = dict(_named_parameters(mod, remove_duplicate=False))
+    named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
+    num_params_buffers = len(named_params) + len(named_buffers)
+    compiled_f = aot_function(functional_call, num_params_buffers=num_params_buffers, *args, **kwargs)
 
     class AOTModule(nn.Module):
         def __init__(self):
@@ -706,8 +716,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                dict(_named_parameters(mod, remove_duplicate=False)),
-                dict(_named_buffers(mod, remove_duplicate=False)),
+                named_params,
+                named_buffers,
                 *args,
                 **kwargs,
             )
@@ -775,6 +785,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             bw_compiler=bw_compiler,
             partition_fn=partition_fn,
             decompositions=decompositions,
+            num_params_buffers=params_len,
         )
 
         compiled_fn = None
