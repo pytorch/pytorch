@@ -22,6 +22,20 @@ void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack)
     "on MPS.")
 }
 
+
+// This dispatch should never be called for tensor on MPS but is frequently called
+// If one of them are on CPU
+Tensor slow_conv2d_forward_mps(
+    const Tensor &self,
+    const Tensor &weight,
+    IntArrayRef kernel_size,
+    const c10::optional<Tensor> &bias,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+   TORCH_CHECK(self.device() == weight.device(), __func__, ": input(device='", self.device(), "') and weight(device=", weight.device(), "')  must be on the same device");
+   TORCH_INTERNAL_ASSERT(false, __func__, " should not be called for both tensors on MPS device");
+}
+
 TORCH_LIBRARY_IMPL(_, MPS, m) {
   static const char *enable_mps_fallback = getenv("PYTORCH_ENABLE_MPS_FALLBACK");
   if (!enable_mps_fallback || std::stoi(enable_mps_fallback) == 0) {
@@ -48,6 +62,7 @@ TORCH_LIBRARY_IMPL(aten, MPS, m) {
   m.impl("linalg_vector_norm", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("sgn.out", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("nonzero", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
+  m.impl("_slow_conv2d_forward", slow_conv2d_forward_mps);
 }
 
 } // namespace at
