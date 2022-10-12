@@ -35,21 +35,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization.fx.pattern_utils": [
-    "Any",
-    "Dict",
-    "FixedQParamsFakeQuantize",
-    "List",
-    "MatchResult",
-    "Node",
-    "ObserverBase",
-    "Optional",
-    "OrderedDict",
-    "Pattern",
-    "QConfigAny",
-    "QuantizeHandler",
-    "Tuple"
-  ],
   "torch.ao.quantization.fx.quantization_patterns": [
     "ABC",
     "Any",
