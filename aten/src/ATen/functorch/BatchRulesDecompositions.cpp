@@ -204,6 +204,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(square);
   OP_DECOMPOSE(numpy_T);
   OP_DECOMPOSE(reshape_as);
+  OP_DECOMPOSE(slogdet);
   OP_DECOMPOSE(t);
   OP_DECOMPOSE2(result_type, Tensor);
   OP_DECOMPOSE2(result_type, Scalar);
