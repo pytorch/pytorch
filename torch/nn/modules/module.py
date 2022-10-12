@@ -184,7 +184,7 @@ def register_module_backward_hook(
 
 
 def register_module_backward_pre_hook(
-    hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+    hook: Callable[['Module', _grad_t], Union[None, Tensor]]
 ) -> RemovableHandle:
     handle = hooks.RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
@@ -999,7 +999,7 @@ class Module:
         return self._apply(convert)
 
     def register_backward_pre_hook(
-        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+        self, hook: Callable[['Module', _grad_t], Union[None, Tensor]]
     ) -> RemovableHandle:
         r"""Registers a backward pre hook on the module.
 
@@ -1098,6 +1098,13 @@ class Module:
             non_full_backward_hooks += self._backward_hooks.values()
 
         return full_backward_hooks, non_full_backward_hooks
+
+    def _get_backward_pre_hooks(self):
+        backward_pre_hooks: List[Callable] = []
+        backward_pre_hooks += _global_backward_pre_hooks.values()
+        backward_pre_hooks += self._backward_pre_hooks.values()
+
+        return backward_pre_hooks
 
     def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
         if not isinstance(result, torch.Tensor):
@@ -1220,8 +1227,7 @@ class Module:
         full_backward_hooks, non_full_backward_hooks = [], []
         backward_pre_hooks = []
         if self._backward_pre_hooks or _global_backward_pre_hooks:
-            backward_pre_hooks += _global_backward_pre_hooks.values()
-            backward_pre_hooks += self._backward_pre_hooks.values()
+            backward_pre_hooks = self._get_backward_pre_hooks()
 
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
