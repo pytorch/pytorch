@@ -217,7 +217,7 @@ op_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
+            )
         ],
         skips=(
             # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
