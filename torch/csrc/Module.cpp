@@ -760,30 +760,25 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   } else {
     node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
   }
-  if (exec_info->empty()) {
-    // .backward() without inputs= arg
-    const auto nodes_in_graph =
-        torch::autograd::get_current_graph_task_nodes_in_graph();
-    auto it = nodes_in_graph->find(node);
-    if (it == nodes_in_graph->end()) {
-      Py_RETURN_FALSE;
-    } else {
-      Py_RETURN_TRUE;
-    }
-  } else {
-    // .grad or .backward when inputs= is passed
+  const auto nodes_in_graph =
+      torch::autograd::get_current_graph_task_nodes_in_graph();
+  bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
+  if (ret && !exec_info->empty()) {
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
-      Py_RETURN_FALSE;
+      ret = false;
     } else {
-      THPUtils_assert(
+      TORCH_CHECK(
           !(node->topological_nr() == 0 && it->second.captures_),
           "A leaf node was passed to _will_engine_execute_node but we are "
           "currently running autograd.grad(). This is currently not supported.");
-      Py_RETURN_TRUE;
     }
   }
-
+  if (ret) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
   END_HANDLE_TH_ERRORS
 }
 
