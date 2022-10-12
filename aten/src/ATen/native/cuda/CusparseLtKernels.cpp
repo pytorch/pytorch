@@ -41,6 +41,12 @@ struct CusparseLtLinear : torch::CustomClassHolder {
     cusparseOperation_t op_weight;
     cusparseOperation_t op_activation;
     cusparseLtMatmulDescriptor_t matmul;
+    float alpha{1.0};
+    float beta{0.0};
+    int num_streams{0};
+    cudaStream_t* streams{nullptr};
+    void* d_workspace{nullptr};
+    cusparseLtMatmulAlgSelection_t alg_sel;
 
     c10::Half *dA, *dB, *dC, *dD, *dA_compressed;
     int* d_valid;
@@ -54,6 +60,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   void init(const at::Tensor& activation, const at::Tensor& res, const at::Tensor& bias);
   void prune();
   void compress();
+  void search_matmul_algo();
   void masked_mm();
 };
 
@@ -76,11 +83,12 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
 
   // m & k are for weight I think, k & n are for activation
   // check if weight is transposed?
-  auto m = weight.size(0);
-  auto k = weight.size(1);
+  // this is assuming num_batches > 1
+  auto m = weight.size(1);
+  auto k = weight.size(2);
   auto n = activation.size(1); // this is assuming num_batches > 1
   auto num_batches = activation.size(0);
-  int64_t batch_strideA = m * k;
+  int64_t batch_strideA = 0;
   int64_t batch_strideB = k * n;
   int64_t batch_strideC = m * n;
   // TODO: make these user inputs
@@ -106,8 +114,6 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   auto     ldc            = (is_rowmajor) ? num_C_cols : num_C_rows;
   auto     C_size         = num_batches * batch_strideC;
   // TODO: make this a function of dtype when dtype is a user input
-  auto     A_size_bytes   = num_batches * batch_strideA * sizeof(c10::Half);
-  auto     B_size_bytes   = num_batches * batch_strideB * sizeof(c10::Half);
   auto     C_size_bytes   = num_batches * batch_strideC * sizeof(__half);
   dA = weight.data_ptr<c10::Half>();
   dB = activation.data_ptr<c10::Half>();
@@ -134,7 +140,6 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   CHECK_CUDA(cudaMemcpy(dC, hC, C_size_bytes, cudaMemcpyHostToDevice))
   //--------------------------------------------------------------------------
   cusparseLtMatDescriptor_t activation_descriptor, matC;
-  cusparseLtMatmulAlgSelection_t alg_sel;
 
   CHECK_CUSPARSE(cusparseLtInit(&handle))
   // matrix descriptor initilization
@@ -185,9 +190,6 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   //--------------------------------------------------------------------------
   // SET BIAS POINTER
   auto  dBias = bias.data_ptr<c10::Half>();
-  // CHECK_CUDA( cudaMalloc((void**) &dBias, m * sizeof(float)) )
-  // CHECK_CUDA( cudaMemcpy(dBias, hBias, m * sizeof(float),
-                          // cudaMemcpyHostToDevice) )
   CHECK_CUSPARSE( cusparseLtMatmulDescSetAttribute(&handle, &matmul,
                                               CUSPARSELT_MATMUL_BIAS_POINTER,
                                               &dBias, sizeof(dBias)) )
@@ -198,7 +200,6 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   // initializing for now because I sometimes see the error:
   //  ** On entry to cusparseLtMatmulPlanInit() parameter number 5 (workspaceSize) had an illegal value: -9127659781585108992
   size_t workspace_size = 0;
-  std::cout << workspace_size << std::endl;
   CHECK_CUSPARSE(cusparseLtMatmulPlanInit(
       &handle, &plan, &matmul, &alg_sel, workspace_size))
   CHECK_CUSPARSE(
@@ -218,11 +219,6 @@ void CusparseLtLinear::prune() {
                                             d_valid, stream) )
 
   int is_valid;
-  std::cout << stream << std::endl;
-  std::cout << &is_valid << std::endl;
-  std::cout << "d_valid " << d_valid << std::endl;
-  // std::cout << *d_valid << std::endl;
-  // std::cout << *stream << std::endl;
   cudaDeviceSynchronize();
   CHECK_CUDA( cudaMemcpyAsync(&is_valid, d_valid, sizeof(is_valid),
                               cudaMemcpyDeviceToHost, stream) )
@@ -244,17 +240,23 @@ void CusparseLtLinear::compress() {
     cusparseLtSpMMACompress2(&handle, &weight_descriptor, true, op_weight, dA, dA_compressed, stream))
 }
 
+void CusparseLtLinear::search_matmul_algo() {
+  CHECK_CUSPARSE( cusparseLtMatmulSearch(&handle, &plan, &alpha,
+                                          dA_compressed, dB, &beta,
+                                          dC, dD, d_workspace,
+                                          streams, num_streams) )
+  int alg_id;
+  CHECK_CUSPARSE( cusparseLtMatmulAlgGetAttribute(
+                                          &handle, &alg_sel,
+                                          CUSPARSELT_MATMUL_ALG_CONFIG_ID,
+                                          &alg_id, sizeof(alg_id)) )
+}
+
+
 // this function assumes the weight tensor already has the mask applied
 void CusparseLtLinear::masked_mm() {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // TODO: should we cache any of this?
-  void* d_workspace = nullptr;
-  int num_streams = 0;
-  cudaStream_t* streams = nullptr;
-  // TODO: make alpha and beta user inputs
-  float alpha = 1.0f;
-  float beta = 0.0f;
-
   CHECK_CUSPARSE(cusparseLtMatmul(
       &handle,
       &plan,
@@ -283,6 +285,7 @@ TORCH_LIBRARY(cusparselt, m) {
     .def("init", &CusparseLtLinear::init)
     .def("prune", &CusparseLtLinear::prune)
     .def("compress", &CusparseLtLinear::compress)
+    .def("search_matmul_algo", &CusparseLtLinear::search_matmul_algo)
     .def("masked_mm", &CusparseLtLinear::masked_mm)
   ;
 }
