@@ -3043,6 +3043,50 @@ class TestDifferentiableOptimizer(TestCase):
              {'lr': 0.9, 'maximize': True, 'momentum': 0.9, 'differentiable': True, 'centered': True, 'weight_decay': 0.1},
              *state.values()))
 
+    def test_adadelta(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['square_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['acc_delta'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adadelta,
+             {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
+    def test_adagrad(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['sum'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adagrad,
+             {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
+    def test_adamax(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_inf'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adamax,
+             {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
 
 if __name__ == '__main__':
     run_tests()
