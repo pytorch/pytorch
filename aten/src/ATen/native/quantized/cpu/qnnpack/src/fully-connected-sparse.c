@@ -88,11 +88,21 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
           (const uint32_t*)kernel_row_values;
       break;
     case pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t:
+      fully_connected->sparse_matrix.col_indices_w16 =
+          (const uint16_t*)kernel_col_indices;
+      fully_connected->sparse_matrix.row_values_w16 =
+          (const uint16_t*)kernel_row_values;
+      break;
     case pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t:
+      fully_connected->sparse_matrix.col_indices_w8 =
+          (const uint8_t*)kernel_col_indices;
+      fully_connected->sparse_matrix.row_values_w8 =
+          (const uint8_t*)kernel_row_values;
+      break;
     case pytorch_qnnp_sparse_matrix_indices_dtype_invalid:
       status = pytorch_qnnp_status_invalid_parameter;
       pytorch_qnnp_log_error(
-          "Currently only uint32_t is supported for sparse matrix indices dtype");
+          "Invalid indices dtype specified for qnnpack fully connected sparse");
       goto error;
   }
 
