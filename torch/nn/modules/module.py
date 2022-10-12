@@ -157,7 +157,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
 
 
 def register_module_backward_hook(
-    hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+    hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
 ) -> RemovableHandle:
     r"""Registers a backward hook common to all the modules.
 
@@ -184,7 +184,7 @@ def register_module_backward_hook(
 
 
 def register_module_backward_pre_hook(
-    hook: Callable[['Module', _grad_t], Union[None, Tensor]]
+    hook: Callable[['Module', _grad_t], Union[None, _grad_t]]
 ) -> RemovableHandle:
     r"""Registers a backward pre-hook common to all the modules.
 
@@ -221,7 +221,7 @@ def register_module_backward_pre_hook(
 
 
 def register_module_full_backward_hook(
-    hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+    hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
 ) -> RemovableHandle:
     r"""Registers a backward hook common to all the modules.
 
@@ -1028,7 +1028,7 @@ class Module:
         return self._apply(convert)
 
     def register_backward_pre_hook(
-        self, hook: Callable[['Module', _grad_t], Union[None, Tensor]]
+        self, hook: Callable[['Module', _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         r"""Registers a backward pre hook on the module.
 
@@ -1062,7 +1062,7 @@ class Module:
         return handle
 
     def register_backward_hook(
-        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
@@ -1086,7 +1086,7 @@ class Module:
         return handle
 
     def register_full_backward_hook(
-        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
