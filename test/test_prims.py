@@ -681,23 +681,34 @@ class TestPrims(TestCase):
         sample = next(samples_iter)
         grad = torch.randn_like(sample.input)
 
-        def func(grad, input, weight, rm, rv, eps, train):
+        def func1(grad, input, weight, rm, rv, eps, train):
             return torch.ops.aten.native_batch_norm_backward.default(
                 grad, input, weight, rm, rv, rm, rv, train, eps, [True, True, True]
+            )
+
+        def func2(grad, input, weight, rm, rv, eps, train):
+            return torch.ops.aten.cudnn_batch_norm_backward.default(
+                input, grad, weight, rm, rv, rm, rv, eps, grad
             )
 
         args = sample.args
         kwargs = sample.kwargs
         all_args = [grad, sample.input, args[2], args[0], args[1], kwargs['eps'], kwargs['training']]
-        with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(*all_args)
 
-        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
-        includes_batch_norm_backward = any(
-            torch.ops.aten.native_batch_norm_backward.default == node.target
-            for node in call_function_nodes
-        )
-        self.assertFalse(includes_batch_norm_backward)
+        for func in (func1, func2):
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(*all_args)
+
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_batch_norm_backward = any(
+                torch.ops.aten.native_batch_norm_backward.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertFalse(includes_batch_norm_backward)
+            all_nvprims = all(
+                str(node.target).startswith("nvprims") for node in call_function_nodes
+            )
+            self.assertTrue(all_nvprims)
 
     @onlyCUDA
     @skipCUDAIfRocm
