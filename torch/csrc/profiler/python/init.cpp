@@ -184,7 +184,8 @@ void initPythonBindings(PyObject* module) {
           [](const NNModuleInfo& s) {
             py::list out;
             for (const auto& p : s.parameters_) {
-              out.append(std::tuple(p.name_, p.metadata_, p.grad_metadata_));
+              out.append(
+                  py::make_tuple(p.name_, p.metadata_, p.grad_metadata_));
             }
             return out;
           })
@@ -196,10 +197,10 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly("parameters", [](const OptimizerInfo& s) {
         py::list out;
         for (const auto& p : s.parameters_) {
-          out.append(std::tuple(p.metadata_, p.grad_metadata_, p.state_));
+          out.append(py::make_tuple(p.metadata_, p.grad_metadata_, p.state_));
         }
         return out;
-        });
+      });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
