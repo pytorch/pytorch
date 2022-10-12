@@ -1098,7 +1098,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             self.assertIn(node.scopeName(), expected_torch_script_scope_names)
 
     def test_scope_of_constants_when_combined_by_cse_pass(self):
-        LAYER_NUM = 3
+        layer_num = 3
 
         class M(torch.nn.Module):
             def __init__(self, constant):
@@ -1111,7 +1111,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return x + self.constant
 
         class N(torch.nn.Module):
-            def __init__(self, layers: int = LAYER_NUM):
+            def __init__(self, layers: int = layer_num):
                 super().__init__()
                 self.layers = torch.nn.ModuleList(
                     [M(constant=torch.tensor(1.0)) for i in range(layers)]
@@ -1130,22 +1130,22 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         #       so we expect 3 constants with different scopes. The 3 constants are for the 3 layers.
         #       If CSE in exporter is improved later, this test needs to be updated.
         #       It should expect 1 constant, with same scope as root.
-        SCOPE_PREFIX = "test_utility_funs.TestUtilityFuns_opset9.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
-        EXPECTED_ROOT_SCOPE_NAME = f"{SCOPE_PREFIX}.N::"
-        EXPECTED_LAYER_SCOPE_NAME = f"{SCOPE_PREFIX}.M::layers"
-        EXPECTED_CONSTANT_SCOPE_NAME = [
-            f"{EXPECTED_ROOT_SCOPE_NAME}/{EXPECTED_LAYER_SCOPE_NAME}.{i}"
-            for i in range(LAYER_NUM)
+        scope_prefix = "test_utility_funs.TestUtilityFuns_opset9.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
+        expected_root_scope_name = f"{scope_prefix}.N::"
+        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_constant_scope_name = [
+            f"{expected_root_scope_name}/{expected_layer_scope_name}.{i}"
+            for i in range(layer_num)
         ]
 
         constant_scope_names = []
         for node in graph.nodes():
             if node.kind() == "onnx::Constant":
                 constant_scope_names.append(node.scopeName())
-        self.assertEqual(constant_scope_names, EXPECTED_CONSTANT_SCOPE_NAME)
+        self.assertEqual(constant_scope_names, expected_constant_scope_name)
 
     def test_scope_of_nodes_when_combined_by_cse_pass(self):
-        LAYER_NUM = 3
+        layer_num = 3
 
         class M(torch.nn.Module):
             def __init__(self, constant, bias):
@@ -1161,7 +1161,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return (x + self.constant) * self.bias
 
         class N(torch.nn.Module):
-            def __init__(self, layers: int = LAYER_NUM):
+            def __init__(self, layers: int = layer_num):
                 super().__init__()
 
                 self.layers = torch.nn.ModuleList(
@@ -1180,15 +1180,15 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, _ = self._model_to_graph(
             N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
         )
-        SCOPE_PREFIX = "test_utility_funs.TestUtilityFuns_opset9.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
-        EXPECTED_ROOT_SCOPE_NAME = f"{SCOPE_PREFIX}.N::"
-        EXPECTED_LAYER_SCOPE_NAME = f"{SCOPE_PREFIX}.M::layers"
-        EXPECTED_ADD_SCOPE_NAMES = [
-            f"{EXPECTED_ROOT_SCOPE_NAME}/{EXPECTED_LAYER_SCOPE_NAME}.0"
+        scope_prefix = "test_utility_funs.TestUtilityFuns_opset9.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
+        expected_root_scope_name = f"{scope_prefix}.N::"
+        expected_layer_scope_name = f"{scope_prefix}.M::layers"
+        expected_add_scope_names = [
+            f"{expected_root_scope_name}/{expected_layer_scope_name}.0"
         ]
-        EXPECTED_MUL_SCOPE_NAMES = [
-            f"{EXPECTED_ROOT_SCOPE_NAME}/{EXPECTED_LAYER_SCOPE_NAME}.{i}"
-            for i in range(LAYER_NUM)
+        expected_mul_scope_names = [
+            f"{expected_root_scope_name}/{expected_layer_scope_name}.{i}"
+            for i in range(layer_num)
         ]
 
         add_scope_names = []
@@ -1198,8 +1198,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 add_scope_names.append(node.scopeName())
             elif node.kind() == "onnx::Mul":
                 mul_scope_names.append(node.scopeName())
-        self.assertEqual(add_scope_names, EXPECTED_ADD_SCOPE_NAMES)
-        self.assertEqual(mul_scope_names, EXPECTED_MUL_SCOPE_NAMES)
+        self.assertEqual(add_scope_names, expected_add_scope_names)
+        self.assertEqual(mul_scope_names, expected_mul_scope_names)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
