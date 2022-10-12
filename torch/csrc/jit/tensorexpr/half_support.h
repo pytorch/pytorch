@@ -83,6 +83,14 @@ class HalfRewriter : public IRMutator {
       inserted_half_casts_.insert(new_val);
     }
 
+    if (isHalf(v->buf()->dtype().scalar_type()) &&
+        !isHalf(newType.scalar_type())) {
+      new_val = alloc<Cast>(
+          newType.cloneWithScalarType(v->buf()->dtype().scalar_type()),
+          new_val);
+      inserted_half_casts_.insert(new_val);
+    }
+
     v->set_value(new_val);
     return v;
   }
