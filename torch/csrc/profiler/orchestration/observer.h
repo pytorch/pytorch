@@ -40,7 +40,7 @@ struct TORCH_API ExperimentalConfig {
   ExperimentalConfig(
       std::vector<std::string> profiler_metrics = {},
       bool profiler_measure_per_kernel = false,
-      bool verbose = true);
+      bool verbose = false);
   ~ExperimentalConfig() = default;
   explicit operator bool() const;
 
