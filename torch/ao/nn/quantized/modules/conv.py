@@ -6,7 +6,7 @@ from typing import Optional, List, TypeVar
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
