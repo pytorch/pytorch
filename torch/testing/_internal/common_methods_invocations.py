@@ -2481,17 +2481,22 @@ def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(
                 input_tensor, weights=weight_tensor, minlength=minlength)
 
-def sample_inputs_bucketize(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_bucketize(op_info, device, dtype, requires_grad, reference_inputs_mode=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    sizes = (((), S), ((S,), S), ((S, S), S), ((S, S, S), S), ((S, 1, S), S), ((S, 0, S), S))
 
-    for size, out_int32, right in product(sizes, [False, True], [False, True]):
-        input_tensor = make_arg(size)
-        boundaries = make_arg((S,)).msort()
+    if reference_inputs_mode:
+        sizes += (((256,), 128), ((128,), 256), ((32, 32), 11), ((32, 4, 32), 33))
+
+    for (input_shape, nb), out_int32, right in product(sizes, [False, True], [False, True]):
+        input_tensor = make_arg(input_shape)
+        boundaries = make_arg(nb).msort()
 
         yield SampleInput(input_tensor, boundaries,
                           out_int32=out_int32, right=right)
+
+reference_inputs_bucketize = partial(sample_inputs_bucketize, reference_inputs_mode=True)
 
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -10318,8 +10323,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # AssertionError: Booleans mismatch: True is not False
@@ -14300,6 +14306,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_bucketize,
+           reference_inputs_func=reference_inputs_bucketize,
            supports_autograd=False,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
@@ -16341,6 +16348,16 @@ python_ref_db = [
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.bucketize",
+        torch_opinfo_name="bucketize",
+        skips=(
+            # RuntimeError: It appears that you're trying to get value out of a tracing tensor with
+            #  aten._local_scalar_dense.default - erroring out! [...]
+            # triggered by mid_val = boundaries[mid]
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
+        )
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
@@ -16553,6 +16570,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
+        aliases=('_refs.special.expit',),
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,

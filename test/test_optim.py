@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
+    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm, skipIfTorchDynamo
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -34,7 +34,7 @@ def drosenbrock(tensor):
     x, y = tensor
     return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
-
+@skipIfTorchDynamo()
 class TestOptim(TestCase):
     exact_dtype = True
 
@@ -157,7 +157,7 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
-    def _test_state_dict(self, weight, bias, input, constructor):
+    def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
         weight = Parameter(weight)
         bias = Parameter(bias)
         with torch.no_grad():
@@ -255,7 +255,7 @@ class TestOptim(TestCase):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
             self.assertEqual(weight, weight_cuda)
-            self.assertEqual(bias, bias_cuda)
+            self.assertEqual(bias, bias_cuda, atol=atol, rtol=rtol)
 
         # validate deepcopy() copies all public attributes
         def getPublicAttr(obj):
@@ -263,7 +263,8 @@ class TestOptim(TestCase):
         self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
-                          ignore_multidevice=False, constructor_accepts_maximize=False, constructor_accepts_foreach=False):
+                          ignore_multidevice=False, constructor_accepts_maximize=False, constructor_accepts_foreach=False,
+                          atol=None, rtol=None):
         if scheduler_constructors is None:
             scheduler_constructors = []
 
@@ -285,6 +286,7 @@ class TestOptim(TestCase):
                 torch.randn(10),
                 torch.randn(5),
                 make_two_arg_constructor(constructor, maximize, foreach),
+                atol=atol, rtol=rtol
             )
         self._test_basic_cases_template(
             torch.randn(10, 5),
@@ -1006,6 +1008,7 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_rprop(self):
+        is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
         for foreach in (False, True):
             self._test_basic_cases(
                 lambda weight, bias, maximize, foreach: optim.Rprop(
@@ -1018,6 +1021,7 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2), lr=2e-4, maximize=maximize, foreach=foreach),
                 constructor_accepts_maximize=True,
                 constructor_accepts_foreach=True,
+                atol=4e-5 if is_cuda_sm86 else None, rtol=3e-5 if is_cuda_sm86 else None
             )
             self._test_complex_2d(lambda param: optim.Rprop(param, foreach=foreach))
             self._test_complex_optimizer(
@@ -1126,6 +1130,27 @@ class TestOptim(TestCase):
                 state_steps,
                 [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)],
             )
+
+    def test_empty_grad(self):
+        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam, torch.optim.AdamW,
+                      torch.optim.Adamax, torch.optim.ASGD, torch.optim.NAdam, torch.optim.RAdam,
+                      torch.optim.RMSprop, torch.optim.Rprop, torch.optim.SGD, torch.optim.SparseAdam]
+
+        for optimizer in optimizers:
+            net = torch.nn.Embedding(5, 1, padding_idx=0, sparse=optimizer is torch.optim.SparseAdam)
+            original_params = (param.detach().clone() for param in net.parameters())
+            # Simulate a batch that only indexes the embedding at padding_idx
+            x = torch.tensor([[0, 0]]).int()
+            y = torch.tensor([[[3.0], [4.0]]])
+            opt = optimizer(net.parameters(), lr=1e-5)
+            torch.nn.MSELoss()(net.forward(x), y).backward()
+
+            opt.step()
+
+            for original_param, param in zip(original_params, net.parameters()):
+                # assert that the parameters have not changed
+                self.assertEqual(original_param, param)
+
 
 
 class SchedulerTestNet(torch.nn.Module):
