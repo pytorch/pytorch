@@ -519,24 +519,15 @@ def test_distributed(test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
     config = DISTRIBUTED_TESTS_CONFIG
-
-    for with_init_file in {True, False}:
-        # Run all distributed backends in parallel, trying to run env/file init
-        # methods in parallel too ends in failures in which the subprocesses
-        # timeout
-        pool = Pool(processes=len(config))
-        return_codes = []
-        tmp_dirs = []
-
-        for backend, env_vars in config.items():
-            if sys.platform == "win32" and backend != "gloo":
-                continue
-            if backend == "mpi" and not mpi_available:
-                continue
+    for backend, env_vars in config.items():
+        if sys.platform == "win32" and backend != "gloo":
+            continue
+        if backend == "mpi" and not mpi_available:
+            continue
+        for with_init_file in {True, False}:
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
-            tmp_dirs.append(tmp_dir)
             if options.verbose:
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
@@ -556,7 +547,6 @@ def test_distributed(test_module, test_directory, options):
                 else:
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
                 os.environ["INIT_METHOD"] = init_method
-
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -587,41 +577,18 @@ def test_distributed(test_module, test_directory, options):
                         )
 
                     mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-                    return_code = pool.apply_async(
-                        run_test,
-                        args=(test_module, test_directory, options),
-                        kwds={
-                            "launcher_cmd": mpiexec,
-                            "env": os.environ.copy(),
-                        }
+
+                    return_code = run_test(
+                        test_module, test_directory, options, launcher_cmd=mpiexec
                     )
                 else:
-                    return_code = pool.apply_async(
-                        run_test,
-                        args=(test_module, test_directory, options),
-                        kwds={
-                            "extra_unittest_args": ["--subprocess"],
-                            "env": os.environ.copy(),
-                        }
-                    )
-
-                return_codes.append(return_code)
-
+                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
+                if return_code != 0:
+                    return return_code
             finally:
+                shutil.rmtree(tmp_dir)
                 os.environ.clear()
                 os.environ.update(old_environ)
-
-        pool.close()
-        # Close the pool and wait for all the processes to finish
-        pool.join()
-
-        for tmp_dir in tmp_dirs:
-            shutil.rmtree(tmp_dir)
-
-        for return_code in return_codes:
-            if return_code.get() != 0:
-                return return_code
-
     return 0
 
 
