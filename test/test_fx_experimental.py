@@ -782,7 +782,7 @@ terrible spacing
 
         x = torch.randn(5, 3)
         foo = torch.randn(5, 3)
-        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
+        torch.testing.assert_close(split(x, foo=foo), traced(x, foo=foo))
 
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
@@ -814,7 +814,7 @@ terrible spacing
         split = split_module(traced, mtt, lambda node: 0)
 
         x = torch.randn(50, 512)
-        torch.testing.assert_allclose(split(x), traced(x))
+        torch.testing.assert_close(split(x), traced(x))
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
