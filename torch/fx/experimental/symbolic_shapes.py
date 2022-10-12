@@ -360,7 +360,7 @@ class ShapeEnv(object):
                 )[0]
                 stride[i] = self[val]
         assert all(x is not None for x in stride)
-        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]
+        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
     def create_symintnode(self, expr: Union["sympy.Expr", int]):
         if isinstance(expr, int):
