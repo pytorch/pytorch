@@ -1812,7 +1812,6 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "linalg.svd",
     "linalg.svdvals",
     "pca_lowrank",
-    "roll",
     "svd_lowrank",
     "sgn",
     "cholesky",
