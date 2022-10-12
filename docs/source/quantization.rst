@@ -742,19 +742,19 @@ Backend/Hardware Support
 
 Today, PyTorch supports the following backends for running quantized operators efficiently:
 
-* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `fbgemm <https://github.com/pytorch/FBGEMM>`_ , `onednn <https://github.com/oneapi-src/oneDNN>`_ or using `x86` backend to auto select `fbgemm` or `onednn` backend(see `RFC <https://github.com/pytorch/pytorch/issues/83888>`)
+* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `fbgemm <https://github.com/pytorch/FBGEMM>`_ , `onednn <https://github.com/oneapi-src/oneDNN>`_ or using `x86` backend to auto select `fbgemm` or `onednn` backend(see the details at `RFC <https://github.com/pytorch/pytorch/issues/83888>`_)
 * ARM CPUs (typically found in mobile/embedded devices), via `qnnpack <https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_
 * (early prototype) support for NVidia GPU via `TensorRT <https://developer.nvidia.com/tensorrt>`_ through `fx2trt` (to be open sourced)
 
 
 Note for native CPU backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We expose both `fbgemm`, `onednn`, `x86` and `qnnpack` with the same native pytorch quantized operators, so we need additional flag to distinguish between them. The corresponding implementation of `fbgemm`, `onednn`, `x86` and `qnnpack` is chosen automatically based on the PyTorch build mode, though users have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm`, `oneDNN`, `x86` or `qnnpack`.
+We expose both `fbgemm`, `onednn`, `x86` and `qnnpack` with the same native pytorch quantized operators, so we need additional flag to distinguish between them. The corresponding implementation of `fbgemm`, `onednn`, `x86` and `qnnpack` is chosen automatically based on the PyTorch build mode, though users have the option to override this by setting `torch.backends.quantization.engine` to `fbgemm`, `onednn`, `x86` or `qnnpack`.
 
 When preparing a quantized model, it is necessary to ensure that qconfig
 and the engine used for quantized computations match the backend on which
 the model will be executed. The qconfig controls the type of observers used
-during the quantization passes. The qengine controls whether `fbgemm`, `onednn`
+during the quantization passes. The qengine controls whether `fbgemm`, `onednn`,
 `x86` or `qnnpack` specific packing function is used when packing weights for
 linear and convolution functions and modules. For example:
 
@@ -1014,7 +1014,7 @@ Best Practices
 if ``dtype`` is ``torch.quint8``, make sure to set a custom ``quant_min`` to be ``0`` and ``quant_max`` to be ``127`` (``255`` / ``2``)
 if ``dtype`` is ``torch.qint8``, make sure to set a custom ``quant_min`` to be ``-64`` (``-128`` / ``2``) and ``quant_max`` to be ``63`` (``127`` / ``2``), we already set this correctly if
 you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.quantization.get_default_qat_qconfig(backend)` function to get the default ``qconfig`` for
-``fbgemm``, ``onednn``, ``x86` or ``qnnpack`` backend
+``fbgemm``, ``onednn``, ``x86`` or ``qnnpack`` backend
 
 Common Errors
 ---------------------------------------
