@@ -252,6 +252,13 @@ Tensor mkldnn_linear_pointwise_binary(
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
     c10::string_view attr) {
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+  // Make sure inputs have same type(device, layout, dtype), device is cpu and
+  // dtype is float or bfloat16.
+  check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
+
   auto input = input_t.contiguous();
 
   auto it_binary = fusion_binary_alg_map().find(attr);
@@ -283,11 +290,6 @@ Tensor mkldnn_linear_pointwise_binary(
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   ideep::tensor mkldnn_output = itensor_from_tensor(output);
   const ideep::tensor mkldnn_other = itensor_from_tensor(other_reshaped);
-
-  c10::MaybeOwned<Tensor> bias_maybe_owned =
-      at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
   const ideep::tensor mkldnn_input = itensor_view_from_dense(input_reshaped);
 
   c10::optional<ideep::tensor> mkldnn_bias{c10::nullopt};

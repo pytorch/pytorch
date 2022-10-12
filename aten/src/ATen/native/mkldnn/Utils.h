@@ -27,6 +27,12 @@ std::vector<int64_t> pool_output_sizes(
     IntArrayRef dilation,
     bool ceil_mode);
 
+void check_mkldnn_binary_fusion_inputs(
+    const Tensor& input,
+    const Tensor& other,
+    const Tensor& weight,
+    const Tensor& bias);
+
 #if AT_MKLDNN_ENABLED()
 
 using AttrFunction = std::function<ideep::attr_t(
