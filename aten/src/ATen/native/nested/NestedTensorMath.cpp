@@ -1061,7 +1061,7 @@ Tensor squeeze_dim_nested(const Tensor& self, int64_t dim) {
   auto column_indices = sizemat.new_empty(ndim - 2);
   int64_t* column_indices_ptr = column_indices.data_ptr<int64_t>();
   std::iota(column_indices_ptr, column_indices_ptr + wrapped_dim - 1, 0);
-  std::iota(column_indices_ptr + wrapped_dim - 1, column_indices_ptr + ndim - 1, wrapped_dim);
+  std::iota(column_indices_ptr + wrapped_dim - 1, column_indices_ptr + ndim - 2, wrapped_dim);
   auto sizemat_squeezed = at::index_select(sizemat, 1, column_indices);
   auto stridemat_squeezed = at::index_select(stridemat, 1, column_indices);
   return create_nested_view_tensor(
