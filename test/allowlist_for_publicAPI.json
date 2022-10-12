@@ -35,17 +35,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization.fx.quantization_patterns": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "Node",
-    "NodePattern",
-    "Optional",
-    "Pattern",
-    "all_node_args_have_no_tensors"
-  ],
   "torch.ao.quantization.fx.quantization_types": [
     "Any",
     "Node",
