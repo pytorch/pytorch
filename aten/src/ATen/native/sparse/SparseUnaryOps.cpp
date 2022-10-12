@@ -198,8 +198,15 @@ Tensor threshold_backward_sparse(
     const Tensor& grad_output,
     const Tensor& self,
     const Scalar& threshold) {
+  auto self_v = [&self]() {
+    if (self.is_coalesced()) {
+      return self.values();
+    } else {
+      return self.coalesce().values();
+    }
+  }();
   return coalesced_unary_ufunc(grad_output, [&](const Tensor& t) {
-    return at::threshold_backward(t, self.values(), threshold);
+    return at::threshold_backward(t, self_v, threshold);
   });
 }
 
@@ -208,9 +215,16 @@ Tensor& threshold_backward_sparse_out(
     const Tensor& self,
     const Scalar& threshold,
     Tensor& grad_input) {
+  auto self_v = [&self]() {
+    if (self.is_coalesced()) {
+      return self.values();
+    } else {
+      return self.coalesce().values();
+    }
+  }();
   return coalesced_unary_ufunc_out(
       grad_output, grad_input, [&](const Tensor& t, Tensor& out) {
-        return at::threshold_backward_outf(t, self.values(), threshold, out);
+        return at::threshold_backward_outf(t, self_v, threshold, out);
       });
 }
 
