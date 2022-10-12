@@ -60,7 +60,7 @@ class MPSReluTest(TestCase):
         py_relu = torch.nn.ReLU(inplace=False)(py_tensor)
         py_relu_cpu = py_relu.to("cpu")
 
-        torch.testing.assert_close(np_relu, py_relu_cpu)
+        self.assertEqual(np_relu, py_relu_cpu)
 
     def _testReluInPlace(self, np_features, device):
         np_relu = self._npRelu(np_features)
@@ -70,9 +70,9 @@ class MPSReluTest(TestCase):
         py_relu = torch.nn.ReLU(inplace=True)(py_tensor)
         py_relu_cpu = py_relu.to("cpu")
 
-        torch.testing.assert_close(np_relu, py_relu_cpu)
+        self.assertEqual(np_relu, py_relu_cpu)
         # Inplace Relu modifies the initial input and it should match the output of Relu
-        torch.testing.assert_close(np_relu, py_tensor.to("cpu"))
+        self.assertEqual(np_relu, py_tensor.to("cpu"))
 
     def testNumbersCPU(self):
         for t in [np.int32]:
