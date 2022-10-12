@@ -699,7 +699,7 @@ def run_doctests(test_module, test_directory, options):
 
 def print_log_file(test: str, file_path: str, failed: bool) -> None:
     num_lines = sum(1 for _ in open(file_path, 'rb'))
-    n = 300
+    n = 100
     with open(file_path, "r") as f:
         print_to_stderr("")
         if failed:
