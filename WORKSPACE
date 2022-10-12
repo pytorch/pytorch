@@ -85,6 +85,12 @@ new_local_repository(
 )
 
 new_local_repository(
+    name = "cutlass",
+    build_file = "//third_party:cutlass.BUILD",
+    path = "third_party/cutlass",
+)
+
+new_local_repository(
     name = "fbgemm",
     build_file = "//third_party:fbgemm/BUILD.bazel",
     path = "third_party/fbgemm",
