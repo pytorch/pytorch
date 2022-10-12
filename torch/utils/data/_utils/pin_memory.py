@@ -22,7 +22,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     if device == "cuda":
         torch.cuda.set_device(device_id)
     elif device == "xpu":
-        torch.xpu.set_device(device_id) # type: ignore[attr-defined]
+        torch.xpu.set_device(device_id)  # type: ignore[attr-defined]
 
     def do_one_step():
         try:
