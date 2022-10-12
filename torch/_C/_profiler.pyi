@@ -190,6 +190,10 @@ class _OptimizerInfo:
 
 class _ExtraFields_PyCCall:
     @property
+    def caller(self) -> _PyFrameState: ...
+
+class _ExtraFields_PyCall:
+    @property
     def callsite(self) -> _PyFrameState: ...
     @property
     def caller(self) -> _PyFrameState: ...
@@ -197,8 +201,5 @@ class _ExtraFields_PyCCall:
     def module(self) -> Optional[_NNModuleInfo]: ...
     @property
     def optimizer(self) -> Optional[_OptimizerInfo]: ...
-
-class _ExtraFields_PyCall:
-    caller: _PyFrameState
 
 class _ExtraFields_Kineto: ...

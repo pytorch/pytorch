@@ -29,6 +29,7 @@ class TensorKey:
     ) -> Optional["TensorKey"]:
         if tensor_id is not None and ptr is not None:
             return TensorKey(tensor_id, ptr, device)
+        return None
 
     @classmethod
     def from_tensor(cls, t: Optional[_TensorMetadata]) -> Optional["TensorKey"]:
