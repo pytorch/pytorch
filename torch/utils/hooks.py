@@ -182,9 +182,10 @@ class BackwardHook(object):
                         if hook_grad_outputs is None:
                             continue
 
-                        if len(hook_grad_outputs) != len(res):
+                        actual_len = len(hook_grad_outputs)
+                        if actual_len != expected_len:
                             raise RuntimeError("Backward pre hook returned an invalid number of grad_output, "
-                                               "got {}, but expected {}".format(len(hook_grad_outputs), expected_len))
+                                               "got {}, but expected {}".format(actual_len, expected_len))
                         self.grad_outputs = hook_grad_outputs
 
                 # Special case if no input required gradients, this hook should call the user
