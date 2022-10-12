@@ -969,6 +969,7 @@ def main():
     install_requires = [
         'typing_extensions',
         'sympy',
+        'networkx',
     ]
 
     extras_require = {

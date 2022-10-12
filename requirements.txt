@@ -13,3 +13,4 @@ types-dataclasses
 typing_extensions
 sympy
 filelock
+networkx
