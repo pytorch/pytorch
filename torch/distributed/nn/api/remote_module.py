@@ -61,6 +61,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_buffers",
     "_non_persistent_buffers_set",
     "_backward_hooks",
+    "_backward_pre_hooks",
     "_is_full_backward_hook",
     "_forward_hooks",
     "_forward_pre_hooks",
