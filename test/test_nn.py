@@ -260,6 +260,14 @@ class TestNN(NNTestCase):
             self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
             counter['backwards'] += inc
 
+        # backward_pre_hook expects callback with only `module` and `grad_output`
+        # as arguments.
+        def bw_pre_hook(inc, h_module, grad_output):
+            self.assertIsInstance(grad_output, tuple)
+            self.assertTrue(h_module is module)
+            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
+            counter['backwards'] += inc
+
         test_fwd = module.register_forward_hook(lambda *args: fw_hook(1, *args))
 
         module(input)
@@ -267,8 +275,9 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
+        bw_hook_fn = bw_pre_hook if backward_register_fn == 'register_backward_pre_hook' else bw_hook
         test_bwd = getattr(module, backward_register_fn)(
-            lambda *args: bw_hook(1, *args))
+            lambda *args: bw_hook_fn(1, *args))
 
         output = module(input)
         self.assertEqual(counter['forwards'], 3)
@@ -288,7 +297,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 6)
         self.assertEqual(counter['backwards'], 2)
 
-        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook(2, *args))
+        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook_fn(2, *args))
 
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 9)
@@ -313,6 +322,7 @@ class TestNN(NNTestCase):
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
+        self._test_hooks("register_backward_pre_hook")
 
     def test_hook_cpp(self):
         bn = nn.BatchNorm1d(5)
