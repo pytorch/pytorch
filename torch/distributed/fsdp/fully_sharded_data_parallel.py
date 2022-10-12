@@ -3539,9 +3539,7 @@ class FullyShardedDataParallel(nn.Module):
                     output = torch.zeros_like(chunks[0])
                     self._communication_hook(self._communication_hook_state, input_flattened, output)
                     if self.sharding_strategy == ShardingStrategy.HYBRID_SHARD:
-                        torch.cuda.synchronize()
                         default_hooks.allreduce_hook(state=self._inter_node_averaging_state, grad=output)
-                        torch.cuda.synchronize()
 
                     self._cast_grad_to_param_dtype(output, param)
 
