@@ -3194,7 +3194,10 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     )
     # Treat scalars as elements of \R^1
     if x.ndim == 0:
-        return x.unsqueeze(0)[index].squeeze(0).clone()
+        # we cannot write `x.unsqueeze(0)[index].squeeze(0).clone()`
+        # as tensor[index] will trigger index.item() if index is a 0-dim tensor
+        # and .item() cannot be symbolically traced with FakeTensor.
+        return torch.ops.aten.index(x.unsqueeze(0), [index]).squeeze(0).clone()
     idx = (slice(None),) * dim + (index,)
     return x[idx]
 
