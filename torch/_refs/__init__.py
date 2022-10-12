@@ -4663,7 +4663,7 @@ def bucketize(
 ):
     utils.check(
         boundaries.dim() == 1,
-        lambda: f"bonudaries tensor must be 1 dimension but got dim({boundaries.dim()})",
+        lambda: f"boundaries tensor must be 1 dimension but got dim({boundaries.dim()})",
     )
 
     out_dtype = torch.int32 if out_int32 else torch.int64
@@ -4680,28 +4680,33 @@ def bucketize(
     # Since we can't break out of the loop at different points for different elements of a,
     # we just do the max amount of iterations that binary search requires and add condition
     # tensor (cond_update below) to stop updating once the search terminates
-    niters = int(math.log2(n_boundaries)) + 1
-    # Initialize cond_update and mid for first loop
-    cond_update = torch.ones_like(a, dtype=torch.bool)
+
+    # For first iteration through loop we can skip some checks, we have separate implementation
     mid = start + (end - start) // 2
-    for i in range(niters):
-        mid_val = boundaries[mid]
-        # If right is true, the buckets are closed on the *left*
-        # (i.e., we are doing the equivalent of std::upper_bound in C++)
-        # Otherwise they are closed on the right (std::lower_bound)
-        if right:
-            cond_mid = mid_val > a
-        else:
-            cond_mid = mid_val >= a
-        start = torch.where((~cond_mid) & cond_update, mid + 1, start)
-        end = torch.where(cond_mid & cond_update, mid, end)
-        # We update these at end of loop rather than beggining because this way
-        # we get to skip doing them for first iteration
-        # we also don't need the updates for last iteration
-        if i != niters - 1:
+    mid_val = boundaries[mid]
+    if right:
+        cond_mid = mid_val > a
+    else:
+        cond_mid = mid_val >= a
+    start = torch.where(cond_mid, start, mid + 1)
+
+    if n_boundaries > 1:
+        cond_update = torch.ones_like(a, dtype=torch.bool)
+        niters = int(math.log2(n_boundaries))
+        for _ in range(niters):
+            end = torch.where(cond_mid & cond_update, mid, end)
             cond_update = start < end
             # start might end up pointing to 1 past the end, we guard against that
             mid = torch.where(cond_update, start + (end - start) // 2, 0)
+            mid_val = boundaries[mid]
+            # If right is true, the buckets are closed on the *left*
+            # (i.e., we are doing the equivalent of std::upper_bound in C++)
+            # Otherwise they are closed on the right (std::lower_bound)
+            if right:
+                cond_mid = mid_val > a
+            else:
+                cond_mid = mid_val >= a
+            start = torch.where((~cond_mid) & cond_update, mid + 1, start)
 
     return start.to(dtype=out_dtype)
 
