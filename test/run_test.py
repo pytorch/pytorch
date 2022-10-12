@@ -251,6 +251,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
+    "test_cuda_nvml_based_avail",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -266,6 +267,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_cuda_trace",
+    "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
 CI_SERIAL_LIST = [
@@ -749,6 +751,7 @@ def run_test_ops(test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
+    "test_cuda_nvml_based_avail": get_run_test_with_subprocess_fn(),
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
