@@ -19,6 +19,7 @@ from typing_extensions import TypeAlias
 import copyreg
 import pickle
 import pathlib
+import torch._weights_only_unpickler as _weights_only_unpickler
 
 DEFAULT_PROTOCOL = 2
 
@@ -358,7 +359,7 @@ def _check_dill_version(pickle_module) -> None:
         pickle_module: module used for pickling metadata and objects
 
     '''
-    if pickle_module.__name__ == 'dill':
+    if pickle_module is not None and pickle_module.__name__ == 'dill':
         required_dill_version = (0, 3, 1)
         if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
             raise ValueError((
@@ -652,7 +653,8 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 def load(
     f: FILE_LIKE,
     map_location: MAP_LOCATION = None,
-    pickle_module: Any = pickle,
+    pickle_module: Any = None,
+    weight_load_only: bool = False,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -660,7 +662,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=None, weights_load_only = False, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -742,6 +744,10 @@ def load(
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
+    if weight_load_only:
+        if pickle_module is not None:
+            raise RuntimeError("Can not safely load weights when expiclit picke_module is specified")
+        picke_module = _weights_only_unpickler
     _check_dill_version(pickle_module)
 
     if 'encoding' not in pickle_load_args.keys():
@@ -760,7 +766,21 @@ def load(
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
+                if pickle_module is None:
+                    try:
+                        return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
+                    except RuntimeError:
+                        warnings.warn("UNSAFE UNSAFE UNSAFE")
+                        opened_file.seek(orig_position)
+                        return _load(opened_zipfile, map_location, pickle, **pickle_load_args)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+        if pickle_module is None:
+            try:
+                return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
+            except RuntimeError:
+                warnings.warn("UNSAFE UNSAFE UNSAFE")
+                opened_file.seek(0)
+                return _legacy_load(opened_file, map_location, pickle, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 
