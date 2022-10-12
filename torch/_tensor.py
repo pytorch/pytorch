@@ -25,6 +25,7 @@ from torch.overrides import (
     has_torch_function_unary,
     has_torch_function_variadic,
 )
+from torch.utils.dlpack import DLDeviceType
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
@@ -1327,23 +1328,22 @@ class Tensor(torch._C._TensorBase):
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
-        # Avoid circular import
-        from torch.utils.dlpack import DLDeviceType
-
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
-        idx = self.device.index if self.device.index is not None else 0
-        if self.device.type == "cuda" and torch.version.hip is not None:
+        device = self.device
+        idx = device.index if device.index is not None else 0
+        torch_device_type = device.type
+        if torch_device_type == "cuda" and torch.version.hip is not None:
             device_type = DLDeviceType.kDLROCM
-        elif self.device.type == "cpu" and self.is_pinned():
+        elif torch_device_type == "cpu" and self.is_pinned():
             device_type = DLDeviceType.kDLCPUPinned
-        elif self.device.type == "cuda":
+        elif torch_device_type == "cuda":
             device_type = DLDeviceType.kDLGPU
-        elif self.device.type == "cpu":
+        elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
         else:
             raise ValueError(
-                "Unknown device type {} for Dlpack".format(self.device.type)
+                "Unknown device type {} for Dlpack".format(torch_device_type)
             )
         return (device_type, idx)
 
