@@ -224,8 +224,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   } else if (bias.defined()) {
     out = out.add(bias.view(affine_param_shape));
   }
-  at::Tensor mean = std::get<1>(outputs).view({N, group});
-  at::Tensor rstd = std::get<2>(outputs).view({N, group});
+  // convert mean/std to have the same dtype as input.
+  // This follows the same behavior as the CPU and CUDA kernels.
+  at::Tensor mean = std::get<1>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
+  at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   return std::make_tuple(out, mean, rstd);
 }
 } // namespace native
