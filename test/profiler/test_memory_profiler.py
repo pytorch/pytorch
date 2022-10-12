@@ -5,7 +5,7 @@ from typing import Iterator, Optional
 import torch
 from torch._C._profiler import _EventType
 from torch.profiler import _memory_profiler, _utils
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 profile = functools.partial(
@@ -22,6 +22,7 @@ class ScaleLayer(torch.nn.Module):
         return x * self.scale
 
 
+@skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
     def gradient_detected(
         self,
