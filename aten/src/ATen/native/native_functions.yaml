@@ -5219,6 +5219,7 @@
     MkldnnCPU: mkldnn_tanh
     SparseCPU, SparseCUDA: tanh_sparse
     SparseCsrCPU, SparseCsrCUDA: tanh_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: tanh_nested
   tags: canonical
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
