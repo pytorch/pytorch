@@ -601,7 +601,6 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(IndexError, lambda: nt[2])
         self.assertRaises(IndexError, lambda: nt[-3])
         self.assertRaises(NotImplementedError, lambda: nt[:])
-        self.assertRaises(NotImplementedError, lambda: nt[None])
         self.assertRaises(NotImplementedError, lambda: nt[...])
         # tuple of indices: only support integer in the batch dimension
         #                 + all possible indexing in the original tensor dimensions
@@ -1295,6 +1294,12 @@ class TestNestedTensorDeviceType(TestCase):
         a = torch.arange(6).reshape(2, 3)
         b = torch.arange(15).reshape(5, 3)
         nt = torch.nested.nested_tensor([a, b], device=device, dtype=dtype)
+        # error case: squeeze no dimension
+        self.assertRaisesRegex(
+            RuntimeError,
+            "For nested tensors, squeeze without the dim argument",
+            lambda: nt.squeeze()
+        )
         # error case: squeeze nested dimension
         self.assertRaisesRegex(
             RuntimeError,
@@ -1303,6 +1308,14 @@ class TestNestedTensorDeviceType(TestCase):
         )
         # error case: dimension out of range
         self.assertRaises(IndexError, lambda: nt.squeeze(3))
+        # error case: squeeze nested tensor of singleton tensors
+        c = torch.ones(1)
+        nt_singleton = torch.nested.nested_tensor([c, c], device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "For nested tensors, squeezing a nested tensor of singleton",
+            lambda: nt_singleton.squeeze(1)
+        )
 
         # squeezing a dim which does not have size 1 should be a no-op
         nt2 = nt.squeeze(-1)
@@ -1802,6 +1815,17 @@ class TestNestedTensorAutograd(TestCase):
 
         self.assertEqual(torch.nested.to_padded_tensor(nt.grad, 0.0), pt.grad)
 
+    def test_nested_tensor_squeeze_gradcheck(self):
+        a = torch.randn((2, 6, 1), dtype=torch.float64, requires_grad=True)
+        b = torch.randn((3, 6, 1), dtype=torch.float64, requires_grad=True)
+
+        def grad_test_func(a, b):
+            nt = torch.nested.as_nested_tensor([a, b])
+            result = nt.squeeze(-1)
+            return torch.nested.to_padded_tensor(result, 0.0)
+
+        assert torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3)
+
     def test_nested_tensor_unsqueeze_backward(self):
         nt = torch.nested.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))], requires_grad=True)
         with torch.no_grad():
@@ -1813,6 +1837,17 @@ class TestNestedTensorAutograd(TestCase):
         ypt.backward(ypt.clone())
 
         self.assertEqual(torch.nested.to_padded_tensor(nt.grad, 0.0), pt.grad)
+
+    def test_nested_tensor_unsqueeze_gradcheck(self):
+        a = torch.randn((2, 6), dtype=torch.float64, requires_grad=True)
+        b = torch.randn((3, 6), dtype=torch.float64, requires_grad=True)
+
+        def grad_test_func(a, b):
+            nt = torch.nested.as_nested_tensor([a, b])
+            result = nt.unsqueeze(-1)
+            return torch.nested.to_padded_tensor(result, 0.0)
+
+        assert torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3)
 
     def test_nested_tensor_linear(self):
 
