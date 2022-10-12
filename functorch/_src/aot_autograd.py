@@ -452,6 +452,11 @@ def create_aot_dispatcher_function(
 
     The resulting compiled forward and backward graphs are then wrapped up in a
     ``torch.autograd.Function`` object.
+
+    The calling convention here is that the first aot_config.num_params_buffers
+    inputs in flat_args are parameters and buffers, and the rest are inputs.
+
+    We use this to assume that parameters/buffer's shapes don't change.
     """
 
     # This is the main entry point.

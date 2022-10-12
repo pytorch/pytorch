@@ -1301,6 +1301,7 @@ symbolic_tensor_failures = {
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
+    skip('nn.functional.batch_norm')  # Segfault??
 }
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)

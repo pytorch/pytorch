@@ -142,9 +142,7 @@ class MetaConverter:
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
-        # Don't make parameters have symbolic shapes; they are assumed to stay
-        # constant size across training runs
-        make_symbolic = shape_env is not None and not isinstance(t, torch.nn.Parameter)
+        make_symbolic = shape_env is not None
 
         def sym(x):
             if make_symbolic:
@@ -156,15 +154,6 @@ class MetaConverter:
             if make_symbolic:
                 return shape_env.create_symbolic_sizes_strides(t)
             return (t.size(), t.stride())
-
-        # NB: Although sym_stride variables initially have no correlation
-        # with size, we will immediately introduce guards based on contiguity.
-        # Thus, if the input tensor is contiguous, the stride variables
-        # will typically immediately get reexpressed in terms of the size
-        # variables.
-
-        def sym_storage_offset(t):
-            return sym(t.storage_offset())
 
         # see expired-storages
         self.check_expired_count += 1
@@ -222,7 +211,7 @@ class MetaConverter:
 
                     with torch.enable_grad():
                         sizes, strides = sym_sizes_strides(t)
-                        r = base.as_strided(sizes, strides, sym_storage_offset(t))
+                        r = base.as_strided(sizes, strides, sym(t.storage_offset()))
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
@@ -248,7 +237,7 @@ class MetaConverter:
                     with no_dispatch():
                         sizes, strides = sym_sizes_strides(t)
                         with torch.no_grad():
-                            r.set_(s, sym_storage_offset(t), sizes, strides)
+                            r.set_(s, sym(t.storage_offset()), sizes, strides)
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())

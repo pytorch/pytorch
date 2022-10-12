@@ -330,6 +330,12 @@ class ShapeEnv(object):
         return (len(self.replacements), len(self.divisible))
 
     def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+        """
+        Returns a list of symbolic sizes and strides for the given tensor.
+        We try our best to express stride in terms of the sizes, so as to not
+        introduce new symbolic variables.
+        """
+
         size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
@@ -371,12 +377,14 @@ class ShapeEnv(object):
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
         if val < 0:
-            # all variables are positive
+            # all sympy base variables must be positive and > 1
             return -self.create_symbol(-val)
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
         # TODO: Create a guard whenever this happens
         # TODO: But how do I represent the guard in this case?
+        # Note: val_to_var is also initialized with 0/1 mapping to constants, so
+        # this also ensures that all symbols are > 1
         if val in self.val_to_var:
             return self.val_to_var[val]
         sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
