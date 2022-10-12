@@ -252,6 +252,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
+    "test_cuda_nvml_based_avail",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
