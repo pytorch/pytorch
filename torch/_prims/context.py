@@ -337,7 +337,10 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
 
-        if orig_func == torch.ops.aten.cudnn_batch_norm.default or orig_func == torch.ops.aten.cudnn_batch_norm:
+        if (
+            orig_func == torch.ops.aten.cudnn_batch_norm.default
+            or orig_func == torch.ops.aten.cudnn_batch_norm
+        ):
             with self:
                 return self._cudnn_batch_norm(*args, **kwargs)
 
