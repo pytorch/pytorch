@@ -41,7 +41,7 @@ from .quantization_patterns import (
     QuantizeHandler,
 )
 
-from torch.ao.quantization.quantization_types import (
+from torch.ao.quantization.utils import (
     Pattern,
     NodePattern,
 )

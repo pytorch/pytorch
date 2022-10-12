@@ -4,14 +4,12 @@ from torch.ao.quantization.backend_config import (
     get_native_backend_config,
     ObservationType,
 )
-from torch.ao.quantization.quantization_types import (
-    Pattern,
-    NodePattern,
-    QuantizerCls,
-)
 from torch.ao.quantization.utils import (
     activation_dtype,
     get_combined_dict,
+    Pattern,
+    NodePattern,
+    QuantizerCls,
 )
 
 from ..backend_config import BackendConfig

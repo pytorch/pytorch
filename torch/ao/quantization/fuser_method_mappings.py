@@ -2,10 +2,7 @@ import torch.nn as nn
 import torch.nn.intrinsic as nni
 
 from typing import Union, Callable, Tuple, Dict, Optional, Type
-from torch.ao.quantization.utils import Pattern
-
-from torch.ao.quantization.utils import get_combined_dict
-from torch.ao.quantization.utils import MatchAllNode
+from torch.ao.quantization.utils import Pattern, get_combined_dict, MatchAllNode
 import itertools
 
 __all__ = [
