@@ -1721,6 +1721,9 @@ def define_buck_targets(
             "{}:flatbuffer_loader".format(ROOT),
             "{}:flatbuffer_serializer_mobile".format(ROOT),
         ],
+        deps = [
+            third_party("flatbuffers-api"),
+        ],
     )
 
     fb_xplat_cxx_library(
@@ -1741,7 +1744,6 @@ def define_buck_targets(
             ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
-            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_train",
