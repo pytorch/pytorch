@@ -289,7 +289,7 @@ struct ViewOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "view",
+            "ops.view",
             RecordType::ViewOp),
         original_shape_(std::move(original_shape)),
         new_shape_(std::move(new_shape)) {}
