@@ -182,9 +182,10 @@ Tensor _mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    std::string attr = "none",
-    std::vector<c10::optional<at::Scalar>> scalars = {},
-    c10::optional<std::string> algorithm = c10::nullopt) {
+    c10::string_view attr = "none",
+    torch::List<c10::optional<at::Scalar>> scalars =
+        torch::List<c10::optional<at::Scalar>>(),
+    c10::optional<c10::string_view> algorithm = c10::nullopt) {
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
     auto it = fx_fusion_attr_map().find(attr);
@@ -278,9 +279,9 @@ Tensor mkldnn_convolution_pointwise(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    std::string attr,
-    std::vector<c10::optional<at::Scalar>> scalars,
-    c10::optional<std::string> algorithm) {
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   return _mkldnn_convolution(
       input_t,
