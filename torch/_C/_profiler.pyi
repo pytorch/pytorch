@@ -163,13 +163,15 @@ class _PyFrameState:
 
 class _NNModuleInfo:
     @property
-    def params(self) -> List[Tuple[str, int]]: ...
-    @property
     def self_ptr(self) -> int: ...
     @property
     def cls_ptr(self) -> int: ...
     @property
     def cls_name(self) -> str: ...
+    @property
+    def parameters(
+        self,
+    ) -> List[Tuple[str, _TensorMetadata, Optional[_TensorMetadata]]]: ...
 
 class _OptimizerInfo:
     @property
