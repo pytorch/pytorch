@@ -13637,7 +13637,7 @@ formally, the returned index satisfies the following rules:
 
 Args:
     input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
-    boundaries (Tensor): 1-D tensor, must contain a monotonically increasing sequence.
+    boundaries (Tensor): 1-D tensor, must contain a strictly increasing sequence, or the return value is undefined.
 
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
