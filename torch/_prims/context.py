@@ -300,6 +300,35 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             input.new_zeros((0,), dtype=torch.uint8),
         )
 
+    # This is a workaround for AOT Autograd graphs
+    def _cudnn_batch_norm_backward(
+        self,
+        input,
+        grad_output,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        epsilon,
+        reserveSpace,
+    ):
+        func = torch._decomp.decomposition_table.get(
+            torch.ops.aten.native_batch_norm_backward.default
+        )
+        return func(
+            grad_output,
+            input,
+            weight,
+            running_mean,
+            running_var,
+            save_mean,
+            save_var,
+            True,
+            epsilon,
+            [True, True, True],
+        )
+
     def _is_var_mean(self, func):
         return "torch.var_mean" == torch.overrides.resolve_name(func) or (
             (
@@ -343,6 +372,15 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         ):
             with self:
                 return self._cudnn_batch_norm(*args, **kwargs)
+
+        # A workaround for AOT Autograd graphs
+        # See https://github.com/pytorch/pytorch/pull/86115#issue-1394883782
+        if (
+            orig_func == torch.ops.aten.cudnn_batch_norm_backward.default
+            or orig_func == torch.ops.aten.cudnn_batch_norm_backward
+        ):
+            with self:
+                return self._cudnn_batch_norm_backward(*args, **kwargs)
 
         if self._is_native_batch_norm(orig_func):
             return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
