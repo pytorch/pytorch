@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: profiler"]
 import functools
 from typing import Iterator, Optional
 
