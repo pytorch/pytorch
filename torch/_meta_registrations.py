@@ -277,8 +277,8 @@ def meta__fused_moving_avg_obs_fq_helper(
     quant_min,
     quant_max,
     ch_axis,
-    per_row_fake_quant,
-    symmetric_quant
+    per_row_fake_quant=False,
+    symmetric_quant=False
 ):
     check(
         ch_axis < self.dim(),
@@ -1063,8 +1063,8 @@ def meta_convolution_backward(
     if output_mask[1]:
         backend_grad_weight = aten.empty_like.default(weight_)
     if output_mask[2]:
-        backend_grad_bias = aten.empty.memory_format(
-            bias_sizes_opt, dtype=weight_.dtype, layout=weight_.layout
+        backend_grad_bias = aten.new_empty.default(
+            input_, bias_sizes_opt, dtype=weight_.dtype, layout=weight_.layout
         )
 
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
@@ -2007,6 +2007,12 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
         assert sym_float >= 0
         out_size[i + 2] = math.floor(sym_float)
     return input.new_empty(out_size).to(memory_format=mem_format)
+
+
+@register_meta(aten.upsample_nearest2d_backward.vec)
+def upsample_nearest2d_backward_vec(grad_output, output_size, input_size, scale_factors):
+    mem_format = utils.suggest_memory_format(grad_output)
+    return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
 
 # We must also trigger meta registrations from PrimTorch ref
