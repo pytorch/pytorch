@@ -129,7 +129,8 @@ Tensor math_pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   std::vector<int64_t> final_shape(self.sizes().begin(), self_sizes_batch_end);
   final_shape.insert(final_shape.end(), {oc, oh, ow});
 
-  return input_permuted.reshape(final_shape);
+  // pixel_shuffle expects to *never* return an alias of the input.
+  return input_permuted.clone(at::MemoryFormat::Contiguous).view(final_shape);
 }
 
 Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
@@ -169,7 +170,8 @@ Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   std::vector<int64_t> final_shape(self.sizes().begin(), self_sizes_batch_end);
   final_shape.insert(final_shape.end(), {oc, oh, ow});
 
-  return input_permuted.reshape(final_shape);
+  // pixel_unshuffle expects to *never* return an alias of the input.
+  return input_permuted.clone(at::MemoryFormat::Contiguous).view(final_shape);
 }
 
 DEFINE_DISPATCH(pixel_shuffle_kernel);

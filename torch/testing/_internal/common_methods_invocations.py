@@ -16445,13 +16445,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # https://github.com/pytorch/pytorch/issues/82235
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestSchemaCheckModeOpInfo',
-                'test_schema_correctness',
-                device_type='cuda',
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
@@ -16468,13 +16461,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # https://github.com/pytorch/pytorch/issues/82235
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestSchemaCheckModeOpInfo',
-                'test_schema_correctness',
-                device_type='cuda',
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
