@@ -159,6 +159,7 @@ __all__ = [
     #
     # Data conversion and movement prims
     #
+    "clone",
     "convert_element_type",
     "device_put",
     "item",
@@ -185,10 +186,6 @@ __all__ = [
     "empty_strided",
     "scalar_tensor",
     "arange",
-    #
-    # Data conversion and movement Prims
-    #
-    "clone",
     #
     # Linear algebra (linalg) Prims
     #
