@@ -35,14 +35,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization.fx.graph_module": [
-    "Any",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "Set",
-    "Union"
-  ],
   "torch.ao.quantization.fx.pattern_utils": [
     "Any",
     "Dict",
