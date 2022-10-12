@@ -11,6 +11,7 @@ import torch
 import torch.distributed as dist
 from torch._C._distributed_rpc import _get_current_rpc_agent
 
+__all__ = ["RPCExecMode", "serialize", "deserialize", "PythonUDF", "RemoteException"]
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
 # objects
