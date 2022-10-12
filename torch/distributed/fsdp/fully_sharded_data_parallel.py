@@ -1565,6 +1565,14 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not handles:
             return
+        training_state = self._get_training_state(tuple(handles))
+        # Do not use the all-gather stream if in `summon_full_params()` to
+        # avoid overallocating blocks to that stream
+        unshard_stream = (
+            self._streams["all_gather"]
+            if training_state != HandleTrainingState.SUMMON_FULL_PARAMS
+            else torch.cuda.current_stream()
+        )
         if self.limit_all_gathers:
             event = self._free_event_queue.dequeue_if_needed()
             if event:
@@ -1575,8 +1583,8 @@ class FullyShardedDataParallel(nn.Module):
                 ran_pre_unshard = handle.pre_unshard()
                 any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
         if any_ran_pre_unshard:
-            self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
-        with torch.cuda.stream(self._streams["all_gather"]):
+            unshard_stream.wait_stream(self._streams["pre_all_gather"])
+        with torch.cuda.stream(unshard_stream):
             for handle in handles:
                 handle.unshard()
                 handle.post_unshard()
@@ -3059,7 +3067,6 @@ class FullyShardedDataParallel(nn.Module):
         self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
         self._unshard(self._handles)
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
         if with_grads:
             self._unshard_grads(self._handles)
 
