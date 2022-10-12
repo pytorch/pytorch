@@ -1566,8 +1566,13 @@ class FullyShardedDataParallel(nn.Module):
         if not handles:
             return
         training_state = self._get_training_state(tuple(handles))
-        # Do not use the all-gather stream if in `summon_full_params()` to
-        # avoid overallocating blocks to that stream
+        # Do not use the pre-all-gather and all-gather streams if in
+        # `summon_full_params()` to avoid overallocating blocks to that stream
+        pre_unshard_stream = (
+            self._streams["pre_all_gather"]
+            if training_state != HandleTrainingState.SUMMON_FULL_PARAMS
+            else torch.cuda.current_stream()
+        )
         unshard_stream = (
             self._streams["all_gather"]
             if training_state != HandleTrainingState.SUMMON_FULL_PARAMS
@@ -1578,12 +1583,12 @@ class FullyShardedDataParallel(nn.Module):
             if event:
                 event.synchronize()
         any_ran_pre_unshard = False
-        with torch.cuda.stream(self._streams["pre_all_gather"]):
+        with torch.cuda.stream(pre_unshard_stream):
             for handle in handles:
                 ran_pre_unshard = handle.pre_unshard()
                 any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
         if any_ran_pre_unshard:
-            unshard_stream.wait_stream(self._streams["pre_all_gather"])
+            unshard_stream.wait_stream(pre_unshard_stream)
         with torch.cuda.stream(unshard_stream):
             for handle in handles:
                 handle.unshard()
