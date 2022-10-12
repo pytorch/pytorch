@@ -11,11 +11,11 @@ class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
   ~GetGPUMemoryUsageOp() override {}
 
   bool RunOnDevice() override {
-    CHECK_EQ(InputSize(), 0);
-    CHECK_EQ(OutputSize(), 1);
+    TORCH_CHECK_EQ(InputSize(), 0);
+    TORCH_CHECK_EQ(OutputSize(), 1);
     std::vector<long> total_by_gpu = CUDAContext::TotalMemoryByGpu();
     std::vector<long> max_by_gpu = CUDAContext::MaxMemoryByGpu();
-    CHECK_EQ(total_by_gpu.size(), max_by_gpu.size());
+    TORCH_CHECK_EQ(total_by_gpu.size(), max_by_gpu.size());
 
 
     auto* stats = Output(0, {2, static_cast<int64_t>(total_by_gpu.size())}, at::dtype<long>());

@@ -16,6 +16,7 @@ class Normal(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
         >>> m = Normal(torch.tensor([0.0]), torch.tensor([1.0]))
         >>> m.sample()  # normally distributed with loc=0 and scale=1
         tensor([ 0.1046])

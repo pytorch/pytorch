@@ -326,6 +326,21 @@ c10::optional<Use> getClampScalarInputUse(Value* v) {
   return c10::nullopt;
 }
 
+void cloneMethod(
+    Module& module,
+    const std::string& orig_method_name,
+    const std::string& new_method_name) {
+  const Function& method = module.get_method(orig_method_name).function();
+  auto graph = toGraphFunction(method).graph()->copy();
+  const auto& schema = method.getSchema();
+  const auto this_method_name =
+      c10::QualifiedName(*module.type()->name(), new_method_name);
+  auto copied = module._ivalue()->compilation_unit()->create_function(
+      this_method_name, graph);
+  module.type()->addMethod(copied);
+  copied->setSchema(schema);
+}
+
 std::vector<Value*> getPassThroughInputs(Value* v) {
   Node* n = v->node();
   if (isSingleInputGeneralCallFunction(n)) {

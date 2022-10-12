@@ -43,6 +43,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.mps";
     case at::Backend::PrivateUse1:
       return "torch.privateuseone";
+    case at::Backend::Lazy:
+      return "torch.lazy";
     default:
       AT_ERROR("Unimplemented backend ", backend);
   }

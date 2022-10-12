@@ -3,6 +3,7 @@
 import os
 import tempfile
 import unittest
+from typing import Optional
 
 import expecttest
 from torchgen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
@@ -25,12 +26,20 @@ class TestGenBackendStubs(expecttest.TestCase):
             fp.flush()
             run(fp.name, "", True)
 
-    def get_errors_from_gen_backend_stubs(self, yaml_str: str) -> str:
+    def get_errors_from_gen_backend_stubs(
+        self, yaml_str: str, *, kernels_str: Optional[str] = None
+    ) -> str:
         with tempfile.NamedTemporaryFile(mode="w") as fp:
             fp.write(yaml_str)
             fp.flush()
             try:
-                run(fp.name, "", True)
+                if kernels_str is None:
+                    run(fp.name, "", True)
+                else:
+                    with tempfile.NamedTemporaryFile(mode="w") as kernel_file:
+                        kernel_file.write(kernels_str)
+                        kernel_file.flush()
+                        run(fp.name, "", True, impl_path=kernel_file.name)
             except AssertionError as e:
                 # Scrub out the temp file name from any error messages to simplify assertions.
                 return str(e).replace(fp.name, "")
@@ -238,7 +247,7 @@ invalid_key: invalid_val"""
         output_error = self.get_errors_from_gen_backend_stubs(yaml_str)
         self.assertExpectedInline(
             output_error,
-            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen, non_native""",  # noqa: B950
+            """ contains unexpected keys: invalid_key. Only the following keys are supported: backend, class_name, cpp_namespace, extra_headers, supported, autograd, full_codegen, non_native, ir_gen, symint""",  # noqa: B950
         )
 
     # if use_out_as_primary is provided, it must be a bool
@@ -268,6 +277,34 @@ supported:
             output_error,
             """You must provide either True or False for device_guard. Provided: frue""",
         )  # noqa: B950
+
+    def test_incorrect_kernel_name(self) -> None:
+        yaml_str = """\
+backend: XLA
+cpp_namespace: torch_xla
+supported:
+- abs
+autograd:
+- add.Tensor"""
+        # Codegen will expect two kernel names (and try to parse them with regex):
+        # XLANativeFunctions::abs(...)
+        # XLANativeFunctions::add(...)
+        kernels_str = """\
+at::Tensor& XLANativeFunctions::absWRONG(at::Tensor& self) {}
+at::Tensor& XLANativeFunctions::add(at::Tensor& self) {}"""
+        output_error = self.get_errors_from_gen_backend_stubs(
+            yaml_str, kernels_str=kernels_str
+        )
+        self.assertExpectedInline(
+            output_error,
+            """\
+
+XLANativeFunctions is missing a kernel definition for abs. We found 0 kernel(s) with that name,
+but expected 1 kernel(s). The expected function schemas for the missing operator are:
+at::Tensor abs(const at::Tensor & self)
+
+""",
+        )
 
 
 if __name__ == "__main__":

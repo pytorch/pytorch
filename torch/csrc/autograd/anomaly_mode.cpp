@@ -8,6 +8,7 @@ namespace torch {
 namespace autograd {
 
 bool AnomalyMode::_enabled = false;
+bool AnomalyMode::_check_nan = true;
 
 namespace {
 std::mutex& get_anomaly_guard_lock() {
@@ -21,20 +22,21 @@ uint32_t& get_anomaly_counter() {
 }
 } // namespace
 
-DetectAnomalyGuard::DetectAnomalyGuard() {
+DetectAnomalyGuard::DetectAnomalyGuard(bool check_nan) {
   TORCH_WARN_ONCE(
       "This mode should be enabled only for debugging as the different tests will slow down your program execution.");
   std::lock_guard<std::mutex> lock(get_anomaly_guard_lock());
   uint32_t& counter = get_anomaly_counter();
   counter++;
-  AnomalyMode::set_enabled(true);
+  this->prev_check_nan_ = AnomalyMode::should_check_nan();
+  AnomalyMode::set_enabled(true, check_nan);
 }
 
 DetectAnomalyGuard::~DetectAnomalyGuard() {
   std::lock_guard<std::mutex> lock(get_anomaly_guard_lock());
   uint32_t& counter = get_anomaly_counter();
   counter--;
-  AnomalyMode::set_enabled(counter > 0);
+  AnomalyMode::set_enabled(counter > 0, this->prev_check_nan_);
 }
 
 AnomalyMetadata::~AnomalyMetadata() = default;

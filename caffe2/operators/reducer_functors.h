@@ -343,7 +343,7 @@ class BaseReducer {
     }
 
     void observeInput(int input, const Tensor& value, int skip_dims) {
-      DCHECK_EQ(0, input);
+      TORCH_DCHECK_EQ(0, input);
       auto dims = value.sizes();
       computeMeta(dims, skip_dims);
     }

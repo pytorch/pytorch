@@ -23,7 +23,7 @@ def gen_data(special_op_lists, analysis_name):
     composite_ops = get_ops_for_key('CompositeImplicitAutograd')
     noncomposite_ops = all_ops - composite_ops
 
-    ops = yaml.load(open('../../pytorch/aten/src/ATen/native/native_functions.yaml', 'r').read(), Loader=yaml.CLoader)
+    ops = yaml.load(open('../../aten/src/ATen/native/native_functions.yaml', 'r').read(), Loader=yaml.CLoader)
 
     annotated_ops = {a.strip(): b.strip() for a, b in list(csv.reader(open('annotated_ops')))}
     from collections import defaultdict

@@ -3,8 +3,8 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "x"
-    input: "x"
+    input: "x.1"
+    input: "x.1"
     output: "1"
     name: "ATen_0"
     op_type: "ATen"
@@ -22,7 +22,7 @@ graph {
   }
   name: "torch_jit"
   input {
-    name: "x"
+    name: "x.1"
     type {
       tensor_type {
         elem_type: 1
@@ -55,7 +55,7 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }
 opset_import {
   domain: "org.pytorch.aten"

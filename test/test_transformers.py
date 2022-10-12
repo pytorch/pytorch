@@ -5,9 +5,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import unittest
+from unittest.mock import patch
+import math
+from torch.backends.cuda import sdp_kernel
 
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import TEST_FAIRSEQ, run_tests, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    TEST_FAIRSEQ,
+    run_tests,
+    parametrize,
+    instantiate_parametrized_tests,
+    freeze_rng_state,
+    TEST_WITH_CROSSREF
+)
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 if TEST_FAIRSEQ:
@@ -58,11 +68,11 @@ class TestTransformers(NNTestCase):
             self.assertEqual(output_mask_4d, output_mask_TxT)
 
     @parametrize("device", device_list)
-    def test_transformerencoderlayer_src_mask(self, device):
+    @parametrize("nhead", [1, 4, 8])
+    def test_transformerencoderlayer_src_mask(self, device, nhead):
         batch_size = 2
         seqlen = 4
         d_model = 8
-        nhead = 8
         dim_feedforward = 32
 
         model = torch.nn.TransformerEncoderLayer(
@@ -78,36 +88,99 @@ class TestTransformers(NNTestCase):
         with torch.no_grad():
             model(src, src_mask=src_mask)
 
-    @parametrize("use_torchscript", [True, False])
-    @parametrize("with_no_grad", [True, False])
-    @parametrize("training", [True, False])
-    def test_transformerencoder_fastpath_torchscript(self, use_torchscript, with_no_grad, training):
+    @parametrize("device", device_list)
+    @parametrize("use_torchscript", [False])
+    @parametrize("enable_nested_tensor", [True, False])
+    @parametrize("use_autocast", [True, False])
+    def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor, use_autocast):
         """
-        Test TransformerEncoder does not crash
+        Test TransformerEncoder fastpath output matches slowpath output
         """
-        model = torch.nn.TransformerEncoder(
-            torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True),
-            num_layers=2,
-            enable_nested_tensor=True
-        )
+        torch.manual_seed(1234)
+        d_model = 12
+        nhead = 4
+        dim_feedforward = 12
+        batch_first = True
 
-        if training:
-            model = model.train()
-        else:
-            model = model.eval()
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                d_model=d_model,
+                nhead=nhead,
+                dim_feedforward=dim_feedforward,
+                batch_first=batch_first),
+            num_layers=2,
+            enable_nested_tensor=enable_nested_tensor
+        ).to(device).eval()
 
         if use_torchscript:
             model = torch.jit.script(model)
 
-        x = torch.Tensor([[[1, 2], [3, 4]]]).to(torch.float)
-        mask = torch.Tensor([[0, 1]]).to(torch.bool)
+        # each input is (input, mask)
+        input_mask_pairs = [
+            (
+                torch.rand(3, 2, d_model),
+                [
+                    [0, 1],
+                    [0, 1],
+                    [1, 1]
+                ]
+            ),
+            (
+                torch.rand(2, 100, d_model),
+                [
+                    [0] * 98 + [1] * 2,
+                    [0] * 90 + [1] * 10
+                ]
+            ),
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test 1024.
+            (
+                torch.rand(2, 1024, d_model),
+                [
+                    [0] * 1020 + [1] * 4,
+                    [0] * 1024,
+                ]
+            ),
+            (
+                torch.rand(1, 1026, d_model),
+                [[0] * 1024 + [1] * 2]
+            ),
+            # softmax.cu switches from fast->slowpath at masked seqlen 1024. test range of masks above 1024.
+            (
+                torch.rand(4, 1040, d_model),
+                [
+                    [0] * 1024 + [1] * 16,
+                    [0] * 1025 + [1] * 15,
+                    [0] * 1031 + [1] * 9,
+                    [0] * 1040,
+                ]
+            )
+        ]
+        input_mask_pairs = [
+            (
+                torch.tensor(pair[0], device=device, dtype=torch.float32),  # float input
+                torch.tensor(pair[1], device=device, dtype=torch.bool)  # bool mask
+            ) for pair in input_mask_pairs
+        ]
 
-        if with_no_grad:
-            cm = torch.no_grad()
-        else:
-            cm = contextlib.nullcontext()
-        with cm:
-            model(x, src_key_padding_mask=mask)
+        maybe_autocast = torch.autocast("cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
+        with maybe_autocast:
+            for input, src_key_padding_mask in input_mask_pairs:
+                with torch.no_grad():
+                    fastpath_output = model(input, src_key_padding_mask=src_key_padding_mask)
+                slowpath_output = model(input, src_key_padding_mask=src_key_padding_mask)  # reference
+
+                # Make sure fastpath_output is same shape as slowpath_output and mask.
+                # When enable_nested_tensor=true, fastpath_output may be smaller than input tensor.
+                # Eg if input bs=1, seqlen=6, and we mask out 2 tokens, fastpath_output will have bs=1, seqlen=4.
+                # Expand back to old size to match.
+                bs, true_seqlen, embed_dim = fastpath_output.shape
+                expanded_seqlen = src_key_padding_mask.shape[1]
+                fastpath_output_expanded = torch.zeros(bs, expanded_seqlen, embed_dim, device=device)
+                fastpath_output_expanded[:, :true_seqlen, :] = fastpath_output
+                # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
+                fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+                slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+                torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=1e-7, atol=1e-5)
 
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
@@ -650,6 +723,202 @@ class TestTransformers(NNTestCase):
         self.assertEqual(result.shape, ref_output.shape)
         torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
+    @parametrize("input_dim,attn_mask_dim,is_causal",
+                 [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
+                  (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
+                 name_fn=lambda input_dim, attn_dim, is_causal: (
+                     f"{input_dim}D_input_dim_" + (
+                         f"{attn_dim}D_{'causal_' if is_causal else ''}attn_mask"
+                         if attn_dim is not None else "no_attn_mask")))
+    @parametrize("dropout_p", [0.0, 0.2, 0.5])
+    @parametrize("device", device_list)
+    @sdp_kernel(enable_flash=False)
+    def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
+        def sdp_ref(
+                q,
+                k,
+                v,
+                attn_mask=None,
+                dropout_p=0.0):
+            E = q.size(-1)
+            q = q / math.sqrt(E)
+            # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
+            if attn_mask is not None:
+                attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
+            else:
+                attn = torch.bmm(q, k.transpose(-2, -1))
+
+            attn = torch.nn.functional.softmax(attn, dim=-1)
+            if dropout_p > 0.0:
+                attn = torch.nn.functional.dropout(attn, p=dropout_p)
+            # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
+            output = torch.bmm(attn, v)
+            return output, attn
+        # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
+        dtypes = [torch.double, torch.float]
+        for dtype in dtypes:
+
+            def rand_tensor(*shape):
+                return torch.randn(shape, device=device, dtype=dtype)
+
+            # This test compares python and C++ implementations of SDP.
+            N, N_prime, L, S, E = 5, 2, 4, 3, 6
+            if input_dim == 3:
+                query = rand_tensor(N, L, E)
+                key = rand_tensor(N, S, E)
+                value = rand_tensor(N, S, E)
+            elif input_dim == 4:
+                query = rand_tensor(N, N_prime, L, E)
+                key = rand_tensor(N, N_prime, S, E)
+                value = rand_tensor(N, N_prime, S, E)
+            else:
+                self.fail(f'Invalid input_dim {input_dim} encountered in SDP test')
+
+            attn_mask = None
+            if attn_mask_dim is not None:
+                assert attn_mask_dim in [2, input_dim]
+                mask_size = (L, S) if attn_mask_dim == 2 else ((N, L, S) if input_dim == 3 else (N, N_prime, L, S))
+                attn_mask = (torch.ones(mask_size, device=device, dtype=torch.bool).tril() if is_causal
+                             else torch.randint(0, 2, size=mask_size, device=device, dtype=torch.bool))
+
+            with freeze_rng_state():
+                # Python impl only supports float mask and 3D inputs.
+                attn_mask_float = attn_mask
+                if attn_mask_float is not None:
+                    attn_mask_float = torch.zeros_like(attn_mask, dtype=query.dtype)
+                    attn_mask_float.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                q, k, v = query.view(-1, L, E), key.view(-1, S, E), value.view(-1, S, E)
+                a = attn_mask_float
+                if a is not None and attn_mask_dim > 3:
+                    a = a.view(-1, L, S)
+                expected = sdp_ref(q, k, v, attn_mask=a, dropout_p=dropout_p)
+                if input_dim > 3:
+                    expected = (expected[0].view(-1, N_prime, L, E), expected[1].view(-1, N_prime, L, S))
+
+            need_attn_weights: bool = True
+            with freeze_rng_state():
+                if is_causal:
+                    # NB: Don't pass attn_mask here
+                    actual = torch.ops.aten._scaled_dot_product_attention(
+                        query, key, value, None, dropout_p, need_attn_weights, is_causal)
+
+                    # Error case: both explicit attn_mask and is_causal are set
+                    with self.assertRaisesRegex(RuntimeError,
+                                                "Explicit attn_mask should not be set when is_causal=True"):
+                        torch.ops.aten._scaled_dot_product_attention(
+                            query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
+                else:
+                    actual = torch.ops.aten._scaled_dot_product_attention(
+                        query, key, value, attn_mask, dropout_p, need_attn_weights, is_causal)
+
+            # freeze_rng_state() doesn't seem to work outside of CPU, so dropout makes the results incomparable.
+            # TODO: Do this skipping in a nicer way once the granular test skipping logic lands.
+            if dropout_p == 0.0 or device == 'cpu':
+                self.assertEqual(actual, expected)
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
+    @torch.no_grad()
+    def test_mask_check_fastpath(self):
+        """
+        Test that fastpath is executed independently of the mask that is passed.
+        If the passed mask is left aligned or mask_check=False, test that nested tensors are used (sparsity fastpath),
+        otherwise use fastpath with traditional tensors.
+        """
+
+        x = torch.Tensor([[[1, 2], [3, 4], [5, 6]]]).to(torch.float)
+
+        def _test_fastpath(model, mask, mock_return_value, nested_tensors=True):
+            with patch('torch._transformer_encoder_layer_fwd') as fastpath_mock:
+                fastpath_mock.return_value = mock_return_value
+                model(x, src_key_padding_mask=mask)
+
+                # If mock was called, fastpath was taken
+                self.assertTrue(fastpath_mock.called)
+
+                # If mock was called with nested tensors, sparsity fastpath was taken
+                for call_args, _ in fastpath_mock.call_args_list:
+                    self.assertEqual(call_args[0].is_nested, nested_tensors)
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
+
+        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=True)
+        model.eval()
+
+        aligned_mask = torch.Tensor([[0, 0, 1]]).to(torch.bool)
+        not_aligned_mask = torch.Tensor([[1, 0, 1]]).to(torch.bool)
+        nested_tensor_return_value = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
+        tensor_return_value = torch.ones((1, 3, 2), dtype=torch.float)
+
+        # Left aligned mask results in sparsity fastpath
+        _test_fastpath(model, aligned_mask, nested_tensor_return_value, nested_tensors=True)
+
+        # Not aligned mask results in fastpath
+        _test_fastpath(model, not_aligned_mask, tensor_return_value, nested_tensors=False)
+
+        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=False, mask_check=True)
+        model.eval()
+
+        # If nested tensor disabled, fastpath is always taken
+        _test_fastpath(model, aligned_mask, tensor_return_value, nested_tensors=False)
+        _test_fastpath(model, not_aligned_mask, tensor_return_value, nested_tensors=False)
+
+
+        model = torch.nn.TransformerEncoder(encoder_layer, num_layers=2, enable_nested_tensor=True, mask_check=False)
+        model.eval()
+
+        # Mask check disabled results in sparisty fastpath, independently of the mask
+        _test_fastpath(model, aligned_mask, nested_tensor_return_value, nested_tensors=True)
+        _test_fastpath(model, not_aligned_mask, nested_tensor_return_value, nested_tensors=True)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_sdp_runtime_dispatch(self):
+        # We will test all the constraints that we know will cause a failure
+        # The problem is that any code path that goes down flash_attention
+        # will fail on CI/CD becuase it is not compiled with the right flags
+        device = 'cuda'
+        dtype = torch.float16
+
+        def make_tensor(*size, device=device, dtype=dtype):
+            return torch.randn(size, device=device, dtype=dtype)
+
+        with sdp_kernel(enable_flash=False, enable_math=False):
+            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
+                                   lambda: torch.nn.functional._scaled_dot_product_attention(q, k, v))
+
+        with sdp_kernel(enable_flash=True, enable_math=False):
+            # Failures for invalid input
+
+            # Dim is not 4
+            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+            # Xformers can now cover this case but will add back in next PR
+            # # Invalid last_dim size
+            # q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
+            # self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+            #     q, k, v, None, 0.0, False, False))
+
+            # Invalid dtype
+            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float64), make_tensor(
+                2, 2, 3, 16, dtype=torch.float64), make_tensor(2, 2, 3, 16, dtype=torch.float64)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+            # Failures for unsupported SDP args
+            q, k, v = make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16)
+
+            # Needs attention weights
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, True, False))
+
+            # Non-None attention mask
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, torch.ones_like(q), 0.0, False, False))
+
+# TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
+# cross device / dtype testing.
 instantiate_parametrized_tests(TestTransformers)
 
 if __name__ == '__main__':

@@ -47,7 +47,7 @@ static void BM_deep_wide_jit_graph_executor(benchmark::State& state) {
 
   std::vector<IValue> inputs({ad_emb_packed, user_emb, wide});
 
-  CHECK_EQ(setenv("TORCH_JIT_DISABLE_NEW_EXECUTOR", "1", 1), 0);
+  TORCH_CHECK_EQ(setenv("TORCH_JIT_DISABLE_NEW_EXECUTOR", "1", 1), 0);
 
   mod.forward(inputs);
   for (auto _ : state) {
@@ -65,7 +65,7 @@ static void BM_deep_wide_jit_profiling_executor(benchmark::State& state) {
 
   std::vector<IValue> inputs({ad_emb_packed, user_emb, wide});
 
-  CHECK_EQ(unsetenv("TORCH_JIT_DISABLE_NEW_EXECUTOR"), 0);
+  TORCH_CHECK_EQ(unsetenv("TORCH_JIT_DISABLE_NEW_EXECUTOR"), 0);
 
   mod.forward(inputs);
   for (auto _ : state) {

@@ -146,7 +146,7 @@ void remove_padding_kernelLauncher(
   dim3 grid;
   grid.x = batch_size;
   grid.y = GRID_DIM_Y;
-  at::cuda::CUDAStream stream = at::cuda::getDefaultCUDAStream();
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   if (output_dim == 2) {
     remove_padding_2<T><<<grid, BLOCK_DIM, 0, stream>>>(
         input,
@@ -180,7 +180,7 @@ void remove_padding_transform0213_kernelLauncher(
   dim3 grid;
   grid.x = batch_size;
   grid.y = GRID_DIM_Y;
-  at::cuda::CUDAStream stream = at::cuda::getDefaultCUDAStream();
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   TORCH_CHECK(
       output_dim == 2,
       "remove padding transform0213 only support output dim == 2");
@@ -374,7 +374,7 @@ void add_padding_kernelLauncher(
     const std::vector<int64_t>& output_sizes,
     const int batch_size,
     const int output_batch_size) {
-  at::cuda::CUDAStream stream = at::cuda::getDefaultCUDAStream();
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   dim3 grid;
   grid.x = output_batch_size;
   grid.y = GRID_DIM_Y;

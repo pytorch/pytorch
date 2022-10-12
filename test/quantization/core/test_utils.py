@@ -3,6 +3,8 @@
 import torch
 from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization.utils import get_fqn_to_example_inputs
+from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.ao.quantization import MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver
 
 
 class TestUtils(TestCase):
@@ -126,3 +128,66 @@ class TestUtils(TestCase):
         assert isinstance(fqn_to_example_inputs["sub"][1], list)
         assert isinstance(fqn_to_example_inputs["sub"][2], dict) and \
             "3" in fqn_to_example_inputs["sub"][2]
+
+    def test_quantize_weight_clamping_per_tensor(self):
+        """ Test quant_{min, max} from per tensor observer is honored by `_quantize_weight` method
+        """
+        fp_min, fp_max = -1000.0, 1000.0
+        q8_min, q8_max = -10, 10
+
+        float_tensor = torch.tensor([fp_min, fp_max])
+
+        observer = MovingAverageMinMaxObserver(
+            averaging_constant=1.0,
+            dtype=torch.qint8,
+            quant_min=q8_min,
+            quant_max=q8_max,
+            qscheme=torch.per_tensor_symmetric,
+        )
+
+        observer(float_tensor)
+        assert observer.min_val == fp_min
+        assert observer.max_val == fp_max
+
+        quantized_tensor = _quantize_weight(float_tensor, observer)
+        assert quantized_tensor.int_repr().max().item() == q8_max
+        assert quantized_tensor.int_repr().min().item() == q8_min
+
+        # Actual weight values can be outside than observer [min_val, max_val] for the moving average observer
+        float_tensor *= 1.2
+
+        quantized_tensor = _quantize_weight(float_tensor, observer)
+        assert quantized_tensor.int_repr().max().item() == q8_max
+        assert quantized_tensor.int_repr().min().item() == q8_min
+
+    def test_quantize_weight_clamping_per_channel(self):
+        """ Test quant_{min, max} from per channel observer is honored by `_quantize_weight` method
+        """
+        fp_min, fp_max = -1000.0, 1000.0
+        q8_min, q8_max = -10, 10
+
+        float_tensor = torch.tensor([[fp_min, fp_max]])
+
+        observer = MovingAveragePerChannelMinMaxObserver(
+            averaging_constant=1.0,
+            dtype=torch.qint8,
+            quant_min=q8_min,
+            quant_max=q8_max,
+            qscheme=torch.per_channel_symmetric,
+            ch_axis=0,
+        )
+
+        observer(float_tensor)
+        assert observer.min_val == fp_min
+        assert observer.max_val == fp_max
+
+        quantized_tensor = _quantize_weight(float_tensor, observer)
+        assert quantized_tensor.int_repr().max().item() == q8_max
+        assert quantized_tensor.int_repr().min().item() == q8_min
+
+        # Actual weight values can be outside than observer [min_val, max_val] for the moving average observer
+        float_tensor *= 1.2
+
+        quantized_tensor = _quantize_weight(float_tensor, observer)
+        assert quantized_tensor.int_repr().max().item() == q8_max
+        assert quantized_tensor.int_repr().min().item() == q8_min

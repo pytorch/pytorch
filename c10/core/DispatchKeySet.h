@@ -172,7 +172,9 @@ class DispatchKeySet final {
             (1ULL
              << (num_backends + static_cast<uint8_t>(toFunctionalityKey(t)) -
                  1)) -
-            1) {}
+            1) {
+    *this = add(DispatchKey::PythonDispatcher);
+  }
 
   // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!

@@ -30,10 +30,11 @@ in the same job) to make a collective decision.
 
 from .api import (  # noqa: F401
     ElasticAgent,
+    RunResult,
     SimpleElasticAgent,
     Worker,
     WorkerGroup,
-    RunResult,
     WorkerSpec,
     WorkerState,
 )
+from .local_elastic_agent import TORCHELASTIC_ENABLE_FILE_TIMER, TORCHELASTIC_TIMER_FILE

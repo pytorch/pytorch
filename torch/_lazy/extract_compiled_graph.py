@@ -72,7 +72,7 @@ class ReturnValueHandler:
         self.index: List[List[int]] = []
         self.total_count = len(lazy_out_list)
 
-        tensor_id_to_idx: Dict[int, int] = dict()
+        tensor_id_to_idx: Dict[int, int] = {}
         for dup_idx, lazy_tensor in enumerate(lazy_out_list):
             uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
             if uniq_idx is not None:

@@ -27,6 +27,16 @@ namespace native {
   _(7)                      \
   _(8)
 
+#define AT_FOR_8_CASES_WITH_COMMA(_)  \
+  _(1)     ,                           \
+  _(2)     ,                           \
+  _(3)     ,                           \
+  _(4)     ,                           \
+  _(5)     ,                           \
+  _(6)     ,                           \
+  _(7)     ,                           \
+  _(8)
+
 c10::SmallVector<std::string> get_extra_args_typenames(const c10::SmallVector<at::Scalar>& extra_args) {
   c10::SmallVector<std::string> args_typenames(extra_args.size());
   for (auto i = 0; i < extra_args.size(); ++i) {
@@ -83,9 +93,9 @@ static std::unique_ptr<OffsetCalculator<N>> make_unique_offset_calculator(
 
 template <bool IS_INPUT>
 struct OffsetCalculatorVariant {
-#define DEFINE_CASE(index) std::unique_ptr<OffsetCalculator<index>>,
+#define DEFINE_CASE(index) std::unique_ptr<OffsetCalculator<index>>
   using OffsetCalculatorTypes = c10::variant<
-    AT_FOR_8_CASES(DEFINE_CASE)
+    AT_FOR_8_CASES_WITH_COMMA(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 
@@ -113,9 +123,9 @@ struct OffsetCalculatorVariant {
 
 struct ArrayVariant {
 // works for up to 8 input + 8 outputs
-#define DEFINE_CASE(index) at::detail::Array<char*, index>, at::detail::Array<char*, index+8>,
+#define DEFINE_CASE(index) at::detail::Array<char*, index>, at::detail::Array<char*, index+8>
   using ArrayTypes = c10::variant<
-    AT_FOR_8_CASES(DEFINE_CASE)
+    AT_FOR_8_CASES_WITH_COMMA(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 
@@ -149,9 +159,9 @@ private:
 };
 
 struct TrivialOffsetCalculatorVariant {
-#define DEFINE_CASE(index) TrivialOffsetCalculator<index>,
+#define DEFINE_CASE(index) TrivialOffsetCalculator<index>
   using TrivialOffsetCalculatorTypes = c10::variant<
-    AT_FOR_8_CASES(DEFINE_CASE)
+    AT_FOR_8_CASES_WITH_COMMA(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 
@@ -177,9 +187,9 @@ private:
 };
 
 struct LoadWithCastVariant {
-#define DEFINE_CASE(index) std::unique_ptr<memory::LoadWithCast<index>>,
+#define DEFINE_CASE(index) std::unique_ptr<memory::LoadWithCast<index>>
   using LoadWithCastPtr = c10::variant<
-    AT_FOR_8_CASES(DEFINE_CASE)
+    AT_FOR_8_CASES_WITH_COMMA(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 
@@ -206,9 +216,9 @@ private:
 };
 
 struct StoreWithCastVariant {
-#define DEFINE_CASE(index) std::unique_ptr<memory::StoreWithCast<index>>,
+#define DEFINE_CASE(index) std::unique_ptr<memory::StoreWithCast<index>>
   using StoreWithCastPtr = c10::variant<
-    AT_FOR_8_CASES(DEFINE_CASE)
+    AT_FOR_8_CASES_WITH_COMMA(DEFINE_CASE)
   >;
 #undef DEFINE_CASE
 

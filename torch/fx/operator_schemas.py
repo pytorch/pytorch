@@ -13,6 +13,9 @@ from torch._ops import OpOverloadPacket, OpOverload
 if TYPE_CHECKING:
     from .node import Argument
 
+__all__ = ["ArgsKwargsPair", "check_for_mutable_operation", "get_signature_for_torch_op", "create_type_hint",
+           "type_matches", "normalize_function", "normalize_module"]
+
 @compatibility(is_backward_compatible=False)
 class ArgsKwargsPair(NamedTuple):
     """
@@ -177,7 +180,7 @@ def create_type_hint(x):
             return ret_type(base_type)
     except Exception as e:
         # We tried to create a type hint for list but failed.
-        torch.warnings.warn(f"We were not able to successfully create type hint from the type {x}")
+        warnings.warn(f"We were not able to successfully create type hint from the type {x}")
         pass
     return x
 

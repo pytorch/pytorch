@@ -22,6 +22,7 @@
 #include <ATen/ops/_conj_physical_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
@@ -147,7 +148,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
     // For the case of (0x0) result tensor, manually resize `result` tensor
     // to the size of `self` tensor
     if (result.numel() == 0) {
-      at::native::resize_as_sparse_csr_(result, self);
+      at::native::resize_as_sparse_compressed_(result, self);
     }
     // copy_sparse_compressed_ internally checks the sizes of result and self tensors
     // Hence no external size check required
@@ -163,7 +164,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
 
 template <typename F, typename... Args>
 Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "unary_op_inplace", [](){});
 
   auto self_values = self.values();
   (self_values.*op_inplace)(std::forward<Args>(args)...);
@@ -299,6 +300,23 @@ Tensor mul_scalar_sparse_csr(const Tensor& self, const Scalar& other) {
       result_values.device());
 }
 
+Tensor& zero_sparse_csr_(Tensor& self) {
+  /*
+    csr.zero_() resets nnz to 0.
+
+    If the original sparsity pattern needs to be preserved, use
+    `csr.values().zero_()` instead.
+
+    The above behavior also implies that torch.zeros_like(csr) returns
+    a new tensor with nnz == 0. If one needs a zeros_like semantics
+    where the result has the same sparsity pattern as input, then use
+    `result = csr.clone(); result.values.zero_();`
+  */
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "zero_sparse_csr_", [](){});
+  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.sizes());
+  return self;
+}
+
 /* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
  * Only simple funcs, with 0->0 correspondence are currently supported. */
 
@@ -349,8 +367,6 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-
-CREATE_UNARY_UFUNC_INPLACE(zero);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -457,11 +473,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
       mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
       mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
-    return addmm_out_sparse_compressed_cpu(
-        self, mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
-  }
-
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
   if (&result == &self) {
@@ -510,20 +521,69 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
 #if !AT_USE_MKL_SPARSE()
+  // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
+  // strided -> strided
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat2.transpose(-2, -1).to_sparse_csr(),
+                  mat1.transpose(-2, -1),
+                  result.transpose(-2, -1),
+                  alpha,
+                  beta);
+            });
+        return result;
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat2.transpose(-2, -1),
+                  mat1.transpose(-2, -1),
+                  result.transpose(-2, -1),
+                  alpha,
+                  beta);
+            });
+        return result;
+      }
+    }
+  } else if (mat1.layout() == kSparseCsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat1, mat2, result, alpha, beta);
+            });
+        return result;
+      }
+    }
+  } else if (mat1.layout() == kSparseCsc) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat1.to_sparse_csr(), mat2, result, alpha, beta);
+            });
+        return result;
+      }
+    }
+  }
   TORCH_CHECK(
-      (mat1.is_sparse_csr() ||
-       (mat2.is_sparse_csr() && result.is_sparse_csr())),
       false,
-      "Calling addmm on sparse CPU tensors requires Linux platform. ",
-      "Please use PyTorch built with MKL on Linux.");
-  TORCH_CHECK(
-      result.layout() == kStrided,
-      "Calling addmm on CPU with sparse output requires MKL.");
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      result.scalar_type(), "addmm_sparse_dense", [&] {
-        addmm_out_sparse_csr_native_cpu<scalar_t>(
-            mat1, mat2, result, alpha, beta);
-      });
+      "addmm: computation on CPU is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout(),
+      " without MKL. PyTorch built with MKL has better support for addmm with sparse CPU tensors.");
 #else
   sparse::impl::mkl::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
 #endif
@@ -579,25 +639,19 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
     // native support for CSC.
     return _sparse_csr_mm(mat1.to_sparse_csr(), mat2);
   }
-  if (mat1.is_sparse_csr() && mat2.layout() == c10::kStrided) {
-    // Return dense
-    return at::addmm(
-        at::zeros({mat1.size(0), mat2.size(1)}, mat2.options()),
-        mat1,
-        mat2,
-        0.0,
-        1.0);
+  // Default to taking options from mat1
+  auto result_options = mat1.options();
+  if (mat2.layout() == kStrided) {
+    // if either  arg is strided we return strided, so update the options if
+    // mat2 is strided.
+    result_options = result_options.layout(kStrided);
   }
-  if (mat1.layout() == c10::kStrided && mat2.is_sparse_csr()) {
-    // Return dense
-    return at::addmm(
-        at::zeros({mat1.size(0), mat2.size(1)}, mat1.options()),
-        mat1,
-        mat2,
-        0.0,
-        1.0);
-  }
-  AT_ERROR("_sparse_csr_mm does not support matrix multiplication of ", mat1.layout(), " @ ", mat2.layout());
+  return at::addmm(
+      at::zeros({mat1.size(0), mat2.size(1)}, result_options),
+      mat1,
+      mat2,
+      0.0,
+      1.0);
 }
 
 Tensor _sparse_csr_addmm(
@@ -753,7 +807,7 @@ Tensor& add_out_sparse_csr_cpu(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
-    at::native::resize_as_sparse_csr_(out, self);
+    at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
   return out;

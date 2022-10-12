@@ -21,12 +21,12 @@ def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
     Args:
         seen (set): Set of names that have already been used (with respect to
             some context).
-        name (string): The name to make unique
+        name (str): The name to make unique
         min_version (number): Starting index. Is incremented continually until
             it can make the resulting name unique relative to 'seen'.
 
     Returns:
-        x (string): A version of name that is not in seen.
+        x (str): A version of name that is not in seen.
     """
     assert name is not None
     i = min_version

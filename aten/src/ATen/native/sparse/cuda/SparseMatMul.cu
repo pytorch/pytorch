@@ -734,13 +734,13 @@ void sparse_sparse_matmul_cuda_kernel(
 
   output_values.set_(csr_output.csr_values_);
   output_indices.resize_({2, nnz});
-  auto output_indices_accessor = output_indices.packed_accessor<int64_t, 2>();
+  auto output_indices_accessor = output_indices.packed_accessor64<int64_t, 2>();
 
   auto csr_output_pointers_accessor =
-      csr_output.csr_pointers_.packed_accessor<int, 1>();
+      csr_output.csr_pointers_.packed_accessor64<int, 1>();
 
   auto csr_output_ind_accessor =
-      csr_output.csr_indices_.packed_accessor<int, 1>();
+      csr_output.csr_indices_.packed_accessor64<int, 1>();
 
   auto major_dim = result.size(0);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();

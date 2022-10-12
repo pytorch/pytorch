@@ -23,7 +23,7 @@ def range_push(msg):
     depth of the range that is started.
 
     Args:
-        msg (string): ASCII message to associate with range
+        msg (str): ASCII message to associate with range
     """
     return _nvtx.rangePushA(msg)
 
@@ -48,7 +48,7 @@ def range_start(msg) -> int:
     Returns: A range handle (uint64_t) that can be passed to range_end().
 
     Args:
-        msg (string): ASCII message to associate with the range.
+        msg (str): ASCII message to associate with the range.
     """
     return _nvtx.rangeStartA(msg)
 
@@ -68,7 +68,7 @@ def mark(msg):
     Describe an instantaneous event that occurred at some point.
 
     Args:
-        msg (string): ASCII message to associate with the event.
+        msg (str): ASCII message to associate with the event.
     """
     return _nvtx.markA(msg)
 
@@ -81,7 +81,7 @@ def range(msg, *args, **kwargs):
     they are passed as arguments to msg.format().
 
     Args:
-        msg (string): message to associate with the range
+        msg (str): message to associate with the range
     """
     range_push(msg.format(*args, **kwargs))
     yield

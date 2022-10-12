@@ -2,7 +2,7 @@ import json
 import logging
 
 import math
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torchgen.api.cpp as cpp
 from torchgen.context import native_function_manager
@@ -21,7 +21,7 @@ from torchgen.model import (
 )
 from torchgen.static_runtime import config
 
-logger: logger = logging.getLogger()
+logger: logging.Logger = logging.getLogger()
 
 
 def has_alias(
@@ -42,6 +42,7 @@ BLOCKED_OPS = frozenset(
         # non cpu ops
         "sparse_sampled_addmm",
         "hspmm",
+        "linalg_svdvals",
         # sparse ops
         "sspaddmm",
         "coalesce",
@@ -71,6 +72,156 @@ BLOCKED_OPS = frozenset(
         "_fw_primal",
         # no documentation
         "_index_reduce",
+        # TODO: these ones got added recently and need manual inspection
+        "_new_zeros_with_same_feature_meta",
+        "_conj_physical",
+        "binary_cross_entropy_with_logits",
+        "bincount",
+        "conv_tbc",
+        "copy",
+        "_copy_from",
+        "_copy_from_and_resize",
+        "count_nonzero",
+        "cudnn_affine_grid_generator",
+        "cudnn_affine_grid_generator_backward",
+        "cudnn_grid_sampler",
+        "diag_embed",
+        "embedding",
+        "embedding_dense_backward",
+        "_embedding_bag_dense_backward",
+        "_embedding_bag_per_sample_weights_backward",
+        "grid_sampler_2d",
+        "_grid_sampler_2d_cpu_fallback",
+        "grid_sampler_3d",
+        "isnan",
+        "mkldnn_linear",
+        "median",
+        "nanmedian",
+        "_sparse_sparse_matmul",
+        "_sparse_mask_helper",
+        "batch_norm_backward_elemt",
+        "_euclidean_dist",
+        "pixel_shuffle",
+        "pixel_unshuffle",
+        "channel_shuffle",
+        "_reshape_nested_backward",
+        "relu",
+        "prelu",
+        "celu",
+        "slice_scatter",
+        "select_scatter",
+        "diagonal_scatter",
+        "sum",
+        "_mkldnn_transpose",
+        "_nested_tensor_from_mask",
+        "_nested_from_padded",
+        "_nested_tensor_size",
+        "_nested_from_padded_and_nested_example",
+        "_standard_gamma_grad",
+        "_dirichlet_grad",
+        "native_norm",
+        "_sparse_softmax",
+        "_sparse_softmax_backward_data",
+        "_sparse_log_softmax",
+        "_sparse_log_softmax_backward_data",
+        "zero",
+        "_sparse_addmm",
+        "sparse_mask",
+        "_to_dense",
+        "_coalesce",
+        "_coalesced",
+        "copy_sparse_to_sparse",
+        "to_sparse",
+        "to_sparse_csr",
+        "to_sparse_csc",
+        "to_mkldnn",
+        "quantize_per_tensor_dynamic",
+        "quantize_per_channel",
+        "q_per_channel_scales",
+        "q_per_channel_zero_points",
+        "int_repr",
+        "_make_per_channel_quantized_tensor",
+        "set",
+        "lift",
+        "lift_fresh",
+        "lift_fresh_copy",
+        "masked_scatter",
+        "_masked_softmax",
+        "_masked_softmax_backward",
+        "put",
+        "index_reduce",
+        "trace",
+        "_cholesky_solve_helper",
+        "dist",
+        "max",
+        "_torch_cuda_cu_linker_symbol_op",
+        "glu_jvp",
+        "glu_backward_jvp",
+        "hardswish_backward",
+        "rrelu_with_noise_backward",
+        "mkldnn_adaptive_avg_pool2d_backward",
+        "_adaptive_avg_pool2d_backward",
+        "_adaptive_avg_pool3d_backward",
+        "isinf",
+        "linalg_lu_solve",
+        "linalg_vecdot",
+        "linalg_matrix_exp",
+        "linalg_eigvalsh",
+        "_test_warn_in_autograd",
+        "_test_autograd_multiple_dispatch_view",
+        "_test_autograd_multiple_dispatch_view_copy",
+        "segment_reduce",
+        "_segment_reduce_backward",
+        "_fw_primal_copy",
+        "_make_dual_copy",
+        "view_as_real_copy",
+        "view_as_complex_copy",
+        "_conj_copy",
+        "_neg_view_copy",
+        "diagonal_copy",
+        "detach_copy",
+        "squeeze_copy",
+        "t_copy",
+        "unsqueeze_copy",
+        "_indices_copy",
+        "_values_copy",
+        "indices_copy",
+        "values_copy",
+        "crow_indices_copy",
+        "col_indices_copy",
+        "ccol_indices",
+        "ccol_indices_copy",
+        "row_indices",
+        "row_indices_copy",
+        "unfold_copy",
+        "alias_copy",
+        "_triton_multi_head_attention",
+        "special_airy_ai",
+        "special_bessel_j0",
+        "special_bessel_j1",
+        "special_bessel_y0",
+        "special_bessel_y1",
+        "special_chebyshev_polynomial_t",
+        "special_chebyshev_polynomial_u",
+        "special_chebyshev_polynomial_v",
+        "special_chebyshev_polynomial_w",
+        "special_hermite_polynomial_h",
+        "special_hermite_polynomial_he",
+        "special_laguerre_polynomial_l",
+        "special_legendre_polynomial_p",
+        "special_modified_bessel_i0",
+        "special_modified_bessel_i1",
+        "special_modified_bessel_k0",
+        "special_modified_bessel_k1",
+        "special_scaled_modified_bessel_k0",
+        "special_scaled_modified_bessel_k1",
+        "special_shifted_chebyshev_polynomial_t",
+        "special_shifted_chebyshev_polynomial_u",
+        "special_shifted_chebyshev_polynomial_v",
+        "special_shifted_chebyshev_polynomial_w",
+        "special_spherical_bessel_j0",
+        "_foobar",
+        "_nested_tensor_strides",
     )
 )
 
@@ -98,7 +249,9 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             return False
 
     if isinstance(g, NativeFunctionsViewGroup):
-        if "at::Tensor" != cpp.returns_type(func.returns).cpp_type():
+        # TODO: stop doing type tests by converting to C++ and then testing
+        # the string, just test the dang thing directly
+        if "at::Tensor" != cpp.returns_type(func.returns, symint=False).cpp_type():
             # Returns a non-Tensor value.
             logger.info(f"NON-TENSOR RET TYPE: {str(func)}")
             return False
@@ -122,7 +275,8 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             or not str(func.name).endswith(".out")
         ):
             return False
-    if "at::Tensor &" != cpp.returns_type(func.returns).cpp_type():
+    # TODO: stop type testing by converting to C++
+    if "at::Tensor &" != cpp.returns_type(func.returns, symint=False).cpp_type():
         logger.info(f"NON_TENSOR RET TYPE: {str(func)}")
         return False
     if has_alias(func.arguments.non_out):
@@ -229,7 +383,7 @@ def test_tensor_dim(op_name: str) -> int:
 
 
 test_tensor_shapes_string = '{"view_as_complex": "{2, 2}"}'
-test_tensor_shape_json = json.loads(test_tensor_shapes_string)
+test_tensor_shape_json: Dict[str, str] = json.loads(test_tensor_shapes_string)
 
 
 def test_tensor_shape(op_name: str) -> str:
@@ -418,6 +572,7 @@ no_memory_resize_ops = frozenset(
         "multilabel_margin_loss",
         "nll_loss",
         "nll_loss2d",
+        "prod",
     )
 )
 

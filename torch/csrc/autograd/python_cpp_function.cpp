@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
@@ -77,7 +78,7 @@ PyObject* THPCppFunction_call(
 int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   for (const auto& hook : fn.pre_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+    if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
@@ -149,7 +150,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
   }
   auto var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
-  std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
+  std::unique_ptr<FunctionPreHook> hook(new PyFunctionTensorPreHook(
       var->backward_hooks, THPVariable_Unpack(var).output_nr()));
   fn.add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
@@ -158,6 +159,11 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
 PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   return registerFunctionHook(fn, hook);
+}
+
+PyObject* THPCppFunction_register_prehook(PyObject* self, PyObject* hook) {
+  auto& fn = *((THPCppFunction*)self)->cdata;
+  return registerFunctionPreHook(fn, hook);
 }
 
 PyObject* THPCppFunction_name(PyObject* self, PyObject* noargs) {
@@ -197,7 +203,8 @@ PyTypeObject* _initFunctionPyTypeObject(
   return &type;
 }
 
-static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
+static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types_map;
+static std::unordered_set<PyTypeObject*> cpp_function_types_set;
 
 struct DefaultFunctionType {
   DefaultFunctionType() : type() {
@@ -225,10 +232,10 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
     Py_INCREF(cdata->pyobj());
   } else {
     auto& fn = *cdata;
-    auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    auto it = cpp_function_types_map.find(std::type_index(typeid(fn)));
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
-    if (it == cpp_function_types.end()) {
+    if (it == cpp_function_types_map.end()) {
       type = &default_type.type;
     } else {
       type = (PyTypeObject*)it->second.get();
@@ -249,7 +256,9 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
   Py_INCREF((PyObject*)pytype);
-  cpp_function_types[std::type_index(type)] = THPObjectPtr((PyObject*)pytype);
+  cpp_function_types_map[std::type_index(type)] =
+      THPObjectPtr((PyObject*)pytype);
+  cpp_function_types_set.insert(pytype);
 }
 
 PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
@@ -279,6 +288,46 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
   Py_INCREF(handle);
   return handle;
+}
+
+// This is almost a copy of the function above except post -> pre
+PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
+  PyObject* dict = Py_None;
+  for (const auto& hook : fn.pre_hooks()) {
+    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      dict = pyhook->dict;
+      break;
+    }
+  }
+
+  THPObjectPtr register_fn(
+      PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
+  if (!register_fn)
+    return nullptr;
+  THPObjectPtr res(
+      PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
+  if (!res)
+    return nullptr;
+
+  if (dict == Py_None) {
+    dict = PyTuple_GET_ITEM(res.get(), 0);
+    std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(dict));
+    fn.add_pre_hook(std::move(hook));
+  }
+
+  PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
+  Py_INCREF(handle);
+  return handle;
+}
+
+bool THPCppFunction_Check(PyObject* obj) {
+  THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
+  if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
+      cpp_function_types_set.end()) {
+    return false;
+  } else {
+    return true;
+  }
 }
 
 } // namespace autograd

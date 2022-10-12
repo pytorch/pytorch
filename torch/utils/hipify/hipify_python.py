@@ -854,7 +854,8 @@ def preprocessor(
     output_source = hip_header_magic(output_source)
 
     # Replace the extern __shared__
-    output_source = replace_extern_shared(output_source)
+    # NOTE: No longer needed after transition from hcc to hipclang.
+    # output_source = replace_extern_shared(output_source)
 
     # Don't write out identical hipified files for extensions if dirpath has not changed
     if (

@@ -873,7 +873,7 @@ graph(%x : Tensor,
 
 [runtime/graph_executor.cpp](runtime/graph_executor.cpp)
 
-All program execution starts with a graph executor. Its responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
+All program execution starts with a graph executor. It's responsible for running optimizations (potentially involving the JIT-compilation of fused kernel code), and then handing the `Graph` or subcomponents of it off to an interpreter to actually run.
 
 
 In this section, we use a running example program that computes one step of an LSTM to show how the graph is transformed:
@@ -1200,6 +1200,8 @@ or switching the fuser could also provide a temporary fix in case of bugs.
 | NNC context manager | `with torch.jit.fuser("fuser1"):` |
 | NVFuser enable/disable | `torch._C._jit_set_nvfuser_enabled()` |
 | NVFuser context manager | `with torch.jit.fuser("fuser2")` |
+| oneDNN Graph on CPU | `torch._C._jit_set_llga_enabled(True)` |
+| oneDNN Graph context manager | `with torch.jit.fuser("fuser3"):` |
 
 **C++ APIs:**
 

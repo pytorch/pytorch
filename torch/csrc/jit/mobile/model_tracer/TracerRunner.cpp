@@ -267,6 +267,10 @@ void run_model(
 }
 
 TracerResult trace_run(const std::string& input_module_path) {
+  return trace_run(std::vector<std::string>(1, input_module_path));
+}
+
+TracerResult trace_run(const std::vector<std::string>& input_module_paths) {
   at::globalContext().setQEngine(at::QEngine::QNNPACK);
   c10::ObservedOperators::getUnobservedOperatorList().clear();
 
@@ -283,10 +287,25 @@ TracerResult trace_run(const std::string& input_module_path) {
 
   using torch::jit::MobileModuleLoadOptions;
 
-  // run with QNNPACK
-  run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
-  at::globalContext().setQEngine(at::QEngine::FBGEMM);
-  run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
+  for (auto& input_module_path : input_module_paths) {
+    // run with QNNPACK
+    at::globalContext().setQEngine(at::QEngine::QNNPACK);
+
+    run_model(
+        input_module_path, root_ops, enabled_backends, called_kernel_tags);
+    // Not every model can be successfully run with fbgemm,
+    // but for those that can this can help broaden the tracers scope around
+    // hyper optimized QNNPack paths
+    try {
+      at::globalContext().setQEngine(at::QEngine::FBGEMM);
+      run_model(
+          input_module_path, root_ops, enabled_backends, called_kernel_tags);
+    } catch (std::exception& ex) {
+      std::cerr
+          << "ModelTracer encountered an error while attempting to run the model in FBGEMM mode"
+          << ex.what() << "\n Skipping FBGEMM execution" << std::endl;
+    }
+  }
 
   op_tracer.getCalledOperators().withLock(
       [&](std::set<std::string>& called_operators) {

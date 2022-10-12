@@ -3,7 +3,7 @@ from warnings import warn
 
 import torch
 import torch.cuda
-from torch._C._autograd import _ExperimentalConfig
+from torch._C._profiler import _ExperimentalConfig
 
 from torch.autograd import (
     _disable_profiler,
@@ -30,14 +30,16 @@ from torch.autograd.profiler_util import (
 )
 from torch.futures import Future
 
+__all__ = ["profile", "record_function", "emit_itt", "emit_nvtx", "load_nvprof", "EnforceUnique",
+           "parse_nvprof_trace", "kineto_step", "EventList", "FunctionEvent", "MemRecordsAcc"]
 
 try:
     # Available in Python >= 3.2
-    from contextlib import ContextDecorator
+    from contextlib import ContextDecorator as _ContextDecorator
 except ImportError:
     import functools
 
-    class ContextDecorator(object):  # type: ignore[no-redef]
+    class _ContextDecorator(object):  # type: ignore[no-redef]
 
         def __enter__(self):
             raise NotImplementedError
@@ -52,7 +54,6 @@ except ImportError:
                     return func(*args, **kwargs)
 
             return wrapped
-
 
 class profile(object):
     """Context manager that manages autograd profiler state and holds a summary of results.
@@ -118,11 +119,12 @@ class profile(object):
         please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         >>>     for _ in range(100):  # any normal python code, really!
         >>>         y = x ** 2
-        >>          y.backward()
+        >>>         y.backward()
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
         -----------------------------------  ---------------  ---------------  ---------------
@@ -248,11 +250,25 @@ class profile(object):
         if self.function_events is None:
             raise RuntimeError("Profiler didn't finish running")
 
-    def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
+    def table(
+            self,
+            sort_by=None,
+            row_limit=100,
+            max_src_column_width=75,
+            max_name_column_width=55,
+            max_shapes_column_width=80,
+            header=None,
+            top_level_events_only=False
+    ):
         self._check_finish()
         assert self.function_events is not None
         return self.function_events.table(
-            sort_by=sort_by, row_limit=row_limit, max_src_column_width=max_src_column_width, header=header,
+            sort_by=sort_by,
+            row_limit=row_limit,
+            max_src_column_width=max_src_column_width,
+            max_name_column_width=max_name_column_width,
+            max_shapes_column_width=max_shapes_column_width,
+            header=header,
             top_level_events_only=top_level_events_only
         )
     table.__doc__ = EventList.table.__doc__
@@ -425,7 +441,7 @@ class profile(object):
         return function_events
 
 
-class record_function(ContextDecorator):
+class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a block of
     Python code (or function) when running autograd profiler. It is
     useful when tracing the code profile.
@@ -443,6 +459,7 @@ class record_function(ContextDecorator):
         ...         z = y ** 3
         ...     y.backward()
         ...
+        >>> # xdoctest: +IGNORE_WANT
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
         -----------------------------------  ---------------  ---------------  ---------------
@@ -522,9 +539,9 @@ class emit_itt(object):
         instance should be enabled at any given time.
 
     Args:
-        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
+        enabled (bool, optional): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
-        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the itt range wrapping
+        record_shapes (bool, optional): If ``record_shapes=True``, the itt range wrapping
             each autograd op will append information about the sizes of Tensor arguments received
             by that op, in the following format:
             ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
@@ -532,8 +549,10 @@ class emit_itt(object):
             Arguments will be listed in the order they are received by the backend op.
             Please note that this order may not match the order in which those arguments were passed
             on the Python side.  Also note that shape recording may increase the overhead of itt range creation.
+            Default: ``False``
 
     Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> with torch.autograd.profiler.emit_itt():
         ...     model(x)
 
@@ -588,9 +607,9 @@ class emit_nvtx(object):
         instance should be enabled at any given time.
 
     Args:
-        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
+        enabled (bool, optional): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
-        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+        record_shapes (bool, optional): If ``record_shapes=True``, the nvtx range wrapping
             each autograd op will append information about the sizes of Tensor arguments received
             by that op, in the following format:
             ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
@@ -598,8 +617,10 @@ class emit_nvtx(object):
             Arguments will be listed in the order they are received by the backend op.
             Please note that this order may not match the order in which those arguments were passed
             on the Python side.  Also note that shape recording may increase the overhead of nvtx range creation.
+            Default: ``False``
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> with torch.cuda.profiler.profile():
         ...     model(x) # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():

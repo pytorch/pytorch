@@ -84,6 +84,8 @@ if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
+_UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
+_UCC_COMMIT=12944da33f911daf505d9bbc51411233d0ed85e1
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -141,22 +143,26 @@ case "$image" in
   pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7)
     CUDA_VERSION=11.6.2
     CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
     ;;
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
     CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
+    ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
     KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.7
@@ -262,7 +268,7 @@ case "$image" in
     ;;
   pytorch-linux-focal-py3.7-gcc7)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
+    CMAKE_VERSION=3.16.9  # Required for precompiled header support
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -373,8 +379,10 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
+       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
+       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

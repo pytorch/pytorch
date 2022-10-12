@@ -112,7 +112,7 @@ def transformer_auto_wrap_policy(
 
        transformer_layer_cls (int):
            Submodules with one of the `transformer_layer_cls` names
-           will be wrapped as seperated FSDP units
+           will be wrapped as separated FSDP units
     """
     if recurse:
         # always recurse
