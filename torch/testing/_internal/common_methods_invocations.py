@@ -4627,9 +4627,9 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
     shapes = ((0, 1, 5, 5), (1, 1, 5, 5), (2, 3, 5, 5))
-    kernel_sizes = (2, (2, 2), (3, 3))
+    kernel_sizes = (2, (2, 2), (3, 3), (2, 3))
     dilations = (1, 2, (1, 2))
-    paddings = (0, 1, (1, 1))
+    paddings = (0, 1, (1, 1), (1, 2))
     strides = (1, 2, (1, 2))
 
     cases = product(shapes, kernel_sizes, dilations, paddings, strides)
@@ -6246,12 +6246,11 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
     for input_shape, output_shape in sample_shapes:
-        input_t = make_arg(input_shape)
-        yield SampleInput(input_t, args=(output_shape,))
+        yield SampleInput(make_arg(input_shape), args=(output_shape,))
         if output_shape == ():
             continue
-        yield SampleInput(input_t, args=(list(output_shape),))
-        yield SampleInput(input_t, args=(*output_shape,))
+        yield SampleInput(make_arg(input_shape), args=(list(output_shape),))
+        yield SampleInput(make_arg(input_shape), args=(*output_shape,))
 
 
 def error_inputs_sum_to_size(op_info, device, **kwargs):
@@ -7386,12 +7385,12 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
 
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
 
-    N, N_prime, L, S, E = 5, 2, 4, 3, 6
-    dim_3_q_shape = (N, L, E)
-    dim_3_kv_shape = (N, S, E)
-    dim_4_q_shape = (N, N_prime, L, E)
-    dim_4_kv_shape = (N, N_prime, S, E)
+    dim_3_q_shape = (batch, seq_q, head_dim)
+    dim_3_kv_shape = (batch, seq_kv, head_dim)
+    dim_4_q_shape = (batch, num_heads, seq_q, head_dim)
+    dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape)]
     shapes_and_kwargs = []
@@ -9035,11 +9034,6 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),
-               # AssertionError: Tensor-likes are not close!
-               # Mismatched elements: 5 / 5 (100.0%)
-               # https://github.com/pytorch/pytorch/issues/85409
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
            )),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
@@ -11879,11 +11873,12 @@ op_db: List[OpInfo] = [
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast', device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
             # No meta function
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),),
+            DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
