@@ -308,6 +308,7 @@ case "$image" in
     fi
     if [[ "$image" == *rocm* ]]; then
       extract_version_from_image_name rocm ROCM_VERSION
+      NINJA_VERSION=1.9.0
     fi
     if [[ "$image" == *gcc* ]]; then
       extract_version_from_image_name gcc GCC_VERSION
