@@ -1930,7 +1930,7 @@ class TestFakeTensor(TestCase):
 
             # TODO: enable check_aliasing, batch norm fails
             with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                with warnings.catch_warnings(), context():
+                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
                         sample.output_process_fn_grad,
