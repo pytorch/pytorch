@@ -1278,12 +1278,14 @@ class TestProfiler(TestCase):
 
 
 def find_node_with_name(nodes, name):
-    for node in nodes:
+    for node in _utils.traverse_dfs(nodes):
         if node.name == name:
             return node
-        result = find_node_with_name(node.children, name)
-        if result is not None:
-            return result
+
+def find_node_with_regex(nodes, pattern):
+    for node in _utils.traverse_dfs(nodes):
+        if re.search(pattern, node.name):
+            return node
 
 
 class SimpleNet(nn.Module):
@@ -1367,6 +1369,73 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(d_storage_data, c_storage_data_new)
         self.assertEqual(c_id, c_id_new)
         self.assertEqual(d_id, c_id_new)
+
+    def test_module_and_optimizer_ids(self) -> None:
+        model = torch.nn.Linear(2, 1, bias=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+
+        def check(cold_start: bool) -> None:
+            with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+                x = torch.ones((1, 2))
+                _ = x.sin()  # Mark `x`
+                model(x).backward()
+                optimizer.step()
+                _ = optimizer.state[model.weight]["momentum_buffer"].cos()  # Mark weight momentum
+                _ = model.weight.grad.tan()  # Mark weight gradient
+
+            nodes = p.profiler.kineto_results.experimental_event_tree()
+
+            def get_fields(op_name, index):
+                return self._get_tensor_fields(
+                    find_node_with_name(nodes, op_name),
+                    index)
+
+            # Marked Tensors act as ground truth for python tracer IDs.
+            _, _, x_id = get_fields("aten::sin", 0)
+            _, _, weight_momenumtum_id = get_fields("aten::cos", 0)
+            _, _, weight_grad_id = get_fields("aten::tan", 0)
+            self.assertNotEqual(x_id, weight_momenumtum_id)
+            self.assertNotEqual(x_id, weight_grad_id)
+            self.assertNotEqual(weight_momenumtum_id, weight_grad_id)
+
+            # Use linear op to identify weight ground truth.
+            linear_op_node = find_node_with_name(nodes, "aten::linear")
+            self.assertIsNotNone(linear_op_node)
+            x_metadata, weight_metadata, _ = linear_op_node.extra_fields.inputs.tensor_metadata
+            self.assertEqual(x_id, x_metadata.id)
+
+            # Module
+            linear_module_node = find_node_with_name(nodes, "nn.Module: Linear_0")
+            self.assertIsNotNone(linear_module_node)
+            self.assertIsNotNone(linear_module_node.extra_fields.module)
+            self.assertIsNone(linear_module_node.extra_fields.optimizer)
+
+            linear_parameters = linear_module_node.extra_fields.module.parameters
+            name, weight, weight_grad = linear_parameters[0]
+            self.assertEqual(name, "weight")
+            self.assertEqual(weight.id, weight_metadata.id)
+
+            self.assertEqual(weight_grad is None, cold_start)
+            if not cold_start:
+                self.assertEqual(weight_grad.id, weight_grad_id)
+
+            # Optimizer
+            step_node = find_node_with_regex(nodes, "_optimizer_step_code")
+            self.assertIsNotNone(step_node)
+            self.assertIsNone(step_node.extra_fields.module)
+            self.assertIsNotNone(step_node.extra_fields.optimizer)
+            optimizer_parameters = step_node.extra_fields.optimizer.parameters
+            self.assertEqual(len(optimizer_parameters), 2)  # Weight and bias
+            weight, weight_grad, state = optimizer_parameters[0]
+            self.assertEqual(weight.id, weight_metadata.id)
+            self.assertEqual(weight_grad.id, weight_grad_id)
+            self.assertEqual(len(state), 1)
+            self.assertEqual(state[0][0], "momentum_buffer")
+            self.assertEqual(state[0][1].id, weight_momenumtum_id)
+
+        # Check that we handle first step (lazy initalization) and steady state.
+        check(cold_start=True)
+        check(cold_start=False)
 
     def _test_allocation_ids(self, before_fn, after_fn) -> None:
         with profile(profile_memory=True, record_shapes=True) as p:
