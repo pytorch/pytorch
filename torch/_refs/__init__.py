@@ -1572,13 +1572,13 @@ def addcdiv(
     if value is not None:
         dtype = self.dtype  # no scalars allowed, see add
         python_type = utils.dtype_to_type(dtype)
-        if not utils.is_weakly_lesser_type(type(value), python_type):
-            msg = (
-                "value argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(value), python_type
-                )
-            )
-            raise ValueError(msg)
+        check(
+            utils.is_weakly_lesser_type(type(value), python_type),
+            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
+                type(value), python_type
+            ),
+            exc_type=ValueError,
+        )
 
     return self + value * tensor1 / tensor2
 
@@ -1602,13 +1602,13 @@ def addcmul(
     if value is not None:
         dtype = self.dtype  # no scalars allowed, see add
         python_type = utils.dtype_to_type(dtype)
-        if not utils.is_weakly_lesser_type(type(value), python_type):
-            msg = (
-                "value argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(value), python_type
-                )
-            )
-            raise ValueError(msg)
+        check(
+            utils.is_weakly_lesser_type(type(value), python_type),
+            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
+                type(value), python_type
+            ),
+            exc_type=ValueError,
+        )
 
     return self + value * tensor1 * tensor2
 

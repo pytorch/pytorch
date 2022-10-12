@@ -355,6 +355,26 @@ PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  using c10::cuda::CUDACachingAllocator::AllocatorBackend;
+  AllocatorBackend backend =
+      c10::cuda::CUDACachingAllocator::allocatorBackend();
+  // this call should be uncommon, don't bother interning strings
+  switch (backend) {
+    case AllocatorBackend::NATIVE:
+      return THPUtils_packString("native");
+#ifndef USE_ROCM
+    case AllocatorBackend::CUDAMALLOCASYNC:
+      return THPUtils_packString("cudaMallocAsync");
+#endif
+    default:
+      THPUtils_assert(false, "Unexpected value for backend");
+      return nullptr;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::cuda::device_synchronize();
@@ -914,6 +934,15 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_clearBlasWorkspaces_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::clearCublasWorkspaces();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_rocm_is_backward_pass(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1003,6 +1032,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_getCurrentBlasHandle_wrap,
      METH_NOARGS,
      nullptr},
+    {"_cuda_clearCublasWorkspaces",
+     THCPModule_clearBlasWorkspaces_wrap,
+     METH_NOARGS,
+     nullptr},
     {"_cuda_isCurrentStreamCapturing",
      THCPModule_isCurrentStreamCapturing_wrap,
      METH_NOARGS,
@@ -1047,6 +1080,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_cudaCachingAllocator_set_allocator_settings",
      THCPModule_cudaCachingAllocator_set_allocator_settings,
      METH_O,
+     nullptr},
+    {"_cuda_getAllocatorBackend",
+     THCPModule_getAllocatorBackend,
+     METH_NOARGS,
      nullptr},
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},
