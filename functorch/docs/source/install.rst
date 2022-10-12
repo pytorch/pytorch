@@ -3,7 +3,7 @@ Install functorch
 
 As of PyTorch 1.13, functorch is now included in the PyTorch binary and no
 longer requires the installation of a separate functorch package. That is,
-after installing PyTorch (`instructions <https://pytorch.org``),
+after installing PyTorch (`instructions <https://pytorch.org>`_),
 you'll be able to ``import functorch`` in your program.
 
 If you're upgrading from an older version of functorch (functorch 0.1.x or 0.2.x),
