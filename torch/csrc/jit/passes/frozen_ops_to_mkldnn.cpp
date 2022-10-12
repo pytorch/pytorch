@@ -248,7 +248,8 @@ Operation createUnaryOp(
     // tensor's physical size could be bigger than a logical one
     // `a_it.get_desc().get_size()` returns the real physical size (in bytes)
     // we use it to compute `nelem` for `aten` ops
-    auto nelem = a_it.get_desc().get_size() / elementSize(a.scalar_type());
+    auto nelem = static_cast<int64_t>(
+        a_it.get_desc().get_size() / elementSize(a.scalar_type()));
     // we also wrap `a` storage into an aten tensor
     auto in_aten =
         at::from_blob(mkldnn_raw_data, {nelem}, a_options_with_strided);
