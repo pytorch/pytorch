@@ -7,11 +7,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater
-from torch.testing._internal.common_device_type import (
-    precisionOverride,
-    tol,
-    toleranceOverride,
-)
+from torch.testing._internal.common_device_type import precisionOverride
 from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
@@ -222,17 +218,6 @@ op_db: List[OpInfo] = [
                 "TestFFT",
                 "test_reference_nd",
             ),
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float16: tol(atol=1e-4, rtol=1e-4),
-                        torch.complex64: tol(atol=1e-4, rtol=1e-4),
-                    }
-                ),
-                "TestCommon",
-                "test_compare_cpu",
-                device_type="cuda",
-            ),
         ],
         skips=(
             # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
@@ -272,17 +257,6 @@ op_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            ),
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float16: tol(atol=1e-4, rtol=1e-4),
-                        torch.complex64: tol(atol=1e-4, rtol=1e-4),
-                    }
-                ),
-                "TestCommon",
-                "test_compare_cpu",
-                device_type="cuda",
             ),
         ],
         skips=(
@@ -690,19 +664,6 @@ python_ref_db: List[OpInfo] = [
         "_refs.fft.hfftn",
         torch_opinfo_name="fft.hfftn",
         supports_nvfuser=False,
-        decorators=[
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float16: tol(atol=1e-4, rtol=1e-4),
-                        torch.complex64: tol(atol=1e-4, rtol=1e-4),
-                    }
-                ),
-                "TestCommon",
-                "test_compare_cpu",
-                device_type="cuda",
-            ),
-        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfftn",
@@ -733,19 +694,6 @@ python_ref_db: List[OpInfo] = [
         "_refs.fft.hfft2",
         torch_opinfo_name="fft.hfft2",
         supports_nvfuser=False,
-        decorators=[
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float16: tol(atol=1e-4, rtol=1e-4),
-                        torch.complex64: tol(atol=1e-4, rtol=1e-4),
-                    }
-                ),
-                "TestCommon",
-                "test_compare_cpu",
-                device_type="cuda",
-            ),
-        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft2",
