@@ -424,8 +424,11 @@ SourceRangeRecords getBackendSourceRanges(const Module& m) {
   return sr_records;
 }
 
+// TODO: remove mobileInterfaceCallExport as it is no longer needed.
+// This function was introduced to guard the usage of `InterfaceCall` and
+// now the support for `InterfaceCall` should be mature enough.
 auto& mobileInterfaceCallExport() {
-  static std::atomic<bool> flag{false};
+  static std::atomic<bool> flag{true};
   return flag;
 }
 
