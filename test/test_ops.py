@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
+    slowTest,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -173,6 +174,7 @@ class TestCommon(TestCase):
     # Tests that the cpu and gpu results are consistent
     @onlyCUDA
     @suppress_warnings
+    @slowTest
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
 
@@ -196,7 +198,9 @@ class TestCommon(TestCase):
             cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            self.assertEqual(cuda_results, cpu_results)
+            # Lower tolerance because we are running this as a `@slowTest`
+            # Don't want the periodic tests to fail frequently
+            self.assertEqual(cuda_results, cpu_results, atol=1e-3, rtol=1e-3)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
@@ -1627,6 +1631,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
+        '_refs.special.expit',
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
@@ -1686,6 +1691,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
+        '_refs.special.expit',
         '_refs.square',
         '_refs.tensor_split',
         '_refs.to',
@@ -1844,10 +1850,6 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "linalg.norm",
     "linalg.svd",
     "linalg.svdvals",
-    "nn.functional.binary_cross_entropy_with_logits",
-    "nn.functional.huber_loss",
-    "nn.functional.logsigmoid",
-    "nn.functional.multilabel_soft_margin_loss",
     "pca_lowrank",
     "roll",
     "svd_lowrank",
@@ -1967,7 +1969,7 @@ class TestFakeTensor(TestCase):
 
             # TODO: enable check_aliasing, batch norm fails
             with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                with warnings.catch_warnings(), context():
+                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
                         sample.output_process_fn_grad,

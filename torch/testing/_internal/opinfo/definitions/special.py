@@ -730,6 +730,12 @@ python_ref_db: List[OpInfo] = [
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.special.entr",
+        torch_opinfo_name="special.entr",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
         supports_nvfuser=False,
