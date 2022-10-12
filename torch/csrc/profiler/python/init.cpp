@@ -219,7 +219,7 @@ void initPythonBindings(PyObject* module) {
       });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
-      .def_readonly("opt", &ExtraFields<EventType::PyCall>::opt_)
+      .def_readonly("optimizer", &ExtraFields<EventType::PyCall>::optimizer_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)
       .def_readonly("module", &ExtraFields<EventType::PyCall>::module_);
