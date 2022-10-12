@@ -205,10 +205,11 @@ size_t getMaxWorkspaceSize(
 {
   size_t max_ws_size = 0;
   size_t max_block_size = 0;
-  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
   const auto device = c10::cuda::current_device();
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  // For the native allocator, retrieves the size of the largest unused block.
+  // For cudaMallocAsync, see c10/cuda/CUDAMallocAsync.cpp:cacheInfo for details.
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
 
   for (const auto i : c10::irange(n_algo)) {
     cudnnStatus_t err;
