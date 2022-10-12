@@ -357,7 +357,7 @@ class GemmBlockSparseMicrokernelTester {
 
   void test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_function packa,
-      pytorch_q8gemm_dq_sparse_packedA_ukernel_function qgemm) const {
+      pytorch_q8gemm_dq_sparse_packedA_w32_ukernel_function qgemm) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
 

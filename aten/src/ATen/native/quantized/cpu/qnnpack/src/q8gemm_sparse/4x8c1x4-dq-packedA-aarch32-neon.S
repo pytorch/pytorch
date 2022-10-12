@@ -60,7 +60,7 @@
 #  |----------------|
 #
 
-# void pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon(
+# void pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
 #     const uint8_t* a_packed,
@@ -72,7 +72,7 @@
 #     size_t c_stride,
 #     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_dynamic_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -449,8 +449,16 @@ k_loop:
     POP {r4, r5, r6, r7, r8, r9, r10, r11, lr}
     BX lr
 
-END_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon
+END_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits
 #endif
+
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w16__aarch32_neon
+    BX lr
+END_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w16__aarch32_neon
+
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w8__aarch32_neon
+    BX lr
+END_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w8__aarch32_neon
