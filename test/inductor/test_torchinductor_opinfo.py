@@ -11,7 +11,6 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
-from torch._inductor.utils import has_triton
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -28,11 +27,14 @@ from torch.testing._internal.common_utils import (
 )
 
 try:
+    from torch._inductor.utils import has_triton
+
     try:
         from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
         from test_torchinductor import check_model, check_model_cuda
-except unittest.SkipTest:
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
     raise
