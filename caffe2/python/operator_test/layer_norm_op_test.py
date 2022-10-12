@@ -352,10 +352,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
             actual_norm, actual_mean, actual_std = jit_layer_norm(
                 torch.tensor(X), None, None, axis, eps, elementwise_affine)
 
-        torch.testing.assert_close(
-            expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
-        torch.testing.assert_close(expected_mean, actual_mean)
-        torch.testing.assert_close(expected_std, actual_std)
+        torch.testing.assert_close(torch.from_numpy(expected_norm), actual_norm, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(torch.from_numpy(expected_mean), actual_mean)
+        torch.testing.assert_close(torch.from_numpy(expected_std), actual_std)
 
     @given(X=hu.tensor(min_dim=2), **hu.gcs)
     def test_layer_norm_brew_wrapper(self, X, gc, dc):
