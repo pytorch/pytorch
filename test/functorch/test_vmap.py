@@ -17,6 +17,7 @@ import itertools
 import warnings
 import unittest
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops
@@ -3272,6 +3273,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # ---------------------------------------------------------------------
     }
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
         tol1('linalg.det',
