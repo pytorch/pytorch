@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from torch.multiprocessing import Pool, get_context
+from torch.multiprocessing import get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
