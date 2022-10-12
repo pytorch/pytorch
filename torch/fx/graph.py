@@ -2,8 +2,8 @@ from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_na
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
-import contextlib
 
+import contextlib
 from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
@@ -188,6 +188,21 @@ class _Namespace:
 
         return False
 
+dtype_abbrs = {
+    torch.bfloat16: 'bf16',
+    torch.float64: 'f64',
+    torch.float32: 'f32',
+    torch.float16: 'f16',
+    torch.complex32: 'c32',
+    torch.complex64: 'c64',
+    torch.complex128: 'c128',
+    torch.int8: 'i8',
+    torch.int16: 'i16',
+    torch.int32: 'i32',
+    torch.int64: 'i64',
+    torch.bool: 'b8',
+    torch.uint8: 'u8',
+}
 
 @compatibility(is_backward_compatible=True)
 @dataclass
@@ -457,10 +472,29 @@ class CodeGen(object):
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
-                    body.append('\n# No stacktrace found for following nodes \n')
+                    body.append('\n# No stacktrace found for following nodes\n')
+
+        def stringify_shape(shape : torch.Size) -> str:
+            return f"[{','.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
+
+            if verbose:
+                # override annotation with more detailed information
+                from torch._subclasses.fake_tensor import FakeTensor
+                from torch.fx.experimental.proxy_tensor import _py_sym_types
+                from torch.fx.passes.shape_prop import TensorMetadata
+
+                meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
+
+                if isinstance(meta_val, FakeTensor):
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                elif isinstance(meta_val, _py_sym_types):
+                    maybe_type_annotation = f': Sym({meta_val.expr})'
+                elif isinstance(meta_val, TensorMetadata):
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
@@ -552,7 +586,7 @@ class CodeGen(object):
 
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
-        code = ''.join(body)
+        code = ''.join(body).lstrip('\n')
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
 {wrap_stmts}
