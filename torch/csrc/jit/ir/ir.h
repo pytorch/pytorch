@@ -423,6 +423,7 @@ struct TORCH_API Node {
     return scope_->namesFromRoot();
   }
 
+  // Copies the source range, scope and callstack from another node.
   Node* copyMetadata(Node* from) {
     this->setSourceRange(from->sourceRange());
     this->setScope(from->scope());
