@@ -337,6 +337,35 @@ struct ViewOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
+  virtual void print(std::ostream& os, bool close_function = true) const {
+    RecordFunctor::print(os, false);
+    os << ", original_shape=[";
+    bool first_arg = true;
+    for (auto shape : original_shape_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << shape;
+    }
+    os << "]";
+    os << ", new_shape=[";
+    bool first_arg = true;
+    for (auto shape : new_shape_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << shape;
+    }
+    os << "]";
+    if (close_function) {
+      os << ")";
+    }
+  }
+
  private:
   //! Represents the tensor dimensions of the input tensor.
   std::vector<int64_t> original_shape_;
