@@ -136,6 +136,21 @@ bool SymInt::operator>=(SymInt sci) const {
   return res[0]->ge(res[1])->bool_();
 }
 
+SymInt SymInt::min(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return std::min(data_, sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->min(res[1]));
+}
+SymInt SymInt::max(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return std::max(data_, sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->max(res[1]));
+}
+
 void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
 }

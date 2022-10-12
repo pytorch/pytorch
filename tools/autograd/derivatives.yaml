@@ -1493,19 +1493,19 @@
   result: auto_element_wise
 
 - name: squeeze(Tensor(a) self) -> Tensor(a)
-  self: unsqueeze_to(grad, self.sizes())
+  self: unsqueeze_to(grad, self.sym_sizes())
   result: auto_linear
 
 - name: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
-  self: unsqueeze_to(grad, dim, self.sizes())
+  self: unsqueeze_to(grad, dim, self.sym_sizes())
   result: auto_linear
 
 - name: squeeze_(Tensor(a!) self) -> Tensor(a!)
-  self: unsqueeze_to(grad, self.sizes())
+  self: unsqueeze_to(grad, self.sym_sizes())
   result: auto_linear
 
 - name: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
-  self: unsqueeze_to(grad, dim, self.sizes())
+  self: unsqueeze_to(grad, dim, self.sym_sizes())
   result: auto_linear
 
 - name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
