@@ -344,9 +344,6 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             or func == torch.ops.aten.native_batch_norm
         )
 
-    def _is_cudnn_batch_norm(self, func):
-        return func == torch.ops.aten.cudnn_batch_norm.default
-
     def _is_rand_like(self, func):
         result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
             func == torch.ops.aten.rand_like or func == torch.ops.aten.rand_like.default
