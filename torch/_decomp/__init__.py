@@ -144,7 +144,7 @@ If you're registering an operator through the `@register_decomposition` decorato
 Please set `disable_meta=True`.
                         """
                         )
-                    meta_lib.impl(op_overload, fn)
+                    # meta_lib.impl(op_overload, fn)
 
         # To handle allowing multiple aten_ops at once
         tree_map(add_op_to_table, aten_op)
