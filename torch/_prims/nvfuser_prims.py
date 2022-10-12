@@ -42,6 +42,7 @@ nvprim_names = [
     "atanh",
     "cos",
     "cosh",
+    "clone",
     "bitwise_not",
     "ceil",
     "erf",
@@ -322,9 +323,14 @@ def _amin_nvfuser(
     return fd.ops.min(a, dims, keep_dims)
 
 
+def _clone_nvfuser(fd: Any, input: TensorLikeType, *, memory_format=None):
+    return fd.ops.set(input)
+
+
 _nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
+_nvfuser_impls["clone"] = _clone_nvfuser
 _nvfuser_impls["transpose"] = _transpose_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["view_of"] = _view_of_nvfuser
