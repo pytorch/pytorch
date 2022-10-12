@@ -34,8 +34,8 @@ def parse_args() -> Any:
 
 
 def main() -> None:
-    print(os.environ.get("GH_RUN_URL"))
     args = parse_args()
+    print("token set" if os.environ.get("GITHUB_TOKEN") else "token not set")
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
