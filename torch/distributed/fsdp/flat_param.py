@@ -304,6 +304,7 @@ class FlatParamHandle:
         self._use_orig_params = use_orig_params
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
+        self._computation_stream = torch.cuda.current_stream()
         self._init_flat_param(params, module, use_orig_params)
         self._use_unsharded_views(as_params=False)
 
@@ -1070,7 +1071,7 @@ class FlatParamHandle:
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
         unsharded_flat_param.record_stream(
-            cast(torch._C.Stream, torch.cuda.current_stream())
+            cast(torch._C.Stream, self._computation_stream)
         )
         _free_storage(unsharded_flat_param)
 
