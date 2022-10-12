@@ -536,8 +536,6 @@ class TestDistBackend(MultiProcessTestCase):
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = []
-        # Explicitly looking for a free port here
-        os.environ["MASTER_PORT"] = str(find_free_port())
 
     def tearDown(self):
         cleanup_temp_dir()

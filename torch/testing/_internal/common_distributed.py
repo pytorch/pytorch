@@ -546,7 +546,9 @@ class MultiProcessTestCase(TestCase):
                 args=(rank, self._current_test_name(), self.file_name, child_conn),
             )
             process.start()
-            logger.info(f"Started process {rank} with pid {process.pid}")
+            logger.info(
+                f"Started process {rank} with pid {process.pid} from {os.getpid()} {sys.argv} (parent {os.getppid()})"
+            )
             self.pid_to_pipe[process.pid] = parent_conn
             self.processes.append(process)
 
@@ -691,7 +693,8 @@ class MultiProcessTestCase(TestCase):
                     # encountered an exception.
                     if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE:
                         print(
-                            f"Process {i} terminated with exit code {p.exitcode}, terminating remaining processes."
+                            f"Process {i} terminated with exit code {p.exitcode}, " +
+                            f"terminating remaining processes ({os.environ['BACKEND']})."
                         )
                         active_children = torch.multiprocessing.active_children()
                         for ac in active_children:
@@ -708,7 +711,7 @@ class MultiProcessTestCase(TestCase):
                 if elapsed > timeout:
                     self._get_timedout_process_traceback()
                     print(
-                        f"Timing out after {timeout} seconds and killing subprocesses."
+                        f"Timing out after {timeout} seconds and killing subprocesses ({os.environ['BACKEND']})."
                     )
                     for p in self.processes:
                         p.terminate()
