@@ -35,25 +35,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization.backend_config.native": [
-    "Any",
-    "Dict",
-    "FixedQParamsFakeQuantize",
-    "List",
-    "ObservationType",
-    "default_fixed_qparams_range_0to1_observer",
-    "default_fixed_qparams_range_neg1to1_observer",
-    "default_affine_fixed_qparams_observer",
-    "default_symmetric_fixed_qparams_observer",
-    "fuse_conv_bn",
-    "fuse_conv_bn_relu",
-    "fuse_convtranspose_bn",
-    "fuse_linear_bn",
-    "namedtuple",
-    "reverse2",
-    "reverse3",
-    "reverse_sequential_wrapper2"
-  ],
   "torch.ao.quantization.quantization_types": [
       "Any",
       "Node",
