@@ -1836,15 +1836,15 @@ Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymInt split_size,
     int64_t dim,
-    c10::SymIntArrayRef sym_sizes,
+    c10::SymIntArrayRef sizes,
     const at::TensorOptions& options) {
-  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
-  auto dim_size = sym_sizes[dim];
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  auto dim_size = sizes[dim];
   int64_t num_splits = grads.size();
   std::vector<c10::SymInt> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
       split_size - (split_size * num_splits - dim_size);
-  return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
+  return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
 }
 
 Tensor max_pool_double_backward(

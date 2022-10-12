@@ -5299,7 +5299,7 @@ for shape in [(1,), ()]:
             out.grad_fn._raw_saved_indices[0].register_hooks(lambda x: x, lambda x: x)
 
         out = a.mean()
-        self.assertEqual(out.grad_fn._saved_self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
+        self.assertEqual(out.grad_fn._saved_self_sym_sizes, a.shape)          # IntArrayRef -> Tuple[int]
 
         a = torch.ones(2, 2, requires_grad=True)
         out = a * a
