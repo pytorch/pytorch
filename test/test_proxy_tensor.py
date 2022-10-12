@@ -1076,7 +1076,6 @@ symbolic_tensor_failures = {
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('einsum', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.fft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.fft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.fftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1107,7 +1106,6 @@ symbolic_tensor_failures = {
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('hsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('index_copy', ''),  # Expected a long tensor for index, but got Float
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
@@ -1262,7 +1260,6 @@ symbolic_tensor_failures = {
     xfail('special.bessel_y1', ''),  # aten.special_bessel_y1.default - couldn't find symbolic meta function/decomposition
     xfail('special.chebyshev_polynomial_t', ''),  # aten.special_chebyshev_polynomial_t.default - couldn't find symbolic me...
     xfail('special.chebyshev_polynomial_u', ''),  # aten.special_chebyshev_polynomial_u.default - couldn't find symbolic me...
-    xfail('special.entr', ''),  # aten.special_entr.default - couldn't find symbolic meta function/decomposition
     xfail('special.erfcx', ''),  # aten.special_erfcx.default - couldn't find symbolic meta function/decomposition
     xfail('special.hermite_polynomial_h', ''),  # aten.special_hermite_polynomial_h.default - couldn't find symbolic meta f...
     xfail('special.hermite_polynomial_he', ''),  # aten.special_hermite_polynomial_he.default - couldn't find symbolic meta...
