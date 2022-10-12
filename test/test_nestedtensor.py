@@ -1291,6 +1291,34 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(ptT, ptT_from_ntT)
 
     @dtypes(torch.float, torch.float16, torch.double)
+    def test_squeeze_unsqueeze(self, device, dtype):
+        a = torch.arange(6).reshape(2, 3)
+        b = torch.arange(15).reshape(5, 3)
+        nt = torch.nested.nested_tensor([a, b], device=device, dtype=dtype)
+        # error case: squeeze nested dimension
+        self.assertRaisesRegex(
+            RuntimeError,
+            "For nested tensors, squeezing dimension 0",
+            lambda: nt.squeeze(0)
+        )
+        # error case: dimension out of range
+        self.assertRaises(IndexError, lambda: nt.squeeze(3))
+
+        # squeezing a dim which does not have size 1 should be a no-op
+        nt2 = nt.squeeze(-1)
+        self.assertEqual(nt, nt2)
+
+        # test cases that should work
+        for i in range(-2, 3):
+            if (i == 0):
+                continue
+            nt_unsqueezed = nt.unsqueeze(i)
+            size_idx = i if i < 0 else i - 1
+            self.assertEqual(nt_unsqueezed._nested_tensor_size()[:, size_idx], torch.ones(2, dtype=torch.long))
+            nt_squeezed = nt_unsqueezed.squeeze(i)
+            self.assertEqual(nt_squeezed, nt)
+
+    @dtypes(torch.float, torch.float16, torch.double)
     def test_transpose_inference_mode_interaction(self, device, dtype):
         nt = self.random_nt(device, dtype, 4, (4, 4))
         # Construct in default mode and transpose while in inference mode
@@ -1757,6 +1785,30 @@ class TestNestedTensorAutograd(TestCase):
 
         ynt = nt.reshape(2, -1, 2, 3)
         ypt = pt.reshape(2, -1, 2, 3)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(torch.nested.to_padded_tensor(nt.grad, 0.0), pt.grad)
+
+    def test_nested_tensor_squeeze_backward(self):
+        nt = torch.nested.nested_tensor([torch.randn((2, 6, 1)), torch.randn((3, 6, 1))], requires_grad=True)
+        with torch.no_grad():
+            pt = torch.nested.to_padded_tensor(nt, 0.0).requires_grad_(True)
+
+        ynt = nt.squeeze(-1)
+        ypt = pt.squeeze(-1)
+        ynt.backward(ynt.clone())
+        ypt.backward(ypt.clone())
+
+        self.assertEqual(torch.nested.to_padded_tensor(nt.grad, 0.0), pt.grad)
+
+    def test_nested_tensor_unsqueeze_backward(self):
+        nt = torch.nested.nested_tensor([torch.randn((2, 6)), torch.randn((3, 6))], requires_grad=True)
+        with torch.no_grad():
+            pt = torch.nested.to_padded_tensor(nt, 0.0).requires_grad_(True)
+
+        ynt = nt.unsqueeze(2)
+        ypt = pt.unsqueeze(2)
         ynt.backward(ynt.clone())
         ypt.backward(ypt.clone())
 
