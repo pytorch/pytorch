@@ -267,6 +267,7 @@ def define_tools_targets(
         name = "test_codegen",
         srcs = [
             "test/test_codegen.py",
+            "test/test_register_dispatch_key.py",
         ],
         contacts = contacts,
         visibility = ["PUBLIC"],

@@ -396,10 +396,7 @@ class RegisterDispatchKey:
             if f.manual_kernel_registration:
                 return None
 
-            if (
-                self.target is Target.REGISTRATION
-                and not self.selector.is_native_function_selected(f)
-            ):
+            if not self.selector.is_native_function_selected(f):
                 return None
 
             sig = self.wrapper_kernel_sig(f)
