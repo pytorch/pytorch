@@ -14,7 +14,7 @@ from trymerge import (
 )
 
 
-def check_labels(pr_labels: List[str]) -> str:
+def check_labels(pr_labels: List[str]) -> bool:
     is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
     if is_not_user_facing_pr:
         return True
