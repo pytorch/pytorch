@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from typing import Dict, Any
-from torch.ao.quantization.quantization_types import Pattern
+from torch.ao.quantization.utils import Pattern
 from ..fake_quantize import FixedQParamsFakeQuantize
 # from .quantization_patterns import BinaryOpQuantizeHandler
 from ..observer import ObserverBase
