@@ -93,7 +93,11 @@ def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, '__module__', None)
     if module_name is not None:
         base_module = module_name.partition('.')[0]
-        return base_module == 'torch'
+        return (
+            base_module == 'torch' and
+            not module_name.startswith("torch._dynamo.") and
+            not module_name.startswith("torch._inductor.")
+        )
 
     name = getattr(obj, '__name__', None)
     # exclude torch because torch.torch.torch.torch works. idk mang
