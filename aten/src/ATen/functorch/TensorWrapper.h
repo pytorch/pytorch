@@ -38,6 +38,7 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
       Tensor value,
       int64_t level,
       std::shared_ptr<bool> is_alive,
+      bool is_immutable = false,  // if true, this came from an operation that aliases an immutable tensor
       bool use_value_sizes_strides = true);
 
   // Override a bunch of methods inherited from TensorImpl to return error messages
@@ -56,6 +57,9 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
     }
     return {};
   }
+  bool is_immutable() const {
+    return is_immutable_;
+  }
   bool is_alive() const;
 
   // Overrides necessary for autograd
@@ -71,6 +75,7 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   const char* tensorimpl_type_name() const override;
   Tensor value_;
   int64_t level_;
+  bool is_immutable_;
 
   // TensorWrapper receives a boolean flag on whether or not the Grad Interpreter
   // that created it is still alive or not.
@@ -84,10 +89,9 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
   std::shared_ptr<bool> is_alive_;
 };
 
-TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level);
+TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable=false);
 TORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
 TORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
 TORCH_API void dumpTensorCout(const Tensor& tensor);
-
 }
 } // namespace at

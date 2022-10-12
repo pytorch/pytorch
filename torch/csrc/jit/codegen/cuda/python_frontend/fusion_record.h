@@ -17,11 +17,13 @@ namespace nvfuser {
 enum class RecordType {
   Base = 0,
   Op,
+  BatchNormOp,
   BroadcastOp,
   CastOp,
   Constant,
   End,
   Tensor,
+  NullTensor,
   Output,
   ReductionOp,
   Scalar,
@@ -962,6 +964,41 @@ struct TensorRecord : RecordFunctor {
   bool is_cpu_;
 };
 
+struct NullTensorRecord : RecordFunctor {
+  NullTensorRecord(std::vector<State> _outputs)
+      : RecordFunctor(
+            {},
+            std::move(_outputs),
+            "null_tensor",
+            RecordType::NullTensor) {}
+  virtual ~NullTensorRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new NullTensorRecord(*this);
+  }
+
+  //! Nothing extra necessary in hash
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 ---------------------------------------  0 |
+  //! | None                                          |
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    return result;
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (dynamic_cast<const NullTensorRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+    }
+    return result;
+  }
+
+  virtual void operator()(FusionDefinition& fd) final {
+    Nvf::TensorView* tv = nullptr;
+    fd.setFusionState(outputs_.at(0).index, tv);
+  }
+};
+
 //! Specialized Record Functor for recording FusionDefinition outputs.
 
 template <class OutputType>
@@ -1378,6 +1415,70 @@ struct VarianceMeanOpRecord : NormOpRecord {
     fd.setFusionState(outputs_.at(0).index, output.var);
     fd.setFusionState(outputs_.at(1).index, output.mean);
   }
+};
+
+struct BatchNormOpRecord : RecordFunctor {
+  BatchNormOpRecord(
+      std::vector<State> args,
+      std::vector<State> outputs,
+      bool training,
+      bool channels_last)
+      : RecordFunctor(
+            std::move(args),
+            std::move(outputs),
+            "ops.batch_norm",
+            RecordType::BatchNormOp),
+        training_(training),
+        channels_last_(channels_last) {}
+  virtual ~BatchNormOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new BatchNormOpRecord(*this);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const BatchNormOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      result = result && (training_ == child_ptr->training_);
+      result = result && (channels_last_ == child_ptr->channels_last_);
+    }
+    return result;
+  }
+
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    return result | (static_cast<size_t>(training_) << 28) |
+        (static_cast<size_t>(channels_last_) << 29);
+  }
+
+  void operator()(FusionDefinition& fd) final {
+    auto x = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
+    auto weight = fd.getFusionState(args_.at(1).index)->as<Nvf::TensorView>();
+    auto bias = fd.getFusionState(args_.at(2).index)->as<Nvf::TensorView>();
+    auto running_mean =
+        fd.getFusionState(args_.at(3).index)->as<Nvf::TensorView>();
+    auto running_var =
+        fd.getFusionState(args_.at(4).index)->as<Nvf::TensorView>();
+    auto momentum = fd.getFusionState(args_.at(5).index)->as<Nvf::Val>();
+    auto eps = fd.getFusionState(args_.at(6).index)->as<Nvf::Val>();
+    auto output = Nvf::batch_norm(
+        x,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training_,
+        momentum,
+        eps,
+        channels_last_);
+    fd.setFusionState(outputs_.at(0).index, output.output);
+    fd.setFusionState(outputs_.at(1).index, output.mean);
+    fd.setFusionState(outputs_.at(2).index, output.invstd);
+  }
+
+ private:
+  bool training_;
+  bool channels_last_;
 };
 
 } // namespace nvfuser

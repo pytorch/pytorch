@@ -98,6 +98,41 @@ using vec2 = vec<2u>;
 using vec3 = vec<3u>;
 using vec4 = vec<4u>;
 
+inline ivec2 make_ivec2(IntArrayRef ints, bool reverse = false) {
+  TORCH_CHECK(ints.size() == 2);
+  if (reverse) {
+    return {safe_downcast<int32_t>(ints[1]), safe_downcast<int32_t>(ints[0])};
+  } else {
+    return {safe_downcast<int32_t>(ints[0]), safe_downcast<int32_t>(ints[1])};
+  }
+}
+
+inline ivec4 make_ivec4(IntArrayRef ints, bool reverse = false) {
+  TORCH_CHECK(ints.size() == 4);
+  if (reverse) {
+    return {
+        safe_downcast<int32_t>(ints[3]),
+        safe_downcast<int32_t>(ints[2]),
+        safe_downcast<int32_t>(ints[1]),
+        safe_downcast<int32_t>(ints[0]),
+    };
+  } else {
+    return {
+        safe_downcast<int32_t>(ints[0]),
+        safe_downcast<int32_t>(ints[1]),
+        safe_downcast<int32_t>(ints[2]),
+        safe_downcast<int32_t>(ints[3]),
+    };
+  }
+}
+
+inline ivec3 make_ivec3(uvec3 ints) {
+  return {
+      safe_downcast<int32_t>(ints.data[0u]),
+      safe_downcast<int32_t>(ints.data[1u]),
+      safe_downcast<int32_t>(ints.data[2u])};
+}
+
 } // namespace utils
 
 inline bool operator==(const utils::uvec3& _1, const utils::uvec3& _2) {

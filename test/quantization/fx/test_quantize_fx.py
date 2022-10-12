@@ -42,6 +42,8 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
     default_qat_qconfig,
     default_reuse_input_qconfig,
+    default_symmetric_qnnpack_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float16_static_qconfig,
@@ -73,6 +75,7 @@ from torch.ao.quantization import (
 )
 
 from torch.ao.quantization.backend_config import (
+    get_qnnpack_backend_config,
     BackendConfig,
     BackendPatternConfig,
     DTypeConfig,
@@ -743,7 +746,7 @@ class TestQuantizeFx(QuantizationTestCase):
             ],
         }
         prepared = prepare_qat_fx(model, qconfig_dict, example_inputs=(torch.randn(1, 5),))
-        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.nn.intrinsic.qat.LinearReLU))
+        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.ao.nn.intrinsic.qat.LinearReLU))
 
     def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:
@@ -2619,8 +2622,13 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.linear2.weight = torch.nn.Parameter(original_m.custom.linear.weight.detach())
         original_ref_m.linear2.bias = torch.nn.Parameter(original_m.custom.linear.bias.detach())
 
+        a16_qconfig = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.qint32, quant_min=0, quant_max=65536),
+            weight=default_weight_observer,
+        )
         test_configs = {
             "static": (default_qconfig, StaticQuantCustomModule, 3),
+            "static_a16": (a16_qconfig, StaticQuantCustomModule, 3),
             "dynamic": (default_dynamic_qconfig, DynamicQuantCustomModule, 0)
         }
 
@@ -4964,7 +4972,8 @@ class TestQuantizeFx(QuantizationTestCase):
             model: torch.nn.Module,
             qconfig: QConfig,
             backend_config: BackendConfig,
-            satisfies_constraints: bool):
+            satisfies_constraints: bool,
+            qconfig_name: Optional[str] = None):
         """
         Helper method to validate whether `qconfig` satisfies the constraints specified in `backend_config`.
         """
@@ -4983,7 +4992,12 @@ class TestQuantizeFx(QuantizationTestCase):
                 ns.call_module(torch.ao.nn.quantized.Linear) : 0,
                 ns.call_module(torch.nn.Linear) : 1,
             }
-        self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+        try:
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+        except AssertionError as e:
+            if qconfig_name is not None:
+                print("ERROR: Validation for QConfig '%s' failed" % qconfig_name)
+            raise e
 
     def test_backend_config_quantization_range(self):
         """
@@ -5108,6 +5122,38 @@ class TestQuantizeFx(QuantizationTestCase):
             activation=FixedQParamsObserver.with_args(scale=1.0, zero_point=0),
             weight=FixedQParamsObserver.with_args(scale=1.0, zero_point=0))
         validate_qconfig(qconfig5, satisfies_constraints=False)
+
+    def test_qnnpack_backend_config(self):
+        """
+        Test whether default QNNPACK QConfigs are compatible with the QNNPACK BackendConfig.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        all_qconfigs: List[Tuple[QConfig, str]] = [
+            (get_default_qconfig("qnnpack", version=0), "default_qnnpack_qconfig_v0"),
+            (get_default_qat_qconfig("qnnpack", version=0), "default_qat_qnnpack_qconfig_v0"),
+            (get_default_qat_qconfig("qnnpack", version=1), "default_qat_qnnpack_qconfig_v1"),
+            (default_symmetric_qnnpack_qconfig, "default_symmetric_qnnpack_qconfig"),
+            (default_symmetric_qnnpack_qat_qconfig, "default_symmetric_qnnpack_qat_qconfig"),
+            # TODO: Test these QConfigs once they are fixed, see https://github.com/pytorch/pytorch/issues/85862
+            # (default_per_channel_symmetric_qnnpack_qconfig, "default_per_channel_symmetric_qnnpack_qconfig"),
+            # (default_per_channel_symmetric_qnnpack_qat_qconfig, "default_per_channel_symmetric_qnnpack_qat_qconfig"),
+        ]
+        backend_config = get_qnnpack_backend_config()
+        for qconfig, qconfig_name in all_qconfigs:
+            self._validate_qconfig_against_backend_config_constraints(
+                MyModel(), qconfig, backend_config, satisfies_constraints=True, qconfig_name=qconfig_name)
+
+    def test_get_executorch_backend_config(self):
+        from torch.ao.quantization.backend_config import get_executorch_backend_config
+        # make sure this runs
+        executorch_backend_config = get_executorch_backend_config()
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

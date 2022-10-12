@@ -73,7 +73,10 @@ using StorageImplData = strong::type<
 // handle ABA for TensorImpl as those allocations are not instrumented.)
 using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
 
-struct RawTensorMetadata {
+struct TORCH_API RawTensorMetadata {
+  RawTensorMetadata() = default;
+  RawTensorMetadata(const RawTensorMetadata&) = default;
+  explicit RawTensorMetadata(const at::Tensor& t);
   TensorImplAddress impl_;
   StorageImplData data_;
 
@@ -88,8 +91,8 @@ struct RawTensorMetadata {
 };
 
 struct TensorMetadata : public RawTensorMetadata {
-  explicit TensorMetadata(const RawTensorMetadata& m) : RawTensorMetadata(m) {}
-
+  explicit TensorMetadata(const RawTensorMetadata& r) : RawTensorMetadata(r) {}
+  explicit TensorMetadata(const at::Tensor& t) : RawTensorMetadata(t) {}
   c10::Device device() const {
     return {device_type_, device_index_};
   }
@@ -177,8 +180,7 @@ struct ExtraFields<EventType::Backend> {
   jit_modules_t jit_modules_;
 };
 
-template <>
-struct ExtraFields<EventType::Allocation> {
+struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
@@ -190,8 +192,19 @@ struct ExtraFields<EventType::Allocation> {
 
 // For performance.
 static_assert(
-    std::is_pod<ExtraFields<EventType::Allocation>>::value,
-    "Non-POD member of ExtraFields<EventType::Allocation>.");
+    std::is_pod<RawAllocation>::value,
+    "Non-POD member of RawAllocation.");
+
+template <>
+struct ExtraFields<EventType::Allocation> : RawAllocation {
+  ExtraFields(const RawAllocation& allocation) : RawAllocation(allocation) {}
+
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  c10::optional<TensorID> id_;
+};
 
 template <>
 struct ExtraFields<EventType::OutOfMemory> {
@@ -224,12 +237,18 @@ using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
 using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
 
+struct ParameterInfo {
+  std::string param_name_;
+  TensorMetadata param_;
+  c10::optional<TensorMetadata> grad_;
+};
+
 struct NNModuleInfo {
   PyModuleSelf self_;
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<std::pair<std::string, void*>> params_;
+  std::vector<ParameterInfo> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };
@@ -239,8 +258,8 @@ struct OptimizerInfo {
   PyOptimizerCls opt_;
   at::StringView opt_name_;
 
-  std::vector<void*> params_addr_;
-  std::vector<std::pair<std::string, void*>> opt_state_;
+  std::vector<TensorMetadata> params_addr_;
+  std::vector<std::pair<std::string, TensorMetadata>> opt_state_;
 };
 
 struct PyExtraFieldsBase {
@@ -528,7 +547,7 @@ class TORCH_API ThreadLocalSubqueue {
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
 
   // reportMemoryUsage
-  AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
+  AppendOnlyList<RawAllocation, BlockSize> allocations_;
 
   // reportOOMs
   AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;

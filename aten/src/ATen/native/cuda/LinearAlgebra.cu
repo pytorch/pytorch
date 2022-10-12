@@ -101,14 +101,14 @@ static void _launch_kernel(int total_n_elems, func_t f) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
+void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size, const int64_t max_pivot) {
   if (iter.numel() == 0) {
     return;
   }
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      unpack_pivots_cuda_kernel(sub_iter, dim_size);
+      unpack_pivots_cuda_kernel(sub_iter, dim_size, max_pivot);
     }
     return;
   }

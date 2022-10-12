@@ -210,6 +210,29 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
     )
 
 
+def _native_batch_norm_nvfuser(
+    fd, input, weight, bias, running_mean, running_var, training, momentum, eps
+):
+    if weight is None:
+        weight = fd.define_null_tensor()
+    if bias is None:
+        bias = fd.define_null_tensor()
+    if running_mean is None:
+        running_mean = fd.define_null_tensor()
+    if running_var is None:
+        running_var = fd.define_null_tensor()
+    return fd.ops.batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        momentum,
+        eps,
+    )
+
+
 def _broadcast_in_dim_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -308,6 +331,7 @@ def _amin_nvfuser(
     return fd.ops.min(a, dims, keep_dims)
 
 
+_nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
 _nvfuser_impls["transpose"] = _transpose_nvfuser
@@ -320,6 +344,36 @@ _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
+
+
+def register_native_batch_norm():
+    """This function is used to register the native_batch_norm function in torch.ops.nvprims module."""
+    name = "native_batch_norm"
+
+    nvprim.define(
+        f"{name}(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, "
+        + "bool training, float momentum, float eps)"
+        + " -> (Tensor, Tensor, Tensor)"
+    )
+
+    def _prim_impl(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    ):
+        return torch.native_batch_norm(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+
+    nvprim_impl.impl(name, _prim_impl)
+    nvprim_autograd_impl.impl(
+        name, backwards_not_supported(torch.ops.nvprims.native_batch_norm.default)
+    )
+
+    prim_packet = torch.ops.nvprims.native_batch_norm
+    prim = prim_packet.default
+    for p in (prim_packet, prim):
+        p.__doc__ = "Computes batch normalization."
+        p.impl_nvfuser = _nvfuser_impls["native_batch_norm"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
 def register_rand_like():
@@ -341,6 +395,7 @@ def register_rand_like():
     ):
         strides = make_contiguous_strides_for(self.shape)
         return torch._prims.TensorMeta(
+            self,
             shape=self.shape,
             strides=strides,
             dtype=dtype,
@@ -514,6 +569,7 @@ def register_nvprims():
     """Registers all nvFuser primitives in the torch.ops.nvprims module."""
     register_var_mean()
     register_view()
+    register_native_batch_norm()
     register_rand_like()
 
     for name in nvprim_names:

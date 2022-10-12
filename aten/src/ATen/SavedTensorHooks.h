@@ -46,7 +46,7 @@ struct TORCH_API SavedTensorDefaultHooks {
   static void disable(const std::string& error_message);
   static void enable();
   static bool is_enabled();
-  static const optional<std::string>& get_disabled_error_message();
+  static const c10::optional<std::string>& get_disabled_error_message();
 };
 
 } // namespace at

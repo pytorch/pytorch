@@ -31,7 +31,7 @@ def doesnt_support_saved_tensors_hooks(f):
 
     @functools.wraps(f)
     def fn(*args, **kwargs):
-        with torch.autograd.graph._disable_saved_tensors_hooks(message):
+        with torch.autograd.graph.disable_saved_tensors_hooks(message):
             return f(*args, **kwargs)
     return fn
 

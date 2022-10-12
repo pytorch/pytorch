@@ -46,7 +46,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import _beartype, diagnostics, jit_utils, registration
 
 __all__ = [
     "is_in_onnx_export",
@@ -182,8 +182,8 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         model
     ) as apex_ctx, setup_onnx_logging(
         verbose
-    ) as log_ctx:
-        yield (mode_ctx, apex_ctx, log_ctx)
+    ) as log_ctx, diagnostics.create_export_diagnostic_context() as diagnostic_ctx:
+        yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
 @_beartype.beartype
@@ -215,7 +215,7 @@ def export(
     for dynamic control flow as :func:`torch.jit.trace`.
 
     Args:
-        model (torch.nn.Module, torch.jit.ScriptModule or torch.jit.ScriptFunction):
+        model (:class:`torch.nn.Module`, :class:`torch.jit.ScriptModule` or :class:`torch.jit.ScriptFunction`):
             the model to be exported.
         args (tuple or torch.Tensor):
 
@@ -238,9 +238,13 @@ def export(
 
             3. A TUPLE OF ARGUMENTS ENDING WITH A DICTIONARY OF NAMED ARGUMENTS::
 
-                args = (x,
-                        {'y': input_y,
-                         'z': input_z})
+                args = (
+                    x,
+                    {
+                        "y": input_y,
+                        "z": input_z
+                    }
+                )
 
             All but the last element of the tuple will be passed as non-keyword arguments,
             and named arguments will be set from the last element. If a named argument is
@@ -255,19 +259,25 @@ def export(
 
                     torch.onnx.export(
                         model,
-                        (x,
-                         # WRONG: will be interpreted as named arguments
-                         {y: z}),
-                        "test.onnx.pb")
+                        (
+                            x,
+                            # WRONG: will be interpreted as named arguments
+                            {y: z}
+                        ),
+                        "test.onnx.pb"
+                    )
 
                 Write::
 
                     torch.onnx.export(
                         model,
-                        (x,
-                         {y: z},
-                         {}),
-                        "test.onnx.pb")
+                        (
+                            x,
+                            {y: z},
+                            {}
+                        ),
+                        "test.onnx.pb"
+                    )
 
         f: a file-like object (such that ``f.fileno()`` returns a file descriptor)
             or a string containing a file name.  A binary protocol buffer will be written
@@ -283,9 +293,9 @@ def export(
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
-              False and in training mode if model.training is True.
+                False and in training mode if model.training is True.
             * ``TrainingMode.TRAINING``: export the model in training mode. Disables optimizations
-              which might interfere with training.
+                which might interfere with training.
         input_names (list of str, default empty list): names to assign to the
             input nodes of the graph, in order.
         output_names (list of str, default empty list): names to assign to the
@@ -293,60 +303,60 @@ def export(
         operator_export_type (enum, default OperatorExportTypes.ONNX):
 
             * ``OperatorExportTypes.ONNX``: Export all ops as regular ONNX ops
-              (in the default opset domain).
+                (in the default opset domain).
             * ``OperatorExportTypes.ONNX_FALLTHROUGH``: Try to convert all ops
-              to standard ONNX ops in the default opset domain. If unable to do so
-              (e.g. because support has not been added to convert a particular torch op to ONNX),
-              fall back to exporting the op into a custom opset domain without conversion. Applies
-              to `custom ops <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_
-              as well as ATen ops. For the exported model to be usable, the runtime must support
-              these non-standard ops.
+                to standard ONNX ops in the default opset domain. If unable to do so
+                (e.g. because support has not been added to convert a particular torch op to ONNX),
+                fall back to exporting the op into a custom opset domain without conversion. Applies
+                to `custom ops <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_
+                as well as ATen ops. For the exported model to be usable, the runtime must support
+                these non-standard ops.
             * ``OperatorExportTypes.ONNX_ATEN``: All ATen ops (in the TorchScript namespace "aten")
-              are exported as ATen ops (in opset domain "org.pytorch.aten").
-              `ATen <https://pytorch.org/cppdocs/#aten>`_ is PyTorch's built-in tensor library, so
-              this instructs the runtime to use PyTorch's implementation of these ops.
+                are exported as ATen ops (in opset domain "org.pytorch.aten").
+                `ATen <https://pytorch.org/cppdocs/#aten>`_ is PyTorch's built-in tensor library, so
+                this instructs the runtime to use PyTorch's implementation of these ops.
 
-              .. warning::
+                .. warning::
 
-                Models exported this way are probably runnable only by Caffe2.
+                    Models exported this way are probably runnable only by Caffe2.
 
-              This may be useful if the numeric differences in implementations of operators are
-              causing large differences in behavior between PyTorch and Caffe2 (which is more
-              common on untrained models).
+                    This may be useful if the numeric differences in implementations of operators are
+                    causing large differences in behavior between PyTorch and Caffe2 (which is more
+                    common on untrained models).
 
             * ``OperatorExportTypes.ONNX_ATEN_FALLBACK``: Try to export each ATen op
-              (in the TorchScript namespace "aten") as a regular ONNX op. If we are unable to do so
-              (e.g. because support has not been added to convert a particular torch op to ONNX),
-              fall back to exporting an ATen op. See documentation on OperatorExportTypes.ONNX_ATEN for
-              context.
-              For example::
+                (in the TorchScript namespace "aten") as a regular ONNX op. If we are unable to do so
+                (e.g. because support has not been added to convert a particular torch op to ONNX),
+                fall back to exporting an ATen op. See documentation on OperatorExportTypes.ONNX_ATEN for
+                context.
+                For example::
 
-                graph(%0 : Float):
-                  %3 : int = prim::Constant[value=0]()
-                  # conversion unsupported
-                  %4 : Float = aten::triu(%0, %3)
-                  # conversion supported
-                  %5 : Float = aten::mul(%4, %0)
-                  return (%5)
+                    graph(%0 : Float):
+                    %3 : int = prim::Constant[value=0]()
+                    # conversion unsupported
+                    %4 : Float = aten::triu(%0, %3)
+                    # conversion supported
+                    %5 : Float = aten::mul(%4, %0)
+                    return (%5)
 
-              Assuming ``aten::triu`` is not supported in ONNX, this will be exported as::
+                Assuming ``aten::triu`` is not supported in ONNX, this will be exported as::
 
-                graph(%0 : Float):
-                  %1 : Long() = onnx::Constant[value={0}]()
-                  # not converted
-                  %2 : Float = aten::ATen[operator="triu"](%0, %1)
-                  # converted
-                  %3 : Float = onnx::Mul(%2, %0)
-                  return (%3)
+                    graph(%0 : Float):
+                    %1 : Long() = onnx::Constant[value={0}]()
+                    # not converted
+                    %2 : Float = aten::ATen[operator="triu"](%0, %1)
+                    # converted
+                    %3 : Float = onnx::Mul(%2, %0)
+                    return (%3)
 
-              If PyTorch was built with Caffe2 (i.e. with ``BUILD_CAFFE2=1``), then
-              Caffe2-specific behavior will be enabled, including special support
-              for ops are produced by the modules described in
-              `Quantization <https://pytorch.org/docs/stable/quantization.html>`_.
+                If PyTorch was built with Caffe2 (i.e. with ``BUILD_CAFFE2=1``), then
+                Caffe2-specific behavior will be enabled, including special support
+                for ops are produced by the modules described in
+                `Quantization <https://pytorch.org/docs/stable/quantization.html>`_.
 
-              .. warning::
+                .. warning::
 
-                Models exported this way are probably runnable only by Caffe2.
+                    Models exported this way are probably runnable only by Caffe2.
 
         opset_version (int, default 14): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
@@ -354,16 +364,16 @@ def export(
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
-        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
+        dynamic_axes (dict[string, dict[int, string]] or dict[string, list(int)], default empty dict):
 
             By default the exported model will have the shapes of all input and output tensors
             set to exactly match those given in ``args``. To specify axes of tensors as
             dynamic (i.e. known only at run-time), set ``dynamic_axes`` to a dict with schema:
 
             * KEY (str): an input or output name. Each name must also be provided in ``input_names`` or
-              ``output_names``.
+                ``output_names``.
             * VALUE (dict or list): If a dict, keys are axis indices and values are axis names. If a
-              list, each element is an axis index.
+                list, each element is an axis index.
 
             For example::
 
@@ -371,8 +381,13 @@ def export(
                     def forward(self, x):
                         return torch.sum(x, dim=1)
 
-                torch.onnx.export(SumModule(), (torch.ones(2, 2),), "onnx.pb",
-                                  input_names=["x"], output_names=["sum"])
+                torch.onnx.export(
+                    SumModule(),
+                    (torch.ones(2, 2),),
+                    "onnx.pb",
+                    input_names=["x"],
+                    output_names=["sum"]
+                )
 
             Produces::
 
@@ -396,14 +411,19 @@ def export(
 
             While::
 
-                torch.onnx.export(SumModule(), (torch.ones(2, 2),), "onnx.pb",
-                                  input_names=["x"], output_names=["sum"],
-                                  dynamic_axes={
-                                      # dict value: manually named axes
-                                      "x": {0: "my_custom_axis_name"},
-                                      # list value: automatic names
-                                      "sum": [0],
-                                  })
+                torch.onnx.export(
+                    SumModule(),
+                    (torch.ones(2, 2),),
+                    "onnx.pb",
+                    input_names=["x"],
+                    output_names=["sum"],
+                    dynamic_axes={
+                        # dict value: manually named axes
+                        "x": {0: "my_custom_axis_name"},
+                        # list value: automatic names
+                        "sum": [0],
+                    }
+                )
 
             Produces::
 
@@ -440,10 +460,10 @@ def export(
             If None, then the behavior is chosen automatically as follows:
 
             * If ``operator_export_type=OperatorExportTypes.ONNX``, the behavior is equivalent
-              to setting this argument to False.
+                to setting this argument to False.
             * Else, the behavior is equivalent to setting this argument to True.
 
-        custom_opsets (dict<str, int>, default empty dict): A dict with schema:
+        custom_opsets (dict[str, int], default empty dict): A dict with schema:
 
             * KEY (str): opset domain name
             * VALUE (int): opset version
@@ -471,14 +491,17 @@ def export(
             will have prefix "inferred::". This is to differentiate from predefined attributes retrieved from
             python module annotations. Inferred attributes are used inside the subgraph of ONNX local function.
 
-            * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
+            * ``False`` (default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
             * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
-              only if the type of the ``nn.Module`` is found in the set.
+                only if the type of the ``nn.Module`` is found in the set.
 
     Raises:
-      CheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
-        model to the file ``f`` even if this is raised.
+        :class:`torch.onnx.errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
+        :class:`torch.onnx.errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
+            uses an operator that is not supported by the exporter.
+        :class:`torch.onnx.errors.OnnxExporterError`: Other errors that can occur during export.
+            All errors are subclasses of :class:`errors.OnnxExporterError`.
     """
 
     _export(
@@ -842,7 +865,11 @@ def _trace(func, args, operator_export_type, return_outs=False):
         args = (args,)
 
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
-        func, args, strict=False, _force_outplace=False, _return_inputs_states=True
+        func,
+        args,
+        strict=False,
+        _force_outplace=False,
+        _return_inputs_states=True,
     )
     warn_on_static_input_change(inputs_states)
 
@@ -865,7 +892,11 @@ def _trace_and_get_graph_from_model(model, args):
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
-        model, args, strict=False, _force_outplace=False, _return_inputs_states=True
+        model,
+        args,
+        strict=False,
+        _force_outplace=False,
+        _return_inputs_states=True,
     )
     torch.set_autocast_cache_enabled(prev_autocast_cache_enabled)
 
@@ -1201,7 +1232,7 @@ def export_to_pretty_string(
             protobuf's `Message::DebugString()`, which is more verbose.
 
     Returns:
-      A UTF-8 str containing a human-readable representation of the ONNX model.
+        A UTF-8 str containing a human-readable representation of the ONNX model.
     """
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
@@ -1477,7 +1508,9 @@ def _export(
 
         with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(
-                keep_initializers_as_inputs, operator_export_type, opset_version
+                keep_initializers_as_inputs,
+                operator_export_type,
+                opset_version,
             )
             val_add_node_names = _decide_add_node_names(
                 add_node_names, operator_export_type
@@ -1709,7 +1742,9 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 
 @_beartype.beartype
 def _should_aten_fallback(
-    name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
+    name: str,
+    opset_version: int,
+    operator_export_type: _C_onnx.OperatorExportTypes,
 ):
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
