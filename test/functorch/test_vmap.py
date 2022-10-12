@@ -3538,6 +3538,12 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
                                   postprocess_fn=compute_A)
 
+    def test_slogdet(self, device):
+        # There's no OpInfo for this
+        B = 2
+        x = torch.randn(2, 5, 5, device=device)
+        self.vmap_outplace_test(torch.slogdet, (x,), {}, (0,))
+
     def test_fill__Tensor(self, device):
         # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
         def test():
