@@ -8611,8 +8611,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                             "TestCommon", "test_out"),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
-                            "TestCommon", "test_compare_cpu"),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -10190,9 +10188,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           decorators=[
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
-                            'TestCommon', 'test_compare_cpu')],
            skips=(
                # times out
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
@@ -10223,8 +10218,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=0)}),
                             'TestCommon', 'test_out', device_type='cuda',
                             active_if=TEST_WITH_ROCM),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
-                            'TestCommon', 'test_compare_cpu'),
                # mv for the sample with shapes (S, S, M, M), (M,) has some variance in the
                # backward on CPU
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=0, rtol=1e-5)}),
@@ -10709,10 +10702,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_native_layer_norm,
            error_inputs_func=error_inputs_native_layer_norm,
-           decorators=[
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04), }),
-                   'TestCommon', 'test_compare_cpu', device_type='cuda')],
            skips=(
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_forward_mode_AD'),
@@ -10977,10 +10966,7 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05), }),
-                   'TestCommon', 'test_compare_cpu')],
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -11009,9 +10995,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_compare_cpu'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
@@ -11084,10 +11067,6 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
                ),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
-                   'TestCommon', 'test_compare_cpu',
-               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -11150,10 +11129,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_numpy_refs'
-               ),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
-                   'TestCommon', 'test_compare_cpu'
                ),
            ],
            sample_inputs_func=sample_inputs_layer_norm,
@@ -12588,9 +12563,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_ormqr,
            decorators=[
                skipCUDAIfNoCusolver,
-               skipCPUIfNoLapack,
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)}),
-                            'TestCommon', 'test_compare_cpu')],
+               skipCPUIfNoLapack],
            skips=(
                # ormqr does not support forward when complex inputs require grad
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
@@ -13072,8 +13045,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
                             "TestDecomp", "test_comprehensive", device_type="cuda",
                             active_if=TEST_WITH_ROCM),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)}),
-                            'TestCommon', 'test_compare_cpu'),
            ),
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),

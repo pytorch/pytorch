@@ -1657,12 +1657,6 @@ op_db: List[OpInfo] = [
         decorators=[
             skipCUDAIfNoMagma,
             skipCPUIfNoLapack,
-            DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
-                "TestCommon",
-                "test_compare_cpu",
-                device_type="cuda",
-            ),
         ],
         skips=(
             # we skip gradient checks for this suite as they are tested in
