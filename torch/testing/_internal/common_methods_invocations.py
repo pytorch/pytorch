@@ -10250,7 +10250,7 @@ op_db: List[OpInfo] = [
     OpInfo('max',
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=True,
+           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
@@ -10722,8 +10722,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # AssertionError: Booleans mismatch: True is not False
@@ -12501,10 +12502,9 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # couldn't find symbolic meta function/decomposition
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
-               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_meta', device_type='cuda'),
-               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
+               # Not implemented
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
