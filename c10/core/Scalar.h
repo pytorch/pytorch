@@ -105,7 +105,7 @@ class C10_API Scalar {
           intrusive_ptr<SymFloatNodeImpl>::reclaim_copy(
               static_cast<SymFloatNodeImpl*>(v.p)));
     } else {
-      return toLong();
+      return toDouble();
     }
   }
 
