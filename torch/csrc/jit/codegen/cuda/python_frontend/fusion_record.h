@@ -351,7 +351,7 @@ struct ViewOpRecord : RecordFunctor {
     }
     os << "]";
     os << ", new_shape=[";
-    bool first_arg = true;
+    first_arg = true;
     for (auto shape : new_shape_) {
       if (first_arg) {
         first_arg = false;
