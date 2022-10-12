@@ -77,17 +77,16 @@ class HalfRewriter : public IRMutator {
     // get the dtype of the `value()` before that is mutated.
     auto newType = v->value()->dtype();
     ExprPtr new_val = v->value()->accept_mutator(this);
+    auto bufType = v->buf()->dtype();
 
     if (isHalf(newType.scalar_type())) {
       new_val = alloc<Cast>(newType, new_val);
       inserted_half_casts_.insert(new_val);
     }
 
-    if (isHalf(v->buf()->dtype().scalar_type()) &&
-        !isHalf(newType.scalar_type())) {
+    if (!isHalf(newType.scalar_type()) && isHalf(bufType.scalar_type())) {
       new_val = alloc<Cast>(
-          newType.cloneWithScalarType(v->buf()->dtype().scalar_type()),
-          new_val);
+          newType.cloneWithScalarType(bufType.scalar_type()), new_val);
       inserted_half_casts_.insert(new_val);
     }
 
