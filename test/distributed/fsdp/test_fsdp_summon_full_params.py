@@ -1,17 +1,20 @@
 # Owner(s): ["oncall: distributed"]
+import contextlib
 import itertools
 import math
 import sys
 from copy import deepcopy
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import MixedPrecision
+from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp.flat_param import FlatParamHandle
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -19,6 +22,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -76,22 +80,21 @@ class TestSummonFullParamsNoShard(FSDPTest):
         return 1  # does not shard
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("writeback", [True, False])
-    @parametrize("modify_outer", [True, False])
-    @parametrize("mixed_precision", [True, False])
     # TODO: CPUOffload summon + writeback does not
     # work when param is not sharded
     # (currently when world_size == 1)
-    def test_summon_full_param_writeback(
-        self, writeback, modify_outer, mixed_precision
-    ):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
-        return _run_test_summon_full_param_writeback(
-            self,
-            writeback,
-            modify_outer=modify_outer,
+    def test_summon_full_param_writeback(self):
+        subtest_config = {
+            "writeback": [True, False],
+            "modify_outer": [True, False],
+            "mixed_precision": [MixedPrecision(param_dtype=torch.float16), None],
+            "use_orig_params": [True, False],
+        }
+        self.run_subtests(
+            subtest_config,
+            _run_test_summon_full_param_writeback,
+            cls=self,
             cpu_offload=CPUOffload(offload_params=False),
-            mixed_precision=mixed_precision,
         )
 
 
@@ -108,23 +111,21 @@ class TestSummonFullParams(FSDPTest):
         return int(math.ceil(global_size / self.world_size))
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("writeback", [True, False])
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
-    )
-    @parametrize("mixed_precision", [True, False])
-    @parametrize("modify_outer", [True, False])
-    def test_summon_full_param_writeback(
-        self, writeback, cpu_offload, mixed_precision, modify_outer
-    ):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
-        return _run_test_summon_full_param_writeback(
-            self,
-            writeback,
-            modify_outer,
-            cpu_offload=cpu_offload,
-            mixed_precision=mixed_precision,
+    def test_summon_full_param_writeback(self):
+        subtest_config = {
+            "writeback": [True, False],
+            "modify_outer": [True, False],
+            "mixed_precision": [MixedPrecision(param_dtype=torch.float16), None],
+            "cpu_offload": [
+                CPUOffload(offload_params=False),
+                CPUOffload(offload_params=True),
+            ],
+            "use_orig_params": [True, False],
+        }
+        self.run_subtests(
+            subtest_config,
+            _run_test_summon_full_param_writeback,
+            cls=self,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -232,15 +233,30 @@ class TestSummonFullParams(FSDPTest):
             output.backward()
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [True, False])
-    def test_summon_full_params_respects_reshard_after_forward(self, mixed_precision):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+    def test_summon_full_params_respects_reshard_after_forward(self):
+        self.run_subtests(
+            {
+                "mixed_precision": [MixedPrecision(param_dtype=torch.float16), None],
+                "use_orig_params": [False, True],
+            },
+            self._test_summon_full_params_respects_reshard_after_forward,
+        )
+
+    def _test_summon_full_params_respects_reshard_after_forward(
+        self,
+        mixed_precision: Optional[MixedPrecision],
+        use_orig_params: bool
+    ):
+        fsdp_kwargs = {
+            "mixed_precision": mixed_precision,
+            "use_orig_params": use_orig_params,
+        }
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
+                FSDP(nn.Linear(5, 5, bias=False), **fsdp_kwargs),
                 nn.Linear(5, 3, bias=False),
             ),
-            mixed_precision=mixed_precision,
+            **fsdp_kwargs,
         ).cuda(self.rank)
 
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
@@ -564,6 +580,124 @@ class TestSummonFullParams(FSDPTest):
                 ):
                     self.assertEqual(n1, n2)
                     self.assertEqual(p1, p2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_with_grads(self):
+        self.run_subtests(
+            {
+                "writeback": [False, True],
+                "offload_to_cpu": [False, True],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+                "use_orig_params": [True],
+            },
+            self._test_with_grads,
+        )
+
+    def _test_with_grads(
+        self,
+        writeback: bool,
+        offload_to_cpu: bool,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+    ):
+        def _check_grads(
+            ddp_model: DDP,
+            fsdp_model: FSDP,
+            old_fsdp_grads: Optional[List[torch.Tensor]],
+        ):
+            WRITEBACK_FACTOR = 2
+            with FSDP.summon_full_params(
+                fsdp_model,
+                writeback=writeback,
+                offload_to_cpu=offload_to_cpu,
+                with_grads=True,
+            ):
+                for (n1, p1), (n2, p2) in zip(
+                    ddp_model.module.named_parameters(),
+                    fsdp_model.named_parameters(),
+                ):
+                    # Parameter names are only expected to match because
+                    # `fsdp_model` has top-level FSDP, so its
+                    # `named_parameters()` cleans *all* of the names
+                    self.assertEqual(n1, n2)
+                    assert p1.grad is not None
+                    torch.testing.assert_close(p1.grad, p2.grad)
+                    # Ensure that the tensor is not all zeros, which would
+                    # mean that the multiplication is vacuous
+                    assert torch.count_nonzero(p2.grad) > 0
+                    p2.grad *= WRITEBACK_FACTOR
+            new_fsdp_grads = [
+                param.grad for param in fsdp_model.parameters()
+                if param.grad is not None
+            ]
+            writeback_persists = writeback or sharding_strategy == ShardingStrategy.NO_SHARD
+            for old_grad, new_grad in zip(old_fsdp_grads, new_fsdp_grads):
+                if writeback_persists:
+                    torch.testing.assert_close(old_grad * WRITEBACK_FACTOR, new_grad)
+                else:
+                    torch.testing.assert_close(old_grad, new_grad)
+            if writeback_persists:
+                # Modify the DDP gradients for parity
+                for param in ddp_model.parameters():
+                    param.grad *= WRITEBACK_FACTOR
+
+        def _get_error_context(is_supported: bool):
+            return (
+                contextlib.suppress() if is_supported
+                else self.assertRaises(NotImplementedError)
+            )  # some configs not implemented yet
+
+        def _get_fsdp_grads(fsdp_model: FSDP, is_supported: bool):
+            if is_supported:
+                return [
+                    param.grad.clone() for param in fsdp_model.parameters()
+                    if param.grad is not None
+                ]
+            return None  # unused
+
+        is_supported = use_orig_params and not offload_to_cpu
+        model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+        )
+        ddp_model = DDP(model, device_ids=[self.rank])
+        fsdp_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+            fsdp_kwargs={
+                "use_orig_params": use_orig_params,
+                "sharding_strategy": sharding_strategy,
+            },
+        )
+        with FSDP.summon_full_params(fsdp_model):
+            for p1, p2 in zip(ddp_model.module.parameters(), fsdp_model.parameters()):
+                assert torch.all(torch.isclose(p1, p2))
+
+        # Check `summon_full_params()` after backward
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        ddp_out = ddp_model(*inp)
+        fsdp_out = fsdp_model(*inp)
+        ddp_out.sum().backward()
+        fsdp_out.sum().backward()
+        old_fsdp_grads = _get_fsdp_grads(fsdp_model, is_supported)
+        with _get_error_context(is_supported):
+            _check_grads(ddp_model, fsdp_model, old_fsdp_grads)
+
+        # Check `summon_full_params()` between forward and backward
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        ddp_out = ddp_model(*inp)
+        fsdp_out = fsdp_model(*inp)
+        old_fsdp_grads = _get_fsdp_grads(fsdp_model, is_supported)
+        with _get_error_context(is_supported):
+            _check_grads(ddp_model, fsdp_model, old_fsdp_grads)
 
 
 instantiate_parametrized_tests(TestSummonFullParams)
