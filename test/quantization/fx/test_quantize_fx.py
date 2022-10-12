@@ -746,7 +746,7 @@ class TestQuantizeFx(QuantizationTestCase):
             ],
         }
         prepared = prepare_qat_fx(model, qconfig_dict, example_inputs=(torch.randn(1, 5),))
-        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.nn.intrinsic.qat.LinearReLU))
+        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.ao.nn.intrinsic.qat.LinearReLU))
 
     def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:
@@ -5149,6 +5149,11 @@ class TestQuantizeFx(QuantizationTestCase):
         for qconfig, qconfig_name in all_qconfigs:
             self._validate_qconfig_against_backend_config_constraints(
                 MyModel(), qconfig, backend_config, satisfies_constraints=True, qconfig_name=qconfig_name)
+
+    def test_get_executorch_backend_config(self):
+        from torch.ao.quantization.backend_config import get_executorch_backend_config
+        # make sure this runs
+        executorch_backend_config = get_executorch_backend_config()
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
