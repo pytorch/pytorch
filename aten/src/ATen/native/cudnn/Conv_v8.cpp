@@ -307,8 +307,7 @@ size_t get_available_workspace() {
   int device;
   C10_CUDA_CHECK(cudaGetDevice(&device));
   size_t max_block_size = 0;
-  size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
   return max_block_size;
 }
 
