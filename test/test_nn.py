@@ -336,6 +336,27 @@ class TestNN(NNTestCase):
         output = bn(torch.randn(5, 5, requires_grad=True))
         output.sum().backward()
 
+    def test_hook_backward_pre_and_full(self):
+        module = torch.nn.Sigmoid()
+
+        cnt = {'backward_cnt': 0}
+
+        def bw_pre_hook(m, grad_output):
+            cnt['backward_cnt'] += 1
+            return (grad_output[0] * 0.5, )
+
+        def bw_hook(m, grad_in, grad_output):
+            self.assertEqual(torch.full_like(grad_output[0], 0.5), grad_output[0])
+            cnt['backward_cnt'] += 1
+            return grad_output
+
+        module.register_backward_pre_hook(bw_pre_hook)
+        module.register_full_backward_hook(bw_hook)
+
+        t = torch.ones(1, 2, requires_grad=True)
+        module(t).sum().backward()
+        self.assertEqual(cnt['backward_cnt'], 2)
+
     def test_hook_invalid_outputs(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -351,6 +372,20 @@ class TestNN(NNTestCase):
                 module(input).sum().backward()
 
         with module.register_backward_hook(bw_fail2):
+            with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
+                module(input).sum().backward()
+
+        def bw_pre_fail1(self, grad_output):
+            return ()
+
+        def bw_pre_fail2(self, grad_output):
+            return grad_output + (torch.randn(2, 2),)
+
+        with module.register_backward_pre_hook(bw_pre_fail1):
+            with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
+                module(input).sum().backward()
+
+        with module.register_backward_pre_hook(bw_pre_fail2):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
