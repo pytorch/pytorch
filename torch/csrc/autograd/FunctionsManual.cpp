@@ -2837,7 +2837,6 @@ Tensor as_strided_backward(
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
       std::min(input_geometry.sym_storage_offset(), sym_storage_offset);
-      input_geometry.sym_storage_offset().min(sym_storage_offset);
   auto inp_effective_offset =
       input_geometry.sym_storage_offset() - shared_offset;
   auto out_effective_offset = sym_storage_offset - shared_offset;
