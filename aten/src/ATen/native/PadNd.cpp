@@ -1,5 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/PadNd.h>
+#include <ATen/PadNd.h>
 #include <ATen/core/Tensor.h>
 
 #include <c10/util/irange.h>

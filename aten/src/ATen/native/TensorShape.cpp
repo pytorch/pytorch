@@ -1687,39 +1687,49 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   return quantizer;
 }
 
-Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
-  auto size = self.size(dim);
-  if (index < -size || index >= size) {
+  auto size = self.sym_sizes()[dim];
+  if (size < -index_ || size <= index_) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
+  SymInt index = index_;
   if (index < 0) {
     index += size;
   }
   if (self.is_sparse()) {
-    return select_sparse(self, dim, index);
+    return select_sparse(self, dim, index.guard_int(__FILE__, __LINE__));
   }
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
-  DimVector strides(self.strides().begin(), self.strides().end());
-  auto storage_offset = self.storage_offset() + index * strides[dim];
-  sizes.erase(sizes.begin() + dim);
-  strides.erase(strides.begin() + dim);
 
   Tensor result;
   if (self.is_quantized()) {
-    auto quantizer = create_subtensor_quantizer(self, true, index, index + 1, dim, 1);
+    auto local_index = index.guard_int(__FILE__, __LINE__);
+
+    DimVector sizes(self.sizes().begin(), self.sizes().end());
+    DimVector strides(self.strides().begin(), self.strides().end());
+    auto storage_offset = self.storage_offset() + local_index * strides[dim];
+    sizes.erase(sizes.begin() + dim);
+    strides.erase(strides.begin() + dim);
+
+    auto quantizer = create_subtensor_quantizer(self, true, local_index, local_index + 1, dim, 1);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
-    result = self.as_strided(sizes, strides, storage_offset);
+    std::vector<c10::SymInt> sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+    std::vector<c10::SymInt> strides(self.sym_strides().begin(), self.sym_strides().end());
+    auto storage_offset = self.sym_storage_offset() + index * strides[dim];
+    sizes.erase(sizes.begin() + dim);
+    strides.erase(strides.begin() + dim);
+
+    result = self.as_strided_symint(sizes, strides, storage_offset);
   }
   namedinference::propagate_names_except(result, self, {dim});
   return result;
@@ -2994,30 +3004,30 @@ Tensor & t_(Tensor & self) {
   return self.transpose_(0, self.dim() < 2 ? 0 : 1);
 }
 
-std::tuple<DimVector, DimVector>
+std::tuple<SymDimVector, SymDimVector>
 inferSqueezeGeometry(const Tensor &tensor) {
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
-    if(tensor.sizes()[d] != 1) {
-      sizes.push_back(tensor.sizes()[d]);
-      strides.push_back(tensor.strides()[d]);
+    if(tensor.sym_sizes()[d] != 1) {
+      sizes.push_back(tensor.sym_sizes()[d]);
+      strides.push_back(tensor.sym_strides()[d]);
     }
   }
 
   return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
-std::tuple<DimVector, DimVector>
+std::tuple<SymDimVector, SymDimVector>
 inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
-    if(d != dim || tensor.sizes()[dim] != 1) {
-      sizes.push_back(tensor.sizes()[d]);
-      strides.push_back(tensor.strides()[d]);
+    if(d != dim || tensor.sym_sizes()[dim] != 1) {
+      sizes.push_back(tensor.sym_sizes()[d]);
+      strides.push_back(tensor.sym_strides()[d]);
     }
   }
   return std::make_tuple(std::move(sizes), std::move(strides));
@@ -3047,8 +3057,8 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
 Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
   std::tie(sizes, strides) = dim.has_value() ? inferSqueezeGeometry(self, dim.value()) : inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
@@ -3069,7 +3079,9 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
                                                   axis,
                                                   quantizer->scalar_type());
   }
-  auto result = make_qtensor(self, sizes, strides, quantizer);
+  // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
+  // are missing for now.
+  auto result = make_qtensor(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides), quantizer);
   if (dim.has_value()) {
     namedinference::propagate_names_except(result, self, {dim.value()});
   } else {
@@ -3082,7 +3094,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  at::Tensor result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  at::Tensor result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
@@ -3098,11 +3110,11 @@ Tensor squeeze_quantized(const Tensor& self) {
 Tensor squeeze(const Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, dims);
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided(self.sizes(), self.strides());
+  if (dims == 0 || self.sym_sizes()[dim] != 1) {
+    return self.as_strided_symint(self.sym_sizes(), self.sym_strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
   namedinference::propagate_names_except(result, self, {dim});
   return result;
 }
@@ -3115,7 +3127,7 @@ Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
 
 Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
 
@@ -3123,12 +3135,12 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, self.dim());
 
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    self.as_strided_(self.sizes(), self.strides());
+  if (dims == 0 || self.sym_sizes()[dim] != 1) {
+    self.as_strided__symint(self.sym_sizes(), self.sym_strides());
     return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
-  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
 
