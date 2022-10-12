@@ -71,7 +71,6 @@ __all__ = [
     "floor",
     "frac",
     "index_add",
-    "index_add_",
     "index_copy",
     "index_copy_",
     "index_select",
@@ -242,6 +241,7 @@ __all__ = [
     "t",
     "tensor_split",
     "transpose",
+    "unfold",
     "unfold_copy",
     "unsqueeze",
     "view",
@@ -280,6 +280,10 @@ __all__ = [
     #
     "allclose",
     "equal",  # TODO: add OpInfo
+    #
+    # Statistical operations
+    #
+    "bucketize",
 ]
 
 Tensor = torch.Tensor
@@ -1913,8 +1917,8 @@ def _reduction(
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
-    a_converted = prims.convert_element_type(a, computation_dtype)
-    result = prim(a_converted, dims)
+    a = _maybe_convert_to_dtype(a, computation_dtype)  # type: ignore[assignment]
+    result = prim(a, dims)
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
@@ -2756,42 +2760,32 @@ def permute(a: TensorLikeType, *dims) -> TensorLikeType:
 
 
 # Get the new shape and stride after applying unfold to an input tensor
-def _get_unfold_copy_shape_stride(
+def _get_unfold_shape_stride(
     a_shape: ShapeType, a_stride: StrideType, dimension: int, size: int, step: int
 ):
     a_ndim = len(a_shape)
-    dimension = utils.canonicalize_dim(a_ndim, dimension)
-    max_size = 1 if a_ndim == 0 else a_shape[dimension]
-    last_stride = 1 if a_ndim == 0 else a_stride[dimension]
+    dim = utils.canonicalize_dim(a_ndim, dimension, wrap_scalar=True)
+    max_size = 1 if a_ndim == 0 else a_shape[dim]
+    last_stride = 1 if a_ndim == 0 else a_stride[dim]
 
     utils.check(
         size <= max_size,
-        lambda: "Maximum size for tensor at dimension "
-        + str(dimension)
-        + " is "
-        + str(max_size)
-        + " but size is "
-        + str(size),
+        lambda: f"Maximum size for tensor at dimension {dim} is {max_size} but size is {size}",
     )
 
     utils.check(
         step > 0,
-        lambda: "Step is " + str(step) + " but must be > 0",
+        lambda: f"Step is {step} but must be > 0",
     )
 
-    new_size = []
-    new_stride = []
-
-    for d, (dim_size, dim_stride) in enumerate(zip(a_shape, a_stride)):
-        if d == dimension:
-            new_size.append((dim_size - size) // step + 1)
-            new_stride.append(step * dim_stride)
-        else:
-            new_size.append(dim_size)
-            new_stride.append(dim_stride)
-    new_size.append(size)
-    new_stride.append(last_stride)
-    return new_size, new_stride
+    shape = list(a_shape)
+    strides = list(a_stride)
+    shape.append(size)
+    strides.append(last_stride)
+    if dim < a_ndim:
+        shape[dim] = (shape[dim] - size) // step + 1
+        strides[dim] *= step
+    return shape, strides
 
 
 @register_decomposition(torch.ops.aten.repeat)
@@ -2829,7 +2823,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     urtensor_stride = utils.make_contiguous_strides_for(target_shape)
     for dim, dim_size in enumerate(padded_shape):
         # repeat each dimension by using unfold_copy operation
-        urtensor_shape, urtensor_stride = _get_unfold_copy_shape_stride(
+        urtensor_shape, urtensor_stride = _get_unfold_shape_stride(
             urtensor_shape, urtensor_stride, dim, dim_size, max(dim_size, 1)
         )
 
@@ -3194,36 +3188,6 @@ def index_add(
     return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
 
 
-# The decomposition of this function dispatches to aten.index_put_ for efficiency
-# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
-# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
-def index_add_(
-    x: TensorLike,
-    dim: int,
-    index: TensorLike,
-    tensor: TensorLike,
-    *,
-    alpha: NumberType = 1,
-):
-    dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
-    if alpha != 1:
-        python_type = utils.dtype_to_type(x.dtype)
-        utils.check(
-            utils.is_weakly_lesser_type(type(alpha), python_type),
-            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
-        )
-        tensor = prims.mul(tensor, alpha)
-    # Treat scalars as elements of \R^1
-    y = x.unsqueeze(0) if x.ndim == 0 else x
-    idx = (slice(None),) * dim + (index,)
-    y[idx] += tensor
-    return x
-
-
 @register_decomposition(torch.ops.aten.index_select, disable_meta=True)
 @out_wrapper()
 def index_select(x: TensorLike, dim: int, index: TensorLike):
@@ -3234,7 +3198,10 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     )
     # Treat scalars as elements of \R^1
     if x.ndim == 0:
-        return x.unsqueeze(0)[index].squeeze(0).clone()
+        # we cannot write `x.unsqueeze(0)[index].squeeze(0).clone()`
+        # as tensor[index] will trigger index.item() if index is a 0-dim tensor
+        # and .item() cannot be symbolically traced with FakeTensor.
+        return torch.ops.aten.index(x.unsqueeze(0), [index]).squeeze(0).clone()
     idx = (slice(None),) * dim + (index,)
     return x[idx]
 
@@ -3565,12 +3532,20 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-@register_decomposition(torch.ops.aten.unfold_copy)
-def unfold_copy(a: TensorLikeType, dimension: int, size: int, step: int):
-    new_size, new_stride = _get_unfold_copy_shape_stride(
-        a.shape, a.stride(), dimension, size, step
+@register_decomposition(torch.ops.aten.unfold)
+def unfold(
+    self: TensorLikeType, dimension: int, size: int, step: int
+) -> TensorLikeType:
+    shape, strides = _get_unfold_shape_stride(
+        self.shape, self.stride(), dimension, size, step
     )
-    return a.as_strided(new_size, new_stride)
+    return self.as_strided(shape, strides)
+
+
+@register_decomposition(torch.ops.aten.unfold_copy)
+@out_wrapper()
+def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
+    return self.unfold(dimension, size, step).clone()
 
 
 @register_decomposition(torch.ops.aten.cumsum)
@@ -4675,6 +4650,65 @@ def triu_indices(
     return torch.stack(
         (torch.cat((row_inds2, row_inds1)), torch.cat((col_inds2, col_inds1)))
     )
+
+
+@register_decomposition(torch.ops.aten.bucketize)
+@out_wrapper(exact_dtype=True)
+def bucketize(
+    a: TensorLikeType,
+    boundaries: TensorLikeType,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    utils.check(
+        boundaries.dim() == 1,
+        lambda: f"boundaries tensor must be 1 dimension but got dim({boundaries.dim()})",
+    )
+
+    out_dtype = torch.int32 if out_int32 else torch.int64
+    n_boundaries = boundaries.shape[-1]
+    if n_boundaries == 0:
+        return torch.zeros_like(a)
+    # We are trying to find the bucket (defined by pairs of consecutive elements of `boundaries`)
+    # each element of `a` belongs to. We use binary search to achieve logarithimic complexity,
+    # but each step of the search is done "in parallel" over all elements of `a`
+    # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
+    start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)
+    end = start + n_boundaries
+    # Max depth of the binary search
+    # Since we can't break out of the loop at different points for different elements of a,
+    # we just do the max amount of iterations that binary search requires and add condition
+    # tensor (cond_update below) to stop updating once the search terminates
+
+    # For first iteration through loop we can skip some checks, we have separate implementation
+    mid = start + (end - start) // 2
+    mid_val = boundaries[mid]
+    if right:
+        cond_mid = mid_val > a
+    else:
+        cond_mid = mid_val >= a
+    start = torch.where(cond_mid, start, mid + 1)
+
+    if n_boundaries > 1:
+        cond_update = torch.ones_like(a, dtype=torch.bool)
+        niters = int(math.log2(n_boundaries))
+        for _ in range(niters):
+            end = torch.where(cond_mid & cond_update, mid, end)
+            cond_update = start < end
+            # start might end up pointing to 1 past the end, we guard against that
+            mid = torch.where(cond_update, start + (end - start) // 2, 0)
+            mid_val = boundaries[mid]
+            # If right is true, the buckets are closed on the *left*
+            # (i.e., we are doing the equivalent of std::upper_bound in C++)
+            # Otherwise they are closed on the right (std::lower_bound)
+            if right:
+                cond_mid = mid_val > a
+            else:
+                cond_mid = mid_val >= a
+            start = torch.where((~cond_mid) & cond_update, mid + 1, start)
+
+    return start.to(dtype=out_dtype)
 
 
 import torch._refs.fft
