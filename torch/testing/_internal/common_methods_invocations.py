@@ -10710,8 +10710,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # AssertionError: Booleans mismatch: True is not False
@@ -17585,7 +17586,7 @@ python_ref_db = [
     # Data Conversion & Data Movement Opinfos
     #
     ElementwiseUnaryPythonRefInfo(
-        "_refs.bfloat16",
+        "_refs._conversions.bfloat16",
         torch_opinfo_name="bfloat16",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17594,7 +17595,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.bool",
+        "_refs._conversions.bool",
         torch_opinfo_name="bool",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17603,7 +17604,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.byte",
+        "_refs._conversions.byte",
         torch_opinfo_name="byte",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17612,7 +17613,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.char",
+        "_refs._conversions.char",
         torch_opinfo_name="char",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17621,7 +17622,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.double",
+        "_refs._conversions.double",
         torch_opinfo_name="double",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17630,7 +17631,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.float",
+        "_refs._conversions.float",
         torch_opinfo_name="float",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17639,7 +17640,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.half",
+        "_refs._conversions.half",
         torch_opinfo_name="half",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17648,7 +17649,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.int",
+        "_refs._conversions.int",
         torch_opinfo_name="int",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17657,7 +17658,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.long",
+        "_refs._conversions.long",
         torch_opinfo_name="long",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17666,7 +17667,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.short",
+        "_refs._conversions.short",
         torch_opinfo_name="short",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17675,7 +17676,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.chalf",
+        "_refs._conversions.chalf",
         torch_opinfo_name="chalf",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17684,7 +17685,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.cfloat",
+        "_refs._conversions.cfloat",
         torch_opinfo_name="cfloat",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.
@@ -17693,7 +17694,7 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
-        "_refs.cdouble",
+        "_refs._conversions.cdouble",
         torch_opinfo_name="cdouble",
         # TODO: If self already has the correct dtype and device, then self is
         # returned ignoring memory_format.

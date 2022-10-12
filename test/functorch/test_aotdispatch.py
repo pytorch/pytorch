@@ -37,6 +37,8 @@ from common_utils import (
     skip,
     skipOps,
 )
+from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch.fx.experimental.proxy_tensor import is_sym_node
 
 USE_TORCHVISION = False
 try:
@@ -401,6 +403,31 @@ class TestAOTAutograd(AOTTestCase):
         self.assertEqual(ref_out, test_out)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_autocast_disable_guard(self):
+        guard = torch._C._DisableAutocast()
+        try:
+            x = torch.rand([4, 4]).cuda()
+            y = x @ x
+            self.assertEqual(y.dtype, torch.float32)
+        finally:
+            del guard
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_nonidempotent_amp(self):
+        def f(self_s_emb, add_3):
+            einsum_2 = torch.functional.einsum('ah,th->t', self_s_emb, add_3)
+            log_softmax_2 = einsum_2.log_softmax(-1)
+            return (log_softmax_2,)
+
+        args = [torch.rand((1, 256), dtype=torch.float32, device='cuda'), torch.rand((30, 256), dtype=torch.float16, device='cuda')]
+        with torch.cuda.amp.autocast(enabled=True):
+            self.verify_aot_autograd(f, args)
+
+        args = [e.requires_grad_(True) for e in args]
+        with torch.cuda.amp.autocast(enabled=True):
+            self.verify_aot_autograd(f, args)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -428,9 +455,9 @@ class TestAOTAutograd(AOTTestCase):
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
 
-    @unittest.expectedFailure  # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
+    @skipIfNoSympy
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -551,6 +578,158 @@ class TestPartitioning(AOTTestCase):
                                              partitioner=default_partition)
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
+
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @skipIfNoSympy
+    def test_min_cut_partitioner_save_shape(self):
+
+        def f(x):
+            s = x.sum(dim=1)
+            return s
+
+        inp = [torch.ones([10, 10], requires_grad=True)]
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        _, fw_output = get_ins_outs(fw_graph)
+        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
+        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
+        self.assertEqual(str(fw_output[0]), "sum_1")
+        # make sure we don't do the suboptimal thing of saving the bigger primals input to sum,
+        # rather than saving the sizes of the primals input for use in backward expand
+        self.assertEqual(str(fw_output[1]), "sym_size")
+        self.assertEqual(str(fw_output[2]), "sym_size_1")
+
+        inp = [
+            torch.randn(10, requires_grad=True),
+            torch.randn((3, 10), requires_grad=True),
+            torch.randn((2, 10), requires_grad=True),
+        ]
+
+        def f(a, b, c):
+            # tried to test what happens if we save a size tuple in the graph;
+            # turns out we never will due to how we trace, but this is probably
+            # still a good test case for various size manipulations
+            sb = torch.ops.aten.sym_size(b)
+            sc = c.size()
+            x = sb[0] + sc[0]
+            a_sz = (x, a.size(0))
+            return torch.cat([a.expand(a_sz), b, c])
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        self.assertEqual(get_num_ins_outs(fw_graph), (3, 5))
+        self.assertEqual(get_num_ins_outs(bw_graph), (5, 3))
+        _, outs = get_ins_outs(fw_graph)
+        self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
+
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @skipIfNoSympy
+    def test_default_partitioner_output_tensor_shape_tensor(self):
+
+        inp = [
+            torch.randn(10, requires_grad=True),
+            torch.randn((3, 10), requires_grad=True),
+            torch.randn((2, 10), requires_grad=True),
+            torch.randn((10, 1), requires_grad=True),
+        ]
+
+        def f(a, b, c, d):
+            # Try to force symints intermixed with outputs in the function's returns
+            sb = b.size()
+            sc = c.size()
+            x = sb[0] + sc[0]
+            a_sz = (x, a.size(0))
+            cat = torch.cat([a.expand(a_sz), b, c])
+            mm = torch.mm(cat, d)
+            mm2 = torch.mm(mm, a.view(mm.size(1), a.size(0)))  # this saves 4 new ints for backward. why?
+            # and what do i have to do to make it save a tensor for backward?
+            return cat, sb, c, mm2
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_outs = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=default_partition,
+            decompositions=default_decompositions)(*inp)
+        fw_graph = fw_graph_cell[0]
+        (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
+        bw_graph = bw_graph_cell[0]
+
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
+        self.assertEqual(get_num_ins_outs(bw_graph), (13, 4))
+        _, fw_graph_out_nodes = get_ins_outs(fw_graph)
+        self.assertEqual(
+            # fw outputs include b.size() which expands to 2 symints,
+            #
+            # TODO(whc)- are the saved-tensors/saved-symints correct here?
+            # i just made the test pass based on what default partition did
+            [False, True, True, False, False] + [False] * 5 + [True] * 3,
+            [is_sym_node(n) for n in fw_graph_out_nodes]
+        )
+
+        real_outs = f(*inp)
+        self.assertEqual(compiled_outs, real_outs)
+        self.assertTrue(isinstance(real_outs[1], torch.Size))
+
+        # TODO(whc) we should learn to return torch.Sizes
+        self.assertFalse(isinstance(compiled_outs[1], torch.Size))
+
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @skipIfNoSympy
+    def test_min_cut_partitioner_output_tensor_shape_tensor(self):
+
+        inp = [
+            torch.randn(10, requires_grad=True),
+            torch.randn((3, 10), requires_grad=True),
+            torch.randn((2, 10), requires_grad=True),
+            torch.randn((10, 1), requires_grad=True),
+        ]
+
+        def f(a, b, c, d):
+            # Try to force symints intermixed with outputs in the function's returns
+            sb = b.size()
+            sc = c.size()
+            x = sb[0] + sc[0]
+            a_sz = (x, a.size(0))
+            cat = torch.cat([a.expand(a_sz), b, c])
+            mm = torch.mm(cat, d)
+            mm2 = torch.mm(mm, a.view(mm.size(1), a.size(0)))  # this saves 4 new ints for backward. why?
+            # and what do i have to do to make it save a tensor for backward?
+            return cat, sb, c, mm2
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_outs = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=min_cut_rematerialization_partition,
+            decompositions=default_decompositions)(*inp)
+        fw_graph = fw_graph_cell[0]
+        (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
+        bw_graph = bw_graph_cell[0]
+
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
+        self.assertEqual(get_num_ins_outs(bw_graph), (13, 4))
+        _, fw_graph_out_nodes = get_ins_outs(fw_graph)
+        self.assertEqual(
+            # fw outputs include b.size() which expands to 2 symints,
+            # then 4 tensors (transposes of matricies used for mm) are saved
+            # finally 4 symints are saved
+            [False, True, True, False, False] + [False] * 4 + [True] * 4,
+            [is_sym_node(n) for n in fw_graph_out_nodes]
+        )
+
+        real_outs = f(*inp)
+        self.assertEqual(compiled_outs, real_outs)
+        self.assertTrue(isinstance(real_outs[1], torch.Size))
+
+        # TODO(whc) we should learn to return torch.Sizes
+        self.assertFalse(isinstance(compiled_outs[1], torch.Size))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner(self):
@@ -724,7 +903,6 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('__getitem__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('__rmatmul__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addbmm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addcdiv', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
@@ -736,7 +914,6 @@ symbolic_aot_autograd_failures = {
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('broadcast_tensors', ''),  # 'int' and 'torch._C.SymIntNode'
     xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('cdouble'),  # RuntimeError: aten.view_as_real.default - couldn't find symbolic meta function/decomposition
     xfail('cfloat'),  # RuntimeError: aten.view_as_real.default - couldn't find symbolic meta function/decomposition
@@ -762,7 +939,6 @@ symbolic_aot_autograd_failures = {
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('einsum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('expand_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -783,7 +959,6 @@ symbolic_aot_autograd_failures = {
     xfail('fft.rfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.rfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.rfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('flatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fmax', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('fmin', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
@@ -791,8 +966,6 @@ symbolic_aot_autograd_failures = {
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('index_copy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('index_put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('index_select', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -903,14 +1076,12 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.dropout3d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.dropout', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('nn.functional.embedding_bag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # Cannot call numel() on tensor with symbol...
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.grid_sample', ''),  # prims::arange() Expected a value of type 'number' for argument...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.hinge_embedding_loss', ''),  # aten.zeros_like.default - couldn't find symbolic meta...
     xfail('nn.functional.huber_loss', ''),  # Unable to cast Python instance to C++ type (#define PYBIND11_DE...
-    xfail('nn.functional.instance_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'area'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bicubic'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'bilinear'),  # Cannot call sizes() on tensor with symbolic sizes/str...
@@ -972,7 +1143,6 @@ symbolic_aot_autograd_failures = {
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('reshape_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('reshape', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
     xfail('round', ''),  # aten.round.default - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
@@ -986,11 +1156,7 @@ symbolic_aot_autograd_failures = {
     xfail('scatter_reduce', 'sum'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomp...
     xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('select', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('select_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('slice', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('slice_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sort', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.entr', ''),  # aten.special_entr.default - couldn't find symbolic meta function/decomposition
     xfail('special.erfcx', ''),  # aten.special_erfcx.default - couldn't find symbolic meta function/decompos...
@@ -1003,7 +1169,6 @@ symbolic_aot_autograd_failures = {
     xfail('split', 'list_args'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('split_with_sizes', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('squeeze', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('stack', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1072,30 +1237,33 @@ def _test_aot_autograd_helper(self, device, dtype, op):
 
         compiled_f = compiled_function(f, nop, nop)
 
-        reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
+        try:
+            reset_grads()
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
 
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+            reset_grads()
+            call_forwards_backwards(f)
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
 
-        def create_new_arg(x):
-            if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
-                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
-            return x
+            def create_new_arg(x):
+                if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
+                    return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
+                return x
 
-        args = pytree.tree_map(create_new_arg, args)
+            args = pytree.tree_map(create_new_arg, args)
 
-        reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
+            reset_grads()
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
 
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+            reset_grads()
+            call_forwards_backwards(f)
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
+        except DynamicOutputShapeException:
+            self.skipTest("Dynamic output shape operation in trace")
 
 class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
