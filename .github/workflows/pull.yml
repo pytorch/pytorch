@@ -171,6 +171,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-test:
