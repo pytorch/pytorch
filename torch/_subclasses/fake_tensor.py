@@ -621,7 +621,7 @@ class FakeTensorMode(TorchDispatchMode):
         *,
         allow_fallback_kernels=True,
         allow_meta=False,
-        throw_on_data_dependent_ops=False,
+        throw_on_data_dependent_ops=True,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
