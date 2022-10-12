@@ -864,7 +864,7 @@ class TestDistributed(QuantizationTestCase):
                 if epoch >= 1:
                     model.apply(torch.ao.quantization.disable_observer)
                 if epoch >= 2:
-                    model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                    model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                 quant_model = copy.deepcopy(model.module)
                 quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
                 with torch.no_grad():
