@@ -58,17 +58,23 @@ class MinfierTests(torch._dynamo.testing.TestCase):
         inner()
         self.assertTrue(os.path.exists(repro_file))
 
-    def test_after_aot(self):
+    # If error_at_aot is True, an error will be produced when AOTAutograd
+    # attempts to generate the backward graph.
+    # If error_after_aot is False, an error will be produced in inductor.
+    def _test_around_aot(self, error_at_aot):
         mod = MockModule()
         opt_mod = torch._dynamo.optimize("inductor")(mod)
         repro_dir = "/tmp/test_minifier"
         repro_file = os.path.join(repro_dir, "minifier_launcher.py")
         shutil.rmtree(repro_dir, ignore_errors=True)
 
-        @patch.object(torch._dynamo.config, "repro_after", "aot")
+        repro_after = "dynamo" if error_at_aot else "aot"
+
+        @patch.object(torch._dynamo.config, "repro_after", repro_after)
         @patch.object(torch._dynamo.config, "repro_dir", repro_dir)
         def inner():
             x = torch.randn(4)
+            x.requires_grad = error_at_aot
             try:
                 opt_mod(x)
             except Exception:
@@ -77,6 +83,12 @@ class MinfierTests(torch._dynamo.testing.TestCase):
         inner()
 
         self.assertTrue(os.path.exists(repro_file))
+
+    def test_at_aot(self):
+        self._test_around_aot(True)
+
+    def test_after_aot(self):
+        self._test_around_aot(False)
 
 
 if __name__ == "__main__":

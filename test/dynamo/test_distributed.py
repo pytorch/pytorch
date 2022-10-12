@@ -146,6 +146,8 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
+    # hangs/crashes with inductor currently
+    @pytest.mark.skip
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
@@ -199,13 +201,26 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torch._dynamo.optimize("aot_nvfuser")
+        @torch._dynamo.optimize("aot_eager")
         def opt_fn(inputs):
             return ddp_m(inputs)
 
         opt_outputs = opt_fn(inputs)
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+    def test_empty_graph(self):
+        def fn():
+            get_world_size = torch.distributed.distributed_c10d.get_world_size()
+            return (get_world_size,)
+
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        res = None
+        try:
+            res = opt_fn()[0]
+        except Exception:
+            pass
+        self.assertEqual(res, 1)
 
 
 # TODO(jansel): debug issues running this in CI

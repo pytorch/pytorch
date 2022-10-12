@@ -27,6 +27,7 @@ from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
+from torch._inductor.utils import fresh_triton_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._pytree import tree_map
 
@@ -1280,6 +1281,34 @@ class BenchmarkRunner:
                 "--diff_main called on main branch, what are you diffing?"
             )
 
+    @staticmethod
+    def maybe_fresh_cache(fn):
+        def inner(self, *args, **kwargs):
+            cache_minder = NullContext()
+            if self.args.cold_start_latency:
+                cache_entries = {}
+                cache_minder = fresh_triton_cache(cache_entries)
+
+            try:
+                with cache_minder:
+                    return fn(self, *args, **kwargs)
+            finally:
+                dump_cache = False
+                if dump_cache and self.args.cold_start_latency:
+                    output_csv(
+                        output_filename[:-4] + "_triton_cache.csv",
+                        ["dev", "name", "batch_size", "triton_cache"],
+                        [
+                            current_device,
+                            current_name,
+                            current_batch_size,
+                            cache_entries,
+                        ],
+                    )
+
+        return inner
+
+    @maybe_fresh_cache
     def run_one_model(
         self,
         name,
@@ -1448,6 +1477,12 @@ def parse_args():
         "--diff_main",
         action="store_true",
         help="Delta this branch against main. In the future, we may add support for picking the branch.",
+    )
+
+    parser.add_argument(
+        "--cold_start_latency",
+        action="store_true",
+        help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
