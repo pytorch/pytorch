@@ -189,7 +189,9 @@ void initPythonBindings(PyObject* module) {
             return out;
           })
       .def_property_readonly(
-          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
+          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); })
+      .def_readonly("self_ptr", &NNModuleInfo::self_)
+      .def_readonly("cls_ptr", &NNModuleInfo::cls_);
 
   py::class_<OptimizerInfo>(m, "_OptimizerInfo")
       .def_readonly("self_ptr", &OptimizerInfo::self_)
@@ -199,7 +201,7 @@ void initPythonBindings(PyObject* module) {
           out.append(std::tuple(p.metadata_, p.grad_metadata_, p.state_));
         }
         return out;
-        });
+      });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
