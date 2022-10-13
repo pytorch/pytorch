@@ -2663,21 +2663,25 @@ def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
 
     return sample_inputs
 
-def sample_inputs_bucketize(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_bucketize(op_info, device, dtype, requires_grad, reference_inputs_mode=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    sizes = ((), (S,), (S, S), (S, S, S), (S, 1, S), (S, 0, S))
+    sizes = (((), S), ((S,), S), ((S, S), S), ((S, S, S), S), ((S, 1, S), S), ((S, 0, S), S))
 
+    if reference_inputs_mode:
+        sizes += (((256,), 128), ((128,), 256), ((32, 32), 11), ((32, 4, 32), 33))
     sample_inputs = []
 
-    for size, out_int32, right in product(sizes, [False, True], [False, True]):
-        input_tensor = make_arg(size)
-        boundaries = make_arg((S,)).msort()
+    for (input_shape, nb), out_int32, right in product(sizes, [False, True], [False, True]):
+        input_tensor = make_arg(input_shape)
+        boundaries = make_arg(nb).msort()
 
         sample_inputs.append(SampleInput(input_tensor, args=(boundaries, ),
                                          kwargs=dict(out_int32=out_int32, right=right)))
 
     return sample_inputs
+
+reference_inputs_bucketize = partial(sample_inputs_bucketize, reference_inputs_mode=True)
 
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -7382,6 +7386,58 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
             kwargs["distance_function"] = torch.nn.PairwiseDistance()
         yield SampleInput(input, args=args, kwargs=kwargs)
 
+def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+
+    samples = (
+        # input, args, kwargs, error_type, error_regex
+        # invalid reduction
+        (make_input(3, 4), (make_input(3, 4), make_input(3, 4)),
+         dict(reduction="abc"),
+         ValueError, "abc is not a valid value for reduction"),
+
+        # shape mismatch
+        (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
+         dict(),
+         RuntimeError,
+         (r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
+          r"at non-singleton dimension 1")),
+        (make_input(3, 4), (make_input(3, 5), make_input(3, 4)),
+         dict(),
+         RuntimeError,
+         (r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
+          r"at non-singleton dimension 1")),
+        (make_input(3, 4), (make_input(3, 4), make_input(3, 5)),
+         dict(),
+         RuntimeError,
+         (r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
+          r"at non-singleton dimension 1")),
+
+        # different dimensions
+        (make_input(3,), (make_input(3, 4), make_input(3, 4)),
+         dict(),
+         RuntimeError,
+         (r"The anchor, positive, and negative tensors are expected to have "
+          r"the same number of dimensions, but got: anchor 1D, positive 2D, "
+          r"and negative 2D inputs")),
+        (make_input(3, 4), (make_input(3,), make_input(3, 4)),
+         dict(),
+         RuntimeError,
+         (r"The anchor, positive, and negative tensors are expected to have "
+          r"the same number of dimensions, but got: anchor 2D, positive 1D, "
+          r"and negative 2D inputs")),
+        (make_input(3, 4), (make_input(3, 4), make_input(3,)),
+         dict(),
+         RuntimeError,
+         (r"The anchor, positive, and negative tensors are expected to have "
+          r"the same number of dimensions, but got: anchor 2D, positive 2D, "
+          r"and negative 1D inputs")),
+    )
+
+    for input, args, kwargs, error_type, error_regex in samples:
+        yield ErrorInput(SampleInput(input, args=args, kwargs=kwargs),
+                         error_type=error_type, error_regex=error_regex)
+
 
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -10238,7 +10294,7 @@ op_db: List[OpInfo] = [
     OpInfo('max',
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=True,
+           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
@@ -10710,8 +10766,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # AssertionError: Booleans mismatch: True is not False
@@ -12101,6 +12158,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.triplet_margin_loss",
         sample_inputs_func=sample_inputs_triplet_margin_loss,
+        error_inputs_func=error_inputs_triplet_margin_loss,
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -12110,6 +12168,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.triplet_margin_with_distance_loss",
         sample_inputs_func=partial(sample_inputs_triplet_margin_loss, with_distance=True),
+        error_inputs_func=error_inputs_triplet_margin_loss,
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -14697,6 +14756,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_bucketize,
+           reference_inputs_func=reference_inputs_bucketize,
            supports_autograd=False,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
@@ -16738,6 +16798,16 @@ python_ref_db = [
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.bucketize",
+        torch_opinfo_name="bucketize",
+        skips=(
+            # RuntimeError: It appears that you're trying to get value out of a tracing tensor with
+            #  aten._local_scalar_dense.default - erroring out! [...]
+            # triggered by mid_val = boundaries[mid]
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
+        )
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
@@ -16950,6 +17020,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
+        aliases=('_refs.special.expit',),
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
@@ -17560,13 +17631,26 @@ python_ref_db = [
         torch_opinfo_name="clamp",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.triplet_margin_loss",
+        torch_opinfo_name="nn.functional.triplet_margin_loss",
+        supports_out=False,
+        # TODO: Uses minimum and clamp, which don't support nvfuser.
+        supports_nvfuser=False,
+        skips=(
+            # AssertionError: Tensor-likes are not close!
+            # Greatest absolute difference: 6.103515625e-05 at index (4,) (up to 1e-05 allowed)
+            # Greatest relative difference: 8.519846983548175e-06 at index (4,) (up to 1.3e-06 allowed)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.uint8,), device_type="cpu"),
+        )
+    ),
     #
     # Data Conversion & Data Movement Opinfos
     #
     PythonRefInfo(
         "_refs.clone",
         torch_opinfo_name="clone",
-        supports_nvfuser=False,
     ),
     #
     # View & Shape OpInfos
