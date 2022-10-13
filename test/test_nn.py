@@ -260,6 +260,14 @@ class TestNN(NNTestCase):
             self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
             counter['backwards'] += inc
 
+        # backward_pre_hook expects callback with only `module` and `grad_output`
+        # as arguments.
+        def bw_pre_hook(inc, h_module, grad_output):
+            self.assertIsInstance(grad_output, tuple)
+            self.assertTrue(h_module is module)
+            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
+            counter['backwards'] += inc
+
         test_fwd = module.register_forward_hook(lambda *args: fw_hook(1, *args))
 
         module(input)
@@ -267,8 +275,9 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
+        bw_hook_fn = bw_pre_hook if backward_register_fn == 'register_full_backward_pre_hook' else bw_hook
         test_bwd = getattr(module, backward_register_fn)(
-            lambda *args: bw_hook(1, *args))
+            lambda *args: bw_hook_fn(1, *args))
 
         output = module(input)
         self.assertEqual(counter['forwards'], 3)
@@ -288,7 +297,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 6)
         self.assertEqual(counter['backwards'], 2)
 
-        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook(2, *args))
+        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook_fn(2, *args))
 
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 9)
@@ -313,6 +322,7 @@ class TestNN(NNTestCase):
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
+        self._test_hooks("register_full_backward_pre_hook")
 
     def test_hook_cpp(self):
         bn = nn.BatchNorm1d(5)
@@ -325,6 +335,31 @@ class TestNN(NNTestCase):
         bn.register_full_backward_hook(hook)
         output = bn(torch.randn(5, 5, requires_grad=True))
         output.sum().backward()
+
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
+    def test_backward_hooks_interaction(self):
+        # Test to make sure that the grad_outputs
+        # updated by full_backward_pre_hook are received by
+        # the full_backward_hook
+        module = torch.nn.Sigmoid()
+
+        cnt = {'backward_cnt': 0}
+
+        def bw_pre_hook(m, grad_output):
+            cnt['backward_cnt'] += 1
+            return (grad_output[0] * 0.5, )
+
+        def bw_hook(m, grad_in, grad_output):
+            self.assertEqual(torch.full_like(grad_output[0], 0.5), grad_output[0])
+            cnt['backward_cnt'] += 1
+            return grad_output
+
+        module.register_full_backward_pre_hook(bw_pre_hook)
+        module.register_full_backward_hook(bw_hook)
+
+        t = torch.ones(1, 2, requires_grad=True)
+        module(t).sum().backward()
+        self.assertEqual(cnt['backward_cnt'], 2)
 
     def test_hook_invalid_outputs(self):
         module = nn.Sigmoid()
@@ -341,6 +376,20 @@ class TestNN(NNTestCase):
                 module(input).sum().backward()
 
         with module.register_backward_hook(bw_fail2):
+            with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
+                module(input).sum().backward()
+
+        def bw_pre_fail1(self, grad_output):
+            return ()
+
+        def bw_pre_fail2(self, grad_output):
+            return grad_output + (torch.randn(2, 2),)
+
+        with module.register_full_backward_pre_hook(bw_pre_fail1):
+            with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
+                module(input).sum().backward()
+
+        with module.register_full_backward_pre_hook(bw_pre_fail2):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
@@ -446,34 +495,39 @@ class TestNN(NNTestCase):
         def hook(mod, grad_input, grad_output):
             hook_called[0] += 1
 
+        def hook_pre(mod, grad_output):
+            hook_called[0] += 1
+
         inp = torch.rand(10, requires_grad=True)
         mod = MyModule()
-        mod.register_full_backward_hook(hook)
+        for hook_fn, register_fn in [(hook, mod.register_full_backward_hook),
+                                     (hook_pre, mod.register_full_backward_pre_hook)]:
+            hook_called[0] = 0
+            with register_fn(hook_fn):
+                # No inplace should work
+                mod(inp, False).sum().backward()
+                self.assertEqual(hook_called[0], 1)
 
-        # No inplace should work
-        mod(inp, False).sum().backward()
-        self.assertEqual(hook_called[0], 1)
+                # Input inplace error should throw an error
+                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                            "a view and is being modified inplace."):
+                    mod(inp.clone(), True)
 
-        # Input inplace error should throw an error
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                    "a view and is being modified inplace."):
-            mod(inp.clone(), True)
+                # Input inplace error should throw an error if we try to re-use the view after they have
+                # been modified
+                local_inp = inp.clone()
+                out = mod(local_inp, False)
+                local_inp[0] *= 1
+                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                            "a view and its base or another view"):
+                    # Any operation involving the view will fail here
+                    mod.inp + 2
 
-        # Input inplace error should throw an error if we try to re-use the view after they have
-        # been modified
-        local_inp = inp.clone()
-        out = mod(local_inp, False)
-        local_inp[0] *= 1
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                    "a view and its base or another view"):
-            # Any operation involving the view will fail here
-            mod.inp + 2
-
-        # Output inplace error should throw an error
-        out = mod(inp, False)
-        with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
-                                    "and is being modified inplace."):
-            out += 1
+                # Output inplace error should throw an error
+                out = mod(inp, False)
+                with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
+                                            "and is being modified inplace."):
+                    out += 1
 
     def test_hook_non_full_warning(self):
         def noop(*args):
