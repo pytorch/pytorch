@@ -120,13 +120,12 @@ class ShardedTensorExtensions(FSDPExtensions):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, List[Shard]]:
         shards = tensor.local_shards()
-        # default impl removes this line
         if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
             tensor = shards[0].tensor
             shards = tensor.local_shards()
-        return (tensor, [shards[0].tensor] if len(shards) > 0 else [])
+        return (tensor, shards if len(shards) > 0 else [])
 
 
 _set_fsdp_extensions(ShardedTensorExtensions())
@@ -458,6 +457,7 @@ class TestTPFSDPIntegration(FSDPTest):
             # TODO once 2D is out, validate the nesting
             self.assertTrue(_is_nested_tensor(state_dict["net1.weight"]))
             self.assertFalse(_is_nested_tensor(state_dict["net1.bias"]))
+            tp_fsdp_model.load_state_dict(state_dict)
 
         tp_fsdp_optim = torch.optim.Adam(tp_fsdp_model.parameters(), lr=0.0001)
 
