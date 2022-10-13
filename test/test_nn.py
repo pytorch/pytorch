@@ -591,6 +591,46 @@ class TestNN(NNTestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
+    def test_hook_buffer_registration(self):
+        def buffer_registration_hook(module, name, buffer):
+            buffer.registered = True
+        handle = torch.nn.modules.module.register_module_buffer_registration_hook(
+            buffer_registration_hook
+        )
+        try:
+            l, n, s = self._create_basic_net()
+            for b in s.buffers():
+                self.assertTrue(getattr(b, "registered", False))
+        finally:
+            handle.remove()
+
+    def test_hook_submodule_registration(self):
+        def module_registration_hook(module, name, submodule):
+            module.registered = True
+            submodule.registered = True
+        handle = torch.nn.modules.module.register_module_module_registration_hook(
+            module_registration_hook
+        )
+        try:
+            l, n, s = self._create_basic_net()
+            for m in s.modules():
+                self.assertTrue(getattr(m, "registered", False))
+        finally:
+            handle.remove()
+
+    def test_hook_parameter_registration(self):
+        def parameter_registration_hook(module, name, parameter):
+            parameter.registered = True
+        handle = torch.nn.modules.module.register_module_parameter_registration_hook(
+            parameter_registration_hook
+        )
+        try:
+            l, n, s = self._create_basic_net()
+            for p in s.parameters():
+                self.assertTrue(getattr(p, "registered", False))
+        finally:
+            handle.remove()
+
     def test_to(self):
         m = nn.Linear(3, 5)
         self.assertIs(m, m.to('cpu'))
@@ -8843,6 +8883,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
+        input_bf = torch.arange(24, dtype=torch.bfloat16).reshape(1, 3, 2, 4)
+        input_bf = input_bf.permute(0, 2, 1, 3)
+        input_f = input_bf.float()
+        bn_mix = torch.nn.BatchNorm2d(2).float().eval()
+        ref_bn_f = deepcopy(bn_mix)
+        out_bf = bn_mix(input_bf)
+        ref_out_bf = ref_bn_f(input_f)
+        self.assertEqual(ref_out_bf, out_bf.float(), atol=0.05, rtol=0.05)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_batchnorm_cudnn_nhwc(self):
@@ -9201,21 +9250,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             x1, x2, x3, swap=True, reduction='none'), (input1, input2, input3)))
         self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduction='none'),
                          loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduction='none'))
-
-    def test_triplet_margin_loss_invalid(self):
-        input1 = torch.randn(5, 10, requires_grad=True)
-        input2 = torch.randn(5, 10, requires_grad=True)
-        input3 = torch.randn(5, 10, requires_grad=True)
-        input_1d = torch.randn(10, requires_grad=True)
-
-        with self.assertRaisesRegex(RuntimeError, "All inputs should have same dimension"):
-            F.triplet_margin_loss(input1, input2, input_1d)
-
-        with self.assertRaisesRegex(RuntimeError, "All inputs should have same dimension"):
-            F.triplet_margin_loss(input1, input_1d, input3)
-
-        with self.assertRaisesRegex(RuntimeError, "All inputs should have same dimension"):
-            F.triplet_margin_loss(input_1d, input2, input3)
 
     def test_pointwise_loss_target_grad_none_reduction(self):
         i = torch.randn(5, 10)
