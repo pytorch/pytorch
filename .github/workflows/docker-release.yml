@@ -2,13 +2,11 @@ name: Build Official Docker Images
 
 on:
   workflow_dispatch:
-
   pull_request:
     paths:
       - Dockerfile
       - docker.Makefile
       - .github/workflows/docker-release.yml
-
   push:
     branches:
       - nightly
