@@ -206,7 +206,7 @@ reflectable_magic_methods = {
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
     'truediv': lambda a, b: a / b,
-    'floordiv': lambda a, b: FloorDiv(a, b)
+    'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
 magic_methods = {
@@ -216,7 +216,9 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'ceil': lambda a: Ceil(a)
+    'ceil': lambda a: Ceil(a),
+    'min': lambda a, b: sympy.Min(a, b),
+    'max': lambda a, b: sympy.Max(a, b),
 }
 
 unary_magic_methods = {
@@ -236,11 +238,14 @@ def _make_magic(method, func, py_type):
         if SYM_FUNCTION_MODE:
             return _handle_sym_dispatch(op, (self, other), {})
         if isinstance(other, py_type):
-            other = other.expr
+            other_expr = other.expr
+        else:
+            assert isinstance(other, sympy.Expr)
+            other_expr = other
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
-        other = self.shape_env.replace(other)
-        out = func(expr, other)
+        other_expr = self.shape_env.replace(other_expr)
+        out = func(expr, other_expr)
         out = sympy.expand(out)
         if method in ["truediv"]:
             return PySymFloat(out, self.shape_env)
