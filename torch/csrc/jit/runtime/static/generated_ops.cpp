@@ -3428,7 +3428,7 @@ REGISTER_OPERATOR_FUNCTOR(
 
 REGISTER_OPERATOR_FUNCTOR(aten::nll_loss, aten_nll_loss, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor"))) {
+          "aten::nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto& target = p_node->Input(1).toTensor();
@@ -3437,12 +3437,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::nll_loss, aten_nll_loss, [](Node* n) -> SROperat
       const auto ignore_index = p_node->Input(4).toInt();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) =
-            at::native::nll_loss(self, target, weight, reduction, ignore_index);
+            at::nll_loss(self, target, weight, reduction, ignore_index);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::nll_loss_out(
+      at::nll_loss_outf(
           self, target, weight, reduction, ignore_index, out);
     };
   }
@@ -3455,7 +3455,7 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_nll_loss_backward,
     [](Node* n) -> SROperator {
       if (n->matches(torch::schema(
-              "aten::nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor"))) {
+              "aten::nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index, Tensor total_weight) -> Tensor"))) {
         return [](ProcessedNode* p_node) {
           const auto& grad_output = p_node->Input(0).toTensor();
           const auto& self = p_node->Input(1).toTensor();
@@ -3465,7 +3465,7 @@ REGISTER_OPERATOR_FUNCTOR(
           const auto ignore_index = p_node->Input(5).toInt();
           const auto& total_weight = p_node->Input(6).toTensor();
           if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::cpu::nll_loss_backward(
+            p_node->Output(0) = at::nll_loss_backward(
                 grad_output,
                 self,
                 target,
@@ -3477,7 +3477,7 @@ REGISTER_OPERATOR_FUNCTOR(
           }
           auto& grad_input = p_node->Output(0).toTensor();
           fastResizeToZero(grad_input);
-          at::cpu::nll_loss_backward_out(
+          at::nll_loss_backward_out(
               grad_input,
               grad_output,
               self,
@@ -3494,7 +3494,7 @@ REGISTER_OPERATOR_FUNCTOR(
 
 REGISTER_OPERATOR_FUNCTOR(aten::nll_loss2d, aten_nll_loss2d, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor"))) {
+          "aten::nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto& target = p_node->Input(1).toTensor();
@@ -3502,13 +3502,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::nll_loss2d, aten_nll_loss2d, [](Node* n) -> SROp
       const auto reduction = p_node->Input(3).toInt();
       const auto ignore_index = p_node->Input(4).toInt();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::nll_loss2d(
+        p_node->Output(0) = at::nll_loss2d(
             self, target, weight, reduction, ignore_index);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::nll_loss2d_out(
+      at::nll_loss2d_outf(
           self, target, weight, reduction, ignore_index, out);
     };
   }
