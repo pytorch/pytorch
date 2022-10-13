@@ -1674,7 +1674,8 @@ def check_if_enable(test: unittest.TestCase):
                         "windows": IS_WINDOWS,
                         "linux": IS_LINUX,
                         "rocm": TEST_WITH_ROCM,
-                        "asan": TEST_WITH_ASAN
+                        "asan": TEST_WITH_ASAN,
+                        "dynamo": TEST_WITH_TORCHDYNAMO,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
