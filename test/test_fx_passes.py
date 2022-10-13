@@ -175,17 +175,10 @@ class TestPartitionFunctions:
         c2 = x0 + c0
         return b1, c2
 
-    @staticmethod
-    def forward13(a, b, c):
-        a0, a1, a2, a3 = a.split(1, 0)
-        b1 = a0 + b
-        c1 = a1 + c
-        return b1 + c1
-
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add, operator.getitem}
+        return node.op == "call_function" and node.target in {operator.add}
 
 
 @instantiate_parametrized_tests
@@ -212,9 +205,6 @@ class TestFXGraphPasses(JitTestCase):
 
         # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
         (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]]),
-
-        # 5 getitem special case
-        (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]]),
     ])
     def test_partitioner(self, fn, expected_partition):
         traced = symbolic_trace(fn)
