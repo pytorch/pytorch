@@ -5103,7 +5103,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
     return !flip_order ? i : k - i - 1;
   };
   const auto next_i = [flip_order](int64_t i) -> int64_t {
-    return !flip_order ? i + 1 : i - 1;
+    return !flip_order ? ++i : --i;
   };
   const auto apply_left = !flip_order ? true : false;
 
