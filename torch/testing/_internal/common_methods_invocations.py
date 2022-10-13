@@ -11928,6 +11928,8 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_symbolic_dispatch_meta',
+                         device_type='cuda', dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
             # Doesn't support autocasting
@@ -12553,6 +12555,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
                DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_meta', device_type='cuda'),
                DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
+               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -16450,13 +16453,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # https://github.com/pytorch/pytorch/issues/82235
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestSchemaCheckModeOpInfo',
-                'test_schema_correctness',
-                device_type='cuda',
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
@@ -16473,13 +16469,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # https://github.com/pytorch/pytorch/issues/82235
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestSchemaCheckModeOpInfo',
-                'test_schema_correctness',
-                device_type='cuda',
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
