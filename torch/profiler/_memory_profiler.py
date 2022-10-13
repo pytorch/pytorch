@@ -1,7 +1,6 @@
 import dataclasses
-import functools
 import sys
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple, Union
 
 import torch
 from torch._C import FunctionSchema
@@ -162,6 +161,7 @@ class SchemaMatcher:
             (torch._C.NumberType, (bool, int, float, complex)),
         )
 
+        py_types: Union[type, Tuple[type, ...]]
         for jit_type, py_types in type_map:
             if isinstance(schema_type, jit_type):
                 return isinstance(observed, py_types)
@@ -173,8 +173,11 @@ class SchemaMatcher:
         return observed is None
 
     @staticmethod
-    @functools.lru_cache
     def lookup_schemas(name: str) -> Optional[Tuple[FunctionSchema, ...]]:
+        # TODO(robieta):
+        #   _jit_get_schemas_for_operator is quite expensive. (~100us / call)
+        #   Consider adding `functools.lru_cache` if that becomes an issue.
+
         try:
             # Schema lookup will throw if `name` is malformed. (For example,
             # schemas must be namespaced and schema lookup will fail if name

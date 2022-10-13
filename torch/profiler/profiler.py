@@ -205,6 +205,7 @@ class _KinetoProfile(object):
         if missing:
             raise ValueError(f"{', '.join(missing)} required for memory profiling.")
 
+        assert self.profiler is not None and self.profiler.kineto_results is not None
         return _memory_profiler.MemoryProfile(self.profiler.kineto_results)
 
 
