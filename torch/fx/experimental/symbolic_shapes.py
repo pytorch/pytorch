@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import operator
 import math
 import functools
@@ -331,7 +331,7 @@ class ShapeEnv(object):
         self.divisible: Set["sympy.Expr"] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_symint: Dict[int, torch.SymIntNode] = {}
+        self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
 
     def _get_key(self):
         """
@@ -340,28 +340,68 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    # NB: This is only called for input symbolic sizes; intermediate symbolic
-    # sizes are allocated via a different mechanism
-    def create_symint(self, name, val):
-        assert val >= 0
+    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+        """
+        Returns a list of symbolic sizes and strides for the given tensor.
+        We try our best to express stride in terms of the sizes, so as to not
+        introduce new symbolic variables.
+        """
+
+        size = [self.create_symbol(i) for i in ex.size()]
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        for i, val in enumerate(ex.stride()):
+            if val in (0, 1):
+                stride[i] = sympy.Integer(val)
+        while any(x is None for x in stride):
+            candidates = {
+                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
+                for i in range(len(size))
+                if stride[i] is not None and ex.stride()[i] >= 0
+            }
+            # iterate over unbound strides in sorted order
+            val_list = sorted(
+                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+            )
+            for _, i in val_list:
+                if stride[i] is None and ex.stride()[i] in candidates:
+                    stride[i] = candidates[ex.stride()[i]]
+                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
+            if any(x is None for x in stride):
+                # bind the smallest unbound stride to a new variable
+                val, i = sorted(
+                    [
+                        (ex.stride()[i], i)
+                        for i in range(len(stride))
+                        if stride[i] is None
+                    ]
+                )[0]
+                stride[i] = self.create_symbol(val)
+        assert all(x is not None for x in stride)
+        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+
+    def create_symintnode(self, expr: Union["sympy.Expr", int]):
+        py_sym_int = PySymInt(expr, self)
+        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        return cpp_sym_int
+
+    def create_symbol(self, val: int) -> "sympy.Expr":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
-
-        # TODO: Put 0/1 specialization in guards
-        if val == 0 or val == 1:
-            return val
+        if val < 0:
+            # all sympy base variables must be positive and > 1
+            return -self.create_symbol(-val)
         # This implements duck-shaping: input sizes that match are assigned
         # the same symint
         # TODO: Create a guard whenever this happens
         # TODO: But how do I represent the guard in this case?
-        if val in self.val_to_symint:
-            return self.val_to_symint[val]
-        sympy_expr = sympy.Symbol(name, positive=True, integer=True)
-        py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        # Note: val_to_var is also initialized with 0/1 mapping to constants, so
+        # this also ensures that all symbols are > 1
+        if val in self.val_to_var:
+            return self.val_to_var[val]
+        sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
         self.var_to_val[sympy_expr] = sympy.Integer(val)
-        self.val_to_symint[val] = cpp_sym_int
-        return cpp_sym_int
+        self.val_to_var[val] = sympy_expr
+        return sympy_expr
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()

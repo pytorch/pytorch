@@ -23,3 +23,5 @@ debug_graphs = os.environ.get('AOT_FX_GRAPHS', False)
 debug_joint = os.environ.get('AOT_FX_GRAPHS_JOINT', False)
 
 use_dynamic_shapes = os.getenv('AOT_DYNAMIC_SHAPES', False)
+
+static_weight_shapes = True

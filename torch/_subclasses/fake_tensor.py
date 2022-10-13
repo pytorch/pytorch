@@ -622,6 +622,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_meta=False,
         throw_on_data_dependent_ops=True,
+        shape_env=None,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
@@ -641,6 +642,8 @@ class FakeTensorMode(TorchDispatchMode):
         # within python refs, we always return the real device by defining
         # the device property
         self.in_kernel_invocation = False
+
+        self.shape_env = shape_env
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -920,8 +923,10 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor, shape_env=None):
-        return self.fake_tensor_converter(self, tensor, shape_env=shape_env)
+    def from_tensor(self, tensor, static_shapes=False):
+        if static_shapes:
+            return self.fake_tensor_converter(self, tensor)
+        return self.fake_tensor_converter(self, tensor, shape_env=self.shape_env)
 
 
 # NB: returns fake tensors
