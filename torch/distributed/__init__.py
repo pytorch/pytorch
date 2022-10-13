@@ -4,7 +4,6 @@ from enum import Enum
 
 import torch
 
-
 def is_available() -> bool:
     """
     Returns ``True`` if the distributed package is available. Otherwise,
@@ -82,5 +81,8 @@ else:
     #   python test/test_public_bindings.py -k test_correct_module_names
     # working even when USE_DISTRIBUTED=0.  Feel free to add more
     # stubs as necessary.
-    class ProcessGroup:  # type: ignore[no-redef]
+    # We cannot define stubs directly because they confuse pyre
+
+    class _ProcessGroupStub:
         pass
+    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]

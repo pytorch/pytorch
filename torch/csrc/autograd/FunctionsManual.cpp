@@ -831,39 +831,43 @@ Tensor logcumsumexp_backward(
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
-  IntArrayRef sizes;
+  c10::SymIntArrayRef sizes;
   at::TensorOptions o;
   for (const auto& v : grads) {
     if (v.defined()) {
-      sizes = v.sizes();
+      sizes = v.sym_sizes();
       o = static_cast<Tensor>(v).options();
       break;
     }
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }
 
-Tensor unsqueeze_to(const Tensor& self, IntArrayRef sizes) {
+Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
-  int64_t nDims = sizes.size();
+  int64_t nDims = sym_sizes.size();
   for (const auto dim : c10::irange(nDims)) {
-    if (sizes[dim] == 1) {
+    if (sym_sizes[dim] == 1) {
       result = result.unsqueeze(dim);
     }
   }
   return result;
 }
 
-Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
+Tensor unsqueeze_to(
+    const Tensor& self,
+    int64_t dim,
+    c10::SymIntArrayRef sym_sizes) {
+  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to
   // avoided unsqueezing in the backward.
-  if (sizes.size() > 0 && sizes[dim] == 1) {
+  if (sym_sizes.size() > 0 && sym_sizes[dim] == 1) {
     return self.unsqueeze(dim);
   }
   return self;
@@ -871,15 +875,15 @@ Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
 
 std::vector<Tensor> cat_tensors_backward(
     const Tensor& grad,
-    const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<std::vector<c10::SymInt>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim) {
   std::vector<Tensor> grad_inputs(sizes.size());
   if (!grad.defined()) {
     return grad_inputs;
   }
-  dim = at::legacy_cat_wrap_dim(dim, sizes);
-  int64_t accumulate = 0;
+  dim = at::legacy_cat_wrap_dim_symint(dim, sizes);
+  c10::SymInt accumulate = 0;
 
   Tensor grad_;
   bool grad_is_complex = grad.is_complex();
@@ -896,13 +900,13 @@ std::vector<Tensor> cat_tensors_backward(
     }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<int64_t>({0})) {
+    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
       grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
     auto size = shape[dim];
     accumulate += size;
-    grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
+    grad_inputs[i] = grad_val.narrow_symint(dim, accumulate - size, size);
   }
   return grad_inputs;
 }
@@ -2835,21 +2839,27 @@ Tensor as_strided_backward(
 
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
-      std::min(input_geometry.sym_storage_offset(), sym_storage_offset);
+      // TODO: symint-ify. Do we need a min() and max() for SymInts?
+      input_geometry.sym_storage_offset().min(sym_storage_offset);
   auto inp_effective_offset =
       input_geometry.sym_storage_offset() - shared_offset;
   auto out_effective_offset = sym_storage_offset - shared_offset;
-  auto base_size = std::max(
-      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
-      _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
-  auto storage = grad.new_empty_symint(c10::SymIntArrayRef(base_size));
-  storage.zero_();
+  auto base_size1 =
+      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset);
+  auto base_size2 =
+      _min_storage_size(out_sizes_, out_strides_, out_effective_offset);
+  auto base_size = base_size1.max(base_size2);
+  auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
-        at::arange(0, base_size, grad.options().dtype(at::kLong));
+        // TODO: should we symint-ify arange? Need SymScalar.
+        at::arange(
+            0,
+            base_size.guard_int(__FILE__, __LINE__),
+            grad.options().dtype(at::kLong));
   }
 
   // Step (2): use output geometry to scatter gradients into storage

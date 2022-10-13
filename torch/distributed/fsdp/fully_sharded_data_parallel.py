@@ -1072,7 +1072,7 @@ class FullyShardedDataParallel(nn.Module):
 
         self._check_single_device_module(module, ignored_params)
         device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
-        self._materialize_module(module, param_init_fn, device_from_device_id)
+        self._materialize_module(module, param_init_fn, ignored_params, device_from_device_id)
         self._move_module_to_device(module, ignored_params, device_from_device_id)
         self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
@@ -1353,6 +1353,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         param_init_fn: Optional[Callable[[nn.Module], None]],
+        ignored_params: Set[nn.Parameter],
         device_from_device_id: Optional[torch.device],
     ) -> None:
         """
@@ -1367,11 +1368,11 @@ class FullyShardedDataParallel(nn.Module):
         ``reset_parameters()``, and for torchdistX fake tensors, this calls
         ``deferred_init.materialize_module()``.
         """
-        is_meta_module = any(p.is_meta for p in module.parameters())
+        is_meta_module = any(p.is_meta for p in self._get_orig_params(module, ignored_params))
         is_torchdistX_deferred_init = (
             not is_meta_module
             and _TORCHDISTX_AVAIL
-            and any(fake.is_fake(p) for p in module.parameters())
+            and any(fake.is_fake(p) for p in self._get_orig_params(module, ignored_params))
         )
         if (
             is_meta_module or is_torchdistX_deferred_init
@@ -2607,7 +2608,7 @@ class FullyShardedDataParallel(nn.Module):
             chunk_size = (
                 math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
             )
-            if shards:
+            if len(shards) == 1:
                 local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
                 if not local_tensor.is_cuda:
                     local_tensor = local_tensor.cuda()
@@ -4548,7 +4549,7 @@ def _get_param_to_unflat_param_names(
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 module_prefixed_param_names = (
-                    param._prefixed_param_names if type(param) is FlatParameter
+                    param._fqns if type(param) is FlatParameter
                     else [param_name]
                 )  # prefixed from `module`
                 fully_prefixed_param_names = [
