@@ -139,7 +139,7 @@ from torch.ao.ns.fx.n_shadows_utils import (
     handle_subgraph,
 )
 
-from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
+from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type, Union
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
@@ -750,10 +750,65 @@ def extend_logger_results_with_comparison(
                     comparison_result = comparison_fn(value_1, value_2)
                     result_2[comparison_name].append(comparison_result)
 
+class QConfigMultiMapping:
+    def __init__(self, number_of_mappings: int=2):
+        self.number_of_mappings = number_of_mappings
+        self.qconfig_mappings_list: List[QConfigMapping]=[]
+        for _ in range(number_of_mappings):
+            self.qconfig_mappings_list.append(QConfigMapping())
+
+    def _apply_to_each_qconfig_mapping(self, method_name, args, qconfig_list: List[QConfigAny]):
+        assert self.number_of_mappings==len(qconfig_list), "need number_of_mappings to match size of qconfig_list"
+        for qconfig_mapping, qconfig in zip(self.qconfig_mappings_list, qconfig_list):
+            method = getattr(qconfig_mapping, method_name)
+            method(*args, qconfig)
+
+    def set_global(self, global_qconfig_list: List[QConfigAny]):
+        self._apply_to_each_qconfig_mapping("set_global", [], global_qconfig_list)
+        return self
+
+    def set_object_type(self, object_type: Union[Callable, str], qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
+        self._apply_to_each_qconfig_mapping("set_object_type",[object_type], qconfig_list)
+        return self
+
+    def set_module_name_regex(self, module_name_regex: str, qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
+        self._apply_to_each_qconfig_mapping("set_module_name_regex",[module_name_regex], qqconfig_list)
+        return self
+
+    def set_module_name(self, module_name: str, qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
+        self._apply_to_each_qconfig_mapping("set_module_name",[module_name], qconfig_list)
+        return self
+
+    def set_module_name_object_type_order(
+            self,
+            module_name: str,
+            object_type: Callable,
+            index: int,
+            qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
+        self._apply_to_each_qconfig_mapping(
+                "set_module_name_object_type_order",
+                (module_name, object_type, index),
+                qconfig_list
+        )
+        return self
+
+    def add_new_qconfig_mapping(self, qconfig_mapping: QConfigMapping):  # -> QConfigMultiMapping:
+        self.qconfig_mappings_list.append(qconfig_mapping)
+        self.number_of_mappings+=1
+        return self
+
+    @classmethod
+    def from_list_qconfig_mapping(cls, qconfig_mapping_list: List[QConfigMapping]):  # -> QConfigMultiMapping:
+        """
+        Creates a QConfigMultiMapping from a list of QConfigMappings
+        """
+        new_qconfig_multi_mapping = cls(len(qconfig_mapping_list))
+        new_qconfig_multi_mapping.qconfig_mappings_list = qconfig_mapping_list
+
 def prepare_n_shadows_model(
     model: torch.nn.Module,
     example_inputs: Any,
-    qconfig_mappings: List[QConfigMapping],
+    qconfig_mappings: Union[List[QConfigMapping], QConfigMultiMapping],
     backend_config: BackendConfig,
 ) -> torch.nn.Module:
     """
@@ -818,6 +873,9 @@ def prepare_n_shadows_model(
         standalone_module_names, standalone_module_classes, custom_module_classes)
     subgraphs_dedup: Dict[str, List[Node]] = \
         _get_dedup_subgraphs(matches)
+
+    if isinstance(qconfig_mappings, QConfigMultiMapping):
+        qconfig_mappings = qconfig_mappings.qconfig_mappings_list
 
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries

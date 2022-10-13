@@ -81,6 +81,7 @@ from torch.ao.ns._numeric_suite_fx import (
     print_comparisons_n_shadows_model,
     loggers_set_enabled,
     loggers_set_save_activations,
+    QConfigMultiMapping,
 )
 from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
@@ -2287,6 +2288,23 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         ]
         self._test_impl(m, example_input, qconfig_mappings)
 
+    def test_qconfig_multi_mapping(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(2, 2)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        m = M().eval()
+        example_input = (torch.randn(2, 2),)
+
+        qconfig_multi_mapping = QConfigMultiMapping(2) \
+                .set_global([torch.quantization.default_qconfig, torch.quantization.default_dynamic_qconfig])
+
+        self._test_impl(m, example_input, qconfig_multi_mapping)
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
