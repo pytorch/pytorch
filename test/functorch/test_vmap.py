@@ -3131,7 +3131,7 @@ def discover_variants(opinfo):
 
 class TestVmapOperatorsOpInfo(TestCase):
 
-    def vmap_outplace_test(self, func, args, kwargs, in_dims, unbatched_expected, check_shape_only=False,
+    def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
                            postprocess_fn=None):
         for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in \
                 compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
@@ -3147,7 +3147,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.assertEqual(vmap_expected, vmap_actual)
             self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
-    def vmap_inplace_test(self, func, args, kwargs, in_dims, unbatched_expected, postprocess_fn=None):
+    def vmap_inplace_test(self, func, args, kwargs, in_dims, postprocess_fn=None):
         # NB: This test assumes that the first argument is being modified.
         # This is OK because it's what every other OpInfo-based test assumes,
         # but it is going to need a more robust solution eventually.
@@ -3160,7 +3160,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                     pass
             return
         for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in \
-                compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+                compute_quantities_for_vmap_test(func, args, kwargs, in_dims, clone_inputs=True):
             if postprocess_fn is not None:
                 vmap_expected = postprocess_fn(vmap_expected)
                 vmap_actual = postprocess_fn(vmap_actual)
@@ -3188,21 +3188,19 @@ class TestVmapOperatorsOpInfo(TestCase):
             aliases, inplace_aliases = discover_variants(op)
             check_shape_only = op.name in ('empty_like', 'new_empty')
             for sample_input in sample_inputs_itr:
-                unbatched_args = (sample_input.input,) + sample_input.args
+                args = (sample_input.input,) + sample_input.args
                 kwargs = sample_input.kwargs
-                unbatched_expected = op(*unbatched_args, **kwargs)
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
-                for batched_args, in_dims, _ in generate_vmap_inputs(
-                        unbatched_args, {}, is_batch_norm_and_training=is_batch_norm_and_training):
+                for args, in_dims, _ in generate_vmap_inputs(
+                        args, {}, is_batch_norm_and_training=is_batch_norm_and_training):
                     for func in aliases:
-                        self.vmap_outplace_test(func, batched_args, kwargs, in_dims,
-                                                unbatched_expected, check_shape_only, postprocess_fn)
+                        self.vmap_outplace_test(func, args, kwargs, in_dims, check_shape_only, postprocess_fn)
                     if op.name in skip_inplace:
                         continue
                     if not is_valid_inplace_sample_input(sample_input, op, op.inplace_variant):
                         continue
                     for func in inplace_aliases:
-                        self.vmap_inplace_test(func, batched_args, kwargs, in_dims, unbatched_expected, postprocess_fn)
+                        self.vmap_inplace_test(func, args, kwargs, in_dims, postprocess_fn)
 
         if check_has_batch_rule:
             check_vmap_fallback(self, test, op)
