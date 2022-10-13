@@ -104,7 +104,7 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 if op_overload in registry:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
                 registry[op_overload] = fn
-                op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
+
                 # TODO: factor this logic into OpOverload or Library API
                 name = op_overload._schema.name
                 if op_overload._schema.overload_name:
@@ -145,6 +145,8 @@ Please set `disable_meta=True`.
                         """
                         )
                     meta_lib.impl(op_overload, fn)
+                else:
+                    op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
         # To handle allowing multiple aten_ops at once
         tree_map(add_op_to_table, aten_op)
