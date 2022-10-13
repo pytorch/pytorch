@@ -114,6 +114,18 @@ Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
       });
 }
 
+Tensor& NestedTensor_tanh_(Tensor& self) {
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
+  at::tanh_(buffer);
+  return self;
+}
+
+Tensor NestedTensor_tanh(const Tensor& self) {
+  return map_nt(self, at::tanh);
+}
+
 Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, bool mask_check) {
     TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
     TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
