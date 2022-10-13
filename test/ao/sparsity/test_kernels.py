@@ -13,9 +13,9 @@ import torch
 import torch.ao.quantization as tq
 
 from torch import nn
-from torch.ao.sparsity.sparsifier.utils import fqn_to_module
+from torch.ao.pruning.sparsifier.utils import fqn_to_module
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_quantized import (
     override_cpu_allocator_for_qnnpack,
     override_qengines,
@@ -30,6 +30,7 @@ from torch.testing._internal.common_quantized import (
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 class TestQuantizedSparseKernels(TestCase):
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     @override_qengines
     def test_sparse_qlinear(self):
         batch_size = 12

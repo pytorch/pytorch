@@ -290,7 +290,7 @@ class TestFSDPMixedPrecision(FSDPTest):
 
         return orig_reduce_scatter(*args, **kwargs)
 
-    def _test_grads_reduced_precision(self):
+    def _test_grads_reduced_precision(self, offload_params: bool):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -307,8 +307,12 @@ class TestFSDPMixedPrecision(FSDPTest):
             buffer_dtype=torch.float16,
             keep_low_precision_grads=True,
         )
-        m.lin1 = FSDP(m.lin1, mixed_precision=mp)
-        m = FSDP(m, mixed_precision=mp)
+        fsdp_kwargs = {
+            "mixed_precision": mp,
+            "cpu_offload": CPUOffload(offload_params=offload_params),
+        }
+        m.lin1 = FSDP(m.lin1, **fsdp_kwargs)
+        m = FSDP(m, **fsdp_kwargs)
         for _ in range(6):
             inp = torch.ones(1, 10)
             m(inp).sum().backward()
@@ -610,7 +614,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(2)
     def test_grads_reduced_precision(self):
-        self._test_grads_reduced_precision()
+        self.run_subtests(
+            {"offload_params": [False, True]},
+            self._test_grads_reduced_precision,
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize("convert_sync_bn", [True, False])
@@ -679,7 +686,10 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
 
     @skip_if_lt_x_gpu(1)
     def test_grads_reduced_precision(self):
-        return self._test_grads_reduced_precision()
+        self.run_subtests(
+            {"offload_params": [False, True]},
+            self._test_grads_reduced_precision,
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_no_reshard_after_forward(self):
