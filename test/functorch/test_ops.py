@@ -651,6 +651,7 @@ class TestOperators(TestCase):
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -680,11 +681,6 @@ class TestOperators(TestCase):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
 
-        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-        atol, rtol = (1e-4, 2e-2) if is_cuda_sm86 else (None, None)
-        if is_cuda_sm86 and op.name == "nn.functional.conv_transpose3d" and dtype == torch.float32:
-            self.skipTest("test_vmapvjpvjp_nn_functional_conv_transpose3d_cuda_float32 is grossly incorrect on sm86")
-            return
         for sample in samples:
             fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
@@ -707,7 +703,7 @@ class TestOperators(TestCase):
             generator = get_fallback_and_vmap_exhaustive(
                 vjp_of_vjp, args_and_cotangents, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
-                self.assertEqual(loop_out, batched_out, atol=atol, rtol=rtol)
+                self.assertEqual(loop_out, batched_out)
 
     vmapvjp_fail = vjp_fail.union({
         # -------------------- ALLOWED FAILURES --------------------------------
@@ -723,6 +719,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -790,11 +787,6 @@ class TestOperators(TestCase):
         if is_inplace(op, op.get_op()):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
-        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-        if is_cuda_sm86 and op.name == "nn.functional.conv_transpose3d" and dtype == torch.float32:
-            self.skipTest("test_vmapvjp_nn_functional_conv_transpose3d_cuda_float32 is grossly incorrect on sm86")
-            return
-        atol, rtol = (1e-4, 4e-2) if is_cuda_sm86 else (None, None)
         for sample in samples:
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
@@ -802,7 +794,7 @@ class TestOperators(TestCase):
             generator = get_fallback_and_vmap_exhaustive(
                 fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
-                self.assertEqual(loop_out, batched_out, atol=atol, rtol=rtol)
+                self.assertEqual(loop_out, batched_out)
 
     vmapjvpall_fail = {
         # -------------------- ALLOWED FAILURES --------------------------------
@@ -854,6 +846,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
@@ -1119,6 +1112,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1371,6 +1365,7 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1399,10 +1394,6 @@ class TestOperators(TestCase):
         # TODO: test in-place
         if is_inplace(op, op.get_op()):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
-            return
-        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-        if is_cuda_sm86 and op.name == "nn.functional.conv_transpose3d" and dtype == torch.float32:
-            self.skipTest("test_vmapjvpvjp_nn_functional_conv_transpose3d_cuda_float32 is grossly incorrect on sm86")
             return
 
         for sample in samples:
