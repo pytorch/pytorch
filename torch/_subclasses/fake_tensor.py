@@ -621,7 +621,7 @@ class FakeTensorMode(TorchDispatchMode):
         *,
         allow_fallback_kernels=True,
         allow_meta=False,
-        throw_on_data_dependent_ops=False,
+        throw_on_data_dependent_ops=True,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
@@ -885,6 +885,7 @@ class FakeTensorMode(TorchDispatchMode):
     def functions_with_cpp_meta_impl_that_support_symint(self):
         return [
             aten.empty_strided.default,
+            aten.as_strided_scatter.default,
             aten.as_strided.default,
             aten.zeros.default,
             aten.detach.default,
