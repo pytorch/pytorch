@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from torch.multiprocessing import Pool, get_context
+from torch.multiprocessing import get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -66,8 +66,7 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    # This supports symlinks, so we can link domain library tests like functorch
-    # to PyTorch test directory
+    # This supports symlinks, so we can link domain library tests to PyTorch test directory
     all_py_files = [pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)]
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
@@ -252,6 +251,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
+    "test_cuda_nvml_based_avail",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -267,6 +267,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_cuda_trace",
+    "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
 CI_SERIAL_LIST = [
@@ -520,24 +521,15 @@ def test_distributed(test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
     config = DISTRIBUTED_TESTS_CONFIG
-
-    for with_init_file in {True, False}:
-        # Run all distributed backends in parallel, trying to run env/file init
-        # methods in parallel too ends in failures in which the subprocesses
-        # timeout
-        pool = Pool(processes=len(config))
-        return_codes = []
-        tmp_dirs = []
-
-        for backend, env_vars in config.items():
-            if sys.platform == "win32" and backend != "gloo":
-                continue
-            if backend == "mpi" and not mpi_available:
-                continue
+    for backend, env_vars in config.items():
+        if sys.platform == "win32" and backend != "gloo":
+            continue
+        if backend == "mpi" and not mpi_available:
+            continue
+        for with_init_file in {True, False}:
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
-            tmp_dirs.append(tmp_dir)
             if options.verbose:
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
@@ -557,7 +549,6 @@ def test_distributed(test_module, test_directory, options):
                 else:
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
                 os.environ["INIT_METHOD"] = init_method
-
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -588,41 +579,18 @@ def test_distributed(test_module, test_directory, options):
                         )
 
                     mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-                    return_code = pool.apply_async(
-                        run_test,
-                        args=(test_module, test_directory, options),
-                        kwds={
-                            "launcher_cmd": mpiexec,
-                            "env": os.environ.copy(),
-                        }
+
+                    return_code = run_test(
+                        test_module, test_directory, options, launcher_cmd=mpiexec
                     )
                 else:
-                    return_code = pool.apply_async(
-                        run_test,
-                        args=(test_module, test_directory, options),
-                        kwds={
-                            "extra_unittest_args": ["--subprocess"],
-                            "env": os.environ.copy(),
-                        }
-                    )
-
-                return_codes.append(return_code)
-
+                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
+                if return_code != 0:
+                    return return_code
             finally:
+                shutil.rmtree(tmp_dir)
                 os.environ.clear()
                 os.environ.update(old_environ)
-
-        pool.close()
-        # Close the pool and wait for all the processes to finish
-        pool.join()
-
-        for tmp_dir in tmp_dirs:
-            shutil.rmtree(tmp_dir)
-
-        for return_code in return_codes:
-            if return_code.get() != 0:
-                return return_code
-
     return 0
 
 
@@ -750,6 +718,7 @@ def run_test_ops(test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
+    "test_cuda_nvml_based_avail": get_run_test_with_subprocess_fn(),
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
