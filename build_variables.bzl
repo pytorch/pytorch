@@ -133,7 +133,6 @@ libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
-    "torch/csrc/profiler/api.cpp",
     "torch/csrc/profiler/collection.cpp",
     "torch/csrc/profiler/execution_graph_observer.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
@@ -142,6 +141,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/itt_observer.cpp",
     "torch/csrc/profiler/orchestration/observer.cpp",
     "torch/csrc/profiler/orchestration/python_tracer.cpp",
+    "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
 ]
@@ -661,7 +661,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
-    "torch/csrc/profiler/cuda.cpp",
+    "torch/csrc/profiler/stubs/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
