@@ -351,6 +351,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_solve_triangular",
     "linalg_pinv",
     "linalg_lstsq",
+    "unfold_copy",
     "col2im",
     "im2col",
     "cholesky_inverse",

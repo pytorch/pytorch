@@ -1529,8 +1529,8 @@ dense_dim() -> int
 
 Return the number of dense dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``len(self.shape)`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.sparse_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """,
@@ -4680,8 +4680,8 @@ sparse_dim() -> int
 
 Return the number of sparse dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``0`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.dense_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """,
