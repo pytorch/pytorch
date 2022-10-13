@@ -12693,7 +12693,7 @@ class TestNNDeviceType(NNTestCase):
             output2 = m2(i2)
             output2.backward(grad_output[:, offset:].contiguous())
             is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-            atol, rtol = (3e-4, 3e-2) if dtype == torch.float32 and is_cuda_sm86 else (dtype2prec_DONTUSE[dtype], 0)
+            atol, rtol = (0.005, 3e-2) if dtype == torch.float32 and is_cuda_sm86 else (dtype2prec_DONTUSE[dtype], 0)
 
             self.assertEqual(output, torch.cat([output1, output2], 1),
                              atol=atol, rtol=rtol)
