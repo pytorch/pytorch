@@ -5329,10 +5329,10 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
       // left = false and tranpose = true is very much similar with just
       // transposed arguments passed into householder_product_backward.
       // Ormqr computes B = H_1 * ... * H_k * A.
-      // The sensivity wrt H_i is given by (see notes in householder_product_backward)
-      // Tr(H_i_plus B B_grad^H H_i_minus dH_i), so, since
-      // householder_product_backward respects `for i in range(k)`, we could reuse
-      // householder_product_backward with
+      // The sensivity wrt H_i is given by (see notes in
+      // householder_product_backward) Tr(H_i_plus B B_grad^H H_i_minus dH_i),
+      // so, since householder_product_backward respects `for i in range(k)`, we
+      // could reuse householder_product_backward with
       // householder_product_backward.grad = grad and
       // householder_product_backward.result = result.
       const auto hpb_grad = !transpose ? grad : grad.mH();
@@ -5345,17 +5345,17 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
       // transposed arguments passed into householder_product_backward.
       // In this case Ormqr computes B = H_1 * ... * H_k * A and the sensitivity
       // wrt H_i becomes Tr(H_i_plus B_grad^H B H_i_minus dH_k).
-      // We could see that the role of `grad` and `result` in householder_product_backward
-      // gets "swapped" and "transposed" and that in order to compute H_k_grad efficiently
-      // we would need to compute grads in reversed order (`for i in range(k - 1, -1, -1)`).
-      // Hence we reuse householder_product_backward with
-      // householder_product_backward.grad = result.mH,
-      // householder_product_backward.result = grad.mH,
+      // We could see that the role of `grad` and `result` in
+      // householder_product_backward gets "swapped" and "transposed" and that
+      // in order to compute H_k_grad efficiently we would need to compute grads
+      // in reversed order (`for i in range(k - 1, -1, -1)`). Hence we reuse
+      // householder_product_backward with householder_product_backward.grad =
+      // result.mH, householder_product_backward.result = grad.mH,
       // householder_product_backward.flip_order = true.
       const auto hpb_grad = !transpose ? result.mH() : result;
       const auto hpb_result = !transpose ? grad.mH() : grad;
-      std::tie(self_grad, tau_grad) =
-          householder_product_backward(hpb_grad, hpb_result, self, tau, /*flip_order=*/true);
+      std::tie(self_grad, tau_grad) = householder_product_backward(
+          hpb_grad, hpb_result, self, tau, /*flip_order=*/true);
     }
   }
 
