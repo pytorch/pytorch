@@ -390,7 +390,6 @@ template <class Stub>
 void impl_func_cum_ops(
     const Tensor& self,
     int64_t dim,
-    c10::optional<ScalarType> dtype,
     const Tensor& result,
     Stub& stub) {
   NoNamesGuard guard;
@@ -409,7 +408,7 @@ TORCH_IMPL_FUNC(cumsum_out)
  int64_t dim,
  c10::optional<ScalarType> dtype,
  const Tensor& result) {
-  impl_func_cum_ops(self, dim, dtype, result, cumsum_stub);
+  impl_func_cum_ops(self, dim, result, cumsum_stub);
 }
 
 TORCH_IMPL_FUNC(cumprod_out)
@@ -417,7 +416,7 @@ TORCH_IMPL_FUNC(cumprod_out)
  int64_t dim,
  c10::optional<ScalarType> dtype,
  const Tensor& result) {
-  impl_func_cum_ops(self, dim, dtype, result, cumprod_stub);
+  impl_func_cum_ops(self, dim, result, cumprod_stub);
 }
 
 Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
@@ -2055,6 +2054,10 @@ Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const
 
 Tensor sum_csr(const Tensor &self, c10::optional<ScalarType> dtype) {
   return self.values().sum(dtype);
+}
+
+Tensor sum_coo(const Tensor &self, c10::optional<ScalarType> dtype) {
+  return self._values().sum(dtype);
 }
 
 } // namespace native

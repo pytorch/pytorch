@@ -9,7 +9,9 @@ import unittest
 import torch
 import operator
 import itertools
+import io
 from torch.utils._pytree import tree_map
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -353,6 +355,36 @@ class TestPySymInt(TestCase):
             y = torch.add(x, x, alpha=a0)
 
         self.assertTrue(sym_int_encountered)
+
+    @skipIfNoSympy
+    @unittest.mock.patch('sys.stdout', new_callable=io.StringIO)
+    def test_print_readable_with_symints(self, mock_stdout):
+        def f(a, b):
+            dim0 = a.shape[0] + b.shape[0]
+            dim1 = a.shape[1] + b.shape[1]
+            d = a.new_empty(dim0, dim1)
+            d = torch.ops.aten.native_dropout(d, 0.5, train=True)
+            return d
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5, 3), torch.randn(4, 3))
+        fx_g.print_readable()
+
+        self.assertExpectedInline(mock_stdout.getvalue().strip(), """\
+class f(torch.nn.Module):
+    def forward(self, a_1: f32[t0.size(0),t0.size(1)], b_1: f32[t1.size(0),t0.size(1)]):
+        # No stacktrace found for following nodes
+        sym_size: Sym(t0.size(0)) = torch.ops.aten.sym_size(a_1, 0)
+        sym_size_1: Sym(t1.size(0)) = torch.ops.aten.sym_size(b_1, 0)
+        add: Sym(t0.size(0) + t1.size(0)) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
+        sym_size_2: Sym(t0.size(1)) = torch.ops.aten.sym_size(a_1, 1)
+        sym_size_3: Sym(t0.size(1)) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
+        add_1: Sym(2*t0.size(1)) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
+        new_empty: f32[t0.size(0) + t1.size(0),2*t0.size(1)] = torch.ops.aten.new_empty.default(a_1, [add, add_1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False);  a_1 = add = add_1 = None
+        native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
+        getitem: f32[t0.size(0) + t1.size(0),2*t0.size(1)] = native_dropout[0]
+        getitem_1: b8[t0.size(0) + t1.size(0),2*t0.size(1)] = native_dropout[1];  native_dropout = None
+        return (getitem, getitem_1)""")  # noqa: B950
+
 
 if __name__ == '__main__':
     run_tests()
