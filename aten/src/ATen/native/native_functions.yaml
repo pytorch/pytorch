@@ -1174,8 +1174,7 @@
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
-    NestedTensorCPU: bmm_nested
-    NestedTensorCUDA: bmm_nested_cuda
+    NestedTensorCPU, NestedTensorCUDA: bmm_nested
   tags: canonical
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
