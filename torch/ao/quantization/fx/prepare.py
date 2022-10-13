@@ -1358,7 +1358,8 @@ def insert_observers_for_model(
                                         continue
                                     user_node.replace_input_with(node, maybe_output_obs_node)
 
-                                is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype_info)
+                                is_observer_in_same_graph_ = is_observer_in_same_graph(
+                                    node, modules, node_name_to_target_dtype_info)
 
                                 # for general tensor value ops, we modify the graph
                                 # to make all inputs and outputs use the first input's
