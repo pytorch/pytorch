@@ -1337,6 +1337,8 @@ def merge(pr_num: int, repo: GitRepo,
           on_green: bool = False,
           land_checks: bool = False,
           timeout_minutes: int = 400,
+          # DO NOT SUBMIT: temporarily changing default from 3 to 0 for testing
+          # purposes.
           stale_pr_days: int = 0) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
