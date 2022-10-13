@@ -2014,6 +2014,13 @@ def upsample_nearest2d_backward_vec(grad_output, output_size, input_size, scale_
     mem_format = utils.suggest_memory_format(grad_output)
     return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
+@register_meta(aten._to_copy.default)
+def _to_copy(x, *, dtype=None, layout=None, device=None, pin_memory=False,
+                non_blocking=False, memory_format=None):
+    assert device is not None or dtype is not None or memory_format is not None
+    dtype = x.dtype if dtype is None else dtype
+    device = x.device if device is None else device
+    return torch.empty(x.size(), dtype=dtype, layout=layout, device=device, memory_format=memory_format)
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
