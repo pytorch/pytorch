@@ -609,7 +609,6 @@ Utilities
     get_float32_matmul_precision
     set_warn_always
     is_warn_always_enabled
-    vmap
     _assert
 
 Operator Tags
