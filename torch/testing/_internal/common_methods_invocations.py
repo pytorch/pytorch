@@ -12596,10 +12596,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            # https://github.com/pytorch/pytorch/issues/80411
            gradcheck_fast_mode=True,
-           # TODO: backward uses in-place operations that vmap doesn't like
-           check_batched_grad=False,
-           check_batched_gradgrad=False,
-           check_batched_forward_grad=False,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=sample_inputs_ormqr,
            error_inputs_func=error_inputs_ormqr,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
