@@ -12596,17 +12596,11 @@ op_db: List[OpInfo] = [
            # TODO: backward uses in-place operations that vmap doesn't like
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           #supports_forward_ad=True,
-           #supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_ormqr,
            error_inputs_func=error_inputs_ormqr,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # depends on householder_product_backward for which gragradcheck is disabled.
-               # DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               # ormqr does not support forward when complex inputs require grad
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            )),

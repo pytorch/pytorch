@@ -8344,11 +8344,11 @@
 
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: ormqr.out(Tensor self, Tensor tau, Tensor other, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: ormqr_out
 
-- func: ormqr(Tensor self, Tensor tau, Tensor other, bool left=True, bool transpose=False) -> Tensor
+- func: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: ormqr
