@@ -458,7 +458,7 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
   return std::tie(attention, std::get<1>(attention_and_weights));
 }
 
-Tensor flash_attention_helper_packed(
+Tensor flash_attention_helper(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
