@@ -10,7 +10,6 @@
 #include <c10/core/QScheme.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/NonSymbolicBC.h>
 #include <tuple>
 #include <vector>
 ${extra_includes}
