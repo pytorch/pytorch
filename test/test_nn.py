@@ -337,10 +337,10 @@ class TestNN(NNTestCase):
         output.sum().backward()
 
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
-    def test_hook_backward_pre_and_full(self):
+    def test_backward_hooks_interaction(self):
         # Test to make sure that the grad_outputs
-        # updated by backward_pre_hook are received by
-        # the backward_full_hook
+        # updated by full_backward_pre_hook are received by
+        # the full_backward_hook
         module = torch.nn.Sigmoid()
 
         cnt = {'backward_cnt': 0}
