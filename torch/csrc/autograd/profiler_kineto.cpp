@@ -12,10 +12,10 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
-#include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
-#include <torch/csrc/profiler/nvtx_observer.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
+#include <torch/csrc/profiler/standalone/itt_observer.h>
+#include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <ATen/Context.h>
