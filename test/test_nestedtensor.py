@@ -1058,6 +1058,16 @@ class TestNestedTensorDeviceType(TestCase):
         else:
             self.assertEqual(actual, expect)
 
+        # test tensorcore path
+        nt0 = torch.nested.nested_tensor([torch.randn((2, 8)), torch.randn((3, 16))], device=device, dtype=dtype)
+        nt1 = torch.nested.nested_tensor([torch.randn((8, 8)), torch.randn((16, 8))], device=device, dtype=dtype)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(torch.nested.to_padded_tensor(nt1, 0.0))
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.float16)
     def test_bmm_cuda(self, device, dtype):
