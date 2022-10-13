@@ -1085,8 +1085,9 @@ def main():
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
 
     try:
-        for test, shard_id, shard_num, _ in selected_tests:
+        for test, shard_id, shard_num, expected_time in selected_tests:
             options_clone = copy.deepcopy(options)
+            print(f"expected time: {expected_time}")
             if shard_id != 0 or shard_num != 1:
                 options_clone.additional_unittest_args.extend([f"--shard-id={shard_id}", f"--num-shards={shard_num}"])
             err_message = run_test_module(test, test_directory, options_clone)
