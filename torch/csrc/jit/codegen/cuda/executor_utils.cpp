@@ -841,6 +841,8 @@ void bindInputForExprEvaluation(
                 *maybe_expanded_size,
                 " but recieved value of ",
                 tensor_arg_size);
+          } else {
+            expr_eval.bind(root_domain[dim]->expandedExtent(), tensor_arg_size);
           }
         }
 

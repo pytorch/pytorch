@@ -97,6 +97,11 @@ std::vector<Val*> collectRuntimeUsedValues(kir::Kernel* kernel) {
     for (auto id : tv->domain()->domain()) {
       ret.push_back(id->extent());
     }
+    for (auto id : tv->getMaybeRFactorDomain()) {
+      if (id->hasExpandedExtent()) {
+        ret.push_back(id->expandedExtent());
+      }
+    }
   }
   for (auto inp : kernel->inputs()) {
     if (inp->isA<Int>() || inp->isA<Double>()) {
@@ -418,9 +423,16 @@ void KernelPrecomputedValues::bindTensorMetaData(
       "Something went wrong configuring launch. Inputs do not match.");
 
   for (const auto dim : c10::irange(root_domain.size())) {
-    auto extent = root_domain[dim]->extent();
     auto value = tensor_arg_abstract->getSize(dim);
-    bindValue(extent->evaluatorIndex(), value);
+    if (root_domain[dim]->hasExpandedExtent()) {
+      auto extent = root_domain[dim]->extent();
+      auto expanded_extent = root_domain[dim]->expandedExtent();
+      bindValue(extent->evaluatorIndex(), 1);
+      bindValue(expanded_extent->evaluatorIndex(), value);
+    } else {
+      auto extent = root_domain[dim]->extent();
+      bindValue(extent->evaluatorIndex(), value);
+    }
   }
 }
 

@@ -6518,9 +6518,7 @@ TEST_F(NVFuserTest, FusionExpandedInput_CUDA) {
                         .contiguity({false, false, true})
                         .expanded({false, true, false})
                         .build();
-  auto expanded_extent = tv0->axis(1)->expandedExtent();
   fusion->addInput(tv0);
-  fusion->addInput(expanded_extent);
   auto tv1 = set(tv0);
   fusion->addOutput(tv1);
 
@@ -6528,9 +6526,9 @@ TEST_F(NVFuserTest, FusionExpandedInput_CUDA) {
   at::Tensor t0 = at::randn({4096, 1, 3}, options).expand({-1, 7, -1});
 
   FusionExecutorCache fec(std::move(fusion_ptr));
-  auto cg_outputs = fec.runFusionWithInputs({t0, 7});
+  auto cg_outputs = fec.runFusionWithInputs({t0});
 
-  testValidate(fusion, cg_outputs, {t0, 7}, {t0}, __LINE__, __FILE__);
+  testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionExpandedInputThrow_CUDA) {
