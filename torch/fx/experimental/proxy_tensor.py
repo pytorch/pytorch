@@ -28,7 +28,7 @@ __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpr
 aten = torch.ops.aten
 prim = torch.ops.prim
 
-CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -43,13 +43,13 @@ def fake_signature(fn, nargs):
 
 @contextmanager
 def decompose(decomposition_table):
-    global CURRENT_DECOMPOSITION_TABLE
-    old_decomposition_table = CURRENT_DECOMPOSITION_TABLE
-    CURRENT_DECOMPOSITION_TABLE = decomposition_table
+    global CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE
+    old_decomposition_table = CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE
+    CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE = decomposition_table
     try:
-        yield CURRENT_DECOMPOSITION_TABLE
+        yield CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE
     finally:
-        CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
+        CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE = old_decomposition_table
 
 # ensure we cannot collide with other properties
 proxy_slot = object()
@@ -216,9 +216,9 @@ def proxy_call(proxy_mode, func, args, kwargs):
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
         return NotImplemented
 
-    if func in CURRENT_DECOMPOSITION_TABLE:
+    if func in CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE:
         with proxy_mode:
-            r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
+            r = CURRENT_POST_AUTOGRAD_DECOMPOSITION_TABLE[func](*args, **kwargs)
             if r is not NotImplemented:
                 return r
 
@@ -597,10 +597,38 @@ def disable_autocast_cache():
 
 
 def make_fx(f, decomposition_table=None, tracing_mode="real"):
+    """
+    We temporarily allows two types of decomposition_table for the ease of migration.
+    1. Dict[str, Dict[torch._ops.OpOverload, Callable]], which is the new format.
+        The key of the outer dict could be one of the following: {"pre_autograd", "post_autograd", "meta"}.
+
+    2. Dict[torch._ops.OpOverload, Callable], which is the old format.
+        This table is effectively the decomposition_table["post_autograd"] in the new format.
+    """
+
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
         decomposition_table = {}
+
+    pre_autograd_decomps = decomposition_table.get("pre_autograd")
+    post_autograd_decomps = decomposition_table.get("post_autograd", decomposition_table)
+    meta_table = decomposition_table.get("meta")
+
+    if pre_autograd_decomps:
+        for opo, fn in pre_autograd_decomps.items():
+            # TODO: How to check if an op is CompositeImplicitAutograd or CompositeExplicitAutograd?
+            # Need to use DispatchKey.CompositeImplicitAutograd for CompositeImplicitAutograd ops. e.g aten.matmul
+            # Need to use DispatchKey.Autograd for CompositeExplicitAutograd ops. e.g aten.upsample_bilinear2d.vec
+            dk = torch._C.DispatchKey.Autograd
+
+            if opo.py_kernels.get(dk) is None:
+                opo.py_impl(dk)(fn)
+
+    if meta_table:
+        for opo, fn in meta_table.items():
+            if opo.py_kernels.get(torch._C.DispatchKey.Meta) is None:
+                opo.py_impl(torch._C.DispatchKey.Meta)(fn)
 
     @functools.wraps(f)
     def wrapped(*args):
@@ -617,7 +645,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        if tracing_mode == "symbolic":
+        if tracing_mode == "symbolic" or pre_autograd_decomps or meta_table:
             python_dispatcher_mode = enable_python_dispatcher()
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
@@ -655,7 +683,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
+        with decompose(post_autograd_decomps), fake_tensor_mode, python_dispatcher_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 

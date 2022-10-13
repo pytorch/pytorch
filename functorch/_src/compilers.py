@@ -10,7 +10,7 @@ from typing import Callable, Optional, Tuple, Union
 import torch
 import torch.fx as fx
 import torch.nn as nn
-from torch._decomp import get_decompositions
+from torch._decomp import get_all_decompositions
 
 from .aot_autograd import aot_function, aot_module, make_boxed_compiler
 from .compile_utils import strip_overloads
@@ -151,7 +151,7 @@ default_decompositions = {
     aten.is_same_size,
 }
 
-default_decompositions = get_decompositions(default_decompositions)
+default_decompositions = get_all_decompositions(default_decompositions)
 
 
 @make_boxed_compiler

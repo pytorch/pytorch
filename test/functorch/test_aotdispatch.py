@@ -424,7 +424,7 @@ class TestAOTAutograd(AOTTestCase):
         inp = torch.ones(torch.Size([16, 64, 112, 112]), dtype=input_dtype, device=device)
 
         ref = bn(inp)
-        cudnn_batch_norm_decomp = torch._decomp.get_decompositions({torch.ops.aten.cudnn_batch_norm})
+        cudnn_batch_norm_decomp = torch._decomp.get_all_decompositions({torch.ops.aten.cudnn_batch_norm})
         aot_fn = make_fx(bn, decomposition_table=cudnn_batch_norm_decomp)(inp)
         res = aot_fn(inp)
         for a, b in zip(ref, res):

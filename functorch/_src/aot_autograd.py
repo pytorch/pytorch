@@ -185,9 +185,6 @@ def normalize_as_list(x):
     return [x]
 
 
-aot_autograd_decompositions = {}
-
-
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []
 nth_graph: int = 0
@@ -364,7 +361,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # Trace once without decompositions, into a graph of ATen ops.
         # NB: tracing_mode is real, as it's assumed the calling context setup
         # fake tensor mode / symbolic shapes if that is needed
-        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
+        pre_autograd_decomps = {}
+        if aot_config.decompositions and aot_config.decompositions.get("pre_autograd"):
+            pre_autograd_decomps["pre_autograd"] = aot_config.decompositions["pre_autograd"]
+
+        # pre-autograd decomposition must be applied when tracing the joint_forward_backward
+        fx_g = make_fx(joint_forward_backward, pre_autograd_decomps)(*joint_inputs)
 
         def fake_fn(primals, tangents):
             with torch.fx.traceback.override_stack_trace():
@@ -475,10 +478,6 @@ def create_aot_dispatcher_function(
     if aot_config.decompositions is None:
         aot_config.decompositions = {}
 
-    aot_config.decompositions = {
-        **aot_autograd_decompositions,
-        **aot_config.decompositions,
-    }
     # NB: don't bother setting allow_fallback_kernels; this should not actually
     # be configurable in fake tensor, we should automatically do the right
     # thing

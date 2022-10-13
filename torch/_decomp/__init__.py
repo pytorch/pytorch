@@ -15,6 +15,7 @@ __all__ = [
     "meta_table",
     "register_decomposition",
     "get_decompositions",
+    "get_all_decompositions",
 ]
 
 
@@ -196,6 +197,27 @@ def get_decompositions(
         elif isinstance(op, OpOverload) and op in registry:
             decompositions[op] = registry[op]
     return decompositions
+
+
+def get_all_decompositions(
+    aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
+    types: Sequence[str] = None,
+) -> Dict[str, Dict[OpOverload, Callable]]:
+    """
+    By default, this returns available decompositions of all types for the given aten_ops.
+    """
+
+    if types is None:
+        types = {"post_autograd", "pre_autograd", "meta"}
+    else:
+        assert all(t in {"post_autograd", "pre_autograd", "meta"} for t in types)
+
+    all_decompositions = defaultdict(dict)
+
+    for type in types:
+        all_decompositions[type] = get_decompositions(aten_ops, type)
+
+    return all_decompositions
 
 
 # populate the table
