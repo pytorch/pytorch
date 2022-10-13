@@ -1706,6 +1706,43 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("argument_names") = std::vector<std::string>());
 
   m.def(
+      "_create_function_from_trace_with_dict",
+      [](const std::string& qualname,
+         const py::function& func,
+         const py::dict& input_dict,
+         const py::function& var_name_lookup_fn,
+         bool strict,
+         bool force_outplace,
+         const std::vector<std::string>& argument_names) {
+        auto typed_inputs = toTraceableStack(input_dict);
+        std::shared_ptr<Graph> graph =
+            std::get<0>(tracer::createGraphByTracingWithDict(
+                func,
+                input_dict,
+                typed_inputs,
+                var_name_lookup_fn,
+                strict,
+                force_outplace,
+                /*self=*/nullptr,
+                argument_names));
+
+        auto cu = get_python_cu();
+        auto name = c10::QualifiedName(qualname);
+        auto result = cu->create_function(
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
+        StrongFunctionPtr ret(std::move(cu), result);
+        didFinishEmitFunction(ret);
+        return ret;
+      },
+      py::arg("name"),
+      py::arg("func"),
+      py::arg("input_dict"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
+      py::arg("force_outplace"),
+      py::arg("argument_names") = std::vector<std::string>());
+
+  m.def(
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
