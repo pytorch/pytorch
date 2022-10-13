@@ -4275,6 +4275,7 @@ def sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
                              requires_grad=requires_grad)
         yield SampleInput(tensor, args=args)
 
+
 def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
     '''
     sample_inputs_narrow accepts the same inputs as narrow_copy, in addition
