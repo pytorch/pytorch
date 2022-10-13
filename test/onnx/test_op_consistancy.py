@@ -304,11 +304,13 @@ class TestConsistency(common_utils.TestCase):
         for i, (opset, cpu_sample) in enumerate(
             itertools.product(TESTED_OPSETS, samples)
         ):
-            with self.subTest(opset=opset, sample=i):
-                # Print the sample input to help debug failures. They should
-                # appear only when a test fails.
-                print("Testing with sample: f{cpu_sample}")
-
+            with self.subTest(
+                opset=opset,
+                sample_num=i,
+                input=cpu_sample.input,
+                args=cpu_sample.args,
+                kwargs=cpu_sample.kwargs,
+            ):
                 model = SingleOpModel(op, cpu_sample.kwargs)
                 model.eval()
 
