@@ -314,7 +314,13 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
 
         if self._is_view_or_reshape(orig_func):
-            return torch.ops.nvprims.view(*args, **kwargs)
+            a, *shape = args
+            shape = torch._prims_common.extract_shape_from_varargs(
+                shape, validate=False
+            )  # type: ignore[assignment]
+            if len(kwargs) > 0:
+                warn("view has ignored kwargs!")
+            return torch.ops.nvprims.view(a, shape)
 
         if self._is_native_batch_norm(orig_func):
             return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
