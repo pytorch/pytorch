@@ -84,8 +84,6 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
                     return (False, workflowName + " checks were not successful")
                 else:
                     regex[required_check] = True
-        if workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
-            return (False, workflowName + " checks were not successful")
 
     missing_workflows = [x for x in regex.keys() if not regex[x]]
     if len(missing_workflows) > 0:
