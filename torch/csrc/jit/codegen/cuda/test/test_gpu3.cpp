@@ -6523,7 +6523,7 @@ TEST_F(NVFuserTest, FusionExpandedInput_CUDA) {
   fusion->addOutput(tv1);
 
   auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({4096, 1, 3}, options).expand({-1, 7, -1});
+  at::Tensor t0 = at::randn({4096, 1, 4}, options).expand({-1, 7, -1});
 
   FusionExecutorCache fec(std::move(fusion_ptr));
   auto cg_outputs = fec.runFusionWithInputs({t0});
@@ -6551,6 +6551,41 @@ TEST_F(NVFuserTest, FusionExpandedInputThrow_CUDA) {
       [&]() { GpuLower lower(fusion); },
       ::testing::ThrowsMessage<c10::Error>(::testing::HasSubstr(
           "The expanded dim and the dim before it can not be contiguous.")));
+}
+
+// Repro for
+// https://github.com/csarofeen/pytorch/issues/1843#issuecomment-1270759724
+TEST_F(NVFuserTest, FusionVectorizeRepro1843_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv1 =
+      TensorViewBuilder().ndims(2).contiguity({true, true}).build();
+  TensorView* tv0 =
+      TensorViewBuilder().ndims(2).contiguity({true, true}).build();
+  fusion->addInput(tv1);
+  fusion->addInput(tv0);
+
+  auto tv7 = sum(tv0, {1}, true);
+  auto tv_exp =
+      expand(tv7, {tv0->axis(0)->extent(), IrBuilder::create<Int>(32128)});
+  auto tv3 = exp(tv1);
+  auto tv8 = mul(tv3, tv_exp);
+  auto tv13 = sub(tv0, tv8);
+  fusion->addOutput(tv13);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t1 =
+      at::empty_strided({4096, 32128}, {32128, 1}, options).random_();
+  at::Tensor t0 =
+      at::empty_strided({4096, 32128}, {32128, 1}, options).random_();
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({t1, t0});
+
+  auto ref = t0 - t1.exp() * t0.sum((1), true);
+  testValidate(fusion, cg_outputs, {t1, t0}, {ref}, __LINE__, __FILE__);
 }
 
 // Test file size should be up to 10K LoC. Create a new file for more tests.

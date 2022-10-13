@@ -428,9 +428,9 @@ std::vector<std::pair<bool, int>> getVectorizedFusionInputOutput(
   std::vector<std::pair<bool, int>> vectorized_input_output;
 
   // When the producer is a fusion input, validate only the producer
-  // and assume the consumer is contiguous. Similarly, when the
+  // and assume the consumer to be vectorizable. Similarly, when the
   // consumer is a fusion output, validate the consumer and assume the
-  // producer is contiguous.
+  // producer is vectorizable.
 
   if (producer_tv->isFusionInput()) {
     auto producer_it = std::find(
@@ -443,16 +443,6 @@ std::vector<std::pair<bool, int>> getVectorizedFusionInputOutput(
     auto pos = std::distance(fusion->inputs().begin(), producer_it);
     vectorized_input_output.push_back(
         std::make_pair<bool, int>(true, static_cast<int>(pos)));
-  } else {
-    // If not fusion input, assume it's fully contiguous, so nothing
-    // to check with respect to strides.
-    TORCH_INTERNAL_ASSERT(
-        std::all_of(
-            producer_tv->domain()->contiguity().begin(),
-            producer_tv->domain()->contiguity().end(),
-            [](bool contig) { return contig; }),
-        "Unsupported pattern of vectorization: ",
-        consumer_tv->definition()->toString());
   }
 
   if (consumer_tv->isFusionOutput()) {
@@ -466,16 +456,6 @@ std::vector<std::pair<bool, int>> getVectorizedFusionInputOutput(
     auto pos = std::distance(fusion->outputs().begin(), consumer_it);
     vectorized_input_output.push_back(
         std::make_pair<bool, int>(false, static_cast<int>(pos)));
-  } else {
-    // If not fusion input, assume it's fully contiguous, so nothing
-    // to check with respect to strides.
-    TORCH_INTERNAL_ASSERT(
-        std::all_of(
-            consumer_tv->domain()->contiguity().begin(),
-            consumer_tv->domain()->contiguity().end(),
-            [](bool contig) { return contig; }),
-        "Unsupported pattern of vectorization: ",
-        consumer_tv->definition()->toString());
   }
 
   return vectorized_input_output;
