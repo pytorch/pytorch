@@ -8883,6 +8883,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
+        input_bf = torch.arange(24, dtype=torch.bfloat16).reshape(1, 3, 2, 4)
+        input_bf = input_bf.permute(0, 2, 1, 3)
+        input_f = input_bf.float()
+        bn_mix = torch.nn.BatchNorm2d(2).float().eval()
+        ref_bn_f = deepcopy(bn_mix)
+        out_bf = bn_mix(input_bf)
+        ref_out_bf = ref_bn_f(input_f)
+        self.assertEqual(ref_out_bf, out_bf.float(), atol=0.05, rtol=0.05)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_batchnorm_cudnn_nhwc(self):
