@@ -1,5 +1,4 @@
 import dataclasses
-import sys
 from typing import Iterator, Optional, Tuple
 
 import torch
@@ -10,13 +9,6 @@ from torch._C._profiler import (
     _TensorMetadata,
     RecordScope,
 )
-
-
-IS_WINDOWS = sys.platform == "win32"
-
-# `c10::demangle` is platform dependent.
-# TODO(robieta): Move away from load bearing names
-AccumulateGradName = f"{'struct ' if IS_WINDOWS else ''}torch::autograd::AccumulateGrad"
 
 
 @dataclasses.dataclass(eq=True, unsafe_hash=True, frozen=True)
@@ -66,7 +58,8 @@ def extract_gradients(
     if (
         node.typed[0] == _EventType.TorchOp
         and node.typed[1].scope == RecordScope.BACKWARD_FUNCTION
-        and node.name == AccumulateGradName
+        # TODO(robieta): Move away from load bearing names
+        and node.name == "torch::autograd::AccumulateGrad"
         and children
         and children[0].typed[0] == _EventType.TorchOp
         and children[0].name in ("aten::detach", "aten::add_")
