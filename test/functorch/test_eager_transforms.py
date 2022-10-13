@@ -8,7 +8,8 @@
 
 import copy
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests
+    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
+    IS_FBCODE,
 )
 import torch
 import torch.nn as nn
@@ -2278,6 +2279,7 @@ class TestComposability(TestCase):
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
     # it is redundant to run this test twice on a machine that has GPUs
+    @unittest.skipIf(IS_FBCODE, "can't subprocess in fbcode")
     @onlyCPU
     def test_no_warning_on_import_functorch(self, device):
         out = subprocess.check_output(
