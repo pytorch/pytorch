@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 from math import sqrt
 
@@ -111,12 +113,12 @@ Examples::
 def exponential(
         M: int,
         *,
-        center: float = None,
+        center: Optional[float] = None,
         tau: float = 1.0,
         sym: bool = True,
-        dtype: torch.dtype = None,
+        dtype: Optional[torch.dtype] = None,
         layout: torch.layout = torch.strided,
-        device: torch.device = None,
+        device: Optional[torch.device] = None,
         requires_grad: bool = False
 ) -> Tensor:
     if dtype is None:
@@ -193,9 +195,9 @@ def cosine(
         M: int,
         *,
         sym: bool = True,
-        dtype: torch.dtype = None,
+        dtype: Optional[torch.dtype] = None,
         layout: torch.layout = torch.strided,
-        device: torch.device = None,
+        device: Optional[torch.device] = None,
         requires_grad: bool = False
 ) -> Tensor:
     if dtype is None:
@@ -266,9 +268,9 @@ def gaussian(
         *,
         std: float = 1.0,
         sym: bool = True,
-        dtype: torch.dtype = None,
+        dtype: Optional[torch.dtype] = None,
         layout: torch.layout = torch.strided,
-        device: torch.device = None,
+        device: Optional[torch.device] = None,
         requires_grad: bool = False
 ) -> Tensor:
     if dtype is None:
