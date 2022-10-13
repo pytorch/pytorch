@@ -2371,8 +2371,9 @@ def broadcast_shapes(*shapes) -> ShapeType:
     return torch.Size(_broadcast_shapes(*shapes))
 
 
-@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+# TODO: Fix this. We shouldn't directly call py_impl for meta registrations
 @torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
+@register_decomposition(torch.ops.aten.broadcast_tensors.default, type="pre_autograd")
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     if len(tensors) == 1 and not isinstance(tensors[0], Tensor):
         tensors = tensors[0]

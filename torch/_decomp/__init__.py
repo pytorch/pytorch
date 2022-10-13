@@ -2,7 +2,7 @@ import inspect
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
-from typing import Callable, Dict, Sequence, Union
+from typing import Callable, Dict, Optional, Sequence, Union
 
 import torch
 import torch.library
@@ -201,18 +201,18 @@ def get_decompositions(
 
 def get_all_decompositions(
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
-    types: Sequence[str] = None,
+    types: Optional[Sequence[str]] = None,
 ) -> Dict[str, Dict[OpOverload, Callable]]:
     """
     By default, this returns available decompositions of all types for the given aten_ops.
     """
 
     if types is None:
-        types = {"post_autograd", "pre_autograd", "meta"}
+        types = ["post_autograd", "pre_autograd", "meta"]
     else:
         assert all(t in {"post_autograd", "pre_autograd", "meta"} for t in types)
 
-    all_decompositions = defaultdict(dict)
+    all_decompositions: Dict[str, Dict[OpOverload, Callable]] = defaultdict(dict)
 
     for type in types:
         all_decompositions[type] = get_decompositions(aten_ops, type)

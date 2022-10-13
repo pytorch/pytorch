@@ -617,10 +617,19 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
     if pre_autograd_decomps:
         for opo, fn in pre_autograd_decomps.items():
-            # TODO: How to check if an op is CompositeImplicitAutograd or CompositeExplicitAutograd?
-            # Need to use DispatchKey.CompositeImplicitAutograd for CompositeImplicitAutograd ops. e.g aten.matmul
-            # Need to use DispatchKey.Autograd for CompositeExplicitAutograd ops. e.g aten.upsample_bilinear2d.vec
-            dk = torch._C.DispatchKey.Autograd
+            # Use DispatchKey.CompositeImplicitAutograd for CompositeImplicitAutograd ops. e.g aten.matmul.default
+            # Use DispatchKey.Autograd for CompositeExplicitAutograd ops. e.g aten.upsample_bilinear2d.vec
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
+                opo.name(), torch._C.DispatchKey.CompositeImplicitAutograd
+            ):
+                dk = torch._C.DispatchKey.CompositeImplicitAutograd
+
+            elif torch._C._dispatch_has_kernel_for_dispatch_key(
+                opo.name(), torch._C.DispatchKey.CompositeExplicitAutograd
+            ):
+                dk = torch._C.DispatchKey.Autograd
+            else:
+                raise RuntimeError(f"Cannot find a valid DispatchKey for {opo.name()}'s pre_autograd decomp function.")
 
             if opo.py_kernels.get(dk) is None:
                 opo.py_impl(dk)(fn)

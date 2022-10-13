@@ -2266,7 +2266,7 @@ def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
         return False
 
 
-@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@register_decomposition(aten.matmul.default, type="pre_autograd")
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()

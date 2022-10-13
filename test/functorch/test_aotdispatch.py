@@ -28,7 +28,6 @@ from functorch.compile import (
     nop, default_partition, default_decompositions,
     memory_efficient_fusion, get_aot_compilation_context
 )
-from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
 from common_utils import (
@@ -149,20 +148,19 @@ class TestPythonKey(AOTTestCase):
         self.assertTrue(includes_aten_relu)
 
     def test_make_fx_no_decompose(self, device):
-        # FIXME
-        return self.skipTest("error: maximum recursion reached")
-
         def f(x):
             return torch.tanh(x).sum()
 
         fx_f = make_fx(grad(f))(torch.randn(5))
         ops = set([i.target for i in fx_f.graph.nodes])
 
-        self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
+        target_op = torch.ops.aten.tanh.default
+        self.assertEqual(target_op in ops, True)
 
+        decomposition_table = torch._decomp.get_all_decompositions({target_op})
         fx_f = make_fx(grad(f), decomposition_table)(torch.randn(5))
         ops = set([i.target for i in fx_f.graph.nodes])
-        self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
+        self.assertEqual(target_op in ops, False)
 
     def test_nnc_jit(self, device):
         def f(x):
@@ -345,6 +343,32 @@ class TestAOTAutograd(AOTTestCase):
         mod = compiled_module(nn.BatchNorm2d(4), nop, nop)
         x = torch.ones(1, 4, 2, 2)
         mod(x).sum().backward()
+
+    def test_pre_autograd_decomps(self):
+
+        def fn(x):
+            return torch.nn.functional.interpolate(x, scale_factor=2., mode='bilinear') + 1
+
+        def assert_compiler(gm, args):
+            for node in gm.graph.nodes:
+                assert node.target is not torch.ops.aten.upsample_bilinear2d.vec
+                assert node.target is not torch.ops.aten.upsample_bilinear2d_backward.vec
+            return gm
+
+        target_op = torch.ops.aten.upsample_bilinear2d.vec
+        decomposition_table = torch._decomp.get_all_decompositions({target_op})
+
+        self.assertNotEqual(decomposition_table["pre_autograd"][target_op], None)
+        self.assertNotEqual(decomposition_table["post_autograd"][target_op], None)
+
+        compiled_f = aot_function(fn, assert_compiler, decompositions=decomposition_table)
+        inp = [torch.randn(4, 3, 10, 10, requires_grad=True)]
+
+        ref_out, ref_grad = _outs_and_grads(fn, inp)
+        test_out, test_grad = _outs_and_grads(compiled_f, inp)
+        self.assertEqual(ref_out, test_out)
+        self.assertEqual(ref_grad, test_grad)
+
 
     def test_list_codegen(self):
         def list_nop(f, _):
