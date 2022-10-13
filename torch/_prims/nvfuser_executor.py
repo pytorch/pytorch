@@ -276,7 +276,6 @@ def _remove_empty_like_fill(gm: GraphModule):
     # Here when we see a `sub` node, we check if the first input is a result of
     # filling a tensor with a scalar
     # If so, we replace the first argument of the `sub` node with a scalar
-    gm = deepcopy(gm)
     for node in gm.graph.nodes:
         if node.op == "call_function":
             if (
