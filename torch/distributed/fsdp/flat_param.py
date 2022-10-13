@@ -1540,6 +1540,20 @@ class FlatParamHandle:
         ):
             yield (param_name, module_name)
 
+    def shared_parameter_module_names(self) -> Iterator[Tuple[str, str]]:
+        for param_name, _, module_name in [
+            ParamInfo(param_name, module, module_name)
+            for (
+                param_name,
+                module,
+                module_name,
+                _,
+                _,
+                _,
+            ) in self.flat_param._shared_param_infos
+        ]:
+            yield (param_name, module_name)
+
     @property
     def sharded_grad(self) -> Optional[Tensor]:
         """Returns the handle's sharded gradient."""
