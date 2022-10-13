@@ -3442,9 +3442,10 @@ class FullyShardedDataParallel(nn.Module):
             if not self._sync_gradients:
                 return
 
-            # Wait for all ops in the current stream (e.g. gradient
-            # computation) to finish before reduce-scattering the gradient
-            self._streams["post_backward"].wait_stream(self._streams["computation"])
+            # Wait for all ops in the current stream to finish before
+            # reduce-scattering the gradient
+            # TODO (awgu): This current stream is actually the unshard stream!
+            self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
 
             with torch.cuda.stream(self._streams["post_backward"]):
                 orig_grad_data = param.grad.data
