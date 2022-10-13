@@ -1,4 +1,4 @@
-#include <torch/csrc/profiler/nvtx_observer.h>
+#include <torch/csrc/profiler/standalone/nvtx_observer.h>
 
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>

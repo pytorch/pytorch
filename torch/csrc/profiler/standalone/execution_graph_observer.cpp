@@ -27,7 +27,7 @@
 #include <ATen/core/stack.h>
 #include <ATen/record_function.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/profiler/execution_graph_observer.h>
+#include <torch/csrc/profiler/standalone/execution_graph_observer.h>
 #include <torch/csrc/profiler/util.h>
 
 using namespace at;
