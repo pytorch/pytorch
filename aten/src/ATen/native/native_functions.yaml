@@ -1799,6 +1799,7 @@
 - func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: ctc_loss_tensor
+  autogen: _ctc_loss.Tensor_out
   tags: dynamic_output_shape  # the shape of second output is data dependent
 
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
@@ -5219,6 +5220,7 @@
     MkldnnCPU: mkldnn_tanh
     SparseCPU, SparseCUDA: tanh_sparse
     SparseCsrCPU, SparseCsrCUDA: tanh_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_tanh
   tags: canonical
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
@@ -5229,6 +5231,7 @@
     MkldnnCPU: mkldnn_tanh_
     SparseCPU, SparseCUDA: tanh_sparse_
     SparseCsrCPU, SparseCsrCUDA: tanh_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_tanh_
 
 - func: tanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
