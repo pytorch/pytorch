@@ -157,7 +157,7 @@ Via a string:
 
     >>> torch.device('cpu')
     device(type='cpu')
-    
+
     >>> torch.device('mps')
     device(type='mps')
 
@@ -170,7 +170,7 @@ Via a string and device ordinal:
 
     >>> torch.device('cuda', 0)
     device(type='cuda', index=0)
-   
+
     >>> torch.device('mps', 0)
     device(type='mps', index=0)
 
