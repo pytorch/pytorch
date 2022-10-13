@@ -12,7 +12,7 @@ from torch import Tensor
 
 from .stream import default_stream, use_stream
 
-__all__: List[str] = ["get_phony"]
+__all__: List[str] = []
 
 
 _phonies: Dict[Tuple[torch.device, bool], Tensor] = {}

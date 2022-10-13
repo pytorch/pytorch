@@ -4,7 +4,6 @@
 #include <ATen/Functions.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/core/TensorBody.h>
-#include <c10/core/SymInt.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
@@ -212,7 +211,7 @@ static inline Tensor applySlice(
     int64_t step,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const c10::optional<IntArrayRef>& self_sizes) {
   // TODO: implement negative step
   TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
 
@@ -221,10 +220,10 @@ static inline Tensor applySlice(
     // Skip this optimization if we are tracing, as the trace may be polymorphic
     // over the shape of the `self` tensor, and we still want to record
     // the slice.
-    SymInt length = (self_device == at::kCPU || self_device == at::kCUDA)
+    int64_t length = (self_device == at::kCPU || self_device == at::kCUDA)
         ? (*self_sizes)[dim]
-        : self.sym_size(dim);
-    if (!disable_slice_optimization && start == 0 && length == stop &&
+        : self.size(dim);
+    if (!disable_slice_optimization && start == 0 && stop == length &&
         step == 1) {
       return self;
     }
@@ -238,7 +237,7 @@ static inline Tensor applySelect(
     int64_t index,
     int64_t real_dim,
     const at::Device& /*self_device*/,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const c10::optional<IntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     TORCH_CHECK_INDEX(
@@ -246,9 +245,9 @@ static inline Tensor applySelect(
         "invalid index of a 0-dim tensor. ",
         "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
-    auto size = (*self_sizes)[dim];
+    int64_t size = (*self_sizes)[dim];
     TORCH_CHECK_INDEX(
-        size >= -index && size > index,
+        index >= -size && index < size,
         "index ",
         index,
         " is out of bounds for dimension ",
@@ -384,7 +383,7 @@ static inline Tensor scalarToTensor(
 // To match numpy semantics:
 // As a special case for backwards compatibility,
 // strip away unit dimensions from the left of 'src'
-static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
+static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
   for (const auto i : c10::irange(sizes.size())) {
     if (sizes[i] != 1) {
@@ -397,7 +396,7 @@ static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
 }
 
 static inline void copy_to(const Tensor& dst, const Tensor& src) {
-  if (dst.sym_sizes().equals(src.sym_sizes())) {
+  if (dst.sizes().equals(src.sizes())) {
     // A shortcut to avoid generating hard-coded constant sizes during tracing.
     // This is not a perfect solution: when src & dst have different shapes,
     // constants will still appear. Users can workaround that case by
@@ -408,7 +407,7 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     dst.fill_(src);
     return;
   }
-  auto src_view = src.view_symint(slicePrefix1sSize(src.sym_sizes()));
+  auto src_view = src.view(slicePrefix1sSize(src.sizes()));
   c10::MaybeOwned<Tensor> b_src = expand_inplace(dst, src_view, "setitem");
   dst.copy_(*b_src);
 }
@@ -425,7 +424,7 @@ static inline Tensor handleDimInMultiDimIndexing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& original_tensor_device,
-    const c10::optional<SymIntArrayRef>& prev_dim_result_sizes) {
+    const c10::optional<IntArrayRef>& prev_dim_result_sizes) {
   if (index.is_integer()) {
     return impl::applySelect(
         prev_dim_result,
@@ -509,7 +508,7 @@ static inline Tensor applySlicing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const c10::optional<IntArrayRef>& self_sizes) {
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
 
@@ -525,9 +524,9 @@ static inline Tensor applySlicing(
   for (const auto i : c10::irange(indices.size())) {
     auto& obj = indices[i];
     // See NOTE [nested tensor size for indexing]
-    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<SymIntArrayRef>(c10::nullopt)
-        : c10::optional<SymIntArrayRef>(result.sym_sizes());
+    c10::optional<IntArrayRef> result_sizes = result.is_nested()
+        ? c10::optional<IntArrayRef>(c10::nullopt)
+        : c10::optional<IntArrayRef>(result.sizes());
     result = handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
@@ -601,9 +600,9 @@ static inline Tensor get_item(
   // nested tensor does not have a size (yet) so for now we represent its size
   // as null may need to be changed after we reach a better solution for nested
   // tensor size
-  c10::optional<SymIntArrayRef> self_sizes = self.is_nested()
-      ? c10::optional<SymIntArrayRef>(c10::nullopt)
-      : c10::optional<SymIntArrayRef>(self.sym_sizes());
+  c10::optional<IntArrayRef> self_sizes = self.is_nested()
+      ? c10::optional<IntArrayRef>(c10::nullopt)
+      : c10::optional<IntArrayRef>(self.sizes());
 
   // handle simple types: integers, slices, none, ellipsis, bool
   if (indices.size() == 1) {
@@ -664,7 +663,7 @@ static inline void set_item(
     const Tensor& value,
     bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
-  SymIntArrayRef self_sizes = self.sym_sizes();
+  IntArrayRef self_sizes = self.sizes();
 
   // handle simple types: integers, slices, ellipsis, bool
   if (indices.size() == 1) {
@@ -714,11 +713,11 @@ static inline void set_item(
     return;
   }
 
-  SymIntArrayRef valueSizes = value.sym_sizes();
-  SymIntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
+  IntArrayRef valueSizes = value.sizes();
+  IntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
   Tensor valuesSliced;
   if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view_symint(slicedValueSizes);
+    valuesSliced = value.view(slicedValueSizes);
   } else {
     valuesSliced = value;
   }

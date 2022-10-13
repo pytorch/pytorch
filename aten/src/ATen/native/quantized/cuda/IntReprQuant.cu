@@ -1,16 +1,7 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/TensorIterator.h>
-#include <ATen/native/cuda/Loops.cuh>
-
-#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/empty.h>
-#include <ATen/ops/int_repr_native.h>
-#endif
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 namespace at {
 namespace native {

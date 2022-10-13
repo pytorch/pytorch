@@ -1463,11 +1463,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         device = "cuda" if backend == "nccl" else "cpu"
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
-        # multi tensor collectives
-        if collective == dist.all_gather:
-            collective([tensor], tensor, *args)
-        else:
-            collective(tensor, *args)
+        collective(tensor, *args)
 
     # TODO: backend will be replaced with a non specified backend
     def _test_collectives(self, backend):
@@ -1479,10 +1475,8 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             store=store,
         )
         collectives_and_args = [
-            (dist.reduce, self.rank),
             (dist.broadcast, self.rank),
-            (dist.all_reduce,),
-            (dist.all_gather,)
+            (dist.all_reduce,)
         ]
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):

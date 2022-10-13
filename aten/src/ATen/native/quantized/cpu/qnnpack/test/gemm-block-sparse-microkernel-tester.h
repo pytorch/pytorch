@@ -279,7 +279,7 @@ class GemmBlockSparseMicrokernelTester {
       } while (max_elem == min_elem);
 
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-          qnnpack::generateBlockCSRMatrix<uint32_t>(
+          qnnpack::generateBlockCSRMatrix(
               b.data(),
               n(),
               k(),
@@ -332,8 +332,8 @@ class GemmBlockSparseMicrokernelTester {
           aPtr,
           aStride() * sizeof(uint8_t),
           bcsr_matrix->values.data(),
-          static_cast<const uint32_t*>(bcsr_matrix->row_values_data_ptr()),
-          static_cast<const uint32_t*>(bcsr_matrix->col_indices_data_ptr()),
+          bcsr_matrix->row_values.data(),
+          bcsr_matrix->col_indices.data(),
           bias.data(),
           c.data(),
           cStride(),
@@ -355,10 +355,9 @@ class GemmBlockSparseMicrokernelTester {
     }
   }
 
-  template <typename SPARSE_INDICES_DTYPE, typename GEMM_UKERNEL_DTYPE>
   void test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_function packa,
-      GEMM_UKERNEL_DTYPE qgemm) const {
+      pytorch_q8gemm_dq_sparse_packedA_ukernel_function qgemm) const {
     ASSERT_LE(m(), mr());
     ASSERT_LE(n(), nr());
 
@@ -406,13 +405,13 @@ class GemmBlockSparseMicrokernelTester {
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-          qnnpack::generateBlockCSRMatrix<SPARSE_INDICES_DTYPE>(
-              b.data(),
-              n(),
-              k(),
-              rowBlockSize(),
-              colBlockSize(),
-              kernel_zero_points.data());
+        qnnpack::generateBlockCSRMatrix(
+            b.data(),
+            n(),
+            k(),
+            rowBlockSize(),
+            colBlockSize(),
+            kernel_zero_points.data());
 
       ASSERT_NE(
           *std::max_element(a.cbegin(), a.cend()),
@@ -466,10 +465,8 @@ class GemmBlockSparseMicrokernelTester {
           n(),
           a_packed.data(),
           bcsr_matrix->values.data(),
-          static_cast<const SPARSE_INDICES_DTYPE*>(
-              bcsr_matrix->row_values_data_ptr()),
-          static_cast<const SPARSE_INDICES_DTYPE*>(
-              bcsr_matrix->col_indices_data_ptr()),
+          bcsr_matrix->row_values.data(),
+          bcsr_matrix->col_indices.data(),
           bias.data(),
           c.data(),
           cStride(),

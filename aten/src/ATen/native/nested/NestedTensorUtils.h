@@ -86,28 +86,8 @@ inline at::Tensor create_nested_view_tensor(
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt);
 
 // The sizes of the underlying tensors
-inline std::vector<IntArrayRef> NestedTensor_get_sizes(
-    const NestedTensorImpl* self_ptr) {
-  int64_t ntensors = self_ptr->size(0);
-  std::vector<IntArrayRef> sizes(ntensors);
-  if (ntensors == 0) {
-    return sizes;
-  }
-  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
-  int64_t orig_dim = sizemat.size(1);
-  // nesting scalars has empty sizes
-  if (orig_dim == 0) {
-    return sizes;
-  }
-  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
-
-  for (const auto i : c10::irange(ntensors)) {
-    sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
-    sizemat_ptr += orig_dim;
-  }
-  return sizes;
-}
-
+std::vector<IntArrayRef> NestedTensor_get_sizes(
+    const NestedTensorImpl* self_ptr);
 
 TORCH_API std::vector<int64_t> NestedTensor_get_max_size(
     const NestedTensorImpl& nt);
@@ -145,19 +125,6 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
     const at::Tensor& self) {
   const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
   return NestedTensor_get_strides(self_ptr);
-}
-
-inline void check_numel_equals_buffer_size(const at::Tensor& self) {
-  auto self_impl = get_nested_tensor_impl(self);
-  TORCH_CHECK(
-      self.numel() == self_impl -> get_buffer_size(),
-      "Number of elements in nested tensor must match number of elements in buffer.");
-}
-
-inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
-  TORCH_CHECK(
-      self_ptr-> numel() == self_ptr -> get_buffer_size(),
-      "Number of elements in nested tensor must match number of elements in buffer.");
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Data structures and functions for generically applying a function on a nested tensor.

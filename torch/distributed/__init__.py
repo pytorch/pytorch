@@ -4,6 +4,7 @@ from enum import Enum
 
 import torch
 
+
 def is_available() -> bool:
     """
     Returns ``True`` if the distributed package is available. Otherwise,

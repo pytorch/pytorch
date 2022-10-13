@@ -1,19 +1,12 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/core/List.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
 #include <cpuinfo.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/from_blob.h>
-#endif
-
 
 #include <tuple>
 

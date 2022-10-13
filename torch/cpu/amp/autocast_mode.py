@@ -1,8 +1,6 @@
 import torch
 from typing import Any
 
-__all__ = ["autocast"]
-
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.

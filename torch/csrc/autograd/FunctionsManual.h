@@ -215,14 +215,14 @@ at::Tensor logcumsumexp_backward(
     at::Tensor result,
     int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
-at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
+at::Tensor unsqueeze_to(const at::Tensor& self, at::IntArrayRef sizes);
 at::Tensor unsqueeze_to(
     const at::Tensor& self,
     int64_t dim,
-    c10::SymIntArrayRef sym_sizes);
+    at::IntArrayRef sizes);
 std::vector<at::Tensor> cat_tensors_backward(
     const at::Tensor& grad,
-    const std::vector<std::vector<c10::SymInt>>& sizes,
+    const std::vector<std::vector<int64_t>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim);
 std::vector<at::Tensor> stack_tensors_backward(

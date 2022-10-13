@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/PadNd.h>
+#include <ATen/native/PadNd.h>
 
 #include <c10/util/irange.h>
 

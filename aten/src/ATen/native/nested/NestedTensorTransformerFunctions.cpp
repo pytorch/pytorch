@@ -213,7 +213,6 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
 
 Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length) {
   auto* nt_impl = get_nested_tensor_impl(nt);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_impl), "to_mask only works on contiguous NestedTensors.");
   TORCH_CHECK(
       !mask_dim || *mask_dim < nt.dim(),
       "Requested mask dimension ",

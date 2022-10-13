@@ -142,7 +142,7 @@ only:
 Sparse hybrid COO tensors
 -------------------------
 
-PyTorch implements an extension of sparse tensors with scalar values
+Pytorch implements an extension of sparse tensors with scalar values
 to sparse tensors with (contiguous) tensor values. Such tensors are
 called hybrid tensors.
 

@@ -1,9 +1,7 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/Context.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/native/mkldnn/Matmul.h>
-
 #if !AT_MKLDNN_ENABLED()
 
 namespace at {

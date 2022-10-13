@@ -1,8 +1,6 @@
 from torch import nn
 from typing import List
 
-__all__ = ["partition_model"]
-
 def partition_model(
         module: nn.Sequential,
         balance: List[int],

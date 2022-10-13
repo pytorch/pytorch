@@ -1,6 +1,6 @@
 .. _jit_unsupported:
 
-TorchScript Unsupported PyTorch Constructs
+TorchScript Unsupported Pytorch Constructs
 ============================================
 
 Torch and Tensor Unsupported Attributes

@@ -1833,7 +1833,8 @@ Example::
         };
 
         auto set = [&store](const std::string& key, const std::string& value) {
-          store->set(key, value);
+          std::vector<uint8_t> value_(value.begin(), value.end());
+          store->set(key, value_);
         };
 
         auto get = [&store](const std::string& key) {

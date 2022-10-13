@@ -24,9 +24,7 @@ namespace at {
 //    or returning a regular non-Tensor-subclass Tensor!
 
 constexpr auto kFunctorchWrappedTensors = DispatchKeySet(
-    {DispatchKey::FuncTorchGradWrapper,
-     DispatchKey::FuncTorchBatched,
-     DispatchKey::Functionalize});
+    {DispatchKey::FuncTorchGradWrapper, DispatchKey::FuncTorchBatched});
 
 constexpr auto kTensorSubclassLike =
     kFunctorchWrappedTensors |
