@@ -164,7 +164,8 @@ def get_module_path_and_prefix(
     # the input of the next operator
     assert isinstance(observed_node, Node), \
         f"Expecting observed node to be a Node, but got {observed_node}"
-    is_input_observer_only = node_name_to_qconfig[observed_node.name] is None if observed_node.name in node_name_to_qconfig else None
+    is_input_observer_only = node_name_to_qconfig[observed_node.name] is None \
+        if observed_node.name in node_name_to_qconfig else None
     if is_input_observer_only:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
         # to get the path. If a linear call_function is in the user list, we return the first instance
@@ -555,8 +556,10 @@ def convert(
         update_qconfig_for_fusion(model, qconfig_mapping)
 
         compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
-        convert_node_name_to_qconfig = generate_node_name_to_qconfig(model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope)
-        # check the convert_node_name_to_qconfig generated and ensure that all the values either match what was set in prepare node_name_to_qconfig
+        convert_node_name_to_qconfig = generate_node_name_to_qconfig(
+            model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope)
+        # check the convert_node_name_to_qconfig generated and ensure that
+        # all the values either match what was set in prepare node_name_to_qconfig
         # or are set to None in the convert_node_name_to_qconfig.
         for k, v in node_name_to_qconfig.items():
             assert k in convert_node_name_to_qconfig, 'Expected key {} in convert node_name_to_qconfig'.format(k)
