@@ -13,8 +13,8 @@ from torch.testing._internal.opinfo.definitions import (
 op_db: List[OpInfo] = [
     *fft.op_db,
     *linalg.op_db,
-    *special.op_db,
     *signal.op_db,
+    *special.op_db,
     *_masked.op_db,
 ]
 
