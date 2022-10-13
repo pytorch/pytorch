@@ -17,6 +17,7 @@ import itertools
 import warnings
 import unittest
 from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops
@@ -3272,6 +3273,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # ---------------------------------------------------------------------
     }
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
         tol1('linalg.det',
@@ -3579,10 +3581,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         op = torch.ops.aten._convolution_double_backward
 
         generator = get_fallback_and_vmap_exhaustive(op, args, {})
+        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        atol, rtol = (1e-3, 1e-3) if is_cuda_sm86 else (1e-4, 1e-4)
 
         def test():
             for loop_out, batched_out in generator:
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                self.assertEqual(loop_out, batched_out, atol=atol, rtol=rtol)
 
         check_vmap_fallback(self, test, op)
 
