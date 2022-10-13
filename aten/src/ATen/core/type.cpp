@@ -838,6 +838,12 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   if (rhs_.kind() == AnyListType::Kind) {
     return true;
   }
+
+  auto rhs = rhs_.cast<ListType>();
+  if (rhs && rhs->getElementType()->cast<TensorType>()) {
+    return getElementType()->isSubtypeOfExt(*rhs->getElementType(), why_not);
+  }
+
   return false;
 }
 

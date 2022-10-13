@@ -60,5 +60,20 @@ TEST(JitTypeTest, UnifyTypes) {
   TORCH_INTERNAL_ASSERT(!dict_out);
 }
 
+TEST(JitTypeTest, ListTypeOfTensorsIsSubtypeOf) {
+  auto list_type = ListType::create(TensorType::get());
+  auto tensor_type = c10::TensorType::create(
+      at::kFloat,
+      at::kCPU,
+      c10::SymbolicShape(std::vector<c10::optional<int64_t>>({1, 49})),
+      std::vector<c10::Stride>(
+          {c10::Stride{2, true, 1},
+           c10::Stride{1, true, 1},
+           c10::Stride{0, true, c10::nullopt}}),
+      false);
+  auto list_type_modified = ListType::create(tensor_type);
+  TORCH_INTERNAL_ASSERT(list_type_modified->isSubtypeOf(list_type));
+}
+
 } // namespace jit
 } // namespace torch
