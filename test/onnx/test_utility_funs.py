@@ -131,11 +131,11 @@ class TestUnconvertibleOps(common_utils.TestCase):
 
 
 @parameterized.parameterized_class(
-    ("opset_version",),
     [
-        (opset,)
+        {"opset_version": opset}
         for opset in range(_constants.ONNX_BASE_OPSET, _constants.ONNX_MAX_OPSET + 1)
     ],
+    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
 )
 class TestUtilityFuns(_BaseTestCase):
     opset_version = None
@@ -801,7 +801,7 @@ class TestUtilityFuns(_BaseTestCase):
         # verify that the model state is preserved
         self.assertEqual(model.training, old_state)
 
-    def test_export_frozen_scripted_module(self):
+    def test_export_does_not_fail_on_frozen_scripted_module(self):
         class Inner(torch.nn.Module):
             def forward(self, x):
                 if x > 0:
@@ -818,10 +818,11 @@ class TestUtilityFuns(_BaseTestCase):
                 return self.inner(x)
 
         x = torch.zeros(1)
-        outer_module = Outer()
+        # Freezing is only implemented in eval mode. So we need to call eval()
+        outer_module = Outer().eval()
         module = torch.jit.trace_module(outer_module, {"forward": (x)})
-        # borisf: passes if you comment this line out
-        module = torch.jit.optimize_for_inference(torch.jit.freeze(module))
+        # jit.freeze removes the training attribute in the module
+        module = torch.jit.freeze(module)
 
         torch.onnx.export(module, (x,), io.BytesIO(), opset_version=self.opset_version)
 
