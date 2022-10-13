@@ -126,7 +126,7 @@ class MaxPool2d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on both sides
+        padding: Implicit negative infinity padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool2d` later
@@ -200,7 +200,7 @@ class MaxPool3d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on all three sides
+        padding: Implicit negative infinity padding to be added on all three sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool3d` later
