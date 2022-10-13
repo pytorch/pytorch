@@ -129,6 +129,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(index_select_backward);
   OP_DECOMPOSE(inner);
   OP_DECOMPOSE(inverse);
+  OP_DECOMPOSE(concatenate);
   OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
