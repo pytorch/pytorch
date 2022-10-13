@@ -8,6 +8,7 @@
 #include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/_nested_tensor_strides_native.h>
 #include <ATen/ops/_nested_tensor_offsets_native.h>
+#include <ATen/ops/chunk_native.h>
 #endif
 
 namespace at {
