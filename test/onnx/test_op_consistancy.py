@@ -49,8 +49,8 @@ SUPPORTED_DTYPES = (
     # Floating types
     torch.float16,
     torch.float32,
-    torch.float64,
     torch.bfloat16,
+    # float64 not supported by onnx
     # QInt types
     torch.qint8,
     torch.quint8,
@@ -178,7 +178,9 @@ def skip_ops(
     ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in to_skip:
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
-        assert opinfo is not None, f"Couldn't find OpInfo for {decorate_meta}"
+        assert (
+            opinfo is not None
+        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
