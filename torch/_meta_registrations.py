@@ -29,15 +29,15 @@ def register_meta(op, register_dispatcher=True):
     def wrapper(f):
         def add_func(op):
             meta_table[op] = f
-            # if register_dispatcher:
-            #     name = (
-            #         op.__name__
-            #         if op._overloadname != "default"
-            #         else op.overloadpacket.__name__
-            #     )
-            #     _meta_lib_dont_use_me_use_register_meta.impl(name, f)
-
-            op.py_impl(torch._C.DispatchKey.Meta)(f)
+            if register_dispatcher:
+                name = (
+                    op.__name__
+                    if op._overloadname != "default"
+                    else op.overloadpacket.__name__
+                )
+                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+            else:
+                op.py_impl(torch._C.DispatchKey.Meta)(f)
 
         tree_map(add_func, op)
         return f
