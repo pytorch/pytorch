@@ -6,6 +6,7 @@ import io
 from typing import Callable
 
 import onnx
+import parameterized
 
 import torch
 import torch.onnx
@@ -18,6 +19,7 @@ from pytorch_test_common import (
     skipIfUnsupportedMinOpsetVersion,
 )
 from torch.onnx import OperatorExportTypes, TrainingMode, utils
+from torch.onnx import _constants
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
@@ -128,8 +130,15 @@ class TestUnconvertibleOps(common_utils.TestCase):
         self.assertEqual(unconvertible_ops, [])
 
 
-class TestUtilityFuns_opset9(_BaseTestCase):
-    opset_version = 9
+@parameterized.parameterized_class(
+    ("opset_version",),
+    [
+        (opset,)
+        for opset in range(_constants.ONNX_BASE_OPSET, _constants.ONNX_MAX_OPSET + 1)
+    ],
+)
+class TestUtilityFuns(_BaseTestCase):
+    opset_version = None
 
     def test_is_in_onnx_export(self):
         test_self = self
@@ -792,6 +801,30 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # verify that the model state is preserved
         self.assertEqual(model.training, old_state)
 
+    def test_export_frozen_scripted_module(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                if x > 0:
+                    return x
+                else:
+                    return x * x
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = torch.jit.script(Inner())
+
+            def forward(self, x):
+                return self.inner(x)
+
+        x = torch.zeros(1)
+        outer_module = Outer()
+        module = torch.jit.trace_module(outer_module, {"forward": (x)})
+        # borisf: passes if you comment this line out
+        module = torch.jit.optimize_for_inference(torch.jit.freeze(module))
+
+        torch.onnx.export(module, (x,), io.BytesIO(), opset_version=self.opset_version)
+
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_local_function(self):
         class N(torch.nn.Module):
@@ -1059,20 +1092,20 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         model = M(3)
         expected_scope_names = {
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.activation.GELU::gelu1",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.activation.GELU::gelu2",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.normalization.LayerNorm::lns.0",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.normalization.LayerNorm::lns.1",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
             "torch.nn.modules.normalization.LayerNorm::lns.2",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.N::relu/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.N::relu/"
             "torch.nn.modules.activation.ReLU::relu",
-            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::",
+            "test_utility_funs.TestUtilityFuns.test_node_scope.<locals>.M::",
         }
 
         graph, _, _ = self._model_to_graph(
@@ -1882,30 +1915,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             ),
         )
         torch.onnx.unregister_custom_op_symbolic("::cat", _onnx_opset_version)
-
-
-class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
-    opset_version = 10
-
-
-class TestUtilityFuns_opset11(TestUtilityFuns_opset9):
-    opset_version = 11
-
-
-class TestUtilityFuns_opset12(TestUtilityFuns_opset9):
-    opset_version = 12
-
-
-class TestUtilityFuns_opset13(TestUtilityFuns_opset9):
-    opset_version = 13
-
-
-class TestUtilityFuns_opset14(TestUtilityFuns_opset9):
-    opset_version = 14
-
-
-class TestUtilityFuns_opset15(TestUtilityFuns_opset9):
-    opset_version = 15
 
 
 if __name__ == "__main__":
