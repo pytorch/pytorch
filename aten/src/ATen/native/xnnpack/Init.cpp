@@ -1,7 +1,6 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
-#include <c10/util/Exception.h>
 
 namespace at {
 namespace native {

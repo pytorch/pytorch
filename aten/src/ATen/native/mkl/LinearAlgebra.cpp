@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/Config.h>
 

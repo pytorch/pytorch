@@ -13,7 +13,6 @@ from torch.autograd import (
 import itertools
 from warnings import warn
 
-__all__ = ["profile"]
 
 class profile(object):
     """DEPRECATED: use torch.profiler instead"""

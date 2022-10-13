@@ -71,7 +71,6 @@ __all__ = [
     "erf",
     "erf_inv",
     "erfc",
-    "erfcx",
     "exp",
     "expm1",
     "exp2",
@@ -84,7 +83,6 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
-    "ndtri",
     "neg",
     "real",
     "reciprocal",
@@ -161,7 +159,6 @@ __all__ = [
     #
     # Data conversion and movement prims
     #
-    "clone",
     "convert_element_type",
     "device_put",
     "item",
@@ -598,40 +595,6 @@ conj_physical = _make_prim(
     return_type=RETURN_TYPE.NEW,
 )
 
-
-def _clone_meta(
-    input: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    if memory_format != torch.preserve_format:
-        return torch.empty(
-            input.shape,
-            dtype=input.dtype,
-            layout=input.layout,
-            device=input.device,
-            requires_grad=input.requires_grad,
-            memory_format=memory_format,
-        )
-
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(input)
-    return torch.empty_strided(
-        input.shape,
-        strides,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-        requires_grad=input.requires_grad,
-    )
-
-
-clone = _make_prim(
-    schema="clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
-    meta=_clone_meta,
-    impl_aten=torch.clone,
-    doc="Returns the copy of a tensor",
-    return_type=RETURN_TYPE.NEW,
-)
-
 digamma = _make_elementwise_unary_prim(
     "digamma",
     impl_aten=torch.digamma,
@@ -656,13 +619,6 @@ erf_inv = _make_elementwise_unary_prim(
 erfc = _make_elementwise_unary_prim(
     "erfc",
     impl_aten=torch.special.erfc,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-erfcx = _make_elementwise_unary_prim(
-    "erfcx",
-    impl_aten=torch.special.erfcx,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -786,13 +742,6 @@ real = _make_prim(
 reciprocal = _make_elementwise_unary_prim(
     "reciprocal",
     impl_aten=torch.reciprocal,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-ndtri = _make_elementwise_unary_prim(
-    "ndtri",
-    impl_aten=torch.special.ndtri,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

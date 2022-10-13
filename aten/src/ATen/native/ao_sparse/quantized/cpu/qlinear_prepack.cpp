@@ -1,6 +1,4 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/Context.h>
+#include <ATen/ATen.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
@@ -8,13 +6,6 @@
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/_empty_affine_quantized.h>
-#include <ATen/ops/zeros.h>
-#endif
 
 #include <algorithm>
 
@@ -199,7 +190,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
   for (const auto i : c10::irange(wt_numel)) {
     qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
   }
-  bcsr_matrix_ = qnnpack::generateBlockCSRMatrix<uint32_t>(
+  bcsr_matrix_ = qnnpack::generateBlockCSRMatrix(
       reinterpret_cast<uint8_t*>(qnnp_w_data),
       output_channels_,
       input_channels_,

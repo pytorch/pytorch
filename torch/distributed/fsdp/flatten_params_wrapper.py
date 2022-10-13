@@ -7,13 +7,13 @@
 # Licensed under the MIT License.
 
 import contextlib
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List
 
 import torch
 import torch.nn as nn
 from torch.distributed.utils import _replace_by_prefix
 
-from .flat_param import FlatParameter, FlatParamHandle, HandleConfig
+from .flat_param import FlatParamHandle, HandleConfig
 
 FLAT_PARAM = "flat_param"
 FPW_MODULE = "_fpw_module"
@@ -89,10 +89,10 @@ class FlattenParamsWrapper(nn.Module):
         params: List[nn.Parameter],
         device: torch.device,
         config: HandleConfig,
-        use_orig_params: bool,
     ) -> None:
         super().__init__()
         self._fpw_module = module
+        self.flat_param = None
         # Register hooks to clean parameter names for state dict (even if this
         # wrapper itself manages no parameters since it must clean names from
         # submodules)
@@ -100,12 +100,10 @@ class FlattenParamsWrapper(nn.Module):
         self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
         if len(params) == 0:
             return
-        self._flat_param_handle = FlatParamHandle(
-            params, module, device, config, use_orig_params
-        )
-        if not use_orig_params:
-            self._register_flat_param()
-        self._use_orig_params = use_orig_params
+        self._flat_param_handle = FlatParamHandle(params, module, device, config)
+        # Defining `self.flat_param` registers the `FlatParameter` and makes it
+        # visible to `named_parameters()`
+        self.flat_param = self._flat_param_handle.flat_param
         assert getattr(self, FPW_MODULE) is self._fpw_module
         assert getattr(self, FLAT_PARAM) is self.flat_param
 
@@ -113,10 +111,6 @@ class FlattenParamsWrapper(nn.Module):
     def has_params(self) -> bool:
         """Returns whether this wrapper manages any parameters."""
         return hasattr(self, "_flat_param_handle")
-
-    @property
-    def flat_param(self) -> Optional[FlatParameter]:
-        return self.handle.flat_param if self.has_params else None
 
     @property
     def handle(self) -> FlatParamHandle:
@@ -135,44 +129,23 @@ class FlattenParamsWrapper(nn.Module):
     def unflatten_as_params(self) -> Generator:
         """
         Assumes that the flattened parameter is unsharded. When in the context,
-        de-registers the flattened parameter and unflattens the original
-        parameters as ``nn.Parameter`` views into the flattened parameter.
-        After the context, re-registers the flattened parameter and restores
-        the original parameters as ``Tensor`` views into the flattened
-        parameter.
+        unflattens the original parameters as ``nn.Parameter`` views into the
+        flattened parameter and de-registers the flattened parameter. After the
+        context, restores the original parameters as ``Tensor`` views into the
+        flattened parameter and re-registers the flattened parameter.
         """
-        if self.flat_param is None:
+        if getattr(self, "flat_param", None) is None:
             yield
         else:
-            self._deregister_flat_param()
+            # De-register the `FlatParameter` from this wrapper to hide it from
+            # `named_parameters()` (though it still exists in memory)
+            del self.flat_param
             try:
                 with self._flat_param_handle.unflatten_as_params():
                     yield
             finally:
-                if not self.handle._use_orig_params:
-                    self._register_flat_param()
-
-    def _register_flat_param(self):
-        """
-        Registers the flattened parameter, making it visible to ``nn.Module``
-        methods.
-
-        We do not use :meth:`nn.Module.register_parameter` because we want
-        ``flat_param`` to always be an attribute but dynamically change whether
-        it is visible to ``nn.Module`` methods.
-        """
-        self._parameters["flat_param"] = self.flat_param
-
-    def _deregister_flat_param(self):
-        """
-        De-registers the flattened parameter, hiding it from ``nn.Module``
-        methods.
-
-        We do not use ``del self.flat_param`` because we want ``flat_param`` to
-        always be an attribute but dynamically change whether it is visible to
-        ``nn.Module`` methods.
-        """
-        self._parameters.pop("flat_param", None)
+                # Re-register the `FlatParameter`
+                self.flat_param = self._flat_param_handle.flat_param
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes of this wrapper to the wrapped module."""
@@ -187,4 +160,6 @@ class FlattenParamsWrapper(nn.Module):
         return self.module.__getitem__(key)
 
     def forward(self, *inputs: Any, **kwinputs: Any) -> Any:
+        if self.flat_param is not None:
+            self._flat_param_handle._unflatten(as_params=False)
         return self.module(*inputs, **kwinputs)

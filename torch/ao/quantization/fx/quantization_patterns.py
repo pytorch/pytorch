@@ -6,30 +6,13 @@ from torch.fx.graph import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
-from torch.ao.quantization.utils import (
+from torch.ao.quantization.quantization_types import (
     Pattern,
     NodePattern,
 )
 
 from abc import ABC
 from typing import Any, Callable, Dict, Optional
-
-__all__ = [
-    "QuantizeHandler",
-    "BinaryOpQuantizeHandler",
-    "CatQuantizeHandler",
-    "ConvReluQuantizeHandler",
-    "LinearReLUQuantizeHandler",
-    "BatchNormQuantizeHandler",
-    "EmbeddingQuantizeHandler",
-    "RNNDynamicQuantizeHandler",
-    "DefaultNodeQuantizeHandler",
-    "FixedQParamsOpQuantizeHandler",
-    "CopyNodeQuantizeHandler",
-    "GeneralTensorShapeOpQuantizeHandler",
-    "CustomModuleQuantizeHandler",
-    "StandaloneModuleQuantizeHandler",
-]
 
 def _default_root_node_getter(node_pattern):
     if node_pattern is None:

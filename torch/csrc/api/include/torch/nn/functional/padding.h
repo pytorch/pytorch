@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/PadNd.h>
+#include <ATen/native/PadNd.h>
 #include <torch/nn/options/padding.h>
 
 namespace torch {

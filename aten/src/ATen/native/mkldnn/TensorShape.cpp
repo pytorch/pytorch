@@ -1,17 +1,8 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
-#include <c10/core/SymIntArrayRef.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_mkldnn_reshape_native.h>
-#include <ATen/ops/_mkldnn_transpose_native.h>
-#include <ATen/ops/clone_native.h>
-#include <ATen/ops/view_native.h>
-#endif
+#include <c10/core/SymIntArrayRef.h>
 
 #if !AT_MKLDNN_ENABLED()
 

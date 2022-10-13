@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
+#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 
 namespace at {

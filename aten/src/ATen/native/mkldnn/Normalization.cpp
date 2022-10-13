@@ -1,16 +1,7 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <tuple>
-
-#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_to_dense_native.h>
-#include <ATen/ops/empty_native.h>
-#include <ATen/ops/native_batch_norm_backward_native.h>
-#include <ATen/ops/native_batch_norm_native.h>
-#endif
+#include <tuple>
 
 #if !AT_MKLDNN_ENABLED()
 

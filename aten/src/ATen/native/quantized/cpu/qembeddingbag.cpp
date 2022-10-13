@@ -1,5 +1,4 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
@@ -10,19 +9,9 @@
 #endif
 
 #include <ATen/Parallel.h>
-#include <ATen/Utils.h>
 #include <c10/util/irange.h>
 
 #include <array>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/arange.h>
-#include <ATen/ops/empty.h>
-#include <ATen/ops/resize_native.h>
-#endif
 
 int register_embedding_params();
 

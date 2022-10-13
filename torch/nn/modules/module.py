@@ -13,8 +13,7 @@ from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overloa
 from ...utils.hooks import RemovableHandle
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook', 'register_module_backward_hook',
-           'register_module_full_backward_hook', 'register_module_buffer_registration_hook',
-           'register_module_module_registration_hook', 'register_module_parameter_registration_hook', 'Module']
+           'register_module_full_backward_hook', 'Module']
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -43,11 +42,6 @@ def _addindent(s_, numSpaces):
     s = first + '\n' + s
     return s
 
-r"""This tracks hooks common to all modules that are executed immediately before
-.registering the buffer/module/parameter"""
-_global_buffer_registration_hooks: Dict[int, Callable] = OrderedDict()
-_global_module_registration_hooks: Dict[int, Callable] = OrderedDict()
-_global_parameter_registration_hooks: Dict[int, Callable] = OrderedDict()
 
 class _WrappedHook:
     def __init__(self, hook: Callable, module: Optional["Module"] = None):
@@ -94,78 +88,6 @@ _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
-
-
-def register_module_buffer_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Registers a buffer registration hook common to all modules.
-
-    .. warning ::
-
-        This adds global state to the `nn.Module` module
-
-    The hook will be called every time :func:`register_buffer` is invoked.
-    It should have the following signature::
-
-        hook(module, name, buffer) -> None or new buffer
-
-    The hook can modify the input or return a single modified value in the hook.
-
-    Returns:
-        :class:`torch.utils.hooks.RemovableHandle`:
-            a handle that can be used to remove the added hook by calling
-            ``handle.remove()``
-    """
-    handle = hooks.RemovableHandle(_global_buffer_registration_hooks)
-    _global_buffer_registration_hooks[handle.id] = hook
-    return handle
-
-
-def register_module_module_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Registers a module registration hook common to all modules.
-
-    .. warning ::
-
-        This adds global state to the `nn.Module` module
-
-    The hook will be called every time :func:`register_module` is invoked.
-    It should have the following signature::
-
-        hook(module, name, submodule) -> None or new submodule
-
-    The hook can modify the input or return a single modified value in the hook.
-
-    Returns:
-        :class:`torch.utils.hooks.RemovableHandle`:
-            a handle that can be used to remove the added hook by calling
-            ``handle.remove()``
-    """
-    handle = hooks.RemovableHandle(_global_module_registration_hooks)
-    _global_module_registration_hooks[handle.id] = hook
-    return handle
-
-
-def register_module_parameter_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Registers a parameter registration hook common to all modules.
-
-    .. warning ::
-
-        This adds global state to the `nn.Module` module
-
-    The hook will be called every time :func:`register_parameter` is invoked.
-    It should have the following signature::
-
-        hook(module, name, param) -> None or new parameter
-
-    The hook can modify the input or return a single modified value in the hook.
-
-    Returns:
-        :class:`torch.utils.hooks.RemovableHandle`:
-            a handle that can be used to remove the added hook by calling
-            ``handle.remove()``
-    """
-    handle = hooks.RemovableHandle(_global_parameter_registration_hooks)
-    _global_parameter_registration_hooks[handle.id] = hook
-    return handle
 
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
@@ -458,8 +380,6 @@ class Module:
                             "(torch Tensor or None required)"
                             .format(torch.typename(tensor), name))
         else:
-            for hook in _global_buffer_registration_hooks.values():
-                tensor = hook(self, name, tensor) or tensor
             self._buffers[name] = tensor
             if persistent:
                 self._non_persistent_buffers_set.discard(name)
@@ -506,8 +426,6 @@ class Module:
                 "as a function of another Tensor, compute the value in "
                 "the forward() method.".format(name))
         else:
-            for hook in _global_parameter_registration_hooks.values():
-                param = hook(self, name, param) or param
             self._parameters[name] = param
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
@@ -532,8 +450,6 @@ class Module:
             raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
-        for hook in _global_module_registration_hooks.values():
-            module = hook(self, name, module) or module
         self._modules[name] = module
 
     def register_module(self, name: str, module: Optional['Module']) -> None:
@@ -1378,16 +1294,12 @@ class Module:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
-                for hook in _global_module_registration_hooks.values():
-                    value = hook(self, name, value) or value
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
                     raise TypeError("cannot assign '{}' as child module '{}' "
                                     "(torch.nn.Module or None expected)"
                                     .format(torch.typename(value), name))
-                for hook in _global_module_registration_hooks.values():
-                    value = hook(self, name, value) or value
                 modules[name] = value
             else:
                 buffers = self.__dict__.get('_buffers')
@@ -1396,8 +1308,6 @@ class Module:
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
-                    for hook in _global_buffer_registration_hooks.values():
-                        value = hook(self, name, value) or value
                     buffers[name] = value
                 else:
                     super().__setattr__(name, value)
@@ -1758,17 +1668,16 @@ class Module:
                                self.__class__.__name__, "\n\t".join(error_msgs)))
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
-    def _named_members(self, get_members_fn, prefix='', recurse=True, remove_duplicate: bool = True):
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
-        modules = self.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, self)]
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
         for module_prefix, module in modules:
             members = get_members_fn(module)
             for k, v in members:
                 if v is None or v in memo:
                     continue
-                if remove_duplicate:
-                    memo.add(v)
+                memo.add(v)
                 name = module_prefix + ('.' if module_prefix else '') + k
                 yield name, v
 
@@ -1847,16 +1756,15 @@ class Module:
         for _, buf in self.named_buffers(recurse=recurse):
             yield buf
 
-    def named_buffers(self, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True) -> Iterator[Tuple[str, Tensor]]:
+    def named_buffers(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
         r"""Returns an iterator over module buffers, yielding both the
         name of the buffer as well as the buffer itself.
 
         Args:
             prefix (str): prefix to prepend to all buffer names.
-            recurse (bool, optional): if True, then yields buffers of this module
+            recurse (bool): if True, then yields buffers of this module
                 and all submodules. Otherwise, yields only buffers that
-                are direct members of this module. Defaults to True.
-            remove_duplicate (bool, optional): whether to remove the duplicated buffers in the result. Defaults to True.
+                are direct members of this module.
 
         Yields:
             (str, torch.Tensor): Tuple containing the name and buffer
@@ -1871,7 +1779,7 @@ class Module:
         """
         gen = self._named_members(
             lambda module: module._buffers.items(),
-            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+            prefix=prefix, recurse=recurse)
         for elem in gen:
             yield elem
 

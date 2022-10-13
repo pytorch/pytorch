@@ -55,14 +55,6 @@ def decompose(decomposition_table):
 proxy_slot = object()
 no_default = object()
 
-_py_sym_types = (
-    PySymInt,
-    PySymFloat,
-)
-def is_sym_node(node):
-    assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
-    return "val" in node.meta and isinstance(node.meta['val'], _py_sym_types)
-
 def set_proxy_slot(obj, tracer, proxy):
     d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
     assert isinstance(d, weakref.WeakKeyDictionary)
@@ -109,7 +101,7 @@ def set_meta(proxy, val):
     if isinstance(val, FakeTensor):
         proxy.node.meta['val'] = val
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
-    elif isinstance(val, _py_sym_types):
+    elif isinstance(val, PySymInt):
         proxy.node.meta['val'] = val
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
@@ -128,7 +120,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
             inner_s = outer_s.get_pyobj()
-            assert isinstance(inner_s, _py_sym_types)
+            assert isinstance(inner_s, PySymInt)
 
             set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
 
@@ -249,7 +241,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
             with maybe_disable_fake_tensor_mode():
                 return func(*const_args, **const_kwargs)
         raise RuntimeError(
-            f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
+            "It appears that you're trying to get value out of a tracing tensor - erroring out! "
             "It's likely that this is caused by data-dependent control flow or similar."
         )
     proxy_args, proxy_kwargs = pytree.tree_map_only(
@@ -499,7 +491,7 @@ class ProxySymDispatchMode(SymDispatchMode):
     def _compute_proxy(self, func, args, out):
         n_args = tuple(
             get_proxy_slot(a, self.tracer)().node if a.constant is None else a.constant
-            if isinstance(a, _py_sym_types) else a
+            if isinstance(a, (PySymInt, PySymFloat)) else a
             for a in args
         )
 
@@ -516,9 +508,9 @@ class ProxySymDispatchMode(SymDispatchMode):
 
         # Peephole optimize multiply by one
         if func == operator.mul:
-            if isinstance(args[1], (PySymInt, PySymFloat)) and args[1].constant == 1:
+            if isinstance(args[1], PySymInt) and args[1].constant == 1:
                 return args[0]
-            elif isinstance(args[0], (PySymInt, PySymFloat)) and args[0].constant == 1:
+            elif isinstance(args[0], PySymInt) and args[0].constant == 1:
                 return args[1]
 
         # For speed, we assume there are no nested data structures
@@ -526,7 +518,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         # We also assume there are no keyword arguments.
         assert not kwargs
         out = func(*args, **kwargs)
-        assert isinstance(out, _py_sym_types), f"{func}(*{args}, **{kwargs}) = {out}"
+        assert isinstance(out, (PySymInt, PySymFloat)), f"{func}(*{args}, **{kwargs}) = {out}"
 
         # Delays tracing out the proxies on this op until we actually need it
         p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)

@@ -145,11 +145,10 @@ Context* context() {
     return nullptr;
   }());
 
-  if (!context) {
-    TORCH_WARN(
-        "Pytorch Vulkan Context: The global context could not be retrieved "
-        "because it failed to initialize.");
-  }
+  TORCH_CHECK(
+      context,
+      "Pytorch Vulkan Context: The global context could not be retrieved "
+      "because it failed to initialize.");
 
   return context.get();
 }

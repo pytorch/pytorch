@@ -114,7 +114,7 @@ class NVFuserEnabler {
       return *getCachedFuserEnabledEnvVar();
     }
     // 3. default value
-#if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+#ifdef FBCODE_CAFFE2
     return false;
 #else
     return nvfuserCanBeEnabled();
