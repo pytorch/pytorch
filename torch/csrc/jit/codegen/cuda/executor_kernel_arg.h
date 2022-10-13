@@ -301,7 +301,9 @@ class TORCH_CUDA_CU_API KernelArgumentHolder {
       : index_mode_(index_mode) {}
 
   KernelArgumentHolder(const KernelArgumentHolder& self)
-      : device_index_(self.getDeviceIndex()), index_mode_(self.getIndexMode()) {
+      : device_index_(self.getDeviceIndex()),
+        cache_id_(self.getCacheId()),
+        index_mode_(self.getIndexMode()) {
     for (const auto& arg : self.arguments_) {
       push(arg.get());
     }
