@@ -43,8 +43,8 @@ jobs:
       matrix:
         include:
           - docs_type: cpp
-            # Nightly cpp docs take about 150m to finish, and the number is stable
-            timeout-minutes: 180
+            # Nightly cpp docs take about 170m to finish now, and the number is stable
+            timeout-minutes: 240
           - docs_type: python
             # It takes less than 30m to finish python docs unless there are issues
             timeout-minutes: 30
