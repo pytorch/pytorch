@@ -12,7 +12,7 @@ profile = functools.partial(
     torch.profiler.profile, record_shapes=True, profile_memory=True, with_stack=True
 )
 
-
+@skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestMemoryProfiler(TestCase):
     def test_config_check(self) -> None:
         with torch.profiler.profile() as prof:
