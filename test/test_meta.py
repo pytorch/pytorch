@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
-    onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torchgen.utils import YamlLoader
@@ -440,7 +439,6 @@ meta_function_expected_failures = {
     torch.take : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
-    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.frexp : {f64, f16, bf16, f32},
     torch.functional.unique : {f64, i32, i64, u8, i16, bf16, b8, i8, f32},
     torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, bf16, b8, i8, f32},
@@ -548,6 +546,8 @@ meta_function_skips = {
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
     # for grid_sampler_2d, so we can't just xfail it
     torch.nn.functional.grid_sample : {f64, f32},
+
+    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
 }
 
 
@@ -555,6 +555,8 @@ meta_function_device_expected_failures = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
+    torch.native_batch_norm: {bf16},
+    torch.native_layer_norm: {bf16},
 }
 
 meta_function_device_expected_failures['cuda'] = {
@@ -581,6 +583,11 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
+}
+
+meta_function_device_skips['cpu'] = {
+    torch.narrow_copy: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},
+    torch.native_batch_norm: {f32, f64},
 }
 
 meta_function_device_skips['cuda'] = {
@@ -691,8 +698,6 @@ meta_dispatch_expected_failures = {
     aten._pdist_forward.default : {f32, f64},
     aten._unique2.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
-    aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.grid_sampler_3d.default : {f32, f64},
@@ -701,7 +706,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.log_sigmoid_forward.output : {bf16, f32, f64},
     aten.logcumsumexp.default : {bf16, f32, f64},
     aten.logcumsumexp.out : {bf16, f32, f64},
     aten.max_pool3d_with_indices.default : {f32, f64},
@@ -737,10 +741,18 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
+    aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
+    aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
 }
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
+
+meta_dispatch_device_expected_failures['cpu'] = {
+    aten.narrow_copy.out: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::narrow_copy.out
+    aten.native_batch_norm.default: {bf16},
+    aten.native_layer_norm.default: {bf16},
+}
 
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._unique2.default: {f16},  # aten::_unique2
@@ -759,7 +771,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
-    aten.log_sigmoid_forward.output: {f16},  # aten::log_sigmoid_forward.output
+    aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
     aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
     aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -780,6 +792,11 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.unique_consecutive.default: {f16},  # aten::unique_consecutive
     aten.unique_dim.default: {f16},  # aten::unique_dim
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
+}
+
+meta_dispatch_device_skips['cpu'] = {
+    aten._embedding_bag_forward_only.default: {f16, f32, f64},
+    aten.native_batch_norm.default: {f32, f64},
 }
 
 meta_dispatch_device_skips['cuda'] = {
@@ -844,7 +861,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 @skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
@@ -863,7 +879,6 @@ class TestMeta(TestCase):
                     func(*args, **kwargs, out=expected)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)

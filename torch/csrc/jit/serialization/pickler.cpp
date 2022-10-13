@@ -567,7 +567,9 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 // ivalue to the stack as a string so we can preserve type tags across
 // serialization
 void Pickler::startTypeTag() {
-  pushGlobal("torch.jit._pickle", "restore_type_tag");
+  if (tag_aggregates_) {
+    pushGlobal("torch.jit._pickle", "restore_type_tag");
+  }
 }
 namespace {
 c10::optional<std::string> type_printer(const c10::Type& type) {
@@ -580,6 +582,9 @@ c10::optional<std::string> type_printer(const c10::Type& type) {
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
+  if (!tag_aggregates_) {
+    return;
+  }
   TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
   // Push the dict type
