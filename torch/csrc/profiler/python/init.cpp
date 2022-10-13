@@ -150,6 +150,7 @@ void initPythonBindings(PyObject* module) {
 
   using torch_op_t = ExtraFields<EventType::TorchOp>;
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
+      .def_readonly("name", &torch_op_t::name_)
       .def_readonly("inputs", &torch_op_t::inputs_)
       .def_readonly("scope", &torch_op_t::scope_)
       .def_readonly("sequence_number", &torch_op_t::sequence_number_)
