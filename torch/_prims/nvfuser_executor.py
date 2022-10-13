@@ -279,10 +279,14 @@ def _remove_empty_like_fill(gm: GraphModule):
     gm = deepcopy(gm)
     for node in gm.graph.nodes:
         if node.op == "call_function":
-            if node.target == torch.ops.aten.sub.Tensor:
+            if (
+                node.target == torch.ops.aten.sub.Tensor
+                or node.target == torch.ops.nvprims.sub.default
+            ):
                 # check if the first argument is a fill
                 if (
-                    node.args[0].op == "call_function"
+                    isinstance(node.args[0], torch.fx.Node)
+                    and node.args[0].op == "call_function"
                     and node.args[0].target == torch.ops.aten.fill.Scalar
                 ):
                     # Replace the first argument with the second argument of fill
