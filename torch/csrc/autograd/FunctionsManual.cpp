@@ -5110,7 +5110,11 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // K <- H_0^{-1} @ K
   const auto zero_idx = flip_i(0);
   K = apply_householder_reflector(
-      zero_idx, input.narrow(-1, zero_idx, 1), sigma.narrow(-1, zero_idx, 1), K, /*left=*/apply_left);
+      zero_idx,
+      input.narrow(-1, zero_idx, 1),
+      sigma.narrow(-1, zero_idx, 1),
+      K,
+      /*left=*/apply_left);
 
   Tensor input_grad, tau_grad;
   // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
@@ -5315,12 +5319,13 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
     if (left ^ transpose) {
       const auto hp_grad = !transpose ? grad : grad.mH();
       const auto hp_result = !transpose ? result : result.mH();
-      std::tie(self_grad, tau_grad) = householder_product_backward(hp_grad, hp_result, self, tau);
-    }
-    else {
+      std::tie(self_grad, tau_grad) =
+          householder_product_backward(hp_grad, hp_result, self, tau);
+    } else {
       const auto hp_result = !transpose ? result.mH() : result;
       const auto hp_grad = !transpose ? grad.mH() : grad;
-      std::tie(self_grad, tau_grad) = householder_product_backward(hp_result, hp_grad, self, tau, true);
+      std::tie(self_grad, tau_grad) =
+          householder_product_backward(hp_result, hp_grad, self, tau, true);
     }
   }
 
