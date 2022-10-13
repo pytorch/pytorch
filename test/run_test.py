@@ -66,8 +66,7 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    # This supports symlinks, so we can link domain library tests like functorch
-    # to PyTorch test directory
+    # This supports symlinks, so we can link domain library tests to PyTorch test directory
     all_py_files = [pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)]
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
@@ -252,6 +251,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
+    "test_cuda_nvml_based_avail",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -267,6 +267,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_tensorexpr",
     "test_cuda_primary_ctx",
     "test_cuda_trace",
+    "test_cuda_nvml_based_avail",
 ] + FSDP_TEST
 
 CI_SERIAL_LIST = [
@@ -750,6 +751,7 @@ def run_test_ops(test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
+    "test_cuda_nvml_based_avail": get_run_test_with_subprocess_fn(),
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
