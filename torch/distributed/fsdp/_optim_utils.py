@@ -90,6 +90,7 @@ def _unflatten_optim_state(
     fsdp_module,
     to_save: bool,
     shard_state: bool,
+    offload_to_cpu: bool,
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the optimizer state, consisting of the "state" part and the
@@ -131,7 +132,7 @@ def _unflatten_optim_state(
         if to_save or shard_state
         else []
     )
-    if to_save:
+    if offload_to_cpu and to_save:
         for optim_state in unflat_param_state:
             for key in list(optim_state.keys()):
                 state = optim_state[key]
@@ -1119,11 +1120,12 @@ def _optim_state_dict(
             List[Dict[str, Any]],
             Iterable[torch.nn.Parameter],
         ]
-    ],
-    rank0_only: bool,
-    shard_state: bool,
-    group: Optional[dist.ProcessGroup],
-    using_optim_input: bool,
+    ] = None,
+    rank0_only: bool = True,
+    shard_state: bool = False,
+    offload_to_cpu: bool = True,
+    group: Optional[dist.ProcessGroup] = None,
+    using_optim_input: bool = False,
 ) -> Dict[str, Any]:
     """
     Consolidates the optimizer state and returns it as a :class:`dict`
@@ -1238,6 +1240,7 @@ def _optim_state_dict(
                 fsdp_module,
                 to_save,
                 shard_state,
+                offload_to_cpu,
             )
             if to_save:
                 assert len(unflat_state) == len(r0_optim_state_key.unflat_param_names)
@@ -1252,7 +1255,9 @@ def _optim_state_dict(
             fsdp_osd_state[unflat_param_name] = copy.copy(osd_state[flat_param_id])
             for state_name, value in sorted_items(fsdp_osd_state[unflat_param_name]):
                 if torch.is_tensor(value):
-                    fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
+                    if offload_to_cpu:
+                        value = value.cpu()
+                    fsdp_osd_state[unflat_param_name][state_name] = value
 
     if not to_save:
         return {}

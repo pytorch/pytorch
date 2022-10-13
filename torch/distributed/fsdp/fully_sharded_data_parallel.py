@@ -360,9 +360,42 @@ class ShardedStateDictConfig(StateDictConfig):
     pass
 
 
+@dataclass
+class OptimStateDictConfig:
+    """
+    ``StateDictConfig`` is the base class for all state_dict configuration classes.
+    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
+    order to configure settings for the particular type of ``state_dict``
+    implementation FSDP will use.
+    """
+    offload_to_cpu: bool = True
+
+
+@dataclass
+class FullOptimStateDictConfig(OptimStateDictConfig):
+    rank0_only: bool = True
+
+
+@dataclass
+class LocalOptimStateDictConfig(OptimStateDictConfig):
+    pass
+
+
+@dataclass
+class ShardedOptimStateDictConfig(OptimStateDictConfig):
+    pass
+
+
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
     PARAM_ID = auto()
+
+
+@dataclass
+class StateDictSettings:
+    state_dict_type: StateDictType
+    state_dict_config: StateDictConfig
+    optim_state_dict_config: OptimStateDictConfig
 
 
 # A handles key represents the group of `FlatParamHandle`s involved in a given
@@ -1139,6 +1172,7 @@ class FullyShardedDataParallel(nn.Module):
         # implemented using post-save and pre-load hooks
         self._state_dict_type = StateDictType.FULL_STATE_DICT
         self._state_dict_config = FullStateDictConfig()
+        self._optim_state_dict_config = FullOptimStateDictConfig()
         self._register_state_dict_hook(self._post_state_dict_hook)
         self._post_state_dict_hook_fn = {
             StateDictType.FULL_STATE_DICT: self._full_post_state_dict_hook,
@@ -1670,6 +1704,42 @@ class FullyShardedDataParallel(nn.Module):
             (not root_only or submodule.check_is_root())
         ]
 
+    @staticmethod
+    def state_dict_settings(
+        module: nn.Module,
+    ) -> Optional[StateDictSettings]:
+        state_dict_settings: Optional[StateDictSettings] = None
+        for submodule in FullyShardedDataParallel.fsdp_modules(module):
+            if state_dict_settings is None:
+                state_dict_settings = StateDictSettings(
+                    state_dict_type=submodule._state_dict_type,
+                    state_dict_config=submodule._state_dict_config,
+                    optim_state_dict_config=submodule._optim_state_dict_config,
+                )
+            else:
+                if state_dict_settings.state_dict_type != submodule._state_dict_type:
+                    raise ValueError(
+                        "All FSDP modules must have the same state dict types."
+                        f"Got {state_dict_settings.state_dict_type} and "
+                        f"{submodule._state_dict_type}."
+                    )
+                if state_dict_settings.state_dict_config != submodule._state_dict_config:
+                    raise ValueError(
+                        "All FSDP modules must have the same state dict configs."
+                        f"Got {state_dict_settings.state_dict_config} and "
+                        f"{submodule._state_dict_config}."
+                    )
+                if (
+                    state_dict_settings.optim_state_dict_config !=
+                    submodule._optim_state_dict_config
+                ):
+                    raise ValueError(
+                        "All FSDP modules must have the same state dict configs."
+                        f"Got {state_dict_settings.optim_state_dict_config} and "
+                        f"{submodule._optim_state_dict_config}."
+                    )
+        return state_dict_settings
+
     def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
@@ -2109,40 +2179,61 @@ class FullyShardedDataParallel(nn.Module):
         module: nn.Module,
         state_dict_type: StateDictType,
         state_dict_config: Optional[StateDictConfig] = None,
-    ) -> Tuple[StateDictType, StateDictConfig]:
+        optim_state_dict_config: Optional[OptimStateDictConfig] = None,
+    ) -> Tuple[StateDictType, StateDictConfig, OptimStateDictConfig]:
         _state_dict_type_to_config = {
             StateDictType.FULL_STATE_DICT: FullStateDictConfig,
             StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
             StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
         }
+        _optim_state_dict_type_to_config = {
+            StateDictType.FULL_STATE_DICT: FullOptimStateDictConfig,
+            StateDictType.LOCAL_STATE_DICT: LocalOptimStateDictConfig,
+            StateDictType.SHARDED_STATE_DICT: ShardedOptimStateDictConfig,
+        }
 
         prev_state_dict_type = None
         prev_state_dict_config = None
+        prev_optim_state_dict_config = None
         # Use the default config if a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
+        if optim_state_dict_config is None:
+            optim_state_dict_config = _optim_state_dict_type_to_config[state_dict_type]()
         for submodule in FullyShardedDataParallel.fsdp_modules(module):
             if prev_state_dict_type is None:
                 prev_state_dict_type = submodule._state_dict_type
             if prev_state_dict_config is None:
                 prev_state_dict_config = submodule._state_dict_config
+            if prev_optim_state_dict_config is None:
+                prev_optim_state_dict_config = submodule._optim_state_dict_config
             if prev_state_dict_type != submodule._state_dict_type:
                 raise RuntimeError("All FSDP module should the same state_dict_type.")
             if type(prev_state_dict_config) != type(submodule._state_dict_config):
                 raise RuntimeError(
                     "All FSDP modules should have the same type of state_dict_config."
                 )
-
+            if type(prev_optim_state_dict_config) != type(submodule._optim_state_dict_config):
+                raise RuntimeError(
+                    "All FSDP modules should have the same type of optim_state_dict_config."
+                )
             expected_state_dict_config_type = _state_dict_type_to_config[state_dict_type]
             if expected_state_dict_config_type != type(state_dict_config):
                 raise RuntimeError(
                     f"Expected state_dict_config of type {expected_state_dict_config_type} "
                     f"but got {type(state_dict_config)}"
                 )
+            expected_optim_state_dict_config_type = _optim_state_dict_type_to_config[state_dict_type]
+            if expected_optim_state_dict_config_type != type(optim_state_dict_config):
+                raise RuntimeError(
+                    f"Expected state_dict_config of type {expected_optim_state_dict_config_type} "
+                    f"but got {type(optim_state_dict_config)}"
+                )
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
+            submodule._optim_state_dict_config = optim_state_dict_config
 
-        return prev_state_dict_type, prev_state_dict_config
+        return prev_state_dict_type, prev_state_dict_config, prev_optim_state_dict_config
 
     @staticmethod
     @contextlib.contextmanager
@@ -2150,6 +2241,7 @@ class FullyShardedDataParallel(nn.Module):
         module: nn.Module,
         state_dict_type: StateDictType,
         state_dict_config: Optional[StateDictConfig] = None,
+        optim_state_dict_config: Optional[OptimStateDictConfig] = None,
     ) -> Generator:
         """
         A context manager to set the ``state_dict_type`` of all the descendant
@@ -2180,10 +2272,14 @@ class FullyShardedDataParallel(nn.Module):
         """
         prev_state_dict_type = None
         prev_state_dict_config = None
+        prev_optim_state_dict_config = None
         try:
-            prev_state_dict_type, prev_state_dict_config = (
+            prev_state_dict_type, prev_state_dict_config, prev_optim_state_dict_config = (
                 FullyShardedDataParallel.set_state_dict_type(
-                    module, state_dict_type, state_dict_config
+                    module,
+                    state_dict_type,
+                    state_dict_config,
+                    optim_state_dict_config,
                 )
             )
             yield
@@ -2192,10 +2288,18 @@ class FullyShardedDataParallel(nn.Module):
         else:
             assert prev_state_dict_type is not None
             assert prev_state_dict_config is not None
+            assert prev_optim_state_dict_config is not None
         finally:
-            if prev_state_dict_type is not None and prev_state_dict_config is not None:
+            if (
+                prev_state_dict_type is not None and
+                prev_state_dict_config is not None and
+                prev_optim_state_dict_config is not None
+            ):
                 FullyShardedDataParallel.set_state_dict_type(
-                    module, prev_state_dict_type, prev_state_dict_config
+                    module,
+                    prev_state_dict_type,
+                    prev_state_dict_config,
+                    prev_optim_state_dict_config
                 )
 
     def _convert_to_wrapped_module_name(self, module_name: str) -> str:
@@ -3880,6 +3984,62 @@ class FullyShardedDataParallel(nn.Module):
             warnings.warn(
                 "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
                 "from your code without changing its functionality."
+            )
+
+    @staticmethod
+    def optim_state_dict(
+        model: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        group: Optional[dist.ProcessGroup] = None,
+    ) -> Dict[str, Any]:
+        FSDP = FullyShardedDataParallel
+        state_dict_settings = FSDP.state_dict_settings(model)
+        if state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT:
+            rank0_only = cast(
+                state_dict_settings.optim_state_dict_config, FullOptimStateDictConfig
+            ).rank0_only
+            return FSDP.full_optim_state_dict(
+                model, optim, rank0_only=rank0_only, group=group
+            )
+        elif state_dict_settings.state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            return FSDP.sharded_optim_state_dict(model, optim, group=group)
+        else:
+            raise NotImplementedError(
+                "FullyShardedDataParallel.optim_state_dict only supports "
+                "full_state_dict and sharded_state_dict now."
+            )
+
+    @staticmethod
+    def load_optim_state_dict(
+        state_dict: Dict[str, Any],
+        model: torch.nn.Module,
+        optim: torch.optim.Optimizer,
+        group: Optional[dist.ProcessGroup] = None,
+    ) -> None:
+        FSDP = FullyShardedDataParallel
+        state_dict_settings = FSDP.state_dict_settings(model)
+        if state_dict_settings.state_dict_type == StateDictType.FULL_STATE_DICT:
+            rank0_only = cast(
+                state_dict_settings.optim_state_dict_config, FullOptimStateDictConfig
+            ).rank0_only
+            if rank0_only:
+                optim_state_dict = FSDP.scatter_full_optim_state_dict(
+                    state_dict, model=model, optim=optim, group=group
+                )
+            else:
+                optim_state_dict = FSDP.shard_full_optim_state_dict(
+                    state_dict, model=model, optim=optim, group=group
+                )
+            optim.load_state_dict(optim_state_dict)
+        elif state_dict_settings.state_dict_type == StateDictType.SHARDED_STATE_DICT:
+            optim_state_dict = FSDP.flatten_sharded_optim_state_dict(
+                state_dict, model=model, optim=optim
+            )
+            optim.load_state_dict(optim_state_dict)
+        else:
+            raise NotImplementedError(
+                "FullyShardedDataParallel.optim_state_dict only supports "
+                "full_state_dict and sharded_state_dict now."
             )
 
     @staticmethod

@@ -15,6 +15,8 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
+    FullOptimStateDictConfig,
+    ShardedOptimStateDictConfig,
     StateDictType,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -1259,6 +1261,46 @@ class TestFSDPOptimState(FSDPTest):
                     optim_input=nonwrapped_optim_input,
                 )
 
+    def test_optim_state_dict(
+        self,
+    ) -> None:
+        NUM_ITERS = 3
+        for state_dict_type, offload_to_cpu in zip(
+            [StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT], [True, False]
+        ):
+            with self.subTest(
+                state_dict_type=state_dict_type, offload_to_cpu=offload_to_cpu
+            ):
+                if state_dict_type == StateDictType.FULL_STATE_DICT:
+                    optim_state_dict_config = FullOptimStateDictConfig(
+                        rank0_only=offload_to_cpu, offload_to_cpu=offload_to_cpu
+                    )
+                else:
+                    optim_state_dict_config = ShardedOptimStateDictConfig(
+                        offload_to_cpu=offload_to_cpu
+                    )
+                model1, optim1, _ = self._init_transformer_model(wrap=True)
+                self._step_model(model1, optim1, num_iters=NUM_ITERS)
+                with FSDP.state_dict_type(
+                    model1,
+                    state_dict_type,
+                    optim_state_dict_config=optim_state_dict_config,
+                ):
+                    fsdp_osd1 = FSDP.optim_state_dict(model1, optim1)
+
+                model2, optim2, _ = self._init_transformer_model(wrap=True)
+                with FSDP.state_dict_type(
+                    model2,
+                    state_dict_type,
+                    optim_state_dict_config=optim_state_dict_config,
+                ):
+                    FSDP.load_optim_state_dict(fsdp_osd1, model2, optim2)
+
+                local_osd1 = optim1.state_dict()
+                local_osd2 = optim2.state_dict()
+                self._check_same_state(
+                    local_osd1, local_osd2, check_same_param_keys=True
+                )
 
 instantiate_parametrized_tests(TestFSDPOptimState)
 
