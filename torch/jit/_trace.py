@@ -316,7 +316,7 @@ def _check_trace(
     force_outplace,
     is_trace_module,
     _module_class,
-    example_kwarg_inputs=None,
+    example_inputs_is_kwarg=False,
 ):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -336,22 +336,33 @@ def _check_trace(
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
-                example_kwarg_inputs=example_kwarg_inputs
+                example_inputs_is_kwarg=example_inputs_is_kwarg,
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
-            if isinstance(inputs, (torch.Tensor)) or isinstance(inputs, dict) and example_kwarg_inputs is None:
+            if isinstance(inputs, (torch.Tensor)) or isinstance(inputs, dict) and not example_inputs_is_kwarg:
                 inputs = (inputs,)
         else:
-            check_mod = torch.jit.trace(
-                func,
-                _clone_inputs(inputs),
-                check_trace=False,
-                strict=strict,
-                _force_outplace=force_outplace,
-                _module_class=_module_class,
-                example_kwarg_inputs=example_kwarg_inputs,
-            )
+            if example_inputs_is_kwarg:
+                check_mod = torch.jit.trace(
+                    func,
+                    check_trace=False,
+                    strict=strict,
+                    _force_outplace=force_outplace,
+                    _module_class=_module_class,
+                    example_kwarg_inputs=_clone_inputs(inputs),
+                )
+            else:
+                check_mod = torch.jit.trace(
+                    func,
+                    _clone_inputs(inputs),
+                    check_trace=False,
+                    strict=strict,
+                    _force_outplace=force_outplace,
+                    _module_class=_module_class,
+                )
+
+
             check_mod_func = check_mod
 
         def graph_diagnostic_info():
@@ -443,7 +454,7 @@ def _check_trace(
 
         def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
             try:
-                if isinstance(inputs, dict) and isinstance(example_kwarg_inputs, dict):
+                if isinstance(inputs, dict) and example_inputs_is_kwarg:
                     outs = wrap_retval(mod(**inputs))
                 else:
                     outs = wrap_retval(mod(*_clone_inputs(inputs)))
@@ -788,7 +799,7 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
-            example_kwarg_inputs=example_kwarg_inputs,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
         )
 
     if (
@@ -811,7 +822,7 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
-            example_kwarg_inputs=example_kwarg_inputs,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
         )
 
     # Special case for common case of passing a single Tensor
@@ -864,7 +875,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
-                example_kwarg_inputs=example_kwarg_inputs,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
         else:
             _check_trace(
@@ -876,7 +887,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
-                example_kwarg_inputs=example_kwarg_inputs,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
 
     return traced
@@ -896,7 +907,7 @@ def trace_module(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
-    example_kwarg_inputs=None,
+    example_inputs_is_kwarg=False,
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -931,12 +942,8 @@ def trace_module(
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
-        example_kwarg_inputs (dict, optional): This parameter is a pack of keyword arguments example inputs
-                                     that will be passed to the function while tracing. Default: ``None``.
-                                     Either this argument or ``example_inputs`` in ``inputs`` should be specified.
-                                     The dict will be unpacking by the arguments name of the traced function.
-                                     If the keys of the dict don't not match with the traced module's forward 
-                                     function's arguments name, a runtime exception will be raised.
+        example_inputs_is_kwarg (``bool``, optional): This parameter indicate wether the example inputs is a pack
+                                           pack of keyword arguments. Default: ``False``.
 
     Returns:
         A :class:`ScriptModule` object with a single ``forward`` method containing the traced code.
@@ -1021,7 +1028,7 @@ def trace_module(
                 func = getattr(mod, method_name)
                 argument_names = get_callable_argument_names(func)
 
-            if isinstance(example_inputs, dict) and isinstance(example_kwarg_inputs, dict):
+            if isinstance(example_inputs, dict) and example_inputs_is_kwarg:
                 # Raise exception when the user provided key names are not aligned with forward() method's arguments' name/
                 for key in example_inputs:
                     if key not in argument_names:
@@ -1063,7 +1070,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
-                        example_kwarg_inputs=example_kwarg_inputs,
+                        example_inputs_is_kwarg=example_inputs_is_kwarg,
                     )
                 else:
                     _check_trace(
@@ -1075,7 +1082,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
-                        example_kwarg_inputs=example_kwarg_inputs,
+                        example_inputs_is_kwarg=example_inputs_is_kwarg,
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
