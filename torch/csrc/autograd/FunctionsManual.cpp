@@ -5134,7 +5134,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
       tau_grads.push_back(tau_i_grad);
 
       // K <- H_{i + 1}^{-1} @ K @ H_i
-      if (i != k - 1 - flip_i(0)) {
+      if (i != flip_i(k - 1)) {
         auto i_next = next_i(i);
         auto v_i_next = input.narrow(-1, i_next, 1);
         auto s_i_next = sigma.narrow(-1, i_next, 1);
@@ -5171,7 +5171,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
       tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
 
       // K <- H_{i + 1}^{-1} @ K @ H_i
-      if (i != k - 1 - flip_i(0)) {
+      if (i != flip_i(k - 1)) {
         auto i_next = next_i(i);
         auto v_i_next = input.narrow(-1, i_next, 1);
         auto s_i_next = sigma.narrow(-1, i_next, 1);
