@@ -258,6 +258,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     xfail("floor_divide", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
     skip("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
     xfail("t", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    skip("t", dtypes=[torch.float16], reason="flaky tests in CI"),
     xfail("true_divide", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
 )
 # fmt: on
