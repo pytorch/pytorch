@@ -2406,8 +2406,13 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    dim = utils.canonicalize_dim(tensors[0].ndim, dim)
-    utils.validate_idx(tensors[0].ndim, dim)
+    for t in tensors:
+        # match logic in legacy_cat_wrap_dim
+        if t.ndim == 1 and t.size(0) == 0:
+            continue
+        dim = utils.canonicalize_dim(t.ndim, dim)
+        utils.validate_idx(t.ndim, dim)
+        break
 
     # Filters tensors with one dimension of length zero
     filtered = tuple(x for x in tensors if not (x.ndim == 1 and x.numel() == 0))

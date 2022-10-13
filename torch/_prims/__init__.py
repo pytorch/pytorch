@@ -71,6 +71,7 @@ __all__ = [
     "erf",
     "erf_inv",
     "erfc",
+    "erfcx",
     "exp",
     "expm1",
     "exp2",
@@ -83,6 +84,7 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "ndtri",
     "neg",
     "real",
     "reciprocal",
@@ -658,6 +660,13 @@ erfc = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+erfcx = _make_elementwise_unary_prim(
+    "erfcx",
+    impl_aten=torch.special.erfcx,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 exp = _make_elementwise_unary_prim(
     "exp",
     impl_aten=torch.exp,
@@ -777,6 +786,13 @@ real = _make_prim(
 reciprocal = _make_elementwise_unary_prim(
     "reciprocal",
     impl_aten=torch.reciprocal,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+ndtri = _make_elementwise_unary_prim(
+    "ndtri",
+    impl_aten=torch.special.ndtri,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
