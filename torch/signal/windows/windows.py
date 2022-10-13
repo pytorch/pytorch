@@ -85,7 +85,7 @@ Args:
 Keyword args:
     center (float, optional): where the center of the window will be located.
         Default: `M / 2` if `sym` is `False`, else `(M - 1) / 2`.
-    tau (float, optional): the decay value. 
+    tau (float, optional): the decay value.
         Tau is generally associated with a percentage, that means, that the value should
         vary within the interval (0, 100]. If tau is 100, it is considered the uniform window.
         Default: 1.0.
@@ -130,11 +130,11 @@ def exponential(
     if tau <= 0:
         raise ValueError(f'Tau must be positive, got: {tau} instead.')
 
-    if not sym and center is not None:
-        raise ValueError('Center must be None for non-symmetric windows')
+    if sym and center is not None:
+        raise ValueError('Center must be None for symmetric windows')
 
     if center is None:
-        center = -(M if not sym and M > 1 else M - 1) / 2.0
+        center = (M if not sym and M > 1 else M - 1) / 2.0
 
     constant = 1 / tau
 
@@ -142,8 +142,8 @@ def exponential(
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
     thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
-    k = torch.arange(start=center * constant,
-                     end=(center + (M - 1)) * constant + constant / 2,
+    k = torch.arange(start=-center * constant,
+                     end=(-center + (M - 1)) * constant + constant / 2,
                      step=constant,
                      dtype=dtype,
                      layout=layout,

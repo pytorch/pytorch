@@ -40,6 +40,61 @@ def sample_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs)
         )
 
 
+def reference_inputs_window(op_info, device, dtype, requires_grad, *args, **kwargs):
+    r"""Reference inputs function to use for windows which have a common signature, i.e.,
+    window size and sym only.
+
+    Implement other special functions for windows that have a specific signature.
+    See exponential and gaussian windows for instance.
+    """
+    yield from sample_inputs_window(
+        op_info, device, dtype, requires_grad, *args, **kwargs
+    )
+
+    cases = (8, 16, 32, 64, 128, 256)
+
+    for size in cases:
+        yield SampleInput(size, sym=False)
+        yield SampleInput(size, sym=True)
+
+
+def reference_inputs_exponential_window(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
+
+    cases = (
+        (8, {"center": 4, "tau": 0.5}),
+        (16, {"center": 8, "tau": 2.5}),
+        (32, {"center": 16, "tau": 43.5}),
+        (64, {"center": 20, "tau": 3.7}),
+        (128, {"center": 62, "tau": 99}),
+        (256, {"tau": 10}),
+    )
+
+    for size, kw in cases:
+        yield SampleInput(size, sym=False, **kw)
+        kw["center"] = None
+        yield SampleInput(size, sym=True, **kw)
+
+
+def reference_inputs_gaussian_window(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
+
+    cases = (
+        (8, {"std": 0.1}),
+        (16, {"std": 1.2}),
+        (32, {"std": 2.1}),
+        (64, {"std": 3.9}),
+        (128, {"std": 4.5}),
+        (256, {"std": 10}),
+    )
+
+    for size, kw in cases:
+        yield SampleInput(size, sym=False, **kw)
+        yield SampleInput(size, sym=True, **kw)
+
+
 def error_inputs_window(op_info, device, *args, **kwargs):
     # Tests for windows that have a negative size
     yield ErrorInput(
@@ -81,11 +136,11 @@ def error_inputs_exponential_window(op_info, device, **kwargs):
         error_regex="Tau must be positive, got: -1 instead.",
     )
 
-    # Tests for non-symmetric windows and a given center value.
+    # Tests for symmetric windows and a given center value.
     yield ErrorInput(
-        SampleInput(3, center=1, sym=False, dtype=torch.float32, device=device),
+        SampleInput(3, center=1, sym=True, dtype=torch.float32, device=device),
         error_type=ValueError,
-        error_regex="Center must be None for non-symmetric windows",
+        error_regex="Center must be None for symmetric windows",
     )
 
 
@@ -102,7 +157,7 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
 
 
 def make_signal_windows_ref(fn):
-    r"""Wrapper for signal window references.
+    r"""Wrapper for scipy signal window references.
 
     Discards keyword arguments for window reference functions that don't have a matching signature with
     torch, e.g., gaussian window.
@@ -116,13 +171,14 @@ def make_signal_windows_ref(fn):
         requires_grad=False,
         **kwargs,
     ):
+        r"""The unused arguments are defined to disregard those values"""
         return fn(*args, **kwargs).astype(dtype)
 
     return _fn
 
 
 def make_signal_windows_opinfo(
-    name, ref, sample_inputs_func, error_inputs_func, *, skips=()
+    name, ref, sample_inputs_func, reference_inputs_func, error_inputs_func, *, skips=()
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
@@ -131,6 +187,7 @@ def make_signal_windows_opinfo(
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_func,
+        reference_inputs_func=reference_inputs_func,
         error_inputs_func=error_inputs_func,
         supports_out=False,
         supports_autograd=False,
@@ -219,6 +276,7 @@ op_db: List[OpInfo] = [
         if TEST_SCIPY
         else None,
         sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
     ),
     make_signal_windows_opinfo(
@@ -227,6 +285,7 @@ op_db: List[OpInfo] = [
         if TEST_SCIPY
         else None,
         sample_inputs_func=partial(sample_inputs_window, tau=2.78),
+        reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
     ),
     make_signal_windows_opinfo(
@@ -235,6 +294,7 @@ op_db: List[OpInfo] = [
         if TEST_SCIPY
         else None,
         sample_inputs_func=partial(sample_inputs_window, std=1.92),
+        reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
     ),
 ]
