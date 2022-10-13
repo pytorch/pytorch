@@ -235,6 +235,8 @@ def _lazy_init():
                 "libcudart functions unavailable. It looks like you have a broken build?")
         # This function throws if there's a driver initialization error, no GPUs
         # are found or any other error occurs
+        if 'CUDA_MODULE_LOADING' not in os.environ:
+            os.environ['CUDA_MODULE_LOADING'] = 'LAZY'
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
