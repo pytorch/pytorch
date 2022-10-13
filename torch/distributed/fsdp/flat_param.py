@@ -1069,6 +1069,8 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
+        # NOTE: The current stream may be the computation stream *or* the
+        # unshard stream, depending on the calling context.
         unsharded_flat_param.record_stream(
             cast(torch._C.Stream, torch.cuda.current_stream())
         )

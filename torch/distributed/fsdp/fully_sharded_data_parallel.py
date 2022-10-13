@@ -3444,7 +3444,8 @@ class FullyShardedDataParallel(nn.Module):
 
             # Wait for all ops in the current stream to finish before
             # reduce-scattering the gradient
-            # TODO (awgu): This current stream is actually the unshard stream!
+            # NOTE: The current stream may be the computation stream *or* the
+            # unshard stream, depending on the calling context.
             self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
 
             with torch.cuda.stream(self._streams["post_backward"]):
