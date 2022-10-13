@@ -3581,10 +3581,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         op = torch.ops.aten._convolution_double_backward
 
         generator = get_fallback_and_vmap_exhaustive(op, args, {})
+        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        atol, rtol = (1e-3, 1e-3) if is_cuda_sm86 else (1e-4, 1e-4)
 
         def test():
             for loop_out, batched_out in generator:
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                self.assertEqual(loop_out, batched_out, atol=atol, rtol=rtol)
 
         check_vmap_fallback(self, test, op)
 
