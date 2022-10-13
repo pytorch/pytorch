@@ -7,7 +7,6 @@ from torch import Tensor
 from torch._prims_common import is_float_dtype
 from torch._torch_docs import factory_common_args, parse_kwargs, merge_dicts
 
-
 __all__ = [
     'cosine',
     'exponential',
@@ -40,6 +39,7 @@ def _add_docstr(*args):
     Args:
         args (str):
     """
+
     def decorator(o):
         o.__doc__ = "".join(args)
         return o
@@ -98,6 +98,7 @@ Keyword args:
     {requires_grad}
 
 Examples::
+
     >>> # Generate a symmetric exponential window of size 10 and with a decay value of 1.0.
     >>> # The center will be at (M - 1) / 2, where M is 10.
     >>> torch.signal.windows.exponential(10)
@@ -144,13 +145,13 @@ def exponential(
     Note that non-integer step is subject to floating point rounding errors when comparing against end;
     thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
     """
-    k = torch.arange(start=-center * constant,
-                     end=(-center + (M - 1)) * constant + constant / 2,
-                     step=constant,
-                     dtype=dtype,
-                     layout=layout,
-                     device=device,
-                     requires_grad=requires_grad)
+    k = torch.linspace(start=-center * constant,
+                       end=(-center + (M - 1)) * constant,
+                       steps=M,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       requires_grad=requires_grad)
 
     return torch.exp(-torch.abs(k))
 
@@ -180,6 +181,7 @@ Keyword args:
     {requires_grad}
 
 Examples::
+
     >>> # Generate a symmetric cosine window.
     >>> torch.signal.windows.cosine(10)
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540, 0.1564])
@@ -211,17 +213,13 @@ def cosine(
     start = 0.5
     constant = torch.pi / (M + 1 if not sym and M > 1 else M)
 
-    """
-    Note that non-integer step is subject to floating point rounding errors when comparing against end;
-    thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
-    """
-    k = torch.arange(start=start * constant,
-                     end=(start + (M - 1)) * constant + constant / 2,
-                     step=constant,
-                     dtype=dtype,
-                     layout=layout,
-                     device=device,
-                     requires_grad=requires_grad)
+    k = torch.linspace(start=start * constant,
+                       end=(start + (M - 1)) * constant,
+                       steps=M,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       requires_grad=requires_grad)
 
     return torch.sin(k)
 
@@ -252,6 +250,7 @@ Keyword args:
     {requires_grad}
 
 Examples::
+
     >>> # Generate a symmetric gaussian window with a standard deviation of 1.0.
     >>> torch.signal.windows.gaussian(10)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
@@ -288,16 +287,12 @@ def gaussian(
 
     constant = 1 / (std * sqrt(2))
 
-    """
-    Note that non-integer step is subject to floating point rounding errors when comparing against end;
-    thus, to avoid inconsistency, we added an epsilon equal to `step / 2` to `end`.
-    """
-    k = torch.arange(start=start * constant,
-                     end=(start + (M - 1)) * constant + constant / 2,
-                     step=constant,
-                     dtype=dtype,
-                     layout=layout,
-                     device=device,
-                     requires_grad=requires_grad)
+    k = torch.linspace(start=start * constant,
+                       end=(start + (M - 1)) * constant,
+                       steps=M,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       requires_grad=requires_grad)
 
     return torch.exp(-k ** 2)

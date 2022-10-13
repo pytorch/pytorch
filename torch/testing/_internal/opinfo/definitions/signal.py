@@ -2,7 +2,7 @@ import unittest
 from functools import partial
 
 from itertools import product
-from typing import List
+from typing import Callable, List, Tuple
 
 import numpy
 
@@ -156,7 +156,7 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
     )
 
 
-def make_signal_windows_ref(fn):
+def make_signal_windows_ref(fn: Callable):
     r"""Wrapper for scipy signal window references.
 
     Discards keyword arguments for window reference functions that don't have a matching signature with
@@ -178,7 +178,13 @@ def make_signal_windows_ref(fn):
 
 
 def make_signal_windows_opinfo(
-    name, ref, sample_inputs_func, reference_inputs_func, error_inputs_func, *, skips=()
+    name: str,
+    ref: Callable,
+    sample_inputs_func: Callable,
+    reference_inputs_func: Callable,
+    error_inputs_func: Callable,
+    *,
+    skips: Tuple[DecorateInfo] = (),
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
