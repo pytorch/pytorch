@@ -41,7 +41,7 @@ from .quantization_patterns import (
     QuantizeHandler,
 )
 
-from torch.ao.quantization.quantization_types import (
+from torch.ao.quantization.utils import (
     Pattern,
     NodePattern,
 )
@@ -195,14 +195,18 @@ def is_input_arg_dtype_supported_by_backend(
     elif is_weight:
         # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
         weight_dtype = dtype_config.weight_dtype
-        dtype_matches = node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
+        dtype_matches = "weight_dtype" in node_name_to_target_dtype[node.name] and \
+            node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
         qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
             qconfig, dtype_config.weight_dtype_with_constraints, is_activation=False)
         return weight_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
     else:  # bias
         bias_dtype = dtype_config.bias_dtype
         return bias_dtype is None or \
-            node_name_to_target_dtype[node.name]["bias_dtype"][0] == bias_dtype  # type: ignore[index]
+            (
+                "bias_dtype" in node_name_to_target_dtype[node.name] and
+                node_name_to_target_dtype[node.name]["bias_dtype"][0] == bias_dtype  # type: ignore[index]
+            )
 
 def is_output_dtype_supported_by_backend(
     node: Node,
