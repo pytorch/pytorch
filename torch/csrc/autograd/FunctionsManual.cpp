@@ -5124,8 +5124,10 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // one to choose for creating output buffer.
   // eg. if both are BatchedTensor at different level.
   if (areAnyTensorSubclassLike({input, tau, K})) {
-    std::vector<Tensor> input_grads = {};
-    std::vector<Tensor> tau_grads = {};
+    // k + 1 if input_grads hold a matrix of zeros for inactive parts of input.
+    auto input_grads = std::vector<Tensor>(k < input.size(-1) ? k + 1 : k, Tensor{});
+    auto tau_grads = std::vector<Tensor>(k, Tensor{});
+
     for (const auto i_idx : c10::irange(k)) {
       auto i = flip_i(i_idx);
       // NOTE: narrow will unsqueeze(-1)
@@ -5134,8 +5136,8 @@ std::tuple<Tensor, Tensor> householder_product_backward(
 
       Tensor v_i_grad, tau_i_grad;
       std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
-      input_grads.push_back(v_i_grad);
-      tau_grads.push_back(tau_i_grad);
+      input_grads[i] = v_i_grad;
+      tau_grads[i] = tau_i_grad;
 
       // K <- H_{i + 1}^{-1} @ K @ H_i
       if (i != flip_i(k - 1)) {
@@ -5155,7 +5157,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
           at::DimVector(input_.sizes().slice(0, input_.dim() - 1));
       zero_grad_shape.push_back(input.size(-1) - k);
       auto zero_grad = at::zeros(zero_grad_shape, input_.options());
-      input_grads.push_back(zero_grad);
+      input_grads[k] = zero_grad;
     }
 
     input_grad = at::cat(input_grads, -1);
