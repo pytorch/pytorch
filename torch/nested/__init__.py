@@ -90,7 +90,7 @@ to_padded_tensor = _add_docstr(_nested.nested_to_padded_tensor,
                                r"""
 to_padded_tensor(input, padding, output_size=None, out=None) -> Tensor
 
-Returns a new (non-nested) Tensor by padding the attr:`input` nested tensor.
+Returns a new (non-nested) Tensor by padding the :attr:`input` nested tensor.
 The leading entries will be filled with the nested data,
 while the trailing entries will be padded.
 
