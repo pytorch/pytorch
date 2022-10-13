@@ -480,13 +480,22 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     pre_hooks_.push_back(std::move(pre_hook));
   }
 
+  void add_tensor_pre_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
+    tensor_pre_hooks_.push_back(std::move(pre_hook));
+  }
+
   const std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks()
       const noexcept {
     return pre_hooks_;
   }
 
-  virtual std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() noexcept {
+  std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() noexcept {
     return pre_hooks_;
+  }
+
+  virtual std::vector<std::unique_ptr<FunctionPreHook>>&
+  tensor_pre_hooks() noexcept {
+    return tensor_pre_hooks_;
   }
 
   // Customization Points for Subclasses
@@ -599,6 +608,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
+  // pre-hooks registered to tensor should be called before pre-hooks registered
+  // to the function
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::vector<std::unique_ptr<FunctionPreHook>> tensor_pre_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

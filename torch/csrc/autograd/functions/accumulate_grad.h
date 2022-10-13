@@ -42,31 +42,21 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() noexcept override {
-    // Construct a vector that combines hooks registered to the tensor and
-    // hooks registered to the function.
-    //
-    // Why do we need this?
+  std::vector<std::unique_ptr<FunctionPreHook>>& tensor_pre_hooks() noexcept
+      override {
     // We cannot directly store hooks registered to the tensor on this
     // AccumulateGrad node because someone can attempt to register a hook
-    // before another node is able to keep AccumulateGrad alive.
-    int64_t new_hooks_version = impl::_get_hooks_version(variable);
-    bool first_run = hooks_version_ == -1;
-    bool need_refresh =
-        hooks_version_ != -1 && hooks_version_ != new_hooks_version;
-
-    if (need_refresh && hooks_idx_ != -1) {
-      pre_hooks_.erase(pre_hooks_.begin() + hooks_idx_);
-    }
-    if ((need_refresh || first_run) && !impl::hooks(variable).empty()) {
-      pre_hooks_.push_back(
-          std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
-      hooks_idx_ = pre_hooks_.size() - 1;
-    }
-    if (need_refresh || first_run) {
+    // before another node is able to keep AccumulateGrad alive
+    const int64_t new_hooks_version = impl::_get_hooks_version(variable);
+    if (hooks_version_ != new_hooks_version) {
+      tensor_pre_hook_.clear();
+      if (!impl::hooks(variable).empty()) {
+        tensor_pre_hook_.push_back(
+            std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
+      }
       hooks_version_ = new_hooks_version;
     }
-    return pre_hooks_;
+    return tensor_pre_hook_;
   }
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
@@ -266,9 +256,8 @@ struct TORCH_API AccumulateGrad : public Node {
   }
 
   Variable variable;
-  std::vector<std::unique_ptr<FunctionPreHook>> hook_;
+  std::vector<std::unique_ptr<FunctionPreHook>> tensor_pre_hook_;
   int64_t hooks_version_ = -1;
-  int64_t hooks_idx_ = -1;
 };
 
 #undef CHECK_RESULT

@@ -77,8 +77,13 @@ PyObject* THPCppFunction_call(
 
 int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
   auto& fn = *((THPCppFunction*)self)->cdata;
-  for (const auto& hook : fn.pre_hooks()) {
+  for (const auto& hook : fn.tensor_pre_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+      Py_VISIT(pyhook->dict);
+    }
+  }
+  for (const auto& hook : fn.pre_hooks()) {
+    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
@@ -152,7 +157,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
   auto& fn = *((THPCppFunction*)self)->cdata;
   std::unique_ptr<FunctionPreHook> hook(new PyFunctionTensorPreHook(
       var->backward_hooks, THPVariable_Unpack(var).output_nr()));
-  fn.add_pre_hook(std::move(hook));
+  fn.add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
 

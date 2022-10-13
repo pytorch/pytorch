@@ -684,7 +684,13 @@ void GraphTask::set_exception(
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
+  // We order it this way because retains_grad hooks are registered as
+  // tensor_pre_hooks and we want that to observe the result of modifications by
+  // all pre_hooks
   for (const auto& hook : fn.pre_hooks()) {
+    inputs = (*hook)(inputs);
+  }
+  for (const auto& hook : fn.tensor_pre_hooks()) {
     inputs = (*hook)(inputs);
   }
   return inputs;

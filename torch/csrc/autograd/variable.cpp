@@ -187,7 +187,7 @@ void update_cpp_hooks_on_new_gradfn(
   meta->retains_grad_ = 0;
   std::unique_ptr<FunctionPreHook> hook_ptr(
       new CppFunctionTensorPreHook(meta->cpp_hooks_list_, self.output_nr()));
-  new_fn->add_pre_hook(std::move(hook_ptr));
+  new_fn->add_tensor_pre_hook(std::move(hook_ptr));
 }
 
 void rebase_history(const Variable& self, Edge gradient_edge) {
@@ -231,7 +231,7 @@ void create_cpp_hook(const at::TensorBase& self) {
   add_hook(self, std::make_shared<CppFunctionTensorPreHook>(list, 0));
   const auto& fn = self.grad_fn();
   if (fn) {
-    fn->add_pre_hook(std::move(hook_ptr));
+    fn->add_tensor_pre_hook(std::move(hook_ptr));
   }
 }
 
