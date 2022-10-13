@@ -1,4 +1,4 @@
-import copy
+nimport copy
 import torch
 import operator
 import warnings
@@ -1182,7 +1182,6 @@ def insert_observers_for_model(
     #     }
     #   }
     #
-    # TODO: rename this to node_name_to_target_dtype_info_info
     node_name_to_target_dtype_info: Dict[
         str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]
     ] = defaultdict(dict)
