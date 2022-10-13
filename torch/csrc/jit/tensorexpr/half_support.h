@@ -84,6 +84,7 @@ class HalfRewriter : public IRMutator {
       inserted_half_casts_.insert(new_val);
     }
 
+    // The scalar_type of value is not Half while the buf is Half
     if (!isHalf(newType.scalar_type()) && isHalf(bufType.scalar_type())) {
       new_val = alloc<Cast>(
           newType.cloneWithScalarType(bufType.scalar_type()), new_val);

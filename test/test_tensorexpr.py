@@ -1329,7 +1329,7 @@ class TestTensorExprFuser(BaseTestClass):
         def test(x):
             return torch.sin(torch.pow(x, 0))
 
-        for data_type, shape in itertools.product (self.dtypes, [[3], [5], [10]]):
+        for data_type, shape in itertools.product(self.dtypes, [[3], [5], [10]]):
             x = torch.rand(shape, dtype=data_type)
             scripted = torch.jit.script(test)
             out = warmup_and_run_forward(scripted, x)
