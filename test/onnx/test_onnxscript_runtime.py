@@ -1,11 +1,14 @@
+# Owner(s): ["module: onnx"]
+
 """Test the support on onnxscript in PyTorch-ONNX converter."""
+from typing import List
+
+import onnx_test_common
 import onnxscript
 import torch
-from torch.testing._internal import common_utils
-from torch.onnx._internal import jit_utils
-import onnx_test_common
 from onnxscript.onnx_types import FLOAT
-from typing import List
+from torch.onnx._internal import jit_utils
+from torch.testing._internal import common_utils
 
 
 class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
@@ -27,6 +30,7 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         custom_opset = onnxscript.values.Opset("onnxscript", 1)
 
         from onnxscript.onnx_opset import opset15 as op
+
         @onnxscript.script(custom_opset)
         def Selu(X, alpha: float, gamma: float):
             # TODO: onnx/ort doesn't support default values for now
@@ -86,11 +90,14 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         model = M(3)
 
         from onnxscript.onnx_opset import opset15 as op
+
         opset_version = 15
         custom_opset = onnxscript.values.Opset(domain="onnxscript", version=1)
 
         @onnxscript.script(custom_opset)
-        def layer_norm(X, axes: List[int], weight: FLOAT[...], bias: FLOAT[...], eps: float):
+        def layer_norm(
+            X, axes: List[int], weight: FLOAT[...], bias: FLOAT[...], eps: float
+        ):
             mean = op.ReduceMean(X, axes=axes)
             D = X - mean  # op.Sub(X, mean)
             DD = D * D  # op.Mul(D, D)
@@ -99,15 +106,21 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
             stddev = op.Sqrt(vareps)
             invstddev = op.Reciprocal(stddev)
             normalized = D * invstddev  # op.Mul(D, invstddev)
-            normalizedw = op.CastLike(normalized, weight)  # Type issue if missing this Op
+            normalizedw = op.CastLike(
+                normalized, weight
+            )  # Type issue if missing this Op
             normalizedscaled = normalizedw * weight  # op.Mul(normalized, weight)
             return normalizedscaled + bias
 
         @torch.onnx.symbolic_helper.parse_args("v", "is", "v", "v", "f", "none")
-        def custom_layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
+        def custom_layer_norm(
+            g, input, normalized_shape, weight, bias, eps, cudnn_enable
+        ):
             # TODO: move the comprehension into local function once it's supported by onnxscript
             axes = [-i for i in range(len(normalized_shape), 0, -1)]
-            return g.op("onnxscript::layer_norm", input, weight, bias, axes_i=axes, eps_f=eps).setType(input.type())
+            return g.op(
+                "onnxscript::layer_norm", input, weight, bias, axes_i=axes, eps_f=eps
+            ).setType(input.type())
 
         torch.onnx.register_custom_op_symbolic(
             symbolic_name="aten::layer_norm",
@@ -117,6 +130,7 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         self.run_test(model, (x, y, z))
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
