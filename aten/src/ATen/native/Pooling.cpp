@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_mps_max_pool2d.h>
 #include <ATen/ops/adaptive_avg_pool1d_native.h>
 #include <ATen/ops/adaptive_avg_pool2d.h>
 #include <ATen/ops/adaptive_max_pool1d_native.h>
