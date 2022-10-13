@@ -860,7 +860,10 @@ Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sizes) {
   return result;
 }
 
-Tensor unsqueeze_to(const Tensor& self, int64_t dim, c10::SymIntArrayRef sizes) {
+Tensor unsqueeze_to(
+    const Tensor& self,
+    int64_t dim,
+    c10::SymIntArrayRef sizes) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to
   // avoided unsqueezing in the backward.

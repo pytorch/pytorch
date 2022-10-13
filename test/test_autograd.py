@@ -5328,8 +5328,8 @@ for shape in [(1,), ()]:
 
         a = torch.ones(1, 3, 3, requires_grad=True)
         out = torch.addbmm(a.squeeze(0), a, a)
-        self.assertEqual(out.grad_fn._saved_batch1_argsize_0, 1)          # int64_t
-        self.assertEqual(out.grad_fn._saved_batch1_argsize_1, 3)          # int64_t
+        self.assertEqual(out.grad_fn._saved_batch1_sym_argsize_0, 1)      # int64_t
+        self.assertEqual(out.grad_fn._saved_batch1_sym_argsize_1, 3)      # int64_t
 
         a = torch.ones(1, 1, 3, 3, requires_grad=True)
         out = torch.nn.functional.unfold(a, 3)
