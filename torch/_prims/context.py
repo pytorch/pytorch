@@ -313,9 +313,9 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         epsilon,
         reserveSpace,
     ):
-        func = torch._decomp.decomposition_table.get(
+        func = torch._decomp.decomposition_table[
             torch.ops.aten.native_batch_norm_backward.default
-        )
+        ]
         return func(
             grad_output,
             input,
