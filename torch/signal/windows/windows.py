@@ -16,7 +16,7 @@ window_common_args = merge_dicts(
     parse_kwargs(
         """
     M (int): the length of the window.
-        In other words, the number of points of the exponential window.
+        In other words, the number of points of the returned window.
     sym (bool, optional): If `False`, returns a periodic window suitable for use in spectral analysis.
         If `True`, returns a symmetric window suitable for use in filter design. Default: `True`.
 """
@@ -38,7 +38,6 @@ def _add_docstr(*args):
     Args:
         args (str):
     """
-
     def decorator(o):
         o.__doc__ = "".join(args)
         return o
@@ -48,13 +47,13 @@ def _add_docstr(*args):
 
 def _window_function_checks(function_name: str, M: int, dtype: torch.dtype, layout: torch.layout) -> None:
     r"""Performs common checks for all the defined windows.
-     This function should be called before computing any window
+     This function should be called before computing any window.
 
      Args:
          function_name (str): name of the window function.
          M (int): length of the window.
-         dtype (:class:`torch.dtype`): the desired data type of the window tensor.
-         layout (:class:`torch.layout`): the desired layout of the window tensor.
+         dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+         layout (:class:`torch.layout`): the desired layout of returned tensor.
      """
     if M < 0:
         raise ValueError(f'{function_name} requires non-negative window length, got M={M}')
@@ -86,7 +85,10 @@ Args:
 Keyword args:
     center (float, optional): where the center of the window will be located.
         Default: `M / 2` if `sym` is `False`, else `(M - 1) / 2`.
-    tau (float, optional): the decay value. Default: 1.0.
+    tau (float, optional): the decay value. 
+        Tau is generally associated with a percentage, that means, that the value should
+        vary within the interval (0, 100]. If tau is 100, it is considered the uniform window.
+        Default: 1.0.
     {sym}
     {dtype}
     {layout}
@@ -94,7 +96,8 @@ Keyword args:
     {requires_grad}
 
 Examples::
-    >>> # Generate an exponential window without keyword args.
+    >>> # Generate a symmetric exponential window of size 10 and with a decay value of 1.0.
+    >>> # The center will be at (M - 1) / 2, where M is 10.
     >>> torch.signal.windows.exponential(10)
     tensor([0.0111, 0.0302, 0.0821, 0.2231, 0.6065, 0.6065, 0.2231, 0.0821, 0.0302, 0.0111])
 
@@ -175,7 +178,7 @@ Keyword args:
     {requires_grad}
 
 Examples::
-    >>> # Generate a cosine window without keyword args.
+    >>> # Generate a symmetric cosine window.
     >>> torch.signal.windows.cosine(10)
     tensor([0.1564, 0.4540, 0.7071, 0.8910, 0.9877, 0.9877, 0.8910, 0.7071, 0.4540, 0.1564])
 
@@ -247,7 +250,7 @@ Keyword args:
     {requires_grad}
 
 Examples::
-    >>> # Generate a gaussian window without keyword args.
+    >>> # Generate a symmetric gaussian window with a standard deviation of 1.0.
     >>> torch.signal.windows.gaussian(10)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
 

@@ -5,6 +5,8 @@ from functools import partial
 from itertools import product
 from typing import List
 
+import numpy
+
 import torch
 from torch.testing._internal.common_utils import TEST_SCIPY
 from torch.testing._internal.opinfo.core import (
@@ -109,13 +111,13 @@ def make_signal_windows_ref(fn):
 
     def _fn(
         *args,
-        dtype=None,
+        dtype=numpy.float64,
         device=None,
         layout=torch.strided,
         requires_grad=False,
         **kwargs,
     ):
-        return fn(*args, **kwargs)
+        return fn(*args, **kwargs).astype(dtype)
 
     return _fn
 
@@ -225,7 +227,7 @@ op_db: List[OpInfo] = [
         ref=make_signal_windows_ref(scipy.signal.windows.exponential)
         if TEST_SCIPY
         else None,
-        sample_inputs_func=partial(sample_inputs_window, tau=random.uniform(0, 10)),
+        sample_inputs_func=partial(sample_inputs_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
     ),
     make_signal_windows_opinfo(
@@ -233,7 +235,7 @@ op_db: List[OpInfo] = [
         ref=make_signal_windows_ref(scipy.signal.windows.gaussian)
         if TEST_SCIPY
         else None,
-        sample_inputs_func=partial(sample_inputs_window, std=random.uniform(0, 3)),
+        sample_inputs_func=partial(sample_inputs_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
     ),
 ]
