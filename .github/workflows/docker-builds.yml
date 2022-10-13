@@ -6,7 +6,6 @@ on:
     paths:
       - .circleci/docker/**
       - .github/workflows/docker-builds.yml
-
   push:
     branches:
       - master
