@@ -31,6 +31,7 @@ __all__ = [
     "check_training_mode",
     "dequantize_helper",
     "is_caffe2_aten_fallback",
+    "is_complex_value",
     "parse_args",
     "pytorch_name_to_type",
     "quantize_helper",
