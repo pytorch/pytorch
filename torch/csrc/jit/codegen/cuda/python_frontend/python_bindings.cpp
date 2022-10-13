@@ -85,7 +85,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           py::init<nvfuser::FusionInterface*, int>(),
           py::arg("fusion"),
-          py::arg("max_length") = int(256))
+          py::arg("max_length") = int(1024))
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
           "__enter__",

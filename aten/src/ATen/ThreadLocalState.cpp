@@ -27,6 +27,10 @@ void ThreadLocalState::set_grad_mode(bool enabled) {
   autograd_tls_.set_grad_mode(enabled);
 }
 
+void ThreadLocalState::set_multithreading_enabled(bool enabled) {
+  autograd_tls_.set_multithreading_enabled(enabled);
+}
+
 /* static */
 void ThreadLocalState::setThreadLocalState(
     const ThreadLocalState& state) {
