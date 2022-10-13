@@ -4,6 +4,7 @@ import copy
 import functools
 import io
 from typing import Callable
+import warnings
 
 import onnx
 import parameterized
@@ -157,8 +158,6 @@ class TestUtilityFuns(_BaseTestCase):
             self.assertFalse(torch.onnx.is_in_onnx_export())
 
     def test_validate_dynamic_axes_invalid_input_output_name(self):
-        import warnings
-
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             utils._validate_dynamic_axes(
