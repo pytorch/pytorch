@@ -2608,7 +2608,7 @@ class FullyShardedDataParallel(nn.Module):
             chunk_size = (
                 math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
             )
-            if shards:
+            if len(shards) == 1:
                 local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
                 if not local_tensor.is_cuda:
                     local_tensor = local_tensor.cuda()
