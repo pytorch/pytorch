@@ -380,20 +380,22 @@ Tensor where_mps(const Tensor& condition,
                  const Tensor& self,
                  const Tensor& other) {
 
-  bool cond_zero_shape = (condition.dim() == 0);
-  bool self_zero_shape = (self.dim() == 0);
-  bool other_zero_shape = (other.dim() == 0);
-
   auto max_dim = std::max(condition.dim(), std::max(self.dim(), other.dim()));
+
+  // How many leading dimensions do we broadcast across for each Tensor?
+  int cond_num_implicit_ones = (max_dim - condition.dim());
+  int self_num_implicit_ones = (max_dim - self.dim());
+  int other_num_implicit_ones = (max_dim - other.dim());
 
   std::vector<int64_t> out_arr(max_dim);
 
   // Broadcasted output shape
   for(int i = 0; i < max_dim; i++) {
 
-    int64_t cond_idx = cond_zero_shape ? 1 : (i < condition.dim() ? condition.size(i) : 1);
-    int64_t self_idx = self_zero_shape ? 1 : (i < self.dim() ? self.size(i) : 1);
-    int64_t other_idx = other_zero_shape ? 1 : (i < other.dim() ? other.size(i) : 1);
+    // Use up the leading broadcast dimensions for each Tensor, then continue from the start of the "actual" shape
+    int64_t cond_idx = i < cond_num_implicit_ones ? 1 : (condition.size(i - cond_num_implicit_ones));
+    int64_t self_idx = i < self_num_implicit_ones ? 1 : (self.size(i - self_num_implicit_ones));
+    int64_t other_idx = i < other_num_implicit_ones ? 1 : (other.size(i - other_num_implicit_ones));
 
     auto max_idx = std::max({cond_idx, self_idx, other_idx});
 
