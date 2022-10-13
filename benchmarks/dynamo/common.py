@@ -887,6 +887,33 @@ class DummyGradScaler:
         return loss
 
 
+def maybe_fresh_cache(fn):
+    def inner(self, *args, **kwargs):
+        cache_minder = NullContext()
+        if self.args.cold_start_latency:
+            cache_entries = {}
+            cache_minder = fresh_triton_cache(cache_entries)
+
+        try:
+            with cache_minder:
+                return fn(self, *args, **kwargs)
+        finally:
+            dump_cache = False
+            if dump_cache and self.args.cold_start_latency:
+                output_csv(
+                    output_filename[:-4] + "_triton_cache.csv",
+                    ["dev", "name", "batch_size", "triton_cache"],
+                    [
+                        current_device,
+                        current_name,
+                        current_batch_size,
+                        cache_entries,
+                    ],
+                )
+
+    return inner
+
+
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
@@ -1280,33 +1307,6 @@ class BenchmarkRunner:
             raise RuntimeError(
                 "--diff_main called on main branch, what are you diffing?"
             )
-
-    @staticmethod
-    def maybe_fresh_cache(fn):
-        def inner(self, *args, **kwargs):
-            cache_minder = NullContext()
-            if self.args.cold_start_latency:
-                cache_entries = {}
-                cache_minder = fresh_triton_cache(cache_entries)
-
-            try:
-                with cache_minder:
-                    return fn(self, *args, **kwargs)
-            finally:
-                dump_cache = False
-                if dump_cache and self.args.cold_start_latency:
-                    output_csv(
-                        output_filename[:-4] + "_triton_cache.csv",
-                        ["dev", "name", "batch_size", "triton_cache"],
-                        [
-                            current_device,
-                            current_name,
-                            current_batch_size,
-                            cache_entries,
-                        ],
-                    )
-
-        return inner
 
     @maybe_fresh_cache
     def run_one_model(
