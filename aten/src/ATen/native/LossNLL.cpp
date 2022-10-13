@@ -585,7 +585,7 @@ Tensor cross_entropy_loss(
     int64_t ignore_index,
     double label_smoothing) {
   Tensor ret;
-  if (self.sizes() == target.sizes()) {
+  if (self.sym_sizes() == target.sym_sizes()) {
     // Assume soft targets when input and target shapes are the same
     TORCH_CHECK(at::isFloatingType(target.scalar_type()),
         "Expected floating point type for target with class probabilities, got ", target.scalar_type());
@@ -642,13 +642,13 @@ Tensor nll_loss_nd(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sizes()[0] != target.sizes()[0]) {
+  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
     TORCH_CHECK_VALUE(
         false,
         "Expected input batch_size (",
-        self.sizes()[0],
+        self.sym_sizes()[0],
         ") to match target batch_size (",
-        target.sizes()[0],
+        target.sym_sizes()[0],
         ").");
   }
 
@@ -661,37 +661,37 @@ Tensor nll_loss_nd(
     ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
   } else {
     // dim == 3 or dim > 4
-    auto n = input_.sizes()[0];
-    auto c = input_.sizes()[1];
-    auto out_size = input_.sizes().slice(2).vec();
+    auto n = input_.sym_sizes()[0];
+    auto c = input_.sym_sizes()[1];
+    auto out_size = input_.sym_sizes().slice(2).vec();
     out_size.insert(out_size.begin(), n);
-    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
+    if (target_.sym_sizes().slice(1) != input_.sym_sizes().slice(2)) {
       TORCH_CHECK(
           false,
           "Expected target size ",
-          IntArrayRef(out_size),
+          SymIntArrayRef(out_size),
           ", got ",
-          target_.sizes());
+          target_.sym_sizes());
     }
     input_ = input_.contiguous();
     target_ = target_.contiguous();
     // support empty batches, see #15870
     if (input_.numel() > 0) {
-      input_ = input_.view({n, c, 1, -1});
+      input_ = input_.view_symint({n, c, 1, -1});
     } else {
-      input_ = input_.view({n, c, 0, 0});
+      input_ = input_.view_symint({n, c, 0, 0});
     }
     if (target_.numel() > 0) {
-      target_ = target_.view({n, 1, -1});
+      target_ = target_.view_symint({n, 1, -1});
     } else {
-      target_ = target_.view({n, 0, 0});
+      target_ = target_.view_symint({n, 0, 0});
     }
     if (reduction != Reduction::None) {
       ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
     } else {
       auto out =
           at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
-      ret = out.view(out_size);
+      ret = out.view_symint(out_size);
     }
   }
   return ret;

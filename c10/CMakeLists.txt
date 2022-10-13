@@ -52,8 +52,9 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
-if(HAS_WERROR_SIGN_COMPARE AND WERROR)
-  target_compile_options(c10 PRIVATE "-Werror=sign-compare")
+if(WERROR)
+  target_compile_options_if_supported(c10 PRIVATE "-Werror=sign-compare")
+  target_compile_options_if_supported(c10 PRIVATE "-Werror=shadow")
 endif()
 
 # ---[ Dependency of c10
