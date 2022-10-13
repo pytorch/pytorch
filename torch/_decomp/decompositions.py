@@ -1398,36 +1398,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-@register_decomposition(aten._to_copy)
-def _to_copy(
-    x: Tensor,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    layout=None,
-    device: Optional[torch.device] = None,
-    pin_memory: bool = False,
-    non_blocking: bool = False,
-    memory_format: Optional[torch.memory_format] = None,
-):
-    assert not layout or layout == torch.strided, "TODO"
-    assert not pin_memory, "TODO"
-    assert device is not None or dtype is not None or memory_format is not None
-    dtype_converted = False
-    if device is not None and device != x.get_device():
-        # avoid conversions on cpu
-        if dtype is not None and device.type == "cpu":
-            x = torch._prims.convert_element_type(x, dtype)
-            dtype_converted = True
-        x = torch._prims.device_put(x, device)
-    if dtype is not None and not dtype_converted:
-        x = torch._prims.convert_element_type(x, dtype)
-    if memory_format is not None:  # no ref/prim for memory format
-        out = torch.empty_like(x, memory_format=memory_format)
-        out.copy_(x)
-        return out  # type: ignore[call-overload]
-    return x
-
-
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:

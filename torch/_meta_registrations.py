@@ -1256,6 +1256,13 @@ def meta_select_scatter(self, src, dim, index):
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
+@register_meta(aten._to_copy.default)
+def _to_copy(x, *, dtype=None, layout=None, device=None, pin_memory=False,
+                non_blocking=False, memory_format=None):
+    assert device is not None or dtype is not None or memory_format is not None
+    dtype = x.dtype if dtype is None else dtype
+    device = x.device if device is None else device
+    return torch.empty(x.size(), dtype=dtype, layout=layout, device=device, memory_format=memory_format)
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
