@@ -463,7 +463,16 @@ template void add_padding_kernelLauncher<c10::Half>(
 namespace {
 
 #ifndef USE_ROCM
-template <typename scalar_t>
+template <
+    typename scalar_t,
+    unsigned int kPad,
+    typename LayoutA,
+    typename LayoutB,
+    typename OpClass,
+    typename Arch,
+    typename ThreadBlockShape,
+    typename WarpShape,
+    typename InstructionShape>
 void gemm_grouped_cuda_internal(
     const std::vector<int64_t>& lda,
     const std::vector<int64_t>& ldb,
@@ -476,12 +485,11 @@ void gemm_grouped_cuda_internal(
     at::Device& device) {
   using Element = scalar_t;
   using ElementAcc = float;
-  using OpClass = cutlass::arch::OpClassSimt;
 
   using GemmConfiguration =
       typename cutlass::gemm::device::DefaultGemmConfiguration<
           OpClass,
-          cutlass::arch::Sm80,
+          Arch,
           Element,
           Element,
           Element,
@@ -489,21 +497,21 @@ void gemm_grouped_cuda_internal(
 
   using GemmKernel = typename cutlass::gemm::kernel::DefaultGemmGrouped<
       Element,
-      cutlass::layout::RowMajor,
+      LayoutA,
       cutlass::ComplexTransform::kNone,
-      GemmConfiguration::kAlignmentA,
+      kPad,
       Element,
-      cutlass::layout::RowMajor,
+      LayoutB,
       cutlass::ComplexTransform::kNone,
-      GemmConfiguration::kAlignmentB,
+      kPad,
       Element,
       cutlass::layout::RowMajor,
       ElementAcc,
       OpClass,
-      cutlass::arch::Sm80,
-      typename GemmConfiguration::ThreadblockShape,
-      typename GemmConfiguration::WarpShape,
-      typename GemmConfiguration::InstructionShape,
+      Arch,
+      ThreadBlockShape,
+      WarpShape,
+      InstructionShape,
       typename GemmConfiguration::EpilogueOutputOp,
       cutlass::gemm::threadblock::GemmBatchedIdentityThreadblockSwizzle,
       GemmConfiguration::kStages>::GemmKernel;
@@ -590,6 +598,113 @@ void gemm_grouped_cuda_internal(
       "Failed to run CUTLASS Grouped GEMM kernel.");
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+bool group_gemm_dispatch(
+    at::ScalarType scalar_type,
+    at::Device device,
+    Tensor a_buffer,
+    std::vector<int64_t> a_offsets,
+    Tensor b_buffer,
+    std::vector<int64_t> b_offsets,
+    Tensor d_buffer,
+    std::vector<int64_t> d_offsets,
+    std::vector<int64_t> lda,
+    std::vector<int64_t> ldb,
+    std::vector<int64_t> ldd,
+    std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    int64_t ntensors,
+    bool all_row_major) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+
+  if (!all_row_major) {
+    return false;
+  }
+
+  // Check alignment
+  bool all_pad_8 = true;
+  for (int i = 0; i < ntensors; i++) {
+    all_pad_8 = all_pad_8 && (gemm_sizes[i].n() % 8 == 0);
+    all_pad_8 = all_pad_8 && (gemm_sizes[i].k() % 8 == 0);
+
+    // Not sure if this is a requirement, on the safe side
+    all_pad_8 = all_pad_8 && (lda[i] % 8 == 0);
+    all_pad_8 = all_pad_8 && (ldb[i] % 8 == 0);
+    all_pad_8 = all_pad_8 && (ldd[i] % 8 == 0);
+  }
+
+  /* Float case */
+  if (scalar_type == at::kFloat) {
+    std::vector<float*> aptr;
+    std::vector<float*> bptr;
+    std::vector<float*> dptr;
+    for (int64_t i = 0; i < ntensors; i++) {
+      aptr.push_back(a_buffer.data_ptr<float>() + a_offsets[i]);
+      bptr.push_back(b_buffer.data_ptr<float>() + b_offsets[i]);
+      dptr.push_back(d_buffer.data_ptr<float>() + d_offsets[i]);
+    }
+    if (is_sm8x) {
+      gemm_grouped_cuda_internal<
+          float,
+          1,
+          cutlass::layout::RowMajor,
+          cutlass::layout::RowMajor,
+          cutlass::arch::OpClassSimt,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 8>,
+          cutlass::gemm::GemmShape<64, 32, 8>,
+          cutlass::gemm::GemmShape<1, 1, 1>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    }
+  }
+  /* Half case */
+  else if (scalar_type == at::kHalf) {
+    std::vector<cutlass::half_t*> aptr;
+    std::vector<cutlass::half_t*> bptr;
+    std::vector<cutlass::half_t*> dptr;
+    for (int64_t i = 0; i < ntensors; i++) {
+      aptr.push_back(reinterpret_cast<cutlass::half_t*>(
+          a_buffer.data_ptr<c10::Half>() + a_offsets[i]));
+      bptr.push_back(reinterpret_cast<cutlass::half_t*>(
+          b_buffer.data_ptr<c10::Half>() + b_offsets[i]));
+      dptr.push_back(reinterpret_cast<cutlass::half_t*>(
+          d_buffer.data_ptr<c10::Half>() + d_offsets[i]));
+    }
+    if (is_sm8x) {
+      if (all_pad_8) {
+        gemm_grouped_cuda_internal<
+            cutlass::half_t,
+            8,
+            cutlass::layout::RowMajor,
+            cutlass::layout::RowMajor,
+            cutlass::arch::OpClassTensorOp,
+            cutlass::arch::Sm80,
+            cutlass::gemm::GemmShape<128, 128, 32>,
+            cutlass::gemm::GemmShape<64, 64, 32>,
+            cutlass::gemm::GemmShape<16, 8, 16>>(
+            lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+        return true;
+      } else {
+        gemm_grouped_cuda_internal<
+            cutlass::half_t,
+            1,
+            cutlass::layout::RowMajor,
+            cutlass::layout::RowMajor,
+            cutlass::arch::OpClassSimt,
+            cutlass::arch::Sm80,
+            cutlass::gemm::GemmShape<128, 128, 8>,
+            cutlass::gemm::GemmShape<64, 32, 8>,
+            cutlass::gemm::GemmShape<1, 1, 1>>(
+            lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+        return true;
+      }
+    }
+  }
+
+  // Did not perform GEMM
+  return false;
 }
 #endif
 
@@ -682,35 +797,23 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   at::Device device = output.device();
 
 #ifndef USE_ROCM
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  if (is_sm8x && all_row_major) {
-    if (self.dtype() == at::kFloat) {
-      std::vector<float*> aptr;
-      std::vector<float*> bptr;
-      std::vector<float*> dptr;
-      for (int64_t i = 0; i < ntensors; i++) {
-        aptr.push_back(self_buffer.data_ptr<float>() + a_offsets[i]);
-        bptr.push_back(mat2_buffer.data_ptr<float>() + b_offsets[i]);
-        dptr.push_back(out_buffer.data_ptr<float>() + output_offsets[i]);
-      }
-      gemm_grouped_cuda_internal<float>(
-          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-      return output;
-    }
-    if (self.dtype() == at::kHalf) {
-      std::vector<c10::Half*> aptr;
-      std::vector<c10::Half*> bptr;
-      std::vector<c10::Half*> dptr;
-      for (int64_t i = 0; i < ntensors; i++) {
-        aptr.push_back(self_buffer.data_ptr<c10::Half>() + a_offsets[i]);
-        bptr.push_back(mat2_buffer.data_ptr<c10::Half>() + b_offsets[i]);
-        dptr.push_back(out_buffer.data_ptr<c10::Half>() + output_offsets[i]);
-      }
-      gemm_grouped_cuda_internal<c10::Half>(
-          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-      return output;
-    }
+  bool success = group_gemm_dispatch(
+      self.scalar_type(),
+      output.device(),
+      self_buffer,
+      a_offsets,
+      mat2_buffer,
+      b_offsets,
+      out_buffer,
+      output_offsets,
+      lda,
+      ldb,
+      ldd,
+      gemm_sizes,
+      ntensors,
+      all_row_major);
+  if (success) {
+    return output;
   }
 #endif
   std::vector<Tensor> output_unbind = output.unbind();
