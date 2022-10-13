@@ -85,6 +85,7 @@
 #include <ATen/ops/concat_native.h>
 #include <ATen/ops/concatenate_native.h>
 #include <ATen/ops/crow_indices_copy_native.h>
+#include <ATen/ops/dense_dim_native.h>
 #include <ATen/ops/detach_copy_native.h>
 #include <ATen/ops/detach_native.h>
 #include <ATen/ops/diag.h>
@@ -151,6 +152,7 @@
 #include <ATen/ops/slice_scatter_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/split_copy_native.h>
 #include <ATen/ops/split_native.h>
 #include <ATen/ops/split_with_sizes.h>
