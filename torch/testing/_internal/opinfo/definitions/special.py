@@ -225,7 +225,7 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
         supports_one_python_scalar=True,
         skips=(
-            # Greatest absolute difference: nan
+            # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
@@ -748,7 +748,7 @@ python_ref_db: List[OpInfo] = [
         supports_nvfuser=False,
         op_db=op_db,
         skips=(
-            # Greatest absolute difference: nan at index
+            # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
