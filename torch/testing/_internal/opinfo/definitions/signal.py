@@ -156,7 +156,7 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
     )
 
 
-def make_signal_windows_ref(fn: Callable):
+def reference_signal_window(fn: Callable):
     r"""Wrapper for scipy signal window references.
 
     Discards keyword arguments for window reference functions that don't have a matching signature with
@@ -278,7 +278,7 @@ def make_signal_windows_opinfo(
 op_db: List[OpInfo] = [
     make_signal_windows_opinfo(
         name="signal.windows.cosine",
-        ref=make_signal_windows_ref(scipy.signal.windows.cosine)
+        ref=reference_signal_window(scipy.signal.windows.cosine)
         if TEST_SCIPY
         else None,
         sample_inputs_func=sample_inputs_window,
@@ -287,7 +287,7 @@ op_db: List[OpInfo] = [
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
-        ref=make_signal_windows_ref(scipy.signal.windows.exponential)
+        ref=reference_signal_window(scipy.signal.windows.exponential)
         if TEST_SCIPY
         else None,
         sample_inputs_func=partial(sample_inputs_window, tau=2.78),
@@ -296,7 +296,7 @@ op_db: List[OpInfo] = [
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
-        ref=make_signal_windows_ref(scipy.signal.windows.gaussian)
+        ref=reference_signal_window(scipy.signal.windows.gaussian)
         if TEST_SCIPY
         else None,
         sample_inputs_func=partial(sample_inputs_window, std=1.92),
