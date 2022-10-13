@@ -357,7 +357,7 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
-        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, Tensor]]
+        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 

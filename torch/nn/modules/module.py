@@ -12,8 +12,8 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
-__all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook', 'register_module_backward_pre_hook',
-           'register_module_backward_hook',
+__all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
+           'register_module_full_backward_pre_hook', 'register_module_backward_hook',
            'register_module_full_backward_hook', 'Module']
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
@@ -183,7 +183,7 @@ def register_module_backward_hook(
     return handle
 
 
-def register_module_backward_pre_hook(
+def register_module_full_backward_pre_hook(
     hook: Callable[['Module', _grad_t], Union[None, _grad_t]]
 ) -> RemovableHandle:
     r"""Registers a backward pre-hook common to all the modules.
@@ -192,15 +192,15 @@ def register_module_backward_pre_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time before the gradients with respect
-    to module inputs are computed. The hook should have the following signature::
+    The hook will be called every time the gradients for the module are computed.
+    The hook should have the following signature::
 
         hook(module, grad_output) -> Tensor or None
 
     The :attr:`grad_output` is a tuple. The hook should
     not modify its arguments, but it can optionally return a new gradient with
     respect to the output that will be used in place of :attr:`grad_output` in
-    subsequent computations. Entry in :attr:`grad_output` will be ``None`` for
+    subsequent computations. Entries in :attr:`grad_output` will be ``None`` for
     all non-Tensor arguments.
 
     For technical reasons, when this hook is applied to a Module, its forward function will
@@ -1027,20 +1027,20 @@ class Module:
 
         return self._apply(convert)
 
-    def register_backward_pre_hook(
+    def register_full_backward_pre_hook(
         self, hook: Callable[['Module', _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
-        r"""Registers a backward pre hook on the module.
+        r"""Registers a backward pre-hook on the module.
 
-        The hook will be called every time before the gradients with respect
-        to module inputs are computed. The hook should have the following signature::
+        The hook will be called every time the gradients for the module are computed.
+        The hook should have the following signature::
 
             hook(module, grad_output) -> Tensor or None
 
         The :attr:`grad_output` is a tuple. The hook should
         not modify its arguments, but it can optionally return a new gradient with
         respect to the output that will be used in place of :attr:`grad_output` in
-        subsequent computations. Entry in :attr:`grad_output` will be ``None`` for
+        subsequent computations. Entries in :attr:`grad_output` will be ``None`` for
         all non-Tensor arguments.
 
         For technical reasons, when this hook is applied to a Module, its forward function will

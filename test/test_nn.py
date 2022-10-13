@@ -275,7 +275,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
-        bw_hook_fn = bw_pre_hook if backward_register_fn == 'register_backward_pre_hook' else bw_hook
+        bw_hook_fn = bw_pre_hook if backward_register_fn == 'register_full_backward_pre_hook' else bw_hook
         test_bwd = getattr(module, backward_register_fn)(
             lambda *args: bw_hook_fn(1, *args))
 
@@ -322,7 +322,7 @@ class TestNN(NNTestCase):
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
-        self._test_hooks("register_backward_pre_hook")
+        self._test_hooks("register_full_backward_pre_hook")
 
     def test_hook_cpp(self):
         bn = nn.BatchNorm1d(5)
@@ -336,6 +336,7 @@ class TestNN(NNTestCase):
         output = bn(torch.randn(5, 5, requires_grad=True))
         output.sum().backward()
 
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_backward_pre_and_full(self):
         # Test to make sure that the grad_outputs
         # updated by backward_pre_hook are received by
@@ -353,7 +354,7 @@ class TestNN(NNTestCase):
             cnt['backward_cnt'] += 1
             return grad_output
 
-        module.register_backward_pre_hook(bw_pre_hook)
+        module.register_full_backward_pre_hook(bw_pre_hook)
         module.register_full_backward_hook(bw_hook)
 
         t = torch.ones(1, 2, requires_grad=True)
@@ -384,11 +385,11 @@ class TestNN(NNTestCase):
         def bw_pre_fail2(self, grad_output):
             return grad_output + (torch.randn(2, 2),)
 
-        with module.register_backward_pre_hook(bw_pre_fail1):
+        with module.register_full_backward_pre_hook(bw_pre_fail1):
             with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
                 module(input).sum().backward()
 
-        with module.register_backward_pre_hook(bw_pre_fail2):
+        with module.register_full_backward_pre_hook(bw_pre_fail2):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
@@ -500,7 +501,7 @@ class TestNN(NNTestCase):
         inp = torch.rand(10, requires_grad=True)
         mod = MyModule()
         for hook_fn, register_fn in [(hook, mod.register_full_backward_hook),
-                                     (hook_pre, mod.register_backward_pre_hook)]:
+                                     (hook_pre, mod.register_full_backward_pre_hook)]:
             hook_called[0] = 0
             with register_fn(hook_fn):
                 # No inplace should work
