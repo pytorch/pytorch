@@ -23,7 +23,7 @@ feature. A section at the end discusses the extensions for forward mode AD.
 When to use
 ^^^^^^^^^^^
 In general, implement a custom function if you want to perform computations in your model
-that are not differentiable or rely on non-PyTorch libraries (e.g., NumPy), but
+that are not differentiable or rely on non-Pytorch libraries (e.g., NumPy), but
 still wish for your operation to chain with other ops and work with the autograd engine.
 
 In some situations, custom functions can also be used to improve performance and
