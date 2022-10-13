@@ -3,8 +3,8 @@
 import copy
 import functools
 import io
-from typing import Callable
 import warnings
+from typing import Callable
 
 import onnx
 import parameterized
@@ -19,8 +19,7 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
-from torch.onnx import OperatorExportTypes, TrainingMode, utils
-from torch.onnx import _constants
+from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
