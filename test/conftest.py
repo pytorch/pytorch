@@ -148,6 +148,7 @@ class LogXMLReruns(LogXML):
 
 
 # imitating summary_failures in pytest's terminal.py
+# both hookwrapper and tryfirst to make sure this runs before pytest's
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     # prints stack traces for reruns
