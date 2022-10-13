@@ -226,31 +226,19 @@ ALLOWLIST_OP = (
     "t",
 )
 
+# fmt: off
+# Turn off black formatting to keep the list compact
+
 # Expected failures for onnx export. If an op is expected to fail only for certain
 # ONNX opsets, add the op to EXPECTED_OPSET_FAILS below.
-
+# The list should be sorted alphabetically by op name.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    xfail(
-        "ceil",
-        dtypes=[torch.float64],
-        reason="Ceil not implemented for f64 in onnx runtime",
-    ),
-    skip(
-        "ceil",
-        dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
-        reason="not supported by onnx",
-    ),
-    skip(
-        "sqrt",
-        dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES,
-        reason="not supported by onnx",
-    ),
-    xfail(
-        "t",
-        dtypes=COMPLEX_TYPES,
-        reason="jit tracer error for complex types",
-    ),
+    skip("ceil", dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    skip("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    xfail("t", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    skip("t", dtypes=[torch.float16], reason="flaky tests in CI"),
 )
+# fmt: on
 
 # Expected opset specific fails for ops that do not support specific opsets
 
