@@ -19,47 +19,16 @@ using namespace at;
 namespace torch {
 namespace utils {
 
-static const char* backend_to_string(const at::Backend& backend) {
-  switch (backend) {
-    case at::Backend::CPU:
-      return "torch";
-    case at::Backend::CUDA:
-      return "torch.cuda";
-    case at::Backend::XPU:
-      return "torch.xpu";
-    case at::Backend::IPU:
-      return "torch.ipu";
-    case at::Backend::SparseCPU:
-      return "torch.sparse";
-    case at::Backend::SparseCUDA:
-      return "torch.cuda.sparse";
-    case at::Backend::SparseXPU:
-      return "torch.xpu.sparse";
-    case at::Backend::QuantizedCPU:
-      return "torch.quantized";
-    case at::Backend::HPU:
-      return "torch.hpu";
-    case at::Backend::MPS:
-      return "torch.mps";
-    case at::Backend::PrivateUse1:
-      return "torch.privateuseone";
-    case at::Backend::Lazy:
-      return "torch.lazy";
-    default:
-      AT_ERROR("Unimplemented backend ", backend);
-  }
-}
-
 std::string options_to_string(const at::TensorOptions options) {
   std::ostringstream ss;
-  ss << backend_to_string(options.backend()) << "."
+  ss << c10::toString(options.backend()) << "."
      << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";
   return ss.str();
 }
 
 std::string type_to_string(const at::DeprecatedTypeProperties& type) {
   std::ostringstream ss;
-  ss << backend_to_string(type.backend()) << "." << toString(type.scalarType())
+  ss << c10::toString(type.backend()) << "." << toString(type.scalarType())
      << "Tensor";
   return ss.str();
 }
