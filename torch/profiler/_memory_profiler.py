@@ -1,6 +1,6 @@
 import dataclasses
 import sys
-from typing import Iterator, List, Optional, Tuple, Union
+from typing import Any, Iterator, List, Optional, Tuple, Union
 
 import torch
 from torch._C import FunctionSchema
@@ -151,7 +151,7 @@ class SchemaMatcher:
         if isinstance(schema_type, torch._C.AnyType):
             return True
 
-        type_map = (
+        type_map: Tuple[Tuple[Any, Union[type, Tuple[type, ...]]], ...] = (
             (torch._C.TensorType, TensorKey),
             (torch._C.NoneType, type(None)),
             (torch._C.BoolType, bool),
@@ -161,7 +161,6 @@ class SchemaMatcher:
             (torch._C.NumberType, (bool, int, float, complex)),
         )
 
-        py_types: Union[type, Tuple[type, ...]]
         for jit_type, py_types in type_map:
             if isinstance(schema_type, jit_type):
                 return isinstance(observed, py_types)
