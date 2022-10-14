@@ -103,7 +103,6 @@ class Adapter final {
   std::mutex queue_usage_mutex_;
   // Physical Device Info
   PhysicalDevice physical_device_;
-  std::string gpu_name_;
   // Queue Management
   std::vector<Queue> queues_;
   std::vector<uint32_t> queue_usage_;
@@ -125,10 +124,6 @@ class Adapter final {
 
   inline VkPhysicalDevice physical_handle() const {
     return physical_device_.handle;
-  }
-
-  inline std::string gpu_name() const {
-    return gpu_name_;
   }
 
   inline VkDevice device_handle() const {
