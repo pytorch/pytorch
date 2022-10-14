@@ -41,10 +41,9 @@ class XNNPackBackend : public PyTorchBackendInterface {
   c10::impl::GenericList execute(
       c10::IValue handle,
       c10::impl::GenericList inputs) override {
-    c10::List<at::Tensor> output_list;
     auto answer = handle.toGenericDict().at("Answer");
-    output_list.emplace_back(answer.toTensor());
-    return c10::impl::toList(output_list);
+
+    return answer.toList();
   }
 };
 

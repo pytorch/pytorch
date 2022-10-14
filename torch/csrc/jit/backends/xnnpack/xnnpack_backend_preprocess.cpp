@@ -87,8 +87,25 @@ c10::IValue preprocess(
   // inp above has been confirmed to be either Tensor or TensorList
   XNNGraph graph_builder;
   graph_builder.buildXNNGraph(graph, example_inputs);
+  // at this point graph is complete, for the sake of testing preprocess at this
+  // point we will do runtime setup and run with some default values
 
-  compiled.insert("Answer", at::empty({1}, c10::ScalarType::Float));
+  // grabbing the inputs from compile spec for testing
+
+  std::vector<at::Tensor> inputs;
+  auto input_list = inp.toList();
+
+  for (int i = 0; i < input_list.size(); i++) {
+    inputs.push_back(input_list.get(i).toTensor());
+  }
+  std::vector<at::Tensor> outputs;
+  outputs.push_back(out.toList().get(0).toTensor());
+
+  graph_builder.runGraphOnInputs(inputs, outputs);
+
+  c10::List<at::Tensor> output_list(outputs);
+
+  compiled.insert("Answer", output_list);
 
   return compiled;
 }
