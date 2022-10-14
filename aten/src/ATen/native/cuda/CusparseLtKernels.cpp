@@ -88,7 +88,7 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   auto k = weight.size(2);
   auto n = activation.size(1); // this is assuming num_batches > 1
   auto num_batches = activation.size(0);
-  int64_t batch_strideA = 0;
+  int64_t batch_strideA = 0; // this allows broadcasting of A (weight) tensor
   int64_t batch_strideB = k * n;
   int64_t batch_strideC = m * n;
   // TODO: make these user inputs
