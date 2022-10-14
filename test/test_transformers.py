@@ -17,7 +17,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     freeze_rng_state,
     TEST_WITH_CROSSREF,
-    TEST_WITH_ROCM
+    TEST_WITH_ROCM,
+    IS_WINDOWS
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 
@@ -871,7 +872,7 @@ class TestTransformers(NNTestCase):
         _test_fastpath(model, aligned_mask, nested_tensor_return_value, nested_tensors=True)
         _test_fastpath(model, not_aligned_mask, nested_tensor_return_value, nested_tensors=True)
 
-    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
@@ -916,7 +917,7 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
 
-    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, type: str, is_contiguous: bool):
@@ -953,7 +954,7 @@ class TestTransformers(NNTestCase):
                 query.contiguous(), key.contiguous(), value.contiguous(),
                 attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
 
-        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
+        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=2e-3, rtol=1e-2)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sdp_runtime_dispatch(self):
