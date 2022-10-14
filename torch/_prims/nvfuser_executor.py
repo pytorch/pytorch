@@ -268,6 +268,28 @@ class NvfuserGraphModule(torch.nn.Module):
         )
 
 
+# A set of operators that are supported by nvFuser
+# but should not form a fusion group solely on their own
+# _non_compute_ops = {
+#     "torch.ops.nvprims.transpose.default",
+#     "torch.ops.nvprims.view_of.default",
+#     "torch.ops.nvprims.broadcast_in_dim.default",
+#     "torch.ops.nvprims.squeeze.default",
+# }
+_non_compute_ops = [
+    "torch.ops." + str(getattr(torch.ops.nvprims, prim).default)
+    for prim in dir(torch.ops.nvprims)
+    if isinstance(getattr(torch.ops.nvprims, prim), torch._ops.OpOverloadPacket)
+    and getattr(torch.ops.nvprims, prim).return_type
+    == torch._prims_common.RETURN_TYPE.VIEW
+]
+
+_allowed_single_node_partition_ops = [
+    "torch.ops.nvprims.native_batch_norm.default",
+    "torch.ops.nvprims.var_mean.default",
+    "torch.ops.nvprims.var_mean.main",
+]
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def maybe_partition_graph(
@@ -297,7 +319,11 @@ def maybe_partition_graph(
         # CapabilityBasedPartitioner modifies the graph in-place so we need to make a copy of the graph
         gm = deepcopy(gm)
         partitioner = CapabilityBasedPartitioner(
-            gm, supported_ops, allows_single_node_partition=allow_single_op_fusion
+            gm,
+            supported_ops,
+            allows_single_node_partition=allow_single_op_fusion,
+            non_compute_ops=_non_compute_ops,
+            allowed_single_node_partition_ops=_allowed_single_node_partition_ops,
         )
         partitions = partitioner.propose_partitions()
         if len(partitions) == 0:
