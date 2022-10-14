@@ -1018,7 +1018,7 @@ def get_selected_tests(options):
         )
 
     if options.functorch:
-        selected_tests = selected_tests = list(
+        selected_tests = list(
             filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
         )
     else:
