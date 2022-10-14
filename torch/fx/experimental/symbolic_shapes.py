@@ -2,6 +2,7 @@ import torch
 import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast, Union
 import operator
+import builtins
 import math
 import functools
 from functools import lru_cache, partial
@@ -231,8 +232,7 @@ def _make_magic(method, func, py_type):
 
     def magic_impl(self, other):
         if method in ["min", "max"]:
-            # op = getattr(builtins, method)
-            return self
+            op = getattr(builtins, method)
         else:
             op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
@@ -256,7 +256,6 @@ def _make_magic(method, func, py_type):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            # TODO: Should this if/else be moved outside of SYM_FUNCTION_MODE ?
             if method in ["ceil", "floor"]:
                 op = getattr(math, method)
             else:
