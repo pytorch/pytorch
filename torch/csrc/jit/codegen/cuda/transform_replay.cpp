@@ -489,7 +489,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
         it != replay_CasP.getReplay().end(),
         "Could not find axis, ",
         p_id,
-        ", requested in replay.");
+        ", requested in replaying consumer ",
+        consumer,
+        " as producer ",
+        producer);
     TORCH_INTERNAL_ASSERT(
         leaf_ids.find(it->second) != leaf_ids.end(),
         "Replayed id to match producer id ",

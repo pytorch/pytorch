@@ -72,9 +72,11 @@ void ReplayTransformations::handle(Merge* m) {
   auto it_inner = id_map_.find(id_inner);
 
   const bool outer_found = it_outer != id_map_.end();
-  const bool outer_bcast = id_outer->isBroadcast();
+  const bool outer_bcast =
+      id_outer->isBroadcast() || id_outer->isTrivialReduction();
   const bool inner_found = it_inner != id_map_.end();
-  const bool inner_bcast = id_inner->isBroadcast();
+  const bool inner_bcast =
+      id_inner->isBroadcast() || id_outer->isTrivialReduction();
 
   // If either are not found
   if (!outer_found || !inner_found) {
