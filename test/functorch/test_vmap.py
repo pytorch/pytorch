@@ -3236,7 +3236,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),  # randomness
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         xfail('as_strided'),  # Our test runner can't handle this; manual test exists
-        xfail('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
+        skip('new_empty_strided'),  # empty tensor data is garbage so it's hard to make comparisons with it
         xfail('nn.functional.fractional_max_pool3d'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # randomness
         xfail('pca_lowrank', ''),  # random operation
@@ -3560,6 +3560,15 @@ class TestVmapOperatorsOpInfo(TestCase):
         for op in opinfos:
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
                                   postprocess_fn=compute_A)
+
+    def test_slogdet(self, device):
+        # There's no OpInfo for this
+        def test():
+            B = 2
+            x = torch.randn(2, 5, 5, device=device)
+            self.vmap_outplace_test(torch.slogdet, (x,), {}, (0,))
+
+        check_vmap_fallback(self, test, torch.slogdet)
 
     def test_fill__Tensor(self, device):
         # There's no OpInfo for fill_.Tensor, so here's an extra test for it.
