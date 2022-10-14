@@ -2189,7 +2189,16 @@ class FullyShardedDataParallel(nn.Module):
     @property
     def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
         for param_name, module_name in (
-            self._fsdp_wrapped_module.handle.parameter_module_names()
+            self._handles[0].parameter_module_names()
+        ):
+            module_name = self._convert_to_wrapped_module_name(module_name)
+            fqn = f"{module_name}{param_name}"
+            yield fqn, param_name, module_name
+
+    @property
+    def _shared_param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        for param_name, module_name in (
+            self._handles[0].shared_parameter_module_names()
         ):
             module_name = self._convert_to_wrapped_module_name(module_name)
             fqn = f"{module_name}{param_name}"
@@ -2593,11 +2602,12 @@ class FullyShardedDataParallel(nn.Module):
         # gather all the parameters in this layer. This can be achieved by
         # concatenated all the local shards and then append the padding.
         # https://github.com/pytorch/pytorch/issues/77461
-        for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{module_name}{param_name}"
-            param = state_dict.pop(fqn)
-
+        shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
+        for fqn, _, _ in self._param_fqns:
+            full_fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{fqn}"
+            param = state_dict.pop(full_fqn)
+            if fqn in shared_fqns:
+                continue
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
             assert len(shards) < 2, (
@@ -2634,7 +2644,7 @@ class FullyShardedDataParallel(nn.Module):
         )
         loaded_flat_param.to(flat_param.device)
         assert flat_param.numel() == loaded_flat_param.numel(), (
-            f"The loaded local chunk has different numel({flat_param.numel()}) "
+            f"The loaded local chunk has different numel({loaded_flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."
         )
         assert flat_param._shard_numel_padded == num_to_pad, (

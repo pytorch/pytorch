@@ -81,8 +81,5 @@ else:
     #   python test/test_public_bindings.py -k test_correct_module_names
     # working even when USE_DISTRIBUTED=0.  Feel free to add more
     # stubs as necessary.
-    # We cannot define stubs directly because they confuse pyre
-
-    class _ProcessGroupStub:
+    class ProcessGroup:  # type: ignore[no-redef]
         pass
-    sys.modules["torch.distributed"].ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]

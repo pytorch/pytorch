@@ -1,9 +1,11 @@
+#include <sstream>
+
+#include <nvToolsExt.h>
+
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
-#include <nvToolsExt.h>
-#include <torch/csrc/autograd/profiler.h>
-
-#include <sstream>
+#include <torch/csrc/profiler/stubs/base.h>
+#include <torch/csrc/profiler/util.h>
 
 namespace torch {
 namespace profiler {
