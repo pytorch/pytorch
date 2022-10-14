@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/onnx/diagnostics/diagnostics.h>
 
 #include <ATen/ScalarOps.h>
 
@@ -29,6 +30,8 @@ namespace jit {
 namespace onnx {
 using namespace ::c10::onnx;
 }
+
+namespace diagnostics = ::torch::onnx::diagnostics;
 
 bool isRNN(const Node* node) {
   auto k = node->kind();
@@ -483,6 +486,11 @@ void fixDefaultRNNState(
   batch_size->insertBefore(n);
   batch_size->addInput(shape_of_input->outputs()[0]);
   batch_size->addInput(gather_indices->outputs()[0]);
+
+  diagnostics::Diagnose(
+      diagnostics::Rule::kRnnNoInitialStatesVariableBatchSize,
+      diagnostics::Level::kWarning,
+      {n->kind().toDisplayString()});
 
   Node* unsqueezed_batch_size =
       createONNXUnsqueeze(graph, n, batch_size->outputs()[0], 0, opset_version);

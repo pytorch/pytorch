@@ -34,6 +34,12 @@ enum class Rule : uint32_t {
    * @brief Operator is supported in newer opset version.
    */
   kOperatorSupportedInNewerOpsetVersion,
+
+  /**
+   * @brief RNN operation has no initial states input and variable batch size.
+   * Export with batch size set to 1.
+   */
+  kRnnNoInitialStatesVariableBatchSize,
 };
 
 static constexpr const char* const kPyRuleNames[] = {
@@ -41,6 +47,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "missing_custom_symbolic_function",
     "missing_standard_symbolic_function",
     "operator_supported_in_newer_opset_version",
+    "rnn_no_initial_states_variable_batch_size",
 };
 
 } // namespace diagnostics

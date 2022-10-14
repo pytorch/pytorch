@@ -112,5 +112,30 @@ class _POERules(infra.RuleCollection):
     )
     """Operator is supported in newer opset version."""
 
+    rnn_no_initial_states_variable_batch_size: infra.Rule = dataclasses.field(
+        default=infra.Rule.from_sarif(
+            **{
+                "id": "POE0005",
+                "name": "rnn-no-initial-states-variable-batch-size",
+                "short_description": {
+                    "text": "RNN operation has no initial states input and variable batch size. Export with batch size set to 1."
+                },
+                "full_description": {
+                    "text": "",
+                    "markdown": "The RNN code in pytorch accepts an optional hidden state. When it is not provided,\nit is default-initialized by constructing a new Variable, which gets traced as a\nConstantOfShape with the expected Shape. When initial_states, h0 and c0 are\nspecified but are not inputs of the model (they are Constants) and the batch size\nis variable, the model should be saved with a batch size of 1 (or an error will\noccur), and we save the value of h0 and c0 with a batch size of 1. When the model\nis then called with a different batch size value, h0 and c0 are broadcasted to\nget the right shape.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "Exporting the operator '{0}' to ONNX opset version {1} is not supported when batch size is variable. Export with batch size set to 1"
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """RNN operation has no initial states input and variable batch size. Export with batch size set to 1."""
+
 
 rules = _POERules()
