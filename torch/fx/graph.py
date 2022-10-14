@@ -475,7 +475,7 @@ class CodeGen(object):
                     body.append('\n# No stacktrace found for following nodes\n')
 
         def stringify_shape(shape : torch.Size) -> str:
-            return f"[{','.join(str(x) for x in shape)}]"
+            return f"[{', '.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
