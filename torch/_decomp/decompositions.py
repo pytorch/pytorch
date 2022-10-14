@@ -966,6 +966,7 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 
 
 @register_decomposition(aten._softmax)
+@out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
@@ -985,6 +986,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten._log_softmax)
+@out_wrapper()
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
@@ -1006,6 +1008,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
 @register_decomposition(aten.addcmul)
+@out_wrapper()
 @pw_cast_for_opmath
 def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
     if self.is_floating_point() or self.is_complex():
@@ -1110,6 +1113,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
 
 # TODO: this doesn't appear to have enough precision in bfloat16
 @register_decomposition(aten.addmm)
+@out_wrapper()
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
@@ -1795,7 +1799,8 @@ def index_add_(
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         utils.check(
-            utils.is_weakly_lesser_type(type(alpha), python_type),
+            python_type == bool
+            or utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
@@ -2186,6 +2191,7 @@ def grid_sampler_2d(
 
 
 @register_decomposition(aten.mv)
+@out_wrapper()
 @pw_cast_for_opmath
 def mv(self, vec):
     utils.check(
@@ -2200,6 +2206,7 @@ def mv(self, vec):
 
 
 @register_decomposition(aten.dot, disable_meta=True)
+@out_wrapper()
 @pw_cast_for_opmath
 def dot(self, other):
     if self.is_complex():
