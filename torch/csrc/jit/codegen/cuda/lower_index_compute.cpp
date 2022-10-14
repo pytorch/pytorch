@@ -424,129 +424,25 @@ IndexingParameters getPredicateInitialIndexParameters(
 
 } // namespace
 
-class LoopIndexingAnalysis {
- public:
-  static LoopIndexing fromLoopAndConsumer(
-      const std::vector<kir::ForLoop*>& loops,
-      const TensorView* consumer_tv) {
-    LoopIndexingAnalysis analysis(loops, consumer_tv);
-    return analysis.getLoopIndexing();
-  }
+LoopIndexing LoopIndexingAnalysis::fromLoopAndConsumer(
+    const std::vector<kir::ForLoop*>& loops,
+    const TensorView* consumer_tv) {
+  LoopIndexingAnalysis analysis(loops, consumer_tv);
+  return analysis.getLoopIndexing(loops);
+}
 
- private:
-  explicit LoopIndexingAnalysis(
-      const std::vector<kir::ForLoop*>& loops,
-      const TensorView* consumer_tv);
-
-  //! Populate derived information into a LoopIndexing
-  //!  data structure.
-  LoopIndexing getLoopIndexing() {
-    LoopIndexing indexing;
-    indexing.loops_ = loops_;
-    indexing.consumer_tv_ = consumer_tv_;
-    indexing.loop_root_ = loop_root_domains_;
-    indexing.loop_domains_ = loop_domains_.vector();
-    indexing.index_exprs_ = replayed_exprs_;
-    indexing.out_of_line_exprs_ = out_of_line_exprs_;
-    return indexing;
-  }
-
-  //! Validates that the current loop structure is well formed, in the sense
-  //! that ca_map would not map any two loops in the loop nest together.
-  void validateLoopStructure(const std::vector<kir::ForLoop*>& loops);
-
-  //! Start at the loop iter domains, and traverse back into history on the
-  //! concrete IDs in the exact map calling "visitExpr" expressions through the
-  //! history.
-  void traverseFromDomainVals();
-
-  //! Concretize the given iterdomain and record the visit (in deterministic
-  //! order) in terms of the exact mapped concrete id. Marks the mapping of the
-  //! id to the concrete id in "concrete_to_original_id_" and returns the
-  //! concrete id.
-  IterDomain* concretizeAndVisitId(IterDomain* id);
-
-  //! If an equivalent expression has already been processed this function
-  //! simply returns. Otherwise puts the exact concrete IDs of inputs in
-  //! consumed_concrete_, and concrete IDs of outputs in produced_concrete_.
-  //! Then adds the expression to replayed_exprs_.
-  void visitExpr(Expr* expr);
-
-  //! Iterates through provided vals, calls concretizeAndVisitId on them, and
-  //! returns if any of the returned vals are in existing_ids. This is used to
-  //! check if inputs or outputs of ID expressions have already been
-  //! produced/consumed in the traversal. Indexing only needs to consume/produce
-  //! one IterDomain per exact disjoint set.
-  bool visitIdsAndCheckDuplication(
-      const std::vector<Val*>& vals,
-      const std::unordered_set<IterDomain*>& existing_ids);
-
-  //! Fills loop_domains_ with the corresponding replayed_concrete_id mapping to
-  //! the provided loops. Must be done after the exact iterdomain "replay"
-  //! (traverseFromDomainVals). loop_domains_ are the original_id not the
-  //! concrete_id (translated with concrete_to_original_id). These iter domains
-  //! are used to grab the history that will be replayed in IndexCompute. We're
-  //! looking for "new" root domains and subsequent transformations, filling in
-  //! any missing "outputs" (or inputs for backward traversal). Then fills
-  //! loop_domains_ with all of these iter domains.
-  void constructLoopDomains();
-
-  //! Fills out_of_line_exprs_ by traversing the selected list of
-  //!  expressions in reverse topological order and collect iterdomains
-  //!  on the indexing paths that only involves leaf id's on the right
-  //!  of consumer's ca axis.
-  void collectOutOfLineExprs();
-
- private:
-  //! Original loop nest input to derive info from.
-  const std::vector<kir::ForLoop*>& loops_;
-
-  //! Original consumer tv to derive view info from.
-  const TensorView* consumer_tv_ = nullptr;
-
-  // Exact concrete domains that has been used
-  //  in the traversal connection.
-  std::unordered_set<IterDomain*> produced_concrete_;
-  std::unordered_set<IterDomain*> consumed_concrete_;
-
-  //! Iterdomains that the corresponding loops are generated from.
-  std::vector<IterDomain*> initial_loop_domain_ids_;
-
-  //! All Id's in consumer's transform history
-  std::vector<Val*> all_consumer_id_vals_;
-
-  //! Concrete iterdomains visited in the domain traversal,
-  //!  in the order they are visited in traverseFromDomainVals.
-  VectorOfUniqueEntries<IterDomain*> replayed_concrete_ids_;
-
-  //! Keeping track of the original visited id's before they
-  //!  were concretized.
-  std::unordered_map<IterDomain*, IterDomain*> concrete_to_original_id_;
-
-  //! Map from concrete id to its single consumer on the selected
-  //!  iterdomain expression list.
-  std::unordered_map<IterDomain*, Expr*> concrete_id_to_consumer_;
-
-  //! Source domains that all the Iterdomain transforms
-  //!  in the loop nest originated from.
-  std::vector<IterDomain*> loop_root_domains_;
-
-  //! Leaf domains representing the original loop structure
-  VectorOfUniqueEntries<IterDomain*> loop_domains_;
-
-  //! Selected list of exprs that will produce and consume each
-  //!  of the exact concrete ids from the loop nest exactly once.
-  std::vector<Expr*> replayed_exprs_;
-
-  //! Set of expressions from the selected list that can be
-  //!  resolved from axes on the right of ca axes.
-  std::vector<Expr*> out_of_line_exprs_;
-};
+VectorOfUniqueEntries<IterDomain*> LoopIndexingAnalysis::
+    getReplayableConcreteIDs(
+        const std::vector<IterDomain*>& consumer_leaf_ids,
+        const TensorView* consumer_tv) {
+  LoopIndexingAnalysis analysis(consumer_leaf_ids, consumer_tv);
+  return analysis.replayed_concrete_ids_;
+}
 
 LoopIndexingAnalysis::LoopIndexingAnalysis(
     const std::vector<kir::ForLoop*>& loops,
     const TensorView* consumer_tv)
-    : loops_(loops), consumer_tv_(consumer_tv) {
+    : consumer_tv_(consumer_tv) {
   // Validate consistency in given loop nest
   validateLoopStructure(loops);
 
@@ -557,12 +453,43 @@ LoopIndexingAnalysis::LoopIndexingAnalysis(
       std::back_inserter(initial_loop_domain_ids_),
       [](kir::ForLoop* fl) { return fl->iter_domain(); });
 
+  run();
+}
+
+LoopIndexingAnalysis::LoopIndexingAnalysis(
+    const std::vector<IterDomain*>& consumer_leaf_ids,
+    const TensorView* consumer_tv)
+    : consumer_tv_(consumer_tv) {
+  // Populate initial loop iter domains.
+  std::transform(
+      consumer_leaf_ids.begin(),
+      consumer_leaf_ids.end(),
+      std::back_inserter(initial_loop_domain_ids_),
+      [&](IterDomain* consumer_leaf_id) {
+        // Make sure consumer_leaf_id is indeed a consumer leaf ID
+        TORCH_INTERNAL_ASSERT(
+            std::find(
+                consumer_tv->domain()->domain().begin(),
+                consumer_tv->domain()->domain().end(),
+                consumer_leaf_id) != consumer_tv->domain()->domain().end(),
+            "Not a consumer leaf ID: ",
+            consumer_leaf_id->toString(),
+            ", consumer: ",
+            consumer_tv->toString());
+        return GpuLower::current()->caMap()->getConcreteMappedID(
+            consumer_leaf_id, IdMappingMode::LOOP);
+      });
+
+  run();
+}
+
+void LoopIndexingAnalysis::run() {
   // Collect consumer id's for view rfactor traversal.
   all_consumer_id_vals_ = DependencyCheck::getAllValsBetween(
-      {consumer_tv->getRootDomain().begin(),
-       consumer_tv->getRootDomain().end()},
-      {consumer_tv->domain()->domain().begin(),
-       consumer_tv->domain()->domain().end()});
+      {consumer_tv_->getRootDomain().begin(),
+       consumer_tv_->getRootDomain().end()},
+      {consumer_tv_->domain()->domain().begin(),
+       consumer_tv_->domain()->domain().end()});
 
   // Resolve definition of each exact concrete id's involved in the whole loop
   // nest transform history

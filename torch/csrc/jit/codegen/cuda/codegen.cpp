@@ -500,7 +500,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const kir::TensorIndex* ti) final {
     bool is_volatile = ti->view()->getMemoryType() == MemoryType::Global &&
-        kernel_->summary().sync_map.needsRawSync(ti->view()).hasBID();
+        kernel_->summary().sync_map->needsRawSync(ti->view()).hasBID();
     if (is_volatile) {
       code_ << "*(volatile " << ti->getDataType().value() << "*)&";
     }
@@ -688,11 +688,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
               in_tv->getMemoryType() == MemoryType::Global;
 
           bool is_volatile_to = out_tv->getMemoryType() == MemoryType::Global &&
-              kernel_->summary().sync_map.needsRawSync(out_tv).hasBID();
+              kernel_->summary().sync_map->needsRawSync(out_tv).hasBID();
 
           bool is_volatile_from =
               in_tv->getMemoryType() == MemoryType::Global &&
-              kernel_->summary().sync_map.needsRawSync(in_tv).hasBID();
+              kernel_->summary().sync_map->needsRawSync(in_tv).hasBID();
 
           if (localToGlobal) {
             indent() << "loadLocalToGlobal<" << uop->out()->dtype() << ", "

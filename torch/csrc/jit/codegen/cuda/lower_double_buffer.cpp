@@ -452,7 +452,7 @@ class DoubleBufferInserter : private kir::ExprMutator {
       if (std::any_of(loads.begin(), loads.end(), [](Expr* expr) {
             return GpuLower::current()
                 ->syncMap()
-                .needsRawSync(ir_utils::getTvOutput(expr))
+                ->needsRawSync(ir_utils::getTvOutput(expr))
                 .hasTID();
           })) {
         // If any of the double buffered loads require sync, as indicated

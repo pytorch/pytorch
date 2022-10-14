@@ -107,10 +107,6 @@ const TensorView* getTv(const Val*);
 //! Get only TensorView potentially via kir::TensorIndex.
 std::vector<TensorView*> getTvs(const std::vector<Val*>& vals);
 
-//! Return true if axis is derived from a root axis that is an input
-//! to a CA leaf axis.
-bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
-
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
     const Val* val);
 

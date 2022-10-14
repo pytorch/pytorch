@@ -161,7 +161,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return fused_reduction_info_;
   }
 
-  const SyncMap& syncMap() const {
+  std::shared_ptr<const SyncMap> syncMap() const {
     return sync_map_;
   }
 
@@ -214,7 +214,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   DoubleBufferInfo double_buffer_info_;
   CommonIndexMap common_index_map_;
   FusedReductionInfo fused_reduction_info_;
-  SyncMap sync_map_;
+  std::shared_ptr<const SyncMap> sync_map_;
   kir::KernelPerformanceProfile profile_;
   std::unordered_set<Split*> divisible_splits_;
 

@@ -5074,6 +5074,202 @@ TEST_F(NVFuserTest, FusionValidateParallelize7_CUDA) {
       "Grid sync not found");
 }
 
+// From issue #1880
+TEST_F(NVFuserTest, FusionValidateParallelize8_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  auto tv2 = set(tv1);
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = add(tv3, tv0);
+  fusion.addOutput(tv4);
+
+  tv3->split(0, 32);
+  tv3->reorder({{1, -1}});
+  tv3->split(1, 32);
+  tv3->reorder({{2, -1}});
+  tv3->merge(2);
+  tv3->split(2, 16);
+  tv3->axis(-2)->parallelize(ParallelType::TIDx);
+
+  MaxRootDomainInfoSpanningTree tree(tv3);
+  TransformPropagator tp(tv3);
+  tree.traverse(&tp);
+  scheduler_utils::parallelizeAllLike(tv3);
+
+  // Fully inline tv3, but inline tv2 only at position 1. This makes
+  // tv3 indices are resolved based on the whole tv4 IDs, but tv2 uses
+  // only the outer-most ID, resulting in different indeices and thus
+  // requiring tv2 to be placed on shared memory as they are
+  // parallelized with TIDx.
+  tv2->computeAt(tv4, 1);
+  tv3->computeAt(tv4, -1);
+
+  // Since tv2 is not on shared memory, the fusion should be flagged
+  // as invalid by the parallel validation
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(SyncMap sync_map_fail(&fusion));
+
+  // The fusion should work if tv2 is also fully inlined
+  tv2->computeAt(tv4, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input0 = at::arange(64, options).view({32, 2});
+  at::Tensor input1 = at::arange(32, options) * 0.01;
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input0, input1});
+  auto outputs = fe.runFusion({input0, input1});
+
+  auto tv_ref = input0 + input1.unsqueeze(1);
+
+  testValidate(
+      &fusion, outputs, {input0, input1}, {tv_ref}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionValidateParallelize9_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> t0_shape({10});
+  std::vector<int64_t> t1_shape({10, 5});
+
+  auto tv0 = makeConcreteTensor(t0_shape);
+  auto tv1 = makeConcreteTensor(t1_shape);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = broadcast(tv2, {false, true});
+  auto tv4 = add(tv3, IrBuilder::create<Double>(1));
+  fusion.addOutput(tv4);
+
+  tv4->merge(0)->split(0, 4);
+
+  MaxRootDomainInfoSpanningTree tree(tv4);
+  TransformPropagator tp(tv4);
+  tree.traverse(&tp);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // No CA. Although a broadcast is merged, it's never concretized and
+  // the merge is done with just a broadcast of extent 1, thus it can
+  // be ignored. While this fusion should be valid, the validation
+  // doesn't consider whether concretized or not, so the validation
+  // should result in a failure at this point. Note that even if it's
+  // not concretized, it may be split by some factor, which creates
+  // non-size-1 broadcast domains. If they are merged, it's not valid
+  // to ignore, so we need to check each of forwarded broadcast merges
+  // and make sure the forwarded broadcast domains have extent 1.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(SyncMap sync_map_fail(&fusion));
+}
+
+TEST_F(NVFuserTest, FusionValidateParallelize10_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int64_t s0 = 10;
+  const int64_t s1 = 5;
+
+  auto tv0 = makeConcreteTensor({s0});
+  auto tv1 = makeConcreteTensor({s0, s1});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv2);
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = add(tv4, tv1);
+  fusion.addOutput(tv5);
+
+  tv5->merge(0)->split(0, 4);
+
+  TransformPropagatorWithCheck propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
+
+  // tv2 has no CA
+  tv3->computeAt(tv5, 1);
+
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv5);
+
+  // Since tv2 has no CA, it's indexed differently from tv3.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(SyncMap sync_map_fail(&fusion));
+
+  // If tv2 is also computed at, all tensors should be indexed
+  // uniformly
+  tv2->computeAt(tv5, 1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s0}, options);
+  at::Tensor t1 = at::randn({s0, s1}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto tv_ref = t0.unsqueeze(-1) + t1;
+
+  testValidate(&fusion, outputs, aten_inputs, {tv_ref}, __LINE__, __FILE__);
+}
+
+// Similar to ValidateParallelize10, tv2 has a shared leaf axis
+TEST_F(NVFuserTest, FusionValidateParallelize11_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int64_t s0 = 10;
+  const int64_t s1 = 5;
+
+  auto tv0 = makeConcreteTensor({s0});
+  auto tv1 = makeConcreteTensor({s0, s1});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = set(tv2);
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = add(tv4, tv1);
+  fusion.addOutput(tv5);
+
+  tv5->merge(0)->split(0, 4)->split(0, 2);
+
+  TransformPropagatorWithCheck propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
+
+  tv2->computeAt(tv5, 1);
+
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv5);
+
+  // Although tv3->axis(1) is a consumer-only leaf ID permissively
+  // mapped with its consumer, tv3->axis(0) and tv2->axis(0) are
+  // shared, so all the tensors are indexed consistently. No sync is
+  // required.
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s0}, options);
+  at::Tensor t1 = at::randn({s0, s1}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  auto tv_ref = t0.unsqueeze(-1) + t1;
+
+  testValidate(&fusion, outputs, aten_inputs, {tv_ref}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionDAGMerging_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

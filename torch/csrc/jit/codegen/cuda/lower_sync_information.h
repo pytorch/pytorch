@@ -10,22 +10,21 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class SyncMap {
+class TORCH_CUDA_CU_API SyncMap {
  public:
-  std::string toString() const;
-
   //! Validates all tensors are consistently parallelized. Basically,
   //! when a producer axis is threaded, either with threadIdx or
   //! blockIdx, there must be a mapped consumer axis with the
   //! same ParallelType with some exceptions.
   //!
-  //! This function assumes Loop and Parallel ComputeAtMaps are already
-  //! built as they are used to validate consistency.
+  //! ComputeAtMap is already built as they are used to validate consistency.
   //!
   //! Fills needs_raw_sync with output TVs if they need a raw sync if on smem or
   //! gmem. The second entry in this map is the parallel dimensions being
   //! communicated across.
-  void build(Fusion* fusion);
+  SyncMap(Fusion* fusion);
+
+  std::string toString() const;
 
   ParallelTypeBitmap needsRawSync(TensorView* tv) const {
     auto it = needs_raw_sync_.find(tv);

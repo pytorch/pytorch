@@ -88,7 +88,7 @@ struct KernelSummary {
 
   // Sync map is needed to figure out if global memory buffers need to be marked
   // as volatile because they're used for communication.
-  SyncMap sync_map;
+  std::shared_ptr<const SyncMap> sync_map;
 
   // Parallel dimension map needed to set the correct properties of grid buffers
   // (is a dim inactive)

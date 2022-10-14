@@ -207,7 +207,7 @@ class WarSyncInserter : private kir::ExprMutator {
     auto out_tvs = ir_utils::filterByType<TensorView>(expr->outputs());
     for (auto out_tv : out_tvs) {
       if (out_tv->getMemoryType() != MemoryType::Shared ||
-          GpuLower::current()->syncMap().needsRawSync(out_tv).none()) {
+          GpuLower::current()->syncMap()->needsRawSync(out_tv).none()) {
         continue;
       }
 
@@ -225,7 +225,7 @@ class WarSyncInserter : private kir::ExprMutator {
     auto inp_tvs = ir_utils::filterByType<TensorView>(expr->inputs());
     for (auto inp_tv : inp_tvs) {
       if (inp_tv->getMemoryType() != MemoryType::Shared ||
-          GpuLower::current()->syncMap().needsRawSync(inp_tv).none()) {
+          GpuLower::current()->syncMap()->needsRawSync(inp_tv).none()) {
         continue;
       }
 
@@ -609,7 +609,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
     std::unordered_set<Expr*> last_writes;
     for (auto tv : ir_utils::filterByType<TensorView>(tvs)) {
       if (check_sync_map &&
-          GpuLower::current()->syncMap().needsRawSync(tv).none()) {
+          GpuLower::current()->syncMap()->needsRawSync(tv).none()) {
         continue;
       }
       if (tv->getMemoryType() != MemoryType::Shared) {
@@ -628,7 +628,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       const std::vector<Val*>& tvs) const {
     std::unordered_set<Expr*> last_writes;
     for (auto tv : ir_utils::filterByType<TensorView>(tvs)) {
-      if (GpuLower::current()->syncMap().needsRawSync(tv).none()) {
+      if (GpuLower::current()->syncMap()->needsRawSync(tv).none()) {
         continue;
       }
       auto it = gmem.find(tv);
@@ -664,7 +664,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
         ParallelTypeBitmap bitmap;
         for (auto entry : gmem) {
           TORCH_INTERNAL_ASSERT(entry.first->isA<TensorView>());
-          auto sync_bits = GpuLower::current()->syncMap().needsRawSync(
+          auto sync_bits = GpuLower::current()->syncMap()->needsRawSync(
               entry.first->as<TensorView>());
           bitmap |= sync_bits;
         }
@@ -710,7 +710,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
           //  require a RAW block sync.
           if (GpuLower::current()
                   ->syncMap()
-                  .needsRawSync(it.first->as<TensorView>())
+                  ->needsRawSync(it.first->as<TensorView>())
                   .hasTID()) {
             smem_writes.insert(it.second);
           }
