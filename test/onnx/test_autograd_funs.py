@@ -148,7 +148,7 @@ class TestAutogradFuns(unittest.TestCase):
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "prim::PythonOp")
+        self.assertEqual(next(iter).kind(), "aten::ATen")
 
     def test_inline_and_symbolic(self):
         class Exp(torch.autograd.Function):
