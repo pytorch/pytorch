@@ -8,7 +8,6 @@ from torch._C._onnx import (
     TensorProtoDataType,
     TrainingMode,
 )
-from torch.onnx._internal import registration as _registration
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
@@ -78,9 +77,6 @@ __all__ = [
     "unregister_custom_op_symbolic",
     "disable_log",
     "enable_log",
-    "is_onnx_log_enabled",
-    "log",
-    "set_log_stream",
     # Errors
     "CheckerError",  # Backwards compatibility
 ]
@@ -100,9 +96,10 @@ def _export(*args, **kwargs):
     return utils._export(*args, **kwargs)
 
 
-def is_onnx_log_enabled() -> bool:
-    r"""Returns True iff ONNX logging is turned on."""
-    return _C._jit_is_onnx_log_enabled()
+# TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.
+
+# Returns True iff ONNX logging is turned on.
+is_onnx_log_enabled = _C._jit_is_onnx_log_enabled
 
 
 def enable_log() -> None:
@@ -115,21 +112,19 @@ def disable_log() -> None:
     _C._jit_set_onnx_log_enabled(False)
 
 
-def set_log_stream(stream_name: str = "stdout") -> None:
-    r"""Sets output stream for ONNX logging.
+"""Sets output stream for ONNX logging.
 
-    Args:
-        stream_name (str, default "stdout"): Only 'stdout' and 'stderr' are supported
-            as ``stream_name``.
-    """
-    _C._jit_set_onnx_log_output_stream(stream_name)
+Args:
+    stream_name (str, default "stdout"): Only 'stdout' and 'stderr' are supported
+        as ``stream_name``.
+"""
+set_log_stream = _C._jit_set_onnx_log_output_stream
 
 
-def log(*args) -> None:
-    r"""A simple logging facility for ONNX exporter.
+"""A simple logging facility for ONNX exporter.
 
-    Args:
-        args: Arguments are converted to string, concatenated together with a newline
-            character appended to the end, and flushed to output stream.
-    """
-    _C._jit_onnx_log(*args)
+Args:
+    args: Arguments are converted to string, concatenated together with a newline
+        character appended to the end, and flushed to output stream.
+"""
+log = _C._jit_onnx_log

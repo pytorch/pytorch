@@ -50,6 +50,7 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -483,7 +484,36 @@ PyObject* THPModule_float32MatmulPrecision(
   }
   return THPUtils_packString(s);
 }
-
+PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFlash(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledFlashSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseMath(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledMathSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -731,30 +761,31 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   } else {
     node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
   }
-  if (exec_info->empty()) {
-    // .backward() without inputs= arg
-    const auto nodes_in_graph =
-        torch::autograd::get_current_graph_task_nodes_in_graph();
-    auto it = nodes_in_graph->find(node);
-    if (it == nodes_in_graph->end()) {
-      Py_RETURN_FALSE;
-    } else {
-      Py_RETURN_TRUE;
-    }
-  } else {
-    // .grad or .backward when inputs= is passed
+  const auto nodes_in_graph =
+      torch::autograd::get_current_graph_task_nodes_in_graph();
+  bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
+  if (ret && !exec_info->empty()) {
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
-      Py_RETURN_FALSE;
+      ret = false;
     } else {
-      THPUtils_assert(
+      TORCH_CHECK(
           !(node->topological_nr() == 0 && it->second.captures_),
           "A leaf node was passed to _will_engine_execute_node but we are "
           "currently running autograd.grad(). This is currently not supported.");
-      Py_RETURN_TRUE;
     }
   }
+  if (ret) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
 
+PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(torch::autograd::get_current_graph_task_id());
   END_HANDLE_TH_ERRORS
 }
 
@@ -864,6 +895,16 @@ static PyMethodDef TorchMethods[] = {
      THPModule_setNumInteropThreads,
      METH_O,
      nullptr},
+    {"_get_flash_sdp_enabled",
+     THPModule_userEnabledFlashSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
+    {"_get_math_sdp_enabled",
+     THPModule_userEnabledMathSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
@@ -941,6 +982,10 @@ static PyMethodDef TorchMethods[] = {
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,
+     nullptr},
+    {"_current_graph_task_id",
+     THPModule_getCurrentGraphTaskId,
+     METH_NOARGS,
      nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
@@ -1088,6 +1133,7 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
+  torch::dynamo::initDynamoBindings(module);
   torch::functorch::impl::initFuncTorchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initReturnTypes(module);
@@ -1342,18 +1388,21 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
-  py_module.def("_add_meta_to_tls_dispatch_include", []() {
+  py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});
-    local_keyset.included_ = local_keyset.included_ | key_set;
+    if (meta_in_tls) {
+      local_keyset.included_ = local_keyset.included_ | key_set;
+    } else {
+      local_keyset.included_ =
+          local_keyset.included_.remove_backend(c10::BackendComponent::MetaBit);
+    }
     c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
   });
-  py_module.def("_remove_meta_from_tls_dispatch_include", []() {
+
+  py_module.def("_meta_in_tls_dispatch_include", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
-    auto k = key_set.highestBackendKey();
-    local_keyset.included_ = local_keyset.included_.remove_backend(k);
-    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+    return local_keyset.included_.has_backend(c10::BackendComponent::MetaBit);
   });
 
   py_module.def("_dump_local_tls_set", []() {
@@ -1362,13 +1411,10 @@ Call this whenever a new thread is created in order to propagate values from
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
   });
 
-  py_module.def("_is_deploy_enabled", []() {
-#if defined(USE_DEPLOY)
-    return true;
-#else
-    return false;
-#endif
-  });
+  py_module.def(
+      "_should_allow_numbers_as_tensors", [](const std::string& name) {
+        return torch::should_allow_numbers_as_tensors(name);
+      });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =

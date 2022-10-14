@@ -5,7 +5,8 @@
 
 import dataclasses
 import re
-from typing import Any, Dict, Iterable, Sequence, Tuple, Union
+import typing
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
 
 import torch
 from torch import _C
@@ -53,7 +54,7 @@ class GraphContext:
         outputs: int = 1,
         **kwargs,
     ):
-        """Creates an ONNX operator "opname", taking "raw_args" as inputs and attributes "kwargs".
+        """Creates an ONNX operator "opname", taking "raw_args" as inputs and "kwargs" as attributes.
 
         The set of operators and the inputs/attributes they take
         is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
@@ -229,7 +230,7 @@ def _create_node(
     n_outputs: int,
     shape_inference: bool = True,
 ) -> _C.Node:
-    """Creates an node 'opname', taking "args" as inputs and attributes 'kwargs'."""
+    """Creates an node 'domain_op', taking inputs and attributes."""
     if isinstance(graph_or_block, _C.Graph):
         graph = graph_or_block
         node = graph.create(domain_op, inputs, n_outputs)
@@ -306,3 +307,17 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
             else:
                 kind = "i"
     return getattr(node, f"{kind}_")(name, value)
+
+
+# TODO: Expose this to user when migrating symbolic helper functions to here.
+@_beartype.beartype
+def _is_tensor(x: _C.Value) -> bool:
+    return x.type().isSubtypeOf(_C.TensorType.get())
+
+
+@_beartype.beartype
+def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
+    if not _is_tensor(value):
+        return None
+    tensor_type = typing.cast(_C.TensorType, value.type())
+    return tensor_type.device()

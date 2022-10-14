@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
@@ -142,6 +143,18 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
+c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
+  c10::SymInt size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
+}
+
 Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
     // R -> C
@@ -236,7 +249,7 @@ Tensor norm_backward(
   //     the problematic values with something arbitrary before the division,
   //     but we decide not to due to the perf hit. Instead we just silence ASAN
   //     where necessary
-  size_t ndim = self.sizes().size();
+  size_t ndim = self.dim();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
@@ -592,21 +605,22 @@ Tensor unsqueeze_multiple(
 
 Tensor sum_backward(
     const Tensor& grad,
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sizes,
     OptionalIntArrayRef opt_dims,
     bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     if (opt_dims.has_value() && opt_dims.value().size() > 0) {
-      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand(sizes);
+      return unsqueeze_multiple(grad, opt_dims, sizes.size())
+          .expand_symint(sizes);
     }
   }
-  return grad.expand(sizes);
+  return grad.expand_symint(sizes);
 }
 
 Tensor sum_backward(
     const Tensor& grad,
     c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef dims,
+    c10::IntArrayRef dims,
     bool keepdim) {
   if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
     // we are only using `keepdim=true` path for SymInts for now
@@ -623,15 +637,15 @@ Tensor nansum_backward(
     const Tensor& self,
     at::OptionalIntArrayRef dims,
     bool keepdim) {
-  return sum_backward(grad, self.sizes(), dims, keepdim) *
+  return sum_backward(grad, self.sym_sizes(), dims, keepdim) *
       self.isnan().logical_not();
 }
 
 Tensor mean_backward(
     const Tensor& grad,
-    IntArrayRef shape,
+    c10::SymIntArrayRef shape,
     OptionalIntArrayRef opt_dim,
-    int64_t numel,
+    c10::SymInt numel,
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
@@ -817,39 +831,43 @@ Tensor logcumsumexp_backward(
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
-  IntArrayRef sizes;
+  c10::SymIntArrayRef sizes;
   at::TensorOptions o;
   for (const auto& v : grads) {
     if (v.defined()) {
-      sizes = v.sizes();
+      sizes = v.sym_sizes();
       o = static_cast<Tensor>(v).options();
       break;
     }
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }
 
-Tensor unsqueeze_to(const Tensor& self, IntArrayRef sizes) {
+Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
-  int64_t nDims = sizes.size();
+  int64_t nDims = sym_sizes.size();
   for (const auto dim : c10::irange(nDims)) {
-    if (sizes[dim] == 1) {
+    if (sym_sizes[dim] == 1) {
       result = result.unsqueeze(dim);
     }
   }
   return result;
 }
 
-Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
+Tensor unsqueeze_to(
+    const Tensor& self,
+    int64_t dim,
+    c10::SymIntArrayRef sym_sizes) {
+  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to
   // avoided unsqueezing in the backward.
-  if (sizes.size() > 0 && sizes[dim] == 1) {
+  if (sym_sizes.size() > 0 && sym_sizes[dim] == 1) {
     return self.unsqueeze(dim);
   }
   return self;
@@ -857,15 +875,15 @@ Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
 
 std::vector<Tensor> cat_tensors_backward(
     const Tensor& grad,
-    const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<std::vector<c10::SymInt>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim) {
   std::vector<Tensor> grad_inputs(sizes.size());
   if (!grad.defined()) {
     return grad_inputs;
   }
-  dim = at::legacy_cat_wrap_dim(dim, sizes);
-  int64_t accumulate = 0;
+  dim = at::legacy_cat_wrap_dim_symint(dim, sizes);
+  c10::SymInt accumulate = 0;
 
   Tensor grad_;
   bool grad_is_complex = grad.is_complex();
@@ -882,13 +900,13 @@ std::vector<Tensor> cat_tensors_backward(
     }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<int64_t>({0})) {
+    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
       grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
     auto size = shape[dim];
     accumulate += size;
-    grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
+    grad_inputs[i] = grad_val.narrow_symint(dim, accumulate - size, size);
   }
   return grad_inputs;
 }
@@ -1185,7 +1203,7 @@ Tensor convolution_backward_jvp_grad_bias(
 
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
-// set, this function returns its strides or throws an error if the tensor
+// set, this function returns its strides or an empty array if the tensor
 // is sparse. If requires_grad is not set, an empty array is returned since
 // there will be no backward pass. There has one special case, if input is
 // MKLDNN tensor and has requires_grad set, just return an empty array, the
@@ -1206,17 +1224,9 @@ at::SymIntArrayRef strides_or_error(
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
   if (input.requires_grad()) {
-    TORCH_CHECK(
-        !input.is_sparse(),
-        "The backward pass for this operation requires the '",
-        input_name,
-        "' tensor to be strided, but a sparse tensor was given instead. ",
-        "Please either use a strided tensor or set requires_grad=False for '",
-        input_name,
-        "'");
     if (input.is_mkldnn())
       return {};
-    if (input.is_sparse_csr())
+    if (input.is_sparse() || at::sparse_csr::is_sparse_compressed(input))
       return {};
     return input.sym_strides();
   } else {
@@ -1383,11 +1393,11 @@ Tensor renorm_backward(
 
 Tensor repeat_backward(
     Tensor grad,
-    IntArrayRef repeats,
-    IntArrayRef input_shape) {
+    c10::SymIntArrayRef repeats,
+    c10::SymIntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
-    return at::zeros(input_shape, grad.options());
+    return at::zeros_symint(input_shape, grad.options());
   }
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
@@ -1396,9 +1406,10 @@ Tensor repeat_backward(
     grad = grad.sum(0, false);
   }
 
-  at::DimVector grad_size, sum_dims;
+  at::SymDimVector grad_size;
+  at::DimVector sum_dims;
   for (const auto dim : c10::irange(input_dims)) {
-    int64_t repeat = repeats[dim + num_unsqueezed];
+    auto repeat = repeats[dim + num_unsqueezed];
     // Reshape gradient (repeat > 1)
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
     // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
@@ -1457,7 +1468,7 @@ Tensor repeat_backward(
   // reduce the whole grad tensor into a scalar rather than keeping original
   // dimensions.
   if (!sum_dims.empty()) {
-    grad = grad.reshape(grad_size);
+    grad = grad.reshape_symint(grad_size);
     grad = grad.sum(sum_dims);
   }
   return grad;
@@ -1533,16 +1544,19 @@ Tensor var_backward(
     if (n == correction) {
       return INFINITY * grad;
     } else {
-      return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
+      return (c10::SymFloat(2.0) /
+              c10::SymFloat(self.sym_numel() - correction)) *
+          grad * (self - self.mean());
     }
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
-    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
   }
-  const int64_t dof = _safe_size(self.sizes(), dim) - correction;
+  const c10::SymInt dof = _safe_size(self.sym_sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
+  return (c10::SymFloat(2.0) / c10::SymFloat(dof)) * grad *
+      (self - self.mean(dim, /*keepdim=*/true));
 }
 
 Tensor std_backward(
@@ -1571,9 +1585,9 @@ Tensor var_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self.sym_sizes(),
         dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
+        self.sym_numel(),
         keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
@@ -1596,9 +1610,9 @@ Tensor std_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self.sym_sizes(),
         dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
+        self.sym_numel(),
         keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
@@ -1608,21 +1622,21 @@ Tensor std_mean_backward(
 Tensor masked_scatter_backward(
     const Tensor& grad,
     const Tensor& mask,
-    IntArrayRef sizes) {
-  int64_t numel = 1;
+    c10::SymIntArrayRef sizes) {
+  c10::SymInt numel = 1;
   for (auto size : sizes) {
     numel *= size;
   }
   auto mask_selected = grad.masked_select(mask);
-  auto diff_nelem = numel - mask_selected.numel();
+  auto diff_nelem = numel - mask_selected.sym_numel();
   if (diff_nelem > 0) {
     // because mask_selected returns a 1-d tensor with size of masked elements
     // that are 1, we need to fill out the rest with zeros then reshape back to
     // tensor2's size.
-    auto zeros_fillin = at::zeros({diff_nelem}, grad.options());
+    auto zeros_fillin = at::zeros_symint({diff_nelem}, grad.options());
     mask_selected = at::cat({mask_selected, zeros_fillin}, 0);
   }
-  return mask_selected.view(sizes);
+  return mask_selected.view_symint(sizes);
 }
 
 Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
@@ -2705,8 +2719,8 @@ Tensor softplus_double_backward(
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 // Helper for as_strided_backward
 static inline bool _maybe_overlapping_memory(
-    IntArrayRef sizes,
-    IntArrayRef strides) {
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
   if (sizes.size() > 0) {
     std::vector<std::size_t> argsort(sizes.size());
     std::iota(argsort.begin(), argsort.end(), 0);
@@ -2715,7 +2729,7 @@ static inline bool _maybe_overlapping_memory(
           return strides[i] < strides[j];
         });
 
-    int64_t max_index_in_slice = 0;
+    c10::SymInt max_index_in_slice = 0;
     for (auto i : argsort) {
       auto stride_ = strides[i];
       if (stride_ <= max_index_in_slice) {
@@ -2729,11 +2743,11 @@ static inline bool _maybe_overlapping_memory(
 
 // Returns the minimum storage size needed to contain a tensor of sizes,
 // strides, and storage_offset Helper for as_strided_backward
-static inline int64_t _min_storage_size(
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    int64_t storage_offset) {
-  int64_t storage_size = storage_offset + 1;
+static inline c10::SymInt _min_storage_size(
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    c10::SymInt storage_offset) {
+  c10::SymInt storage_size = storage_offset + 1;
   int64_t dim = sizes.size();
   for (const auto i : c10::irange(dim)) {
     auto size_i = sizes[i];
@@ -2753,13 +2767,6 @@ Tensor as_strided_backward(
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
-  // TODO: properly use sym
-  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
-  auto strides = c10::asIntArrayRefSlow(sym_strides);
-  auto storage_offset_ = sym_storage_offset_.has_value()
-      ? c10::make_optional(sym_storage_offset_->expect_int())
-      : c10::nullopt;
-
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -2768,17 +2775,17 @@ Tensor as_strided_backward(
   // layout-aware/agnostic autograd ] Step (0)~(1) for the algorithm in NOTE [
   // Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
-  auto storage_offset =
-      storage_offset_.value_or(input_geometry.storage_offset());
+  auto sym_storage_offset =
+      sym_storage_offset_.value_or(input_geometry.sym_storage_offset());
   auto odim = grad.dim();
-  std::vector<int64_t> out_sizes_, out_strides_;
+  std::vector<c10::SymInt> out_sizes_, out_strides_;
   out_sizes_.reserve(odim);
   out_strides_.reserve(odim);
   for (int64_t i = odim - 1; i >= 0; i--) {
-    auto size_i = sizes[i];
-    auto stride_i = strides[i];
+    auto size_i = sym_sizes[i];
+    auto stride_i = sym_strides[i];
     if (size_i == 0) {
-      return at::zeros(input_geometry.sizes(), grad.options());
+      return at::zeros_symint(input_geometry.sym_sizes(), grad.options());
     } else if (size_i == 1) {
       grad = grad.squeeze(i);
     } else if (stride_i == 0) {
@@ -2800,16 +2807,16 @@ Tensor as_strided_backward(
   // Strided Tensor ]
   //              on input geometry
   auto idim = input_geometry.dim();
-  IntArrayRef inp_sizes = input_geometry.sizes(),
-              inp_strides = input_geometry.strides();
-  std::vector<int64_t> inp_sizes_, inp_strides_;
+  auto inp_sizes = input_geometry.sym_sizes(),
+       inp_strides = input_geometry.sym_strides();
+  std::vector<c10::SymInt> inp_sizes_, inp_strides_;
   inp_sizes_.reserve(idim);
   inp_strides_.reserve(idim);
   for (int64_t i = idim - 1; i >= 0; i--) {
     auto size_i = inp_sizes[i];
     auto stride_i = inp_strides[i];
     if (size_i == 0) {
-      return at::zeros(input_geometry.sizes(), grad.options());
+      return at::zeros_symint(input_geometry.sym_sizes(), grad.options());
     } else if (size_i != 1) {
       inp_sizes_.insert(inp_sizes_.begin(), size_i);
       inp_strides_.insert(inp_strides_.begin(), stride_i);
@@ -2832,29 +2839,37 @@ Tensor as_strided_backward(
 
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
-      std::min(input_geometry.storage_offset(), storage_offset);
-  auto inp_effective_offset = input_geometry.storage_offset() - shared_offset;
-  auto out_effective_offset = storage_offset - shared_offset;
-  auto base_size = std::max(
-      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
-      _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
-  auto storage = grad.new_zeros({base_size});
+      // TODO: symint-ify. Do we need a min() and max() for SymInts?
+      input_geometry.sym_storage_offset().min(sym_storage_offset);
+  auto inp_effective_offset =
+      input_geometry.sym_storage_offset() - shared_offset;
+  auto out_effective_offset = sym_storage_offset - shared_offset;
+  auto base_size1 =
+      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset);
+  auto base_size2 =
+      _min_storage_size(out_sizes_, out_strides_, out_effective_offset);
+  auto base_size = base_size1.max(base_size2);
+  auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
-        at::arange(0, base_size, grad.options().dtype(at::kLong));
+        // TODO: should we symint-ify arange? Need SymScalar.
+        at::arange(
+            0,
+            base_size.guard_int(__FILE__, __LINE__),
+            grad.options().dtype(at::kLong));
   }
 
   // Step (2): use output geometry to scatter gradients into storage
   if (out_maybe_overlap) {
-    auto out_indices = flatten_full_indices->as_strided(
+    auto out_indices = flatten_full_indices->as_strided_symint(
         out_sizes_, out_strides_, out_effective_offset);
     storage.index_add_(0, out_indices.reshape(-1), grad.reshape(-1));
   } else {
     // assume that new tensors have 0 storage offset
-    storage.as_strided(out_sizes_, out_strides_, out_effective_offset)
+    storage.as_strided_symint(out_sizes_, out_strides_, out_effective_offset)
         .copy_(grad);
   }
 
@@ -2864,14 +2879,15 @@ Tensor as_strided_backward(
     auto count = at::zeros_like(storage, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto inp_indices =
         flatten_full_indices
-            ->as_strided(inp_sizes_, inp_strides_, inp_effective_offset)
+            ->as_strided_symint(inp_sizes_, inp_strides_, inp_effective_offset)
             .reshape(-1);
     count.index_add_(
         0, inp_indices, at::ones({1}, grad.options()).expand_as(inp_indices));
     storage.div_(count); // this will give nan outside visible range
   }
   // Step (4): return as_strided view of the storage tensor with input geometry
-  return storage.as_strided(inp_sizes, inp_strides, inp_effective_offset);
+  return storage.as_strided_symint(
+      inp_sizes, inp_strides, inp_effective_offset);
 }
 
 Tensor as_strided_scatter_backward(
@@ -2890,9 +2906,8 @@ Tensor as_strided_scatter_backward(
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  // TODO: geometry should return symints
-  auto result =
-      grad_.new_empty_strided(input_geometry.sizes(), input_geometry.strides());
+  auto result = grad_.new_empty_strided_symint(
+      input_geometry.sym_sizes(), input_geometry.sym_strides());
   auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;
@@ -4356,10 +4371,10 @@ Tensor fft_c2r_backward(
 
 Tensor fft_r2c_backward(
     const Tensor& grad,
-    IntArrayRef dim,
+    at::IntArrayRef dim,
     int64_t normalization,
     bool onesided,
-    int64_t last_dim_size) {
+    c10::SymInt last_dim_size) {
   if (!onesided) {
     return at::real(at::_fft_c2c(grad, dim, normalization, /*forward=*/false));
   }
@@ -4374,16 +4389,17 @@ Tensor fft_r2c_backward(
   //        (C2C ifft only take twosided inputs so we need to fill here)
   //     2. inverse C2C ifft
   //     3. discard the complex dim
-  auto half_sizes = grad.sizes();
-  at::DimVector new_grad_shape(half_sizes.begin(), half_sizes.end());
+  auto half_sizes = grad.sym_sizes();
+  std::vector<c10::SymInt> new_grad_shape(half_sizes.begin(), half_sizes.end());
   const auto last_dim = at::maybe_wrap_dim(dim.back(), half_sizes.size());
   new_grad_shape[last_dim] = last_dim_size;
 
-  const auto zero_length = last_dim_size - grad.size(dim.back());
+  const auto zero_length = last_dim_size - grad.sym_size(dim.back());
   auto complex_full_grad =
-      zero_length > 0 ? grad.new_zeros(new_grad_shape) : grad;
+      zero_length > 0 ? grad.new_zeros_symint(new_grad_shape) : grad;
   if (zero_length > 0) {
-    complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
+    complex_full_grad.slice_symint(last_dim, 0, half_sizes[last_dim])
+        .copy_(grad);
   }
   return at::real(
       at::_fft_c2c(complex_full_grad, dim, normalization, /*forward=*/false));
@@ -4571,7 +4587,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& gO_t,
     const Tensor& save_mean_t,
     const Tensor& save_invstd_t,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
   const int normalized_ndim = normalized_shape.size();
   const auto input_shape = input_t.sizes();
@@ -4713,40 +4729,40 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
+    c10::SymInt N,
+    c10::SymInt C,
+    c10::SymInt HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask) {
   const int64_t G = group;
-  const int64_t D = C / G;
-  const double s = 1.0 / static_cast<double>(D * HxW);
+  const auto D = C / G;
+  c10::SymFloat s = c10::SymFloat(1.0) / c10::SymFloat(D * HxW);
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
-  const Tensor X_tensor = X.reshape({N, G, D, HxW});
-  const Tensor mean_tensor = mean.reshape({N, G, 1, 1});
-  const Tensor rstd_tensor = rstd.reshape({N, G, 1, 1});
+  const Tensor X_tensor = X.reshape_symint({N, G, D, HxW});
+  const Tensor mean_tensor = mean.reshape_symint({N, G, 1, 1});
+  const Tensor rstd_tensor = rstd.reshape_symint({N, G, 1, 1});
   Tensor dY_tensor;
   Tensor ds;
   Tensor db;
   if (dY.defined()) {
-    dY_tensor = dY.reshape({N, G, D, HxW});
+    dY_tensor = dY.reshape_symint({N, G, D, HxW});
     ds = (dY_tensor * X_tensor).sum(3).unsqueeze_(-1);
     db = dY_tensor.sum(3).unsqueeze_(-1);
   }
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
     if (isDefined(gamma)) {
-      gamma_tensor = gamma->reshape({1, G, D, 1});
+      gamma_tensor = gamma->reshape_symint({1, G, D, 1});
     }
     const Tensor var =
         ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
     const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
     Tensor dvar;
     if (drstd.defined()) {
-      dvar = -0.5 * rstd_cube * drstd.view({N, G, 1, 1});
+      dvar = -0.5 * rstd_cube * drstd.view_symint({N, G, 1, 1});
     }
     if (dY.defined()) {
       const Tensor a =
@@ -4761,7 +4777,7 @@ infinitely_differentiable_native_group_norm_backward(
       if (dmean.defined() && drstd.defined()) {
         dX += var_mean_backward(
             dvar,
-            dmean.view({N, G, 1, 1}),
+            dmean.view_symint({N, G, 1, 1}),
             X_tensor,
             IntArrayRef{2, 3},
             0,
@@ -4771,7 +4787,7 @@ infinitely_differentiable_native_group_norm_backward(
     } else if (dmean.defined() && drstd.defined()) {
       dX = var_mean_backward(
                dvar,
-               dmean.view({N, G, 1, 1}),
+               dmean.view_symint({N, G, 1, 1}),
                X_tensor,
                IntArrayRef{2, 3},
                0,
@@ -5607,8 +5623,8 @@ Tensor solve_jvp(
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
-    const int64_t m,
-    const int64_t n) {
+    const c10::SymInt m,
+    const c10::SymInt n) {
   if (!L_grad.defined() && !U_grad.defined()) {
     return {};
   }
@@ -5616,16 +5632,16 @@ Tensor lu_unpack_backward(
 
   // Getters for the principal and complementary part of the matrices
   const auto get_L1 = [m, k](const Tensor& L) {
-    return m == k ? L.tril(-1) : L.narrow(-2, 0, k).tril(-1);
+    return m == k ? L.tril(-1) : L.narrow_symint(-2, 0, k).tril(-1);
   };
   const auto get_L2 = [m, k](const Tensor& L) {
-    return L.narrow(-2, k, m - k);
+    return L.narrow_symint(-2, k, m - k);
   };
   const auto get_U1 = [n, k](const Tensor& U) {
-    return n == k ? U.triu() : U.narrow(-1, 0, k).triu();
+    return n == k ? U.triu() : U.narrow_symint(-1, 0, k).triu();
   };
   const auto get_U2 = [n, k](const Tensor& U) {
-    return U.narrow(-1, k, n - k);
+    return U.narrow_symint(-1, k, n - k);
   };
 
   if (L_grad.defined()) {
@@ -5642,20 +5658,22 @@ Tensor lu_unpack_backward(
       if (m >= n) {
         return L_grad.tril(-1);
       } else {
-        auto size = L_grad.sizes().vec();
+        auto size = L_grad.sym_sizes().vec();
         size.end()[-1] = n - m;
         return at::cat(
-            {L_grad.tril(-1), at::zeros(size, L_grad.options())}, /*dim=*/-1);
+            {L_grad.tril(-1), at::zeros_symint(size, L_grad.options())},
+            /*dim=*/-1);
       }
     }
   } else {
     if (n >= m) {
       return U_grad.triu();
     } else {
-      auto size = U_grad.sizes().vec();
+      auto size = U_grad.sym_sizes().vec();
       size.end()[-2] = m - n;
       return at::cat(
-          {U_grad.triu(), at::zeros(size, U_grad.options())}, /*dim=*/-2);
+          {U_grad.triu(), at::zeros_symint(size, U_grad.options())},
+          /*dim=*/-2);
     }
   }
 }
@@ -5916,7 +5934,7 @@ Tensor layer_norm_jvp(
     const Tensor& bias_t,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
-    IntArrayRef normalized_shape) {
+    c10::SymIntArrayRef normalized_shape) {
   auto dims = std::vector<int64_t>{};
   auto view_size = input_t.sizes().vec();
   auto view_size_affine = input_t.sizes().vec();

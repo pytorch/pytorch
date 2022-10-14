@@ -1,3 +1,4 @@
+import math
 from typing import List, Optional, Union
 
 import torch
@@ -13,6 +14,8 @@ from torch._prims_common import (
 
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
+
+from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
@@ -33,6 +36,8 @@ def register_meta(op, register_dispatcher=True):
                     else op.overloadpacket.__name__
                 )
                 _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+
+            op.py_impl(torch._C.DispatchKey.Meta)(f)
 
         tree_map(add_func, op)
         return f
@@ -76,6 +81,11 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 
+@register_meta(aten.randint.default)
+def meta_randint(high, size, *, dtype=torch.long, **kwargs):
+    return torch.empty(size, dtype=dtype, **kwargs)
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
@@ -105,8 +115,14 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@register_meta([aten.max.default, aten.min.default])
+@register_meta([aten.max.default, aten.max.unary_out])
+@out_wrapper()
 def meta_max(self):
+    return self.new_empty(())
+
+
+@register_meta([aten.min.default])
+def meta_min(self):
     return self.new_empty(())
 
 
@@ -178,6 +194,11 @@ def meta_pad2d(self, padding):
         return self.new_empty((nplane, output_h, output_w))
     else:
         return self.new_empty((nbatch, nplane, output_h, output_w))
+
+
+@register_meta(aten.bernoulli_.float, register_dispatcher=False)
+def meta_bernoulli_(self, p=0.5, generator=None):
+    return self
 
 
 def dot_check(self, other):
@@ -368,6 +389,133 @@ def meta_conv(
     return out
 
 
+# from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
+def check_dim_size(tensor, dim, dim_size, size):
+    check(
+        tensor.dim() == dim and tensor.shape[dim_size] == size,
+        lambda: f"Expected a tensor of dimension {dim} and tensor.size[{dim_size}] == {size}, "
+        + f"but got : dimension {tensor.dim()} and tensor.size[{dim_size}] = {tensor.shape[dim_size]}",
+    )
+
+
+@register_meta(aten.avg_pool2d.default, register_dispatcher=False)
+def meta_avg_pool2d(
+    input,
+    kernel_size,
+    stride=(),
+    padding=(0,),
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    def unpack(name, val):
+        check(
+            len(val) in [1, 2],
+            lambda: f"avg_pool2d: {name} must either be a single int, or a tuple of two ints",
+        )
+        H = val[0]
+        W = H if len(val) == 1 else val[1]
+        return H, W
+
+    kH, kW = unpack("kernel_size", kernel_size)
+    check(
+        len(stride) in [0, 1, 2],
+        lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
+    )
+    if len(stride) == 0:
+        dH, dW = kH, kW
+    elif len(stride) == 1:
+        dH, dW = stride[0], stride[0]
+    else:
+        dH, dW = unpack("stride", stride)
+
+    padH, padW = unpack("padding", padding)
+
+    check(
+        divisor_override is None or divisor_override != 0,
+        lambda: "divisor must be not zero",
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
+
+    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
+    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
+
+    memory_format = utils.suggest_memory_format(input)
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        1,
+        1,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        memory_format,
+    )
+
+    if input.dim() == 3:
+        size = [nInputPlane, outputHeight, outputWidth]
+    else:
+        size = [nbatch, nInputPlane, outputHeight, outputWidth]
+    return torch.empty(
+        size, dtype=input.dtype, device=input.device, memory_format=memory_format
+    )
+
+
+# from avg_pool2d_backward_shape_check() in aten/src/ATen/native/Pool.h.
+def avg_pool2d_backward_shape_check(
+    input,
+    gradOutput,
+    nbatch,
+    kH,
+    kW,
+    dH,
+    dW,
+    padH,
+    padW,
+    nInputPlane,
+    inputHeight,
+    inputWidth,
+    outputHeight,
+    outputWidth,
+    mem_format,
+):
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        1,
+        1,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        mem_format,
+    )
+
+    ndim = input.dim()
+    nOutputPlane = nInputPlane
+
+    check_dim_size(gradOutput, ndim, ndim - 3, nOutputPlane)
+    check_dim_size(gradOutput, ndim, ndim - 2, outputHeight)
+    check_dim_size(gradOutput, ndim, ndim - 1, outputWidth)
+
+
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
@@ -425,6 +573,7 @@ def vdot(self, other):
 # get shape inference through structured kernels
 @register_meta(aten.index.Tensor, register_dispatcher=False)
 def meta_index_Tensor(self, indices):
+    check_no_bool_index_tensors(aten.index.Tensor, self, indices)
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
@@ -432,8 +581,8 @@ def meta_index_Tensor(self, indices):
     for i, index in enumerate(indices):
         if index is not None:
             check(
-                index.dtype in [torch.long, torch.int8, torch.bool],
-                lambda: "tensors used as indices must be long, byte or bool tensors",
+                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
             if index.dtype in [torch.int8, torch.bool]:
                 nonzero = index.nonzero()
@@ -767,6 +916,39 @@ def meta_repeat(self, repeats):
     return self.new_empty(target_size)
 
 
+@register_meta(aten.zero_.default, register_dispatcher=False)
+def meta_zero_(self):
+    return self
+
+
+@register_meta(
+    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar],
+    register_dispatcher=False,
+)
+def meta_fill_(self, val):
+    return self
+
+
+@register_meta(aten.relu_.default, register_dispatcher=False)
+def meta_relu_(self):
+    return self
+
+
+@register_meta(aten.index_put.default, register_dispatcher=False)
+def meta_index_put(self, indices, values, accumulate=False):
+    return self.new_empty(self.size())
+
+
+@register_meta(aten.masked_fill_.Scalar, register_dispatcher=False)
+def meta_masked_fill_(self, mask, value):
+    return self
+
+
+@register_meta(aten.index_put_.default, register_dispatcher=False)
+def meta_index_put_(self, indices, values, accumulate=False):
+    return self
+
+
 @register_meta(aten.alias.default, register_dispatcher=False)
 def meta_alias(self):
     return self.view(self.shape)
@@ -1000,6 +1182,11 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta([aten.full.default])
+def full(size, fill_value, *args, **kwargs):
+    return torch.empty(size, *args, **kwargs)
+
+
 @register_meta(
     [
         aten.randint_like.default,
@@ -1013,6 +1200,66 @@ def meta_max_pool2d_with_indices(
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# hacky: Please remove after math.ceil works with arange
+@register_meta(aten.arange.default)
+def arange(end, **kwargs):
+    if isinstance(end, float):
+        end = math.ceil(end)
+
+    def is_integral(x):
+        return isinstance(x, int) or isinstance(x, bool)
+
+    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
+    if set_to_integral_dtype:
+        kwargs["dtype"] = torch.int64
+
+    return aten.empty([end], **kwargs)
+
+
+@register_meta(aten.arange.start)
+def arange_start(start, end, **kwargs):
+    return aten.arange(end - start, **kwargs)
+
+
+@register_meta(aten.select.int)
+def meta_select(self, dim, index):
+    ndim = self.dim()
+    check(
+        ndim != 0, lambda: "select() cannot be applied to a 0-dim tensor.", IndexError
+    )
+
+    dim = dim if dim >= 0 else dim + ndim
+    size = self.size(dim)
+
+    check(
+        not (-index > size or index >= size),
+        lambda: f"select(): index {index} out of range for tensor of size "
+        f"{self.size()} at dimension {dim}",
+        IndexError,
+    )
+
+    index = index if index >= 0 else index + size
+
+    new_size = list(self.size())
+    new_stride = list(self.stride())
+
+    new_storage_offset = self.storage_offset() + index * new_stride[dim]
+    del new_size[dim]
+    del new_stride[dim]
+
+    return self.as_strided(new_size, new_stride, new_storage_offset)
+
+
+@register_meta(aten.select_scatter.default)
+def meta_select_scatter(self, src, dim, index):
+    return torch.empty_like(self)
+
+
+@register_meta(aten.slice_scatter.default)
+def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
+    return torch.empty_like(self)
 
 
 # We must also trigger meta registrations from PrimTorch ref
