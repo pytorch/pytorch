@@ -1,6 +1,4 @@
-from array import array
 from math import hypot
-from typing_extensions import Self
 import unittest
 from hypothesis import given
 from hypothesis.extra.numpy import mutually_broadcastable_shapes
@@ -26,14 +24,14 @@ def ufunc_inputs(draw, ufunc, input_dtype: DTypeLike = np.int32):
 
 
 @hypothesis.strategies.composite
-def where_inputs(draw, xy_dtype = int):
+def where_inputs(draw, xy_dtype: DTypeLike = int):
     # TODO: Could we do this with a ufunc sig? `where` doesn't seem to have one
     # @given(mutually_broadcastable_shapes(signature=np.where.signature))
     shapes, result_shape = draw(mutually_broadcastable_shapes(num_shapes=3))
     cond = draw(hypothesis.extra.numpy.arrays(bool, shape=shapes[0]))
     x = draw(hypothesis.extra.numpy.arrays(xy_dtype, shape=shapes[1]))
     y = draw(hypothesis.extra.numpy.arrays(xy_dtype, shape=shapes[2]))
-    return cond,x,y
+    return cond, x, y
 
 
 class TestConsistentWithNumpy(unittest.TestCase):
