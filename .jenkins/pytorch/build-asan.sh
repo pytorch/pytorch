@@ -26,7 +26,7 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
   CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -fsanitize-address-use-after-scope -shared-libasan" \
   USE_ASAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py bdist_wheel
-  python -mpip install dist/*.whl
+  python -mpip install "$(echo dist/*.whl)[opt-einsum]"
 
 # Test building via the sdist source tarball
 python setup.py sdist

@@ -29,6 +29,7 @@ from torchgen.api.types import (
     SpecialArgName,
     stringT,
     symIntArrayRefT,
+    SymIntT,
     tensorGeometryT,
     tensorOptionsT,
     typeAndSizeT,
@@ -782,6 +783,17 @@ def saved_variables(
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
             },
         ),
+        # replace self->sym_sizes() with self_sym_sizes_opt
+        (
+            r"{}->sym_sizes\(\)",
+            {
+                "suffix": "_sym_sizes_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+            },
+        ),
         # replace self.options() with self_options
         (
             r"{}.options\(\)",
@@ -802,10 +814,22 @@ def saved_variables(
         ),
         # replace self.size(2) with self_size_2
         (
-            r"{}.size\((\w+)\)",
+            r"{}.size\((-?\w+)\)",
             {
-                "suffix": lambda m: "_argsize_{}".format(*m.groups()),
+                "suffix": lambda m: "_argsize_{}".format(
+                    m.groups()[0].replace("-", "minus_")
+                ),
                 "nctype": lambda name: NamedCType(name, BaseCType(longT)),
+            },
+        ),
+        # replace self.sym_size(2) with self_sym_size_2
+        (
+            r"{}.sym_size\((-?\w+)\)",
+            {
+                "suffix": lambda m: "_sym_argsize_{}".format(
+                    m.groups()[0].replace("-", "minus_")
+                ),
+                "nctype": lambda name: NamedCType(name, BaseCType(SymIntT)),
             },
         ),
         # replace self.numel() with self_numel
@@ -823,6 +847,16 @@ def saved_variables(
                 "suffix": "_args_sizes",
                 "nctype": lambda name: NamedCType(
                     name, VectorCType(VectorCType(BaseCType(longT)))
+                ),
+            },
+        ),
+        # replace to_args_sizes_symint(self) with self_args_sizes
+        (
+            r"to_args_sizes_symint\({}\)",
+            {
+                "suffix": "_args_sizes_symint",
+                "nctype": lambda name: NamedCType(
+                    name, VectorCType(VectorCType(BaseCType(SymIntT)))
                 ),
             },
         ),

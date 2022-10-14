@@ -6,7 +6,12 @@ from warnings import warn
 
 import torch
 import torch.overrides
-from torch._prims_common import getnvFuserDtype, Number, number_type
+from torch._prims_common import (
+    _torch_dtype_to_nvfuser_dtype_map,
+    getnvFuserDtype,
+    Number,
+    number_type,
+)
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -131,6 +136,18 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     args = [args[0], original_shape, args[1]]
                     return self.call_function(node.target, args, node.kwargs)
+
+                if node.target in [
+                    torch.ops.nvprims.native_batch_norm,
+                    torch.ops.nvprims.native_batch_norm.default,
+                ]:
+                    args, kwargs = self.fetch_args_kwargs_from_env(node)
+                    assert len(args) == 8
+                    training = args[5]
+                    args6_end = tuple(map(_to_nvfuser_constant, args[6:]))
+                    args = args[:5] + (training,) + args6_end
+                    return node.target.impl_nvfuser(fd, *args, **kwargs)
+
                 return super().run_node(node)
 
             def call_function(self, target, args, kwargs):
@@ -208,6 +225,18 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
 
 class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+        # special case to stop lowering to nvprim when converting to an unsupported type
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.nvprims.convert_element_type.default
+        ):
+            return (
+                _torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None
+                and _torch_dtype_to_nvfuser_dtype_map.get(
+                    node.args[0].meta["tensor_meta"].dtype  # type: ignore[union-attr]
+                )
+                is not None
+            )
         return (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is not None
