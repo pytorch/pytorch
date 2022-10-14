@@ -490,10 +490,11 @@ def true_divide(g: jit_utils.GraphContext, self, other):
     # Case 2: neither is floating
     # Casts both inputs to the default scalar type
     scalar_type = torch.get_default_dtype()
-    onnx_scalar_type = _C_onnx.TensorProtoDataType.FLOAT
     assert scalar_type is torch.float or scalar_type is torch.double
-    if torch.get_default_dtype() is torch.double:
+    if scalar_type is torch.double:
         onnx_scalar_type = _C_onnx.TensorProtoDataType.DOUBLE
+    else:
+        onnx_scalar_type = _C_onnx.TensorProtoDataType.FLOAT
 
     self = g.op("Cast", self, to_i=onnx_scalar_type)
     other = g.op("Cast", other, to_i=onnx_scalar_type)
