@@ -1,8 +1,15 @@
-name: TorchBench Running with Inductor CI
+name: TorchBench with Inductor
+
 on:
-  pull_request:
+  push:
     tags:
-      - ciflow/dynamo
+      - ciflow/inductor/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.8"
   # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
@@ -15,7 +22,7 @@ env:
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
 jobs:
-  run-torchbench:
+  run-torchbench-with-inductor:
     # We don't accept running on non-pytorch repos because of security concerns
     # Only run the job when the body contains magic word "RUN_TORCHBENCH:"
     if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.body, 'RUN_TORCHBENCH:') }}
@@ -92,8 +99,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: TorchBench Running with Inductor result
-          path: ~/.torchbench/bisection/pr${{ github.event.number }}
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+          path: ~/indcutor_torchbench_training.csv
