@@ -12,10 +12,10 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
-#include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
-#include <torch/csrc/profiler/nvtx_observer.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
+#include <torch/csrc/profiler/standalone/itt_observer.h>
+#include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <ATen/Context.h>
@@ -58,9 +58,12 @@ inline int64_t getTimeUs() {
 }
 
 using torch::profiler::impl::ActiveProfilerType;
+using torch::profiler::impl::ActivityType;
 using torch::profiler::impl::dtypesToStr;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::ProfilerConfig;
+using torch::profiler::impl::ProfilerState;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;
