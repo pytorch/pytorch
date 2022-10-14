@@ -196,7 +196,7 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
-@register_meta(aten.bernoulli_.float)
+@register_meta(aten.bernoulli_.float, register_dispatcher=False)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
