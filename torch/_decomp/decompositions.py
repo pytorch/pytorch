@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import NumberType, TensorLike, TensorSequenceType
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -363,7 +363,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss_backward)
+@register_decomposition(aten.huber_loss_backward.default)
 @pw_cast_for_opmath
 def huber_loss_backward(
     grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, delta: float
@@ -375,6 +375,22 @@ def huber_loss_backward(
         -norm * grad_output * delta,
         torch.where(x > delta, norm * grad_output * delta, norm * x * grad_output),
     )
+
+
+# We cannot use @out_wrapper() here, because the output tensor is not named 'out', it's 'grad_input'
+@register_decomposition(aten.huber_loss_backward.out)
+@pw_cast_for_opmath
+def huber_loss_backward_out(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int,
+    delta: float,
+    grad_input: Tensor,
+):
+    result = huber_loss_backward(grad_output, self, target, reduction, delta)
+    _maybe_resize_out(grad_input, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
 
 
 def _nll_loss_backward(
@@ -2367,7 +2383,6 @@ def matmul(tensor1, tensor2):
 
 
 @register_decomposition(aten.upsample_bicubic2d.default)
-@out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     a: Tensor,
