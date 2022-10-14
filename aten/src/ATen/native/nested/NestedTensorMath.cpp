@@ -1,8 +1,9 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/nested/NestedTensorMath.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
@@ -14,62 +15,6 @@
 
 #include <tuple>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_nested_from_padded.h>
-#include <ATen/ops/_nested_from_padded_and_nested_example_native.h>
-#include <ATen/ops/_nested_from_padded_native.h>
-#include <ATen/ops/_nested_tensor_from_mask_left_aligned_native.h>
-#include <ATen/ops/_nested_tensor_from_mask_native.h>
-#include <ATen/ops/_nested_tensor_from_tensor_list_native.h>
-#include <ATen/ops/_nested_view_from_buffer_native.h>
-#include <ATen/ops/_softmax.h>
-#include <ATen/ops/_softmax_native.h>
-#include <ATen/ops/add.h>
-#include <ATen/ops/add_native.h>
-#include <ATen/ops/bmm_native.h>
-#include <ATen/ops/cat.h>
-#include <ATen/ops/clone_native.h>
-#include <ATen/ops/constant_pad_nd.h>
-#include <ATen/ops/embedding.h>
-#include <ATen/ops/embedding_native.h>
-#include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
-#include <ATen/ops/empty_like_native.h>
-#include <ATen/ops/equal.h>
-#include <ATen/ops/full_like.h>
-#include <ATen/ops/gelu.h>
-#include <ATen/ops/gelu_native.h>
-#include <ATen/ops/index_select.h>
-#include <ATen/ops/matmul.h>
-#include <ATen/ops/matmul_native.h>
-#include <ATen/ops/mm.h>
-#include <ATen/ops/mul.h>
-#include <ATen/ops/mul_native.h>
-#include <ATen/ops/native_dropout.h>
-#include <ATen/ops/native_dropout_native.h>
-#include <ATen/ops/native_layer_norm_native.h>
-#include <ATen/ops/prod.h>
-#include <ATen/ops/relu.h>
-#include <ATen/ops/relu_native.h>
-#include <ATen/ops/reshape_as_native.h>
-#include <ATen/ops/reshape_native.h>
-#include <ATen/ops/select_native.h>
-#include <ATen/ops/split_with_sizes.h>
-#include <ATen/ops/stack.h>
-#include <ATen/ops/sum.h>
-#include <ATen/ops/sum_native.h>
-#include <ATen/ops/tanh.h>
-#include <ATen/ops/tanh_native.h>
-#include <ATen/ops/to_padded_tensor_native.h>
-#include <ATen/ops/transpose_native.h>
-#include <ATen/ops/unbind_native.h>
-#include <ATen/ops/values_native.h>
-#include <ATen/ops/view_native.h>
-#include <ATen/ops/zeros.h>
-#endif
 
 namespace at {
 namespace native {
