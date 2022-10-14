@@ -178,6 +178,11 @@ def main() -> None:
         action="store_true",
         help="Build lazy tensor ts backend with per-operator ATen headers, must match how ATen was built",
     )
+    parser.add_argument(
+        "--gen_onnx_diagnostics",
+        action="store_true",
+        help="Enable generation of source files for ONNX diagnostics rules",
+    )
     options = parser.parse_args()
 
     generate_code(
@@ -226,6 +231,18 @@ def main() -> None:
             per_operator_headers=options.per_operator_headers,
             gen_forced_fallback_code=True,
         )
+
+    if options.gen_onnx_diagnostics:
+        from tools.onnx import gen_diagnostics
+
+        rules_path = "torch/onnx/_internal/diagnostics/rules.yaml"
+        out_py_dir = "torch/onnx/_internal/diagnostics/generated"
+        out_cpp_dir = "torch/csrc/onnx/diagnostics/generated"
+        template_dir = "tools/onnx/templates"
+
+        rules = gen_diagnostics.load_rules(rules_path)
+        gen_diagnostics.gen_diagnostics_cpp(rules, out_cpp_dir, template_dir)
+        gen_diagnostics.gen_diagnostics_python(rules, out_py_dir, template_dir)
 
 
 if __name__ == "__main__":

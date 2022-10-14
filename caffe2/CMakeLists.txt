@@ -410,12 +410,18 @@ set(GENERATED_TESTING_PYTHON
   "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   )
 
+set(GENERATED_ONNX_DIAGNOSTICS_RULES
+  "${TORCH_SRC_DIR}/torch/csrc/onnx/diagnostics/generated/rules.h"
+  "${TORCH_SRC_DIR}/torch/onnx/_internal/diagnostics/generated/rules.py"
+  )
+
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
   ${GENERATED_CXX_PYTHON}
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
+  ${GENERATED_ONNX_DIAGNOSTICS_RULES}
   )
 
 set(GEN_PER_OPERATOR_FLAG)
@@ -437,6 +443,7 @@ add_custom_command(
     $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
     --force_schema_registration
     --gen_lazy_ts_backend
+    --gen_onnx_diagnostics
     ${GEN_PER_OPERATOR_FLAG}
   DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
