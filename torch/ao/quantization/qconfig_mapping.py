@@ -17,6 +17,7 @@ from .observer import (
 )
 from .qconfig import (
     default_reuse_input_qconfig,
+    default_symmetric_qnnpack_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
     QConfig,

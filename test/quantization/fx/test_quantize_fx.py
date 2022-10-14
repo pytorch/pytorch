@@ -5164,18 +5164,20 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
-        qconfig_mapping = get_symmetric_qnnpack_qconfig_mapping()
-        example_inputs = (torch.rand((1, 30), dtype=torch.float),)
-        backend_config = get_qnnpack_backend_config()
-        model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
-        model(*example_inputs)
-        model = convert_fx(model, backend_config=backend_config)
-        expected_node_occurrence = {
-            ns.call_module(torch.ao.nn.quantized.Linear) : 1,
-            ns.call_module(torch.nn.Linear) : 0,
-        }
-        self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
-        model(*example_inputs)
+        with override_quantized_engine("qnnpack"):
+            qconfig_mapping = get_symmetric_qnnpack_qconfig_mapping()
+            example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+            backend_config = get_qnnpack_backend_config()
+            model = MyModel()
+            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+            model(*example_inputs)
+            model = convert_fx(model, backend_config=backend_config)
+            expected_node_occurrence = {
+                ns.call_module(torch.ao.nn.quantized.Linear) : 1,
+                ns.call_module(torch.nn.Linear) : 0,
+            }
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+            model(*example_inputs)
 
     def test_get_executorch_backend_config(self):
         from torch.ao.quantization.backend_config import get_executorch_backend_config
