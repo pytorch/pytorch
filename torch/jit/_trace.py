@@ -712,11 +712,11 @@ def trace(
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
         example_kwarg_inputs (dict, optional): This parameter is a pack of keyword
-            arguments example inputs that will be passed to the function while tracing.
-            Default: ``None``. Either this argument or ``example_inputs`` should be
-            specified. The dict will be unpacking by the arguments name of the traced
-            function. If the keys of the dict don't not match with the traced
-            function's arguments name, a runtime exception will be raised.
+            arguments of example inputs that will be passed to the function while
+            tracing. Default: ``None``. Either this argument or ``example_inputs``
+            should be specified. The dict will be unpacking by the arguments name
+            of the traced function. If the keys of the dict don't not match with
+            the traced function's arguments name, a runtime exception will be raised.
 
     Returns:
         If `func` is `nn.Module` or ``forward`` of `nn.Module`, `trace` returns
