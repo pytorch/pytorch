@@ -12,3 +12,6 @@ six
 types-dataclasses
 typing_extensions
 sympy
+filelock
+networkx
+jinja2

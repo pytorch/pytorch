@@ -1491,10 +1491,19 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
+  auto has_storage = true;
+  for (auto& op : operands_) {
+    has_storage &= op.tensor_base().has_storage();
+  }
+  auto privateuse1_without_storage =
+     common_device_.type() == DeviceType::PrivateUse1 &&
+     !has_storage;
+
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
-  if (common_device_.type() == DeviceType::XLA  ||
+  if (privateuse1_without_storage  ||
+      common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
       common_device_.type() == DeviceType::ORT  ||
