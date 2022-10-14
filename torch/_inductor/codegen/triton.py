@@ -654,6 +654,7 @@ class TritonKernel(Kernel):
     def indexing(
         self,
         index: sympy.Expr,
+        *,
         copy_shape=None,
         dense_indexing=False,
     ):
@@ -781,7 +782,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, value, dense_indexing=True)
+        index, mask = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -863,7 +864,7 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
-        index, mask = self.indexing(index, result_var)
+        index, mask = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)

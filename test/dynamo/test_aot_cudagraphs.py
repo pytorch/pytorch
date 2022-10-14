@@ -10,6 +10,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 def composed(*decs):
@@ -44,6 +45,7 @@ def assert_aot_autograd_counter(ok=True):
 
 def patch_all(ok=True):
     return composed(
+        unittest.skipIf(TEST_WITH_ROCM, "ROCm not supported"),
         patch("torch._dynamo.config.verify_correctness", True),
         assert_aot_autograd_counter(ok),
     )
