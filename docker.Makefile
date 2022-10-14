@@ -16,7 +16,7 @@ BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-de
 # The conda channel to use to install cudatoolkit
 CUDA_CHANNEL              = nvidia
 # The conda channel to use to install pytorch / torchvision
-INSTALL_CHANNEL          ?= pytorch
+INSTALL_CHANNEL          ?= pytorch-nightly
 
 PYTHON_VERSION           ?= 3.8
 PYTORCH_VERSION          ?= $(shell git describe --tags --always)
