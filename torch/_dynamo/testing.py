@@ -30,8 +30,6 @@ log = logging.getLogger(__name__)
 
 
 def run_tests(needs=()):
-    return  # TEMPORARY: disable all tests
-
     from torch.testing._internal.common_utils import (
         IS_WINDOWS,
         run_tests,
