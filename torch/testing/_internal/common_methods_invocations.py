@@ -10383,6 +10383,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
+               # Extremal value issue on aten::native_batch_norm, which returns 'nan' for mean on 'inf' inputs
+               # possibly because of the welford implementation.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )
            ),
     OpInfo('nn.functional.cosine_similarity',
@@ -17614,6 +17617,15 @@ python_ref_db = [
             # There's a discrepancy in returned shape between CPU and other devices
             # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
+        ),
+    ),
+    PythonRefInfo(
+        "ops.nvprims.view",
+        torch_opinfo_name="view",
+        validate_view_consistency=False,
+        # This function is expected not to work with TorchRefsMode(strict=True)
+        decorators=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
         ),
     ),
     #
