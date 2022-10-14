@@ -16,6 +16,7 @@ import argparse
 import os
 import subprocess
 import textwrap
+import typing
 from typing import Any, Mapping, Sequence
 
 import yaml
@@ -71,7 +72,9 @@ def _format_rule_for_cpp(rule: _RuleType) -> str:
 
 def load_rules(rules_path: str) -> Sequence[_RuleType]:
     with open(rules_path, "r") as f:
-        return yaml.load(f, Loader=torchgen_utils.YamlLoader)
+        return typing.cast(
+            Sequence[_RuleType], yaml.load(f, Loader=torchgen_utils.YamlLoader)
+        )
 
 
 def gen_diagnostics_python(
