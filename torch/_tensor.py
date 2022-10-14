@@ -112,11 +112,13 @@ class Tensor(torch._C._TensorBase):
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
             # Update the test in test_serialization if you remove 'meta' from here
-
             if (
                 self.is_sparse
                 or self.device.type in ["lazy", "xla", "mps", "ort", "meta", "hpu"]
-                or (self.storage is None and self.device.type == "privateuseone")
+                or (
+                    not torch._C._has_storage(self)
+                    and self.device.type == "privateuseone"
+                )
                 or (type(self) is not Tensor and self.data_ptr() == 0)
             ):
                 new_tensor = self.clone()
@@ -273,7 +275,7 @@ class Tensor(torch._C._TensorBase):
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
         if self.device.type in ["xla", "ort", "hpu"] or (
-            self.storage is None and self.device.type == "privateuseone"
+            not torch._C._has_storage(self) and self.device.type == "privateuseone"
         ):
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
