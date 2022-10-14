@@ -1,6 +1,5 @@
 # Owner(s): ["module: tests"]
 
-import unittest
 from hypothesis import given
 from hypothesis.extra.numpy import mutually_broadcastable_shapes
 import numpy as np
@@ -10,15 +9,11 @@ import hypothesis.strategies
 from numpy.testing import assert_array_equal
 from numpy.typing import DTypeLike
 
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.cuda
 import torch.backends.mps
-
-
-AVAILABLE_BACKENDS = [
-    backend_str for backend_str, backend in {"cuda": torch.cuda, "mps": torch.backends.mps}.items()
-    if backend.is_available()
-]
 
 
 @hypothesis.strategies.composite
@@ -38,26 +33,24 @@ def where_inputs(draw, xy_dtype: DTypeLike = int):
     return cond, x, y
 
 
-class TestConsistentWithNumpy(unittest.TestCase):
+class TestConsistentWithNumpy(TestCase):
 
     # TODO: This is very close to being able to be genericized over arbitrary ufuncs
     @given(ufunc_inputs(np.matmul, input_dtype=np.float32))
-    def test_matmul_consistent(self, inputs):
+    def test_matmul_consistent(self, device, inputs):
         torch_inputs = [torch.from_numpy(arr) for arr in inputs]
         np_out = np.matmul(*inputs)
         torch_cpu_out = torch.matmul(*torch_inputs)
         # Make sure we get consistent results between numpy and CPU pytorch
         assert_array_equal(np_out, torch_cpu_out.numpy())
 
-        for dev_str in AVAILABLE_BACKENDS:
-            dev = torch.device(dev_str)
-            torch_dev_inputs = [arr.to(dev) for arr in torch_inputs]
-            torch_dev_out = torch.matmul(*torch_dev_inputs)
-            # Now make sure every backend also produces identical results to numpy (and thus CPU pytorch)
-            assert_array_equal(np_out, torch_dev_out.cpu().numpy())
+        torch_dev_inputs = [arr.to(device) for arr in torch_inputs]
+        torch_dev_out = torch.matmul(*torch_dev_inputs)
+        # Now make sure every backend also produces identical results to numpy (and thus CPU pytorch)
+        assert_array_equal(np_out, torch_dev_out.cpu().numpy())
 
     @given(where_inputs())
-    def test_where_consistent(self, where_inputs):
+    def test_where_consistent(self, device, where_inputs):
         cond, x, y = where_inputs
         t_cond, t_x, t_y = torch.from_numpy(cond), torch.from_numpy(x), torch.from_numpy(y)
 
@@ -66,12 +59,13 @@ class TestConsistentWithNumpy(unittest.TestCase):
         # Make sure we get consistent results between numpy and CPU pytorch
         assert_array_equal(np_out, torch_cpu_out.numpy())
 
-        for dev_str in AVAILABLE_BACKENDS:
-            dev = torch.device(dev_str)
-            torch_dev_out = torch.where(t_cond.to(dev), t_x.to(dev), t_y.to(dev))
-            # Now make sure every backend also produces identical results to numpy (and thus CPU pytorch)
-            assert_array_equal(np_out, torch_dev_out.cpu().numpy())
+        torch_dev_out = torch.where(t_cond.to(device), t_x.to(device), t_y.to(device))
+        # Now make sure every backend also produces identical results to numpy (and thus CPU pytorch)
+        assert_array_equal(np_out, torch_dev_out.cpu().numpy())
 
 
-if __name__ == "__main__":
-    unittest.main()
+instantiate_device_type_tests(TestConsistentWithNumpy, globals(), allow_mps=True)
+
+
+if __name__ == '__main__':
+    run_tests()

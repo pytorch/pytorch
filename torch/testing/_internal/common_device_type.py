@@ -10,6 +10,7 @@ from typing import List, Any, ClassVar, Optional, Sequence, Tuple, Union, Dict, 
 import unittest
 import os
 import torch
+import torch.backends.mps
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, \
@@ -515,7 +516,7 @@ class MPSTestBase(DeviceTypeTestBase):
     # TODO: Maybe override `_get_dtypes`, `_get_precision_override`
 
 # Adds available device-type-specific test base classes
-def get_device_type_test_bases():
+def get_device_type_test_bases(allow_mps=False):
     # set type to List[Any] due to mypy list-of-union issue:
     # https://github.com/python/mypy/issues/3351
     test_bases: List[Any] = list()
@@ -531,10 +532,9 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
-        # Disable MPS testing in generic device testing temporarily while we're
-        # ramping up support.
-        # elif torch.backends.mps.is_available():
-        #   test_bases.append(MPSTestBase)
+        # MPS testing is disabled by default while we're ramping up support.
+        elif allow_mps and torch.backends.mps.is_available():
+            test_bases.append(MPSTestBase)
 
     return test_bases
 
@@ -590,7 +590,7 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -609,9 +609,10 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
+    # Re-compute the device types if we're allowing MPS for this test
+    test_bases = device_type_test_bases if not allow_mps else get_device_type_test_bases(allow_mps=allow_mps)
     # Filter out the device types based on user inputs
-    desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
-                                                                 except_for, only_for)
+    desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
     if include_lazy:
         # Note [Lazy Tensor tests in device agnostic testing]
         # Right now, test_view_ops.py runs with LazyTensor.
