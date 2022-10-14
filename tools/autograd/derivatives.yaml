@@ -1495,8 +1495,12 @@
   result: auto_linear
 
 - name: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
-  self: unsqueeze_to(grad, dim, self.sym_sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: unsqueeze_to(grad, dim, self.sym_sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      self: grad.unsqueeze(dim)
 
 - name: squeeze_(Tensor(a!) self) -> Tensor(a!)
   self: unsqueeze_to(grad, self.sym_sizes())
