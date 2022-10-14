@@ -2,7 +2,7 @@ name: TorchBench Running with Inductor CI
 on:
   pull_request:
     tags:
-      - ciflow/inductor
+      - ciflow/dynamo
 env:
   PYTHON_VERSION: "3.8"
   # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
