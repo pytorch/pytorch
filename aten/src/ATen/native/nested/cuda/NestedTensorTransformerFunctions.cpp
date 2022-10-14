@@ -281,7 +281,7 @@ std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
  * needing to call contiguous on the nested tensor input.
  * It checks that the storage offsets' adjacent_difference constant over each of the
  * tensor in the nested tensor and that the strides are monitonically decreasing.
- * This is check is done after calling transpose on the nested tensor.
+ * This check is done after calling transpose on the nested tensor.
  *
  * @return A boolean indicating of contiguous needs to be called for input
  */

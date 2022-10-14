@@ -16,7 +16,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
     freeze_rng_state,
-    TEST_WITH_CROSSREF
+    TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 
@@ -870,7 +871,7 @@ class TestTransformers(NNTestCase):
         _test_fastpath(model, aligned_mask, nested_tensor_return_value, nested_tensors=True)
         _test_fastpath(model, not_aligned_mask, nested_tensor_return_value, nested_tensors=True)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM, "CUDA unavailable")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels(self, type: str, is_contiguous: bool):
@@ -915,7 +916,7 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM, "CUDA unavailable")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, type: str, is_contiguous: bool):
