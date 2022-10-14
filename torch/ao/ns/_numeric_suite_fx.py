@@ -127,7 +127,7 @@ from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_roo
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
-from torch.ao.quantization.fx.qconfig_mapping_utils import generate_qconfig_map
+from torch.ao.quantization.fx.qconfig_mapping_utils import generate_node_name_to_qconfig
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
@@ -823,7 +823,7 @@ def prepare_n_shadows_model(
     # TODO(future PR): deduplicate repeating entries
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
     for qconfig_mapping in qconfig_mappings:
-        node_name_to_qconfig = generate_qconfig_map(
+        node_name_to_qconfig = generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
         list_of_node_name_to_qconfig.append(node_name_to_qconfig)
 
