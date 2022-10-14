@@ -597,11 +597,23 @@ void validateAlignedVectorizedFusionInputOutput(
   for (auto i = aten_tensor.ndimension() - 1; i >= 0; --i) {
     const auto stride = aten_tensor.strides().at(i);
     const auto size = aten_tensor.sizes().at(i);
+    auto root_id = tv->getMaybeRFactorDomain()[i];
+    const auto is_expanded_broadcasting =
+        root_id->isBroadcast() && root_id->hasExpandedExtent();
+
+    if (is_expanded_broadcasting) {
+      TORCH_INTERNAL_ASSERT(
+          stride == 0,
+          "Dimension ",
+          i,
+          " should be an expanded broadcasting, but it does not have stride zero.");
+    }
+
     // If this domain is contiguous or size == 1, then not necessary to check
     // the stride. Otherwise, stride must be 1 if it's rightmost or
     // divisible by word_size
     TORCH_INTERNAL_ASSERT(
-        stride == cur_contig_stride || size == 1 ||
+        stride == cur_contig_stride || size == 1 || is_expanded_broadcasting ||
             (still_rightmost && stride == 1) ||
             (!still_rightmost && stride % word_size == 0),
         "Vectorization of ",
@@ -615,7 +627,8 @@ void validateAlignedVectorizedFusionInputOutput(
         stride)
     // If the domain is size-1, the next domain is still considered
     // rightmost.
-    still_rightmost = still_rightmost && size == 1;
+    still_rightmost =
+        still_rightmost && (size == 1 || is_expanded_broadcasting);
     // We do not update cur_contig_stride for size==1 dimensions,
     // since we have specialized vectorization stride check for them
     if (size != 1) {
