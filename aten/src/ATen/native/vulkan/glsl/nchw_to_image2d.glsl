@@ -7,7 +7,7 @@ layout(std430) buffer;
 /*
  * Output Image
  */
-layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D uImage;
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image2D uImage;
 
 /*
  * Input Buffer
@@ -49,5 +49,5 @@ void main() {
   float val_z = uBuffer.data[buf_indices.z];
   float val_w = uBuffer.data[buf_indices.w];
 
-  imageStore(uImage, pos, vec4(val_x, val_y, val_z, val_w));
+  imageStore(uImage, pos.xy, vec4(val_x, val_y, val_z, val_w));
 }

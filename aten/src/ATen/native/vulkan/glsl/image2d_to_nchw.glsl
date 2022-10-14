@@ -6,7 +6,7 @@ layout(std430) buffer;
 /*
  * Input Sampler
  */
-layout(set = 0, binding = 0) uniform PRECISION sampler3D uImage;
+layout(set = 0, binding = 0) uniform PRECISION sampler2D uImage;
 
 /*
  * Output Buffer
@@ -38,7 +38,7 @@ void main() {
     return;
   }
 
-  const vec4 intex = texelFetch(uImage, pos, 0);
+  const vec4 intex = texelFetch(uImage, pos.xy, 0);
 
   const int base_index =
       pos.x + uBlock.in_extents.x * pos.y + (4 * uBlock.in_extents.w) * pos.z;
