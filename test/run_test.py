@@ -1018,9 +1018,7 @@ def get_selected_tests(options):
         )
 
     if options.functorch:
-        selected_tests = list(
-            filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
-        )
+        selected_tests = [tname for tname in selected_test if tname in FUNCTORCH_TESTS]
     else:
         # Exclude all functorch tests otherwise
         options.exclude.extend(FUNCTORCH_TESTS)
