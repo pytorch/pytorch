@@ -1,6 +1,6 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 import torch
 import unittest
 import warnings
@@ -28,7 +28,8 @@ aten = torch.ops.aten
 
 try:
     import sympy  # noqa: F401
-    HAS_SYMPY = True
+    # TODO(jansel): these tests fail on windows
+    HAS_SYMPY = not IS_WINDOWS
 except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
@@ -1064,6 +1065,7 @@ symbolic_tensor_failures = {
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('chunk', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
+    xfail('combinations', ''),
     xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
@@ -1289,6 +1291,7 @@ symbolic_tensor_failures = {
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
+    skip('nn.functional.batch_norm')  # Segfault??
 }
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
