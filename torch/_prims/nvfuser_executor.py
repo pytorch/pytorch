@@ -279,8 +279,7 @@ def _remove_empty_like_fill(gm: GraphModule):
     for node in gm.graph.nodes:
         if node.op == "call_function":
             if (
-                node.target == torch.ops.aten.sub.Tensor
-                or node.target == torch.ops.nvprims.sub.default
+                node.target == torch.ops.nvprims.sub.default
             ):
                 # check if the first argument is a fill
                 if (

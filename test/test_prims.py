@@ -651,6 +651,7 @@ class TestPrims(TestCase):
         from torch.fx.experimental.proxy_tensor import make_fx
         from functorch import functionalize
         from torch._prims.nvfuser_executor import _remove_empty_like_fill
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
         def func(a):
             out = torch.nn.functional.silu(a)
@@ -662,6 +663,10 @@ class TestPrims(TestCase):
         gm = make_fx(func)(a)
         # functionalize(gm) doesn't work with non-detached inputs
         gm = make_fx(functionalize(gm))(a.detach())
+
+        # replace aten.sub with nvprims.sub
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(gm)(a)
 
         # Check that the graph contains empty_like
         any_aten_empty_like = any(
