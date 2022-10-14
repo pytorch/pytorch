@@ -10,6 +10,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     offload_wrapper,
     apply_activation_checkpointing,
     CheckpointWrapper,
+    OffloadWrapper,
     CheckpointImpl
 )
 
@@ -80,7 +81,10 @@ class CheckpointWrapperTest(TestCase):
         ]:
             with self.subTest(wrapper=wrapper):
                 model = wrapper(MyModel())
-                self.assertTrue(isinstance(model, CheckpointWrapper))
+                if wrapper == offload_wrapper:
+                    self.assertTrue(isinstance(model, OffloadWrapper))
+                else:
+                    self.assertTrue(isinstance(model, CheckpointWrapper))
                 # Verify kwargs can be passed in
                 inp = torch.ones(4, 10, requires_grad=True)
                 out = model(inp, inp, c=inp, d=inp, e=inp, f=inp)
@@ -228,12 +232,12 @@ class CheckpointWrapperTest(TestCase):
                     model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn
                 )
                 n_linear_wrapped = sum(1 if isinstance(x, nn.Linear) else 0 for x in model.modules())
-                n_checkpointed = sum(1 if isinstance(x, CheckpointWrapper) else 0 for x in model.modules())
+                n_checkpointed = sum(1 if isinstance(x, (CheckpointWrapper, OffloadWrapper)) else 0 for x in model.modules())
                 self.assertEqual(n_checkpointed, n_linear_wrapped)
                 self.assertEqual(n_linear, n_linear_wrapped)
                 for j in range(3):
-                    self.assertTrue(isinstance(model.seq[j].lin, CheckpointWrapper))
-                    self.assertTrue(isinstance(model.seq[j].nested_linear[0], CheckpointWrapper))
+                    self.assertTrue(isinstance(model.seq[j].lin, (CheckpointWrapper, OffloadWrapper)))
+                    self.assertTrue(isinstance(model.seq[j].nested_linear[0], (CheckpointWrapper, OffloadWrapper)))
 
                 inp = torch.randn(4, 10, requires_grad=True)
                 for i in range(6):
