@@ -1720,7 +1720,7 @@ void HeuristicSummary::validate() const {
     }
     case ScheduleHeuristic::Transpose:
     case ScheduleHeuristic::PointWise: {
-      if (heuristic_ == ScheduleHeuristic::Pointwise) {
+      if (heuristic_ == ScheduleHeuristic::PointWise) {
         TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::DOMAIN_MAP));
         TORCH_INTERNAL_ASSERT(
             entry_type_map_.count(EntryType::REFERENCE_TENSORS));
