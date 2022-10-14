@@ -30,10 +30,9 @@ try:
     from torch._inductor.utils import has_triton
 
     try:
-        from .test_torchinductor import check_model, check_model_cuda, HAS_CPU, HAS_CUDA
+        from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda, HAS_CPU, HAS_CUDA
-    assert HAS_CPU and HAS_CUDA
+        from test_torchinductor import check_model, check_model_cuda
 except (unittest.SkipTest, ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":

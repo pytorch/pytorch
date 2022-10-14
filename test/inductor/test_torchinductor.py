@@ -65,12 +65,6 @@ except (
 ):
     pass
 
-if not HAS_CPU and not HAS_CPU:
-    if __name__ == "__main__":
-        sys.stderr.write("skipping tests because no working CPU or CUDA\n")
-        sys.exit(0)
-    raise unittest.SkipTest("requires CPU or CUDA compiler")
-
 aten = torch.ops.aten
 
 HAS_CUDA = False
@@ -82,7 +76,6 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-
 torch._inductor.config.triton.autotune = False  # too slow
 
 
@@ -4031,4 +4024,5 @@ if HAS_CUDA:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests(needs="filelock")
+    if HAS_CPU or HAS_CUDA:
+        run_tests(needs="filelock")
