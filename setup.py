@@ -968,6 +968,8 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
+        'sympy',
+        'networkx',
     ]
 
     extras_require = {
@@ -1089,11 +1091,7 @@ def main():
         'include/torch/csrc/autograd/generated/*.h',
         'include/torch/csrc/autograd/utils/*.h',
         'include/torch/csrc/cuda/*.h',
-        'include/torch/csrc/deploy/*.h',
-        'include/torch/csrc/deploy/interpreter/*.h',
-        'include/torch/csrc/deploy/interpreter/*.hpp',
-        'include/torch/csrc/distributed/c10d/*.h',
-        'include/torch/csrc/distributed/c10d/*.hpp',
+        'include/torch/csrc/distributed/c10d/exception.h',
         'include/torch/csrc/distributed/rpc/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
@@ -1117,6 +1115,7 @@ def main():
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
+        'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
         'include/torch/csrc/tensor/*.h',
         'include/torch/csrc/lazy/backend/*.h',
@@ -1134,6 +1133,8 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        "_inductor/codegen/*.h",
+        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
