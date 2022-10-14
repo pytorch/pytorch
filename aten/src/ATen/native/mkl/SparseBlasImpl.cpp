@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/Tensor.h>
@@ -439,10 +440,26 @@ void addmm_out_sparse_csr(
       }
     }
     if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        return addmm_sparse_input_dense_result(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
       if (result.layout() == kSparseCsr) {
         // TODO avoid csc->csr
         return addmm_sparse_result(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+      }
+      if (result.layout() == kSparseCsc) {
+        return addmm_sparse_result(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
       }
     }
   }

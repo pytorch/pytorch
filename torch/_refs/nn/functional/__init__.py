@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 
@@ -6,6 +6,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
 from torch._decomp import register_decomposition
+from torch._decomp.decompositions import Reduction
 from torch._prims_common import (
     check,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -31,6 +32,7 @@ __all__ = [
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
+    "huber_loss",
     "l1_loss",
     "margin_ranking_loss",
     "mish",
@@ -44,6 +46,7 @@ __all__ = [
     "softshrink",
     "tanhshrink",
     "threshold",
+    "triplet_margin_loss",
     "glu",
     "pairwise_distance",
     "pdist",
@@ -301,6 +304,17 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
 
 
 # Losses
+def _reduction_int_to_str(reduction: int) -> str:
+    if reduction == Reduction.NONE.value:
+        return "none"
+    elif reduction == Reduction.MEAN.value:
+        return "mean"
+    elif reduction == Reduction.SUM.value:
+        return "sum"
+    else:
+        raise ValueError(f"{reduction} is not a valid value for reduction")
+
+
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
     if reduction == "sum":
         return refs.sum(loss)
@@ -312,7 +326,7 @@ def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeTyp
 
 def _check_reduction_value(reduction: str):
     if reduction not in ("mean", "sum", "none"):
-        raise ValueError("{} is not a valid value for reduction".format(reduction))
+        raise ValueError(f"{reduction} is not a valid value for reduction")
 
 
 # This helper function maps depreciated arguments, "size_average" and "reduce"
@@ -349,7 +363,8 @@ def l1_loss(
     Reference implementation of torch.nn.functional.l1_loss
     """
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
@@ -393,7 +408,8 @@ def mse_loss(
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
@@ -417,6 +433,37 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
+
+
+# TODO: This ref supports int reduction and out kwarg to be compatible with ATen:
+# https://github.com/pytorch/pytorch/issues/83931
+# TODO: Could be rewritten to support complex:
+# https://github.com/pytorch/pytorch/pull/85041
+@register_decomposition(torch.ops.aten.huber_loss)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def huber_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    reduction: Union[str, int] = "mean",
+    delta: float = 1.0,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.huber_loss
+    """
+    if type(reduction) is int:
+        reduction = _reduction_int_to_str(reduction)
+    _check_reduction_value(reduction)  # type: ignore[arg-type]
+    check(
+        delta > 0,
+        lambda: "huber_loss does not support non-positive values for delta.",
+    )
+    z = (input - target).abs()
+    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
+    return _apply_loss_reduction(loss, reduction)  # type: ignore[arg-type]
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out
@@ -455,6 +502,84 @@ def threshold(
         raise NotImplementedError
 
     return torch.where(a <= threshold, value, a)
+
+
+# CompositeImplicitAutograd - don't register decomp
+# No elementwise type promotion - core op doesn't explicitly type promote
+def triplet_margin_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    margin: float = 1.0,
+    p: float = 2,
+    eps: float = 1e-6,
+    swap: bool = False,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+
+    # torch.nn.functional.triplet_margin_with_distance_loss has no ref defined
+    # since it's a pure Python implementation.  Use this helper instead.
+    return _triplet_margin_with_distance_loss(
+        anchor=anchor,
+        positive=positive,
+        negative=negative,
+        distance_function=lambda x, y: torch.pairwise_distance(x, y, p, eps),
+        margin=margin,
+        swap=swap,
+        reduction=reduction,
+    )
+
+
+# Pure Python impl - don't register decomp and don't add a ref.  Defined as a
+# helper here since triplet_margin_loss can be nicely implemented with it.
+def _triplet_margin_with_distance_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    *,
+    distance_function: Optional[
+        Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
+    ] = None,
+    margin: float = 1.0,
+    swap: bool = False,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    _check_reduction_value(reduction)
+
+    a_dim = anchor.ndim
+    p_dim = positive.ndim
+    n_dim = negative.ndim
+    check(
+        a_dim == p_dim and p_dim == n_dim,
+        lambda: (
+            f"The anchor, positive, and negative tensors are expected to have "
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs"
+        ),
+    )
+
+    if distance_function is None:
+        distance_function = torch.pairwise_distance
+
+    dist_pos = distance_function(anchor, positive)
+    dist_neg = distance_function(anchor, negative)
+    # The distance swap is described in the paper "Learning shallow
+    # convolutional feature descriptors with triplet losses" by V. Balntas, E.
+    # Riba et al.  If True, and if the positive example is closer to the
+    # negative example than the anchor is, swaps the positive example and the
+    # anchor in the loss computation.
+    if swap:
+        dist_swap = distance_function(positive, negative)
+        dist_neg = torch.minimum(dist_neg, dist_swap)
+    loss = torch.clamp_min(margin + dist_pos - dist_neg, 0)
+    return _apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(torch.ops.aten.hardtanh)
@@ -538,7 +663,8 @@ def poisson_nll_loss(
     Reference implementation of torch.nn.functional.poisson_nll_loss
     """
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)

@@ -124,6 +124,11 @@ numba==0.55.2 ; python_version == "3.10"
 #Pinned versions: 1.9.0
 #test that import:
 
+opt-einsum==3.3
+#Description: Python library to optimize tensor contraction order, used in einsum
+#Pinned versions: 3.3
+#test that import: test_linalg.py
+
 #pillow
 #Description:  Python Imaging Library fork
 #Pinned versions:

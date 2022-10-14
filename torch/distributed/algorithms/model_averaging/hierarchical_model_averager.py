@@ -67,7 +67,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         >>> # Register a post-localSGD communication hook.
         >>> # Assume that each machine has 4 GPUs, then each intra-machine subgroup has a size of 4.
         >>> subgroup, _ = dist.new_subgroups()
-        >>> state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>> state = PostLocalSGDState(process_group=None, subgroup=subgroup, start_localSGD_iter=100)
         >>> model.register_comm_hook(state, post_localSGD_hook)
         >>>
         >>> # Average parameters among each group of 8 processes every 4 iterations, and among all

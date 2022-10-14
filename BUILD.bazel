@@ -1748,7 +1748,6 @@ cc_library(
 # Torch integration tests rely on a labeled data set from the MNIST database.
 # http://yann.lecun.com/exdb/mnist/
 
-# imethod.cpp is excluded since torch/csrc/deploy* build is not yet supported.
 cpp_api_tests = glob(
     ["test/cpp/api/*.cpp"],
     exclude = [
