@@ -171,7 +171,7 @@ sparse_support_notes = {
 .. warning::
     Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported,
     or may not have autograd support. If you notice missing functionality please
-    `open an issue <https://github.com/pytorch/pytorch/issues>`
+    open an `issue<https://github.com/pytorch/pytorch/issues>`
     """,
 }
 
@@ -545,7 +545,7 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 
 This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. If
 :attr:`input` is sparse the result will have the same layout and if :attr:`out`
-is provided it should have the same layout as :attr:`input`.
+is provided it must have the same layout as :attr:`input`.
 
 {sparse_beta_warning}
 
