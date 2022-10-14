@@ -17,8 +17,8 @@ import typing as t
 
 import logging
 
-logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
 def aten_to_dtype(self, dtype: torch.dtype, **kwargs):
     if len(kwargs) > 0 or not dtype:
@@ -244,7 +244,7 @@ class NvFuserBackend:
         # "lowering to prims" and "trace execution" are grouped into this function, as they are both input dependent
 
         if graph_module in self.prim_decomp_cache:
-            logging.debug("prim_decomp_cache hit!")
+            logger.debug("prim_decomp_cache hit!")
             prim_module = self.prim_decomp_cache[graph_module]
         else:
             prim_graph = torch.fx.Graph()
@@ -252,18 +252,18 @@ class NvFuserBackend:
             prim_module = torch.fx.GraphModule(graph_module, prim_graph)
             self.prim_decomp_cache[graph_module] = prim_module
 
-            logging.debug("Lower to prims graph: ", prim_module.code)
+            logger.debug("Lower to prims graph: ", prim_module.code)
 
         # invokes trace executor for running the prim graph
         return execute(prim_module, *args, executor="nvfuser")
 
     def compile(self, graph_module: GraphModule) -> GraphModule:
         # entry function for nvFuser backend
-        logging.debug("Compiling graph_module: ", graph_module.code)
+        logger.debug("Compiling graph_module: ", graph_module.code)
 
         # FX graph based partitioning based on nvfuser supported ops
         if graph_module in self.partitioner_cache:
-            logging.debug("partitioner_cache hit!")
+            logger.debug("partitioner_cache hit!")
             fused_graph_module = self.partitioner_cache[graph_module]
         else:
             partitioner = CapabilityBasedPartitioner(
