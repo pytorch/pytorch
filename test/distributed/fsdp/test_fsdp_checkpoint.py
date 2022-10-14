@@ -71,7 +71,6 @@ class TestFSDPCheckpoint(FSDPTest):
                     ckpt_wrapper = offload_wrapper
                 else:
                     ckpt_wrapper = checkpoint_wrapper
-                    pass
 
                 l1 = ckpt_wrapper(l1)
                 l2 = ckpt_wrapper(l2)

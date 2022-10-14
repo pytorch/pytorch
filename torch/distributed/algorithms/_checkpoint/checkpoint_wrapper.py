@@ -251,9 +251,9 @@ def apply_activation_checkpointing(
             nn.Linear(10, 10), nn.Linear(10, 10), nn.Linear(10, 10)
         )
         check_fn = lambda l: isinstance(l, nn.Linear)
-        # Checkpoint activations
+        # checkpoint activations
         apply_activation_checkpointing(model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn)
-        # Or Offload activations to CPU
+        # Or offload activations to CPU
         apply_activation_checkpointing(model, checkpoint_wrapper_fn=offload_wrapper, check_fn=check_fn)
     Args:
         model (nn.Module):
