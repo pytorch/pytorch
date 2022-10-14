@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/csrc/jit/mobile/module.h>
 
 namespace torch {

@@ -113,7 +113,7 @@ struct ActivityTraceWrapper {
 #endif
 };
 
-using ActivitySet = std::set<torch::profiler::impl::ActivityType>;
+using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
