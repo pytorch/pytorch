@@ -1456,6 +1456,46 @@ workflows:
               ignore:
                 - nightly
                 - postnightly
+      - mac_test:
+          name: macos-12-py3-x86-64-test-1-2-default
+          build-environment: macos-12-py3-x86-64
+          xcode-version: "13.3.1"
+          shard-number: "1"
+          num-test-shards: "2"
+          requires:
+            - macos-12-py3-x86-64-build
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
+      - mac_test:
+          name: macos-12-py3-x86-64-test-2-2-default
+          build-environment: macos-12-py3-x86-64
+          xcode-version: "13.3.1"
+          shard-number: "2"
+          num-test-shards: "2"
+          requires:
+            - macos-12-py3-x86-64-build
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
+      - mac_test:
+          name: macos-12-py3-x86-64-test-1-1-functorch
+          build-environment: macos-12-py3-x86-64
+          xcode-version: "13.3.1"
+          shard-number: "1"
+          num-test-shards: "1"
+          test-config: functorch
+          requires:
+            - macos-12-py3-x86-64-build
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - mac_build:
           name: macos-12-py3-x86-64-lite-interpreter-build-test
           build-environment: macos-12-py3-lite-interpreter-x86-64
