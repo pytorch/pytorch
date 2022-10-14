@@ -1174,8 +1174,7 @@
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
-    NestedTensorCPU: bmm_nested
-    NestedTensorCUDA: bmm_nested_cuda
+    NestedTensorCPU, NestedTensorCUDA: bmm_nested
   tags: canonical
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
@@ -4894,6 +4893,7 @@
   dispatch:
     CompositeExplicitAutograd: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
+    NestedTensorCPU, NestedTensorCUDA: squeeze_nested
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
   variants: function, method
@@ -4902,6 +4902,7 @@
   dispatch:
     CompositeExplicitAutograd: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
+    NestedTensorCPU, NestedTensorCUDA: squeeze_dim_nested
   tags: canonical
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
@@ -5532,6 +5533,7 @@
     CompositeExplicitAutograd: unsqueeze
     SparseCPU, SparseCUDA: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
+    NestedTensorCPU, NestedTensorCUDA: unsqueeze_nested
   tags: canonical
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
@@ -8787,13 +8789,6 @@
     MPS: max_mps
     QuantizedCPU: max_quantized_cpu
 
-# Not to be confused with binary op `max.out`. Commented because of failed CI
-# FIXME: enable this
-#- func: max.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-#  device_check: NoCheck   # TensorIterator
-#  dispatch:
-#    CompositeExplicitAutograd: max_unary_out
-
 - func: fmax(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmax.out
   device_check: NoCheck   # TensorIterator
@@ -8828,6 +8823,12 @@
 
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+
+- func: max.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU, CUDA: max_unary_out
+    QuantizedCPU: max_quantized_unary_out
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
   structured_delegate: minimum.out

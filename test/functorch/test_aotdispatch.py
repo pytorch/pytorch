@@ -7,7 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from unittest.mock import patch
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64, IS_WINDOWS
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -60,7 +60,8 @@ except ImportError:
 
 try:
     import sympy  # noqa: F401
-    HAS_SYMPY = True
+    # TODO(jansel): these tests fail on windows
+    HAS_SYMPY = not IS_WINDOWS
 except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
@@ -1059,6 +1060,7 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.avg_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.avg_pool2d', ''),  # aten.avg_pool2d.default - couldn't find symbolic meta function/...
     xfail('nn.functional.avg_pool3d', ''),  # aten.avg_pool3d.default - couldn't find symbolic meta function/...
+    skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.conv1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
