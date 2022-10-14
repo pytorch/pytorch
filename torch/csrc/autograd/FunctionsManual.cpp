@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
@@ -830,39 +831,43 @@ Tensor logcumsumexp_backward(
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
-  IntArrayRef sizes;
+  c10::SymIntArrayRef sizes;
   at::TensorOptions o;
   for (const auto& v : grads) {
     if (v.defined()) {
-      sizes = v.sizes();
+      sizes = v.sym_sizes();
       o = static_cast<Tensor>(v).options();
       break;
     }
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }
 
-Tensor unsqueeze_to(const Tensor& self, IntArrayRef sizes) {
+Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
-  int64_t nDims = sizes.size();
+  int64_t nDims = sym_sizes.size();
   for (const auto dim : c10::irange(nDims)) {
-    if (sizes[dim] == 1) {
+    if (sym_sizes[dim] == 1) {
       result = result.unsqueeze(dim);
     }
   }
   return result;
 }
 
-Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
+Tensor unsqueeze_to(
+    const Tensor& self,
+    int64_t dim,
+    c10::SymIntArrayRef sym_sizes) {
+  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to
   // avoided unsqueezing in the backward.
-  if (sizes.size() > 0 && sizes[dim] == 1) {
+  if (sym_sizes.size() > 0 && sym_sizes[dim] == 1) {
     return self.unsqueeze(dim);
   }
   return self;
@@ -1198,7 +1203,7 @@ Tensor convolution_backward_jvp_grad_bias(
 
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
-// set, this function returns its strides or throws an error if the tensor
+// set, this function returns its strides or an empty array if the tensor
 // is sparse. If requires_grad is not set, an empty array is returned since
 // there will be no backward pass. There has one special case, if input is
 // MKLDNN tensor and has requires_grad set, just return an empty array, the
@@ -1219,17 +1224,9 @@ at::SymIntArrayRef strides_or_error(
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
   if (input.requires_grad()) {
-    TORCH_CHECK(
-        !input.is_sparse(),
-        "The backward pass for this operation requires the '",
-        input_name,
-        "' tensor to be strided, but a sparse tensor was given instead. ",
-        "Please either use a strided tensor or set requires_grad=False for '",
-        input_name,
-        "'");
     if (input.is_mkldnn())
       return {};
-    if (input.is_sparse_csr())
+    if (input.is_sparse() || at::sparse_csr::is_sparse_compressed(input))
       return {};
     return input.sym_strides();
   } else {
@@ -2842,21 +2839,27 @@ Tensor as_strided_backward(
 
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
-      std::min(input_geometry.sym_storage_offset(), sym_storage_offset);
+      // TODO: symint-ify. Do we need a min() and max() for SymInts?
+      input_geometry.sym_storage_offset().min(sym_storage_offset);
   auto inp_effective_offset =
       input_geometry.sym_storage_offset() - shared_offset;
   auto out_effective_offset = sym_storage_offset - shared_offset;
-  auto base_size = std::max(
-      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
-      _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
-  auto storage = grad.new_empty_symint(c10::SymIntArrayRef(base_size));
-  storage.zero_();
+  auto base_size1 =
+      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset);
+  auto base_size2 =
+      _min_storage_size(out_sizes_, out_strides_, out_effective_offset);
+  auto base_size = base_size1.max(base_size2);
+  auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
-        at::arange(0, base_size, grad.options().dtype(at::kLong));
+        // TODO: should we symint-ify arange? Need SymScalar.
+        at::arange(
+            0,
+            base_size.guard_int(__FILE__, __LINE__),
+            grad.options().dtype(at::kLong));
   }
 
   // Step (2): use output geometry to scatter gradients into storage

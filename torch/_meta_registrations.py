@@ -81,6 +81,11 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 
+@register_meta(aten.randint.default)
+def meta_randint(high, size, *, dtype=torch.long, **kwargs):
+    return torch.empty(size, dtype=dtype, **kwargs)
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
@@ -110,8 +115,14 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@register_meta([aten.max.default, aten.min.default])
+@register_meta([aten.max.default, aten.max.unary_out])
+@out_wrapper()
 def meta_max(self):
+    return self.new_empty(())
+
+
+@register_meta([aten.min.default])
+def meta_min(self):
     return self.new_empty(())
 
 
@@ -565,8 +576,8 @@ def meta_index_Tensor(self, indices):
     for i, index in enumerate(indices):
         if index is not None:
             check(
-                index.dtype in [torch.long, torch.int8, torch.bool],
-                lambda: "tensors used as indices must be long, byte or bool tensors",
+                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
             if index.dtype in [torch.int8, torch.bool]:
                 nonzero = index.nonzero()
