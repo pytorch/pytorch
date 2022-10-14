@@ -98,14 +98,18 @@ def define_targets(rules):
             ":tags.yaml",
             ":ts_native_functions.cpp",
             ":ts_native_functions.yaml",
+            "//tools/onnx/diagnostics/templates/rules.h.in",
+            "//tools/onnx/diagnostics/templates/rules.py.in",
+            "torch/onnx/_internal/diagnostics/rules.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
-        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
+        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY + GENERATED_ONNX_DIAGNOSTICS_RULES,
         cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
-              "--gen_lazy_ts_backend",
+              "--gen_lazy_ts_backend" +
+              "--gen_onnx_diagnostics",
     )
 
     rules.cc_library(
@@ -290,3 +294,8 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
+
+GENERATED_ONNX_DIAGNOSTICS_RULES = [
+    "torch/csrc/onnx/diagnostics/generated/rules.h",
+    "torch/onnx/_internal/diagnostics/generated/rules.py"
+]

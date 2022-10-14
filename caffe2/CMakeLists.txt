@@ -456,6 +456,9 @@ add_custom_command(
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyNonNativeIr.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
+    "${TORCH_ROOT}/torch/onnx/_internal/diagnostics/rules.yaml"
+    "${TOOLS_PATH}/onnx/templates/rules.h.in"
+    "${TOOLS_PATH}/onnx/templates/rules.py.in"
     ${autograd_python}
     ${autograd_yaml}
     ${autograd_templates}
