@@ -4,6 +4,7 @@ Opset 9 is supported by ONNX release 1.4.1
 release on 01/23/19
 """
 
+import builtins
 import functools
 import math
 import sys
@@ -1849,32 +1850,34 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
     )
 
 
-@_onnx_symbolic("aten::_pad_circular")
 @_beartype.beartype
-def _pad_circular(g: jit_utils.GraphContext, input, pad):
+def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
     padding = _convert_padding_node(pad)
     assert len(padding) % 2 == 0
     ndim = len(padding) // 2
 
     cur = input
     for idx in range(ndim):
-        pad_l = padding[-(2 * idx + 1)]
-        pad_r = padding[-(2 * idx + 2)]
-
+        pad_r = padding[-(2 * idx + 1)]
+        pad_l = padding[-(2 * idx + 2)]
+        # get size for targeting the last idx, as Slice don't take start=[-1], end=[-1]
+        size = symbolic_helper._get_tensor_sizes(input)
         tensors = []
         if pad_l > 0:
             left = symbolic_helper._slice_helper(
-                g, cur, axes=[2 + idx], starts=[-(pad_l + 1)], ends=[-1]
+                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[size[2 + idx]]
             )
             tensors.append(left)
 
         if pad_l < 0 or pad_r < 0:
+            start = builtins.max(0, -pad_l)
+            end = -(builtins.max(0, -pad_r))
             middle = symbolic_helper._slice_helper(
                 g,
                 cur,
                 axes=[2 + idx],
-                starts=[max(0, -pad_l)],
-                ends=[-(1 + max(0, -pad_r))],
+                starts=[start],
+                ends=[end],
             )
             tensors.append(middle)
         else:
@@ -1919,7 +1922,13 @@ def replication_pad(g: jit_utils.GraphContext, input, padding):
 
 @_onnx_symbolic("aten::pad")
 @_beartype.beartype
-def pad(g: jit_utils.GraphContext, input, pad, mode, value):
+def pad(
+    g: jit_utils.GraphContext,
+    input: _C.Value,
+    pad: _C.Value,
+    mode: _C.Value,
+    value: _C.Value,
+):
     mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)
