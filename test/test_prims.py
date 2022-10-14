@@ -734,6 +734,53 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_nvprims_view(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((3, 4, 5))
+
+        def func1(a):
+            return a.view(tuple(reversed(a.shape)))
+
+        def func2(a):
+            return a.reshape(tuple(reversed(a.shape)))
+
+        def func3(a):
+            return torch.view_copy(a, tuple(reversed(a.shape)))
+
+        def func4(a):
+            return torch.reshape(a, tuple(reversed(a.shape)))
+
+        def func5(a):
+            return torch.ops.aten.view.default(a, tuple(reversed(a.shape)))
+
+        def func6(a):
+            return torch.ops.aten._unsafe_view.default(a, tuple(reversed(a.shape)))
+
+        def func7(a):
+            return torch.ops.aten.view_copy.default(a, tuple(reversed(a.shape)))
+
+        for func in (func1, func2, func3, func4, func5, func6, func7):
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(a)
+
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_nvprims_view = any(
+                torch.ops.nvprims.view.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertTrue(includes_nvprims_view)
+
+            # Try executing the graph
+            out = execute(gm, a, executor="strictly_nvfuser")
+            self.assertEqual(out, func(a))
+
+    @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.float16)
     def test_cpu_tensor(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
