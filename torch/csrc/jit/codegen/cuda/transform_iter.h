@@ -229,7 +229,8 @@ class TORCH_CUDA_CU_API BestEffortReplay {
   //    I02->I12
   //  }
   //
-  bool skip_swizzle_ = true;
+  bool skip_replay_swizzle_ = true;
+  bool skip_target_swizzle_ = true;
 
   bool inReplayForwardMap(IterDomain* id) const {
     return replay_forward_id_map_.find(id) != replay_forward_id_map_.end();
@@ -279,7 +280,8 @@ class TORCH_CUDA_CU_API BestEffortReplay {
       std::unordered_map<IterDomain*, IterDomain*> target2replay_map,
       std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map = {},
       std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map = {},
-      bool skip_swizzle = true);
+      bool skip_replay_swizzle = true,
+      bool skip_target_swizzle = true);
 
   // Return iter domain map from target_domain IDs to their "replayed"
   // replay_domain IDs. If not in map, was not replayed.
@@ -316,7 +318,9 @@ class TORCH_CUDA_CU_API BestEffortReplay {
       const TensorView* consumer,
       const TensorView* producer,
       int producer_compute_at_axis,
-      const RootDomainMap& root_map);
+      const RootDomainMap& root_map,
+      bool skip_consumer_swizzle = true,
+      bool skip_producer_swizzle = true);
 
   // Runs a best effort replay that ignores broadcast axes that appear in
   // consumer that are not mapped to producer in root_map.
@@ -324,7 +328,9 @@ class TORCH_CUDA_CU_API BestEffortReplay {
       const TensorView* producer,
       const TensorView* consumer,
       int consumer_compute_at_axis,
-      const RootDomainMap& root_map);
+      const RootDomainMap& root_map,
+      bool skip_producer_swizzle = true,
+      bool skip_consumer_swizzle = true);
 
   // Find the first position i where td1[i] is not the same as td2[i]. "Same"
   // means the DAG and input IDs to generate td1[i] and td2[i] are the same.

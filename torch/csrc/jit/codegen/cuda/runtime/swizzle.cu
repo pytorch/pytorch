@@ -54,6 +54,25 @@ DEVICE_INLINE Index2D unXor(Index2D in, Index2DInt unit_dim) {
   return Xor(in, unit_dim);
 }
 
+// Block cyclic shift swizzle: (bank conflict removal)
+//  Apply cyclic shift within blocks:
+//   Example: cyclic shift
+//    1   2  3  4       1   2   3   4
+//    5   6  7  8       8   5   6   7
+//    9  10 11 12  =>   11  12  9  10
+//    13 14 15 16       14  15  16 13
+// Note:
+DEVICE_INLINE Index2D CyclicShift(Index2D in, Index2DInt unit_dim) {
+  // Need to validate in swizzle configuration:
+  //  unit_dim.x == unit_dim.y
+  return Index2D(in.x, (in.y + in.x) % unit_dim.x);
+}
+
+// Inverse of CyclicShift
+DEVICE_INLINE Index2D unCyclicShift(Index2D in, Index2DInt unit_dim) {
+  return Index2D(in.x, (in.y + unit_dim.x - in.x) % unit_dim.x);
+}
+
 // Scatter swizzle:
 //   Corresponds to the data layout out of ldmatrix intrinsic.
 //   supported dimensions are : 8x4, 16x4, 32x4

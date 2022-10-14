@@ -712,9 +712,17 @@ TensorView* TensorView::swizzle(
 
     // Check size constraints based on swizzle type
     if (swizzle_type == Swizzle2DType::Transpose ||
-        swizzle_type == Swizzle2DType::XOR) {
+        swizzle_type == Swizzle2DType::XOR ||
+        swizzle_type == Swizzle2DType::CyclicShift) {
       TORCH_INTERNAL_ASSERT(
           in_x_size == in_y_size, "Swizzle: equal dim iterdomains only");
+    }
+
+    if (swizzle_type == Swizzle2DType::XOR) {
+      // XOR swizzle only support power of 2 swizzle unit sizes:
+      bool is_pow_of_2 = in_x_size > 1 && ((in_x_size & (in_x_size - 1)) == 0);
+      TORCH_INTERNAL_ASSERT(
+          is_pow_of_2, "XOR swizzle only support power of 2 domain sizes.");
     }
 
     if (swizzle_type == Swizzle2DType::Scatter) {

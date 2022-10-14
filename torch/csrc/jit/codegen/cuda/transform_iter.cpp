@@ -275,11 +275,13 @@ BestEffortReplay::BestEffortReplay(
     std::unordered_map<IterDomain*, IterDomain*> target2replay_map,
     std::unordered_map<IterDomain*, IterDomain*> replay_forward_id_map,
     std::unordered_map<IterDomain*, IterDomain*> target_forward_id_map,
-    bool skip_swizzle)
+    bool skip_replay_swizzle,
+    bool skip_target_swizzle)
     : target2replay_id_map_(std::move(target2replay_map)),
       replay_forward_id_map_(std::move(replay_forward_id_map)),
       target_forward_id_map_(std::move(target_forward_id_map)),
-      skip_swizzle_(skip_swizzle) {
+      skip_replay_swizzle_(skip_replay_swizzle),
+      skip_target_swizzle_(skip_target_swizzle) {
   for (auto entry : target2replay_id_map_) {
     leaf_ids_[entry.second] = counter++;
   }
@@ -342,7 +344,7 @@ BestEffortReplay::BestEffortReplay(
     }
   }
 
-  if (skip_swizzle_) {
+  if (skip_target_swizzle_ || skip_replay_swizzle_) {
     // Progress through all swizzle ops if we are skipping
     //  swizzles on the mapping.
     skipSwizzles(target_id2expr_map, replay_id2expr_map);
@@ -524,7 +526,8 @@ BestEffortReplay::BestEffortReplay(
 
     // Need to match swizzle type and parameters if
     //  not skipping swizzles in this mapping pass.
-    if (!skip_swizzle_ && replay_expr->etype() == ExprType::Swizzle2D) {
+    if (!(skip_replay_swizzle_ || skip_target_swizzle_) &&
+        replay_expr->etype() == ExprType::Swizzle2D) {
       auto r_swizzle_2d = replay_expr->as<Swizzle2D>();
       auto t_swizzle_2d = target_expr->as<Swizzle2D>();
       if (!(r_swizzle_2d->swizzleType() == t_swizzle_2d->swizzleType())) {
@@ -562,7 +565,7 @@ BestEffortReplay::BestEffortReplay(
       }
     }
 
-    if (skip_swizzle_) {
+    if (skip_target_swizzle_ || skip_replay_swizzle_) {
       // Progress through all swizzle ops if we are skipping
       //  swizzles on the mapping.
       skipSwizzles(target_id2expr_map, replay_id2expr_map);
@@ -896,7 +899,9 @@ BestEffortReplay BestEffortReplay::replayCasP(
     const TensorView* consumer,
     const TensorView* producer,
     int producer_compute_at_axis,
-    const RootDomainMap& root_map) {
+    const RootDomainMap& root_map,
+    bool skip_consumer_swizzle,
+    bool skip_producer_swizzle) {
   if (producer_compute_at_axis < 0)
     producer_compute_at_axis += (int)producer->nDims() + 1;
 
@@ -943,7 +948,9 @@ BestEffortReplay BestEffortReplay::replayCasP(
       producer_CA_ids,
       p2c_root_map,
       consumer_forwarding_info.forwarding_map,
-      producer_forwarding_info.forwarding_map);
+      producer_forwarding_info.forwarding_map,
+      skip_consumer_swizzle,
+      skip_producer_swizzle);
 
   consumer_replay.addComplimentLeafIDs(
       consumer_forwarding_info.forwarding_map,
@@ -958,7 +965,9 @@ BestEffortReplay BestEffortReplay::replayPasC(
     const TensorView* producer,
     const TensorView* consumer,
     int consumer_compute_at_axis,
-    const RootDomainMap& root_map) {
+    const RootDomainMap& root_map,
+    bool skip_producer_swizzle,
+    bool skip_consumer_swizzle) {
   if (consumer_compute_at_axis < 0)
     consumer_compute_at_axis += (int)consumer->nDims() + 1;
   TORCH_INTERNAL_ASSERT(
@@ -997,7 +1006,9 @@ BestEffortReplay BestEffortReplay::replayPasC(
       consumer_CA_ids,
       c2p_root_map,
       producer_forwarding_info.forwarding_map,
-      consumer_forwarding_info.forwarding_map);
+      consumer_forwarding_info.forwarding_map,
+      skip_producer_swizzle,
+      skip_consumer_swizzle);
 
   producer_replay.addComplimentLeafIDs(
       producer_forwarding_info.forwarding_map,
@@ -1015,11 +1026,16 @@ void BestEffortReplay::skipSwizzles(
   while (updated) {
     updated = false;
     for (auto it : target2replay_id_map_) {
-      if (isSwizzleInput(it.first, target_id2expr) ||
-          isSwizzleInput(it.second, replay_id2expr)) {
+      if ((isSwizzleInput(it.first, target_id2expr) && skip_target_swizzle_) ||
+          (isSwizzleInput(it.second, replay_id2expr) && skip_replay_swizzle_)) {
         updated = true;
-        auto new_target = getSwizzleFinalOutput(it.first, target_id2expr);
-        auto new_replay = getSwizzleFinalOutput(it.second, replay_id2expr);
+
+        auto new_target = skip_target_swizzle_
+            ? getSwizzleFinalOutput(it.first, target_id2expr)
+            : it.first;
+        auto new_replay = skip_replay_swizzle_
+            ? getSwizzleFinalOutput(it.second, replay_id2expr)
+            : it.second;
 
         // new_target and new_replay will now be the final output
         //  skipping all swizzles in between. We'd need to

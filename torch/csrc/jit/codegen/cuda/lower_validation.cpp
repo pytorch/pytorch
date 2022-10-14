@@ -311,6 +311,13 @@ class VectorizeValidator : public OptInDispatch {
     domains_.insert(m->inner());
   }
 
+  void handle(Swizzle2D* swizzle) final {
+    if (swizzle->outX() == vectorized_id_ || swizzle->inX() == vectorized_id_) {
+      // Do not (yet) allow vectorization across any swizzled id.
+      is_valid = false;
+    }
+  }
+
   // For the producer tensor, it's indexed first by transformed like
   // the consumer. So, to find its contig merged domain, use the
   // consumer TensorDomain with the producer contiguity info.

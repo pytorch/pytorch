@@ -1076,6 +1076,9 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
     case Swizzle2DType::XOR:
       os << "Xor";
       break;
+    case Swizzle2DType::CyclicShift:
+      os << "CyclicShift";
+      break;
     case Swizzle2DType::Scatter:
       os << "Scatter";
       break;
