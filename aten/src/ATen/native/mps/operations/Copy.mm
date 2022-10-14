@@ -210,8 +210,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
                                          options:options
                                      deallocator:nil];
     sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
-    if (src_.is_view() || !src_.is_contiguous())
-      sourceOffset += src_.storage_offset() * src_.itemsize();
+    sourceOffset += src_.storage_offset() * src_.itemsize();
 
     stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     [sourceBuffer release];
