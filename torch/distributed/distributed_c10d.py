@@ -3366,7 +3366,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
     group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
 
     with record_function(f"## process_group:init with ranks: {ranks}"):
-        pg = _new_process_group_helper(
+        pg, pg_store = _new_process_group_helper(
             group_world_size,
             group_rank,
             ranks,
