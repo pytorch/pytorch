@@ -180,9 +180,9 @@ Tensor linear_pointwise_run(
     const Tensor& input,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
-    std::string attr,
-    std::vector<c10::optional<at::Scalar>> scalars,
-    c10::optional<std::string> algorithm) {
+    c10::string_view attr,
+    torch::List<c10::optional<at::Scalar>> scalars,
+    c10::optional<c10::string_view> algorithm) {
   auto input_size = input.sizes();
 
   const int64_t dim = input.dim();

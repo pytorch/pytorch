@@ -36,41 +36,41 @@ std::vector<int64_t> pool_output_sizes(
 #if AT_MKLDNN_ENABLED()
 
 #define ATTR_FUNC(NAME)                              \
-  [](std::vector<c10::optional<at::Scalar>> scalars, \
-     c10::optional<std::string> algorithm) {         \
+  [](torch::List<c10::optional<at::Scalar>> scalars, \
+     c10::optional<c10::string_view> algorithm) {    \
     return ideep::attr_t::fuse_##NAME();             \
   }
 
 AttrFunction attr_func_leaky_relu =
-    [](std::vector<c10::optional<at::Scalar>> scalars,
-       c10::optional<std::string> algorithm) {
+    [](torch::List<c10::optional<at::Scalar>> scalars,
+       c10::optional<c10::string_view> algorithm) {
       TORCH_CHECK(
-          scalars.size() == 1 && scalars[0].has_value(),
+          scalars.size() == 1 &&
+              scalars[0].get().toOptional<at::Scalar>().has_value(),
           "leaky_relu is expected to have one scalar input: negative_slope");
-      auto alpha_value = scalars[0].value().to<float>();
+      auto alpha_value =
+          scalars[0].get().toOptional<at::Scalar>().value().to<float>();
       return ideep::attr_t::fuse_relu(1.0, alpha_value);
     };
 
 AttrFunction attr_func_hardtanh =
-    [](std::vector<c10::optional<at::Scalar>> scalars,
-       c10::optional<std::string> algorithm) {
+    [](torch::List<c10::optional<at::Scalar>> scalars,
+       c10::optional<c10::string_view> algorithm) {
       TORCH_CHECK(
           scalars.size() == 2 &&
-              std::all_of(
-                  scalars.begin(),
-                  scalars.end(),
-                  [](c10::optional<at::Scalar> item) {
-                    return item.has_value();
-                  }),
+              scalars[0].get().toOptional<at::Scalar>().has_value() &&
+              scalars[1].get().toOptional<at::Scalar>().has_value(),
           "hardtanh is expected to have two scalar input: min_val and max_val");
 
-      auto lower_bound_value = scalars[0].value().to<float>();
-      auto upper_bound_value = scalars[1].value().to<float>();
+      auto lower_bound_value =
+          scalars[0].get().toOptional<at::Scalar>().value().to<float>();
+      auto upper_bound_value =
+          scalars[1].get().toOptional<at::Scalar>().value().to<float>();
       return ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
     };
 
-AttrFunction attr_func_gelu = [](std::vector<c10::optional<at::Scalar>> scalars,
-                                 c10::optional<std::string> algorithm) {
+AttrFunction attr_func_gelu = [](torch::List<c10::optional<at::Scalar>> scalars,
+                                 c10::optional<c10::string_view> algorithm) {
   TORCH_CHECK(
       algorithm.has_value(),
       "gelu is expected to have one str input: algorithm");
@@ -87,8 +87,8 @@ AttrFunction attr_func_gelu = [](std::vector<c10::optional<at::Scalar>> scalars,
   return ideep::attr_t::fuse_gelu(1.0, 0.f, 0.f, gelu_type);
 };
 
-const std::map<std::string, AttrFunction>& fx_fusion_attr_map() {
-  static const std::map<std::string, AttrFunction> fusion_attr_map{
+const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map() {
+  static const std::map<c10::string_view, AttrFunction> fusion_attr_map{
       {"relu", ATTR_FUNC(relu)},
       {"sigmoid", ATTR_FUNC(sigmoid)},
       {"tanh", ATTR_FUNC(tanh)},
