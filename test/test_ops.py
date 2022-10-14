@@ -378,9 +378,15 @@ class TestCommon(TestCase):
         if executor == "nvfuser" and isinstance(op, ReductionPythonRefInfo):
             skip_zero_dim = True
 
-        # skip zero-dim tensors for some composites of reduction operations
-        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax", "_refs.sum_to_size"]
-        if executor == "nvfuser" and op.name in normalization_ops:
+        # skip zero-dim tensors for some composites of reduction operations and view
+        skip_zero_dim_ops = [
+            "_refs.softmax",
+            "_refs.logsumexp",
+            "_refs.log_softmax",
+            "_refs.sum_to_size",
+            "ops.nvprims.view",
+        ]
+        if executor == "nvfuser" and op.name in skip_zero_dim_ops:
             skip_zero_dim = True
 
         from torch._prims.executor import make_traced
@@ -1788,8 +1794,6 @@ data_dependent_op_tests = (
 
 aliasing_failures = (
     "histogramdd",
-    "nn.functional.pixel_shuffle",
-    "nn.functional.pixel_unshuffle",
 )
 
 # tests which have inconsistent fake tensor stride propagation
