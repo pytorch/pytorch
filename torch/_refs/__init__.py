@@ -114,6 +114,7 @@ __all__ = [
     "bitwise_or",
     "bitwise_right_shift",
     "bitwise_xor",
+    "clamp_min",
     # "complex",
     "copysign",
     "div",
@@ -911,7 +912,9 @@ def add(
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
-        if not utils.is_weakly_lesser_type(type(alpha), python_type):
+        if python_type != bool and not utils.is_weakly_lesser_type(
+            type(alpha), python_type
+        ):
             msg = (
                 "alpha argument of type {0} cannot be safely cast to type {1}!".format(
                     type(alpha), python_type
@@ -1676,10 +1679,7 @@ def where(
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
-    result = torch.empty_like(
-        a, requires_grad=a.requires_grad, memory_format=memory_format
-    )
-    copy_to(result, a)
+    result = prims.clone(a, memory_format=memory_format)
     return result
 
 
@@ -2407,8 +2407,13 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    dim = utils.canonicalize_dim(tensors[0].ndim, dim)
-    utils.validate_idx(tensors[0].ndim, dim)
+    for t in tensors:
+        # match logic in legacy_cat_wrap_dim
+        if t.ndim == 1 and t.size(0) == 0:
+            continue
+        dim = utils.canonicalize_dim(t.ndim, dim)
+        utils.validate_idx(t.ndim, dim)
+        break
 
     # Filters tensors with one dimension of length zero
     filtered = tuple(x for x in tensors if not (x.ndim == 1 and x.numel() == 0))
@@ -3516,7 +3521,22 @@ def t(a: TensorLikeType):
     return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
 
 
-T = torch.t  # alias
+# CompositeImplicitAutograd - don't register decomp
+@register_decomposition(torch.ops.aten.numpy_T)
+def T(a: TensorLikeType) -> TensorLikeType:
+    n = a.ndim
+    # n != 2 && n != 0 is deprecated in regular PyTorch.  Maybe T could even be
+    # defined as an alias for t:
+    # https://github.com/pytorch/pytorch/issues/86968
+    check(
+        n in (0, 2),
+        lambda: (
+            "The use of `x.T` on tensors of dimension other than 0 or 2 "
+            "to reverse their shape is not supported."
+        ),
+    )
+    transpose_dims = tuple(x for x in range(n - 1, -1, -1))
+    return a.permute(transpose_dims)
 
 
 @register_decomposition(torch.ops.aten.transpose, disable_meta=True)

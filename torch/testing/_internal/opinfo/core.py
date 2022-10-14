@@ -317,21 +317,16 @@ class ErrorInput(object):
         self.error_regex = error_regex
 
 
-@dataclass
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
     """
 
-    def __init__(self, name, op=None, is_attribute=False):
-        self.name = name
-        self.op = op if op is not None else _getattr_qual(torch, name)
-        if is_attribute:
-            self.method_variant = None
-            self.inplace_variant = None
-        else:
-            self.method_variant = getattr(torch.Tensor, name, None)
-            self.inplace_variant = getattr(torch.Tensor, name + "_", None)
+    def __init__(self, alias_name):
+        self.name = alias_name
+        self.op = _getattr_qual(torch, alias_name)
+        self.method_variant = getattr(torch.Tensor, alias_name, None)
+        self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
 
     def __call__(self, *args, **kwargs):
         return self.op(*args, **kwargs)
@@ -1064,7 +1059,7 @@ class OpInfo(object):
             )
 
         if self.aliases is not None:
-            self.aliases = tuple((a if type(a) is AliasInfo else AliasInfo(a)) for a in self.aliases)  # type: ignore[assignment]
+            self.aliases = tuple(AliasInfo(a) for a in self.aliases)  # type: ignore[assignment]
         else:
             self.aliases = ()
 
@@ -2424,52 +2419,39 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         )
 
     if self.ndimensional == SpectralFuncType.ND:
-        return [
-            SampleInput(
-                nd_tensor(),
-                kwargs=dict(
-                    s=(3, 10) if not is_fp16_or_chalf else (4, 8),
-                    dim=(1, 2),
-                    norm="ortho",
-                ),
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(norm="ortho")),
-            SampleInput(nd_tensor(), kwargs=dict(s=(8,))),
-            SampleInput(oned_tensor()),
-            *(
-                SampleInput(nd_tensor(), kwargs=dict(dim=dim))
-                for dim in [-1, -2, -3, (0, -1)]
-            ),
-        ]
+        yield SampleInput(
+            nd_tensor(),
+            s=(3, 10) if not is_fp16_or_chalf else (4, 8),
+            dim=(1, 2),
+            norm="ortho",
+        )
+        yield SampleInput(nd_tensor(), norm="ortho")
+        yield SampleInput(nd_tensor(), s=(8,))
+        yield SampleInput(oned_tensor())
+        yield from (SampleInput(nd_tensor(), dim=dim) for dim in [-1, -2, -3, (0, -1)])
     elif self.ndimensional == SpectralFuncType.TwoD:
-        return [
-            SampleInput(
-                nd_tensor(),
-                kwargs=dict(
-                    s=(3, 10) if not is_fp16_or_chalf else (4, 8),
-                    dim=(1, 2),
-                    norm="ortho",
-                ),
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(norm="ortho")),
-            SampleInput(
-                nd_tensor(), kwargs=dict(s=(6, 8) if not is_fp16_or_chalf else (4, 8))
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(dim=0)),
-            SampleInput(nd_tensor(), kwargs=dict(dim=(0, -1))),
-            SampleInput(nd_tensor(), kwargs=dict(dim=(-3, -2, -1))),
-        ]
+        yield SampleInput(
+            nd_tensor(),
+            s=(3, 10) if not is_fp16_or_chalf else (4, 8),
+            dim=(1, 2),
+            norm="ortho",
+        )
+        yield SampleInput(nd_tensor(), norm="ortho")
+        yield SampleInput(nd_tensor(), s=(6, 8) if not is_fp16_or_chalf else (4, 8))
+        yield SampleInput(nd_tensor(), dim=0)
+        yield SampleInput(nd_tensor(), dim=(0, -1))
+        yield SampleInput(nd_tensor(), dim=(-3, -2, -1))
     else:
-        return [
-            SampleInput(
-                nd_tensor(),
-                kwargs=dict(n=10 if not is_fp16_or_chalf else 8, dim=1, norm="ortho"),
-            ),
-            SampleInput(nd_tensor(), kwargs=dict(norm="ortho")),
-            SampleInput(nd_tensor(), kwargs=dict(n=7 if not is_fp16_or_chalf else 8)),
-            SampleInput(oned_tensor()),
-            *(SampleInput(nd_tensor(), kwargs=dict(dim=dim)) for dim in [-1, -2, -3]),
-        ]
+        yield SampleInput(
+            nd_tensor(),
+            n=10 if not is_fp16_or_chalf else 8,
+            dim=1,
+            norm="ortho",
+        )
+        yield SampleInput(nd_tensor(), norm="ortho")
+        yield SampleInput(nd_tensor(), n=7 if not is_fp16_or_chalf else 8)
+        yield SampleInput(oned_tensor())
+        yield from (SampleInput(nd_tensor(), dim=dim) for dim in [-1, -2, -3])
 
 
 SpectralFuncType = Enum("SpectralFuncType", ("OneD", "TwoD", "ND"))
