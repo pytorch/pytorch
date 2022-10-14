@@ -741,6 +741,7 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
 else
   install_torchvision
   install_torchdynamo
+  install_triton
   install_monkeytype
   test_python
   test_aten
