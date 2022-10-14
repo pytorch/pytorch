@@ -278,9 +278,7 @@ def _remove_empty_like_fill(gm: GraphModule):
     # If so, we replace the first argument of the `sub` node with a scalar
     for node in gm.graph.nodes:
         if node.op == "call_function":
-            if (
-                node.target == torch.ops.nvprims.sub.default
-            ):
+            if node.target == torch.ops.nvprims.sub.default:
                 # check if the first argument is a fill
                 if (
                     isinstance(node.args[0], torch.fx.Node)
