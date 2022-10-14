@@ -1,4 +1,3 @@
-from math import hypot
 import unittest
 from hypothesis import given
 from hypothesis.extra.numpy import mutually_broadcastable_shapes
@@ -14,7 +13,10 @@ import torch.cuda
 import torch.backends.mps
 
 
-AVAILABLE_BACKENDS = [backend_str for backend_str, backend in {"cuda": torch.cuda, "mps": torch.backends.mps}.items() if backend.is_available()]
+AVAILABLE_BACKENDS = [
+    backend_str for backend_str, backend in {"cuda": torch.cuda, "mps": torch.backends.mps}.items()
+    if backend.is_available()
+]
 
 
 @hypothesis.strategies.composite
