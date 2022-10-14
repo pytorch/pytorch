@@ -1018,7 +1018,7 @@ def get_selected_tests(options):
         )
 
     if options.functorch:
-        selected_tests = FUNCTORCH_TESTS
+        selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
     else:
         # Exclude all functorch tests otherwise
         options.exclude.extend(FUNCTORCH_TESTS)
