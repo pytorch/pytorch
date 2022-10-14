@@ -13,8 +13,8 @@ layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3
  * Input Textures
  */
 layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION sampler3D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION sampler3D uBias;
+layout(set = 0, binding = 2) uniform PRECISION sampler2D uKernel;
+layout(set = 0, binding = 3) uniform PRECISION sampler2D uBias;
 
 /*
  * Params Buffer
@@ -76,7 +76,7 @@ void main() {
   }
 
   vec4 sum[4];
-  sum[0] = texelFetch(uBias, ivec3(gpos.z, 0, 0), 0);
+  sum[0] = texelFetch(uBias, ivec2(gpos.z, 0), 0);
   for (int i = 1; i < 4; ++i) {
     sum[i] = sum[0];
   }
@@ -87,10 +87,10 @@ void main() {
     // During prepacking, the weight tensor has been permuted so that the
     // channel (IC) dim is along the x axis, and the batch (OC) dim is along
     // the z axis.
-    const vec4 ktex_0 = texelFetch(uKernel, ivec3(z + 0, gpos.z, 0), 0);
-    const vec4 ktex_1 = texelFetch(uKernel, ivec3(z + 1, gpos.z, 0), 0);
-    const vec4 ktex_2 = texelFetch(uKernel, ivec3(z + 2, gpos.z, 0), 0);
-    const vec4 ktex_3 = texelFetch(uKernel, ivec3(z + 3, gpos.z, 0), 0);
+    const vec4 ktex_0 = texelFetch(uKernel, ivec2(z + 0, gpos.z), 0);
+    const vec4 ktex_1 = texelFetch(uKernel, ivec2(z + 1, gpos.z), 0);
+    const vec4 ktex_2 = texelFetch(uKernel, ivec2(z + 2, gpos.z), 0);
+    const vec4 ktex_3 = texelFetch(uKernel, ivec2(z + 3, gpos.z), 0);
 
     for (int i = 0; i < 4; ++i) {
       const vec4 in_tex = texelFetch(uInput, ivec3(ipos[i], z4), 0);
