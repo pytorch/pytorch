@@ -510,7 +510,7 @@ vTensor pack_weights(
   vTensor v_weight{
       api::context(),
       weight_rearranged.sizes(),
-      StorageType::TEXTURE_2D,
+      quantized ? StorageType::TEXTURE_3D : StorageType::TEXTURE_2D,
       weight_arg.options(),
   };
 
@@ -535,7 +535,7 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
-      StorageType::TEXTURE_2D,
+      quantized ? StorageType::TEXTURE_3D : StorageType::TEXTURE_2D,
       weight.options(),
   };
 
