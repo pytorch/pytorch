@@ -3052,7 +3052,8 @@ class TestFrontend(JitTestCase):
         example_input_dict = {'key1': value1, 'key2': value2, 'key3': value3}
         example_input_dict_func = {'x': value1, 'y': value2}
         traced_model_1 = torch.jit.trace(model_1, example_kwarg_inputs=example_input_dict, strict=False)
-        traced_model_1_m = torch.jit.trace_module(model_1, {'forward': example_input_dict}, example_inputs_is_kwarg=True, strict=False)
+        traced_model_1_m = torch.jit.trace_module(
+            model_1, {'forward': example_input_dict}, example_inputs_is_kwarg=True, strict=False)
         traced_model_2 = torch.jit.trace(model_2, example_kwarg_inputs={'x': torch.rand([2]), 'y': torch.rand([2])})
         traced_func = torch.jit.trace(test_func, example_kwarg_inputs=example_input_dict_func, strict=False)
         res_1 = traced_model_1(**example_input_dict)
