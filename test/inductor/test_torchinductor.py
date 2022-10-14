@@ -65,6 +65,12 @@ except (
 ):
     pass
 
+if not HAS_CPU and not HAS_CPU:
+    if __name__ == "__main__":
+        sys.stderr.write("skipping tests because no working CPU or CUDA\n")
+        sys.exit(0)
+    raise unittest.SkipTest("requires CPU or CUDA compiler")
+
 aten = torch.ops.aten
 
 HAS_CUDA = False
