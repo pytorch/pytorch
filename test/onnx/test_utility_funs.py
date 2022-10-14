@@ -1162,10 +1162,7 @@ class TestUtilityFuns(_BaseTestCase):
         #       so we expect 3 constants with different scopes. The 3 constants are for the 3 layers.
         #       If CSE in exporter is improved later, this test needs to be updated.
         #       It should expect 1 constant, with same scope as root.
-        scope_prefix = (
-            f"test_utility_funs.TestUtilityFuns_opset{self.opset_version}."
-            "test_scope_of_constants_when_combined_by_cse_pass.<locals>"
-        )
+        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_constants_when_combined_by_cse_pass.<locals>"
         expected_root_scope_name = f"{scope_prefix}.N::"
         expected_layer_scope_name = f"{scope_prefix}.M::layers"
         expected_constant_scope_name = [
@@ -1215,10 +1212,7 @@ class TestUtilityFuns(_BaseTestCase):
         graph, _, _ = self._model_to_graph(
             N(), (torch.randn(2, 3)), input_names=[], dynamic_axes={}
         )
-        scope_prefix = (
-            f"test_utility_funs.TestUtilityFuns_opset{self.opset_version}."
-            "test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
-        )
+        scope_prefix = "test_utility_funs.TestUtilityFuns.test_scope_of_nodes_when_combined_by_cse_pass.<locals>"
         expected_root_scope_name = f"{scope_prefix}.N::"
         expected_layer_scope_name = f"{scope_prefix}.M::layers"
         expected_add_scope_names = [
