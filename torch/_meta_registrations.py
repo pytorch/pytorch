@@ -14,6 +14,8 @@ from torch._prims_common import (
 
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
+
+from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
@@ -79,6 +81,11 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 
+@register_meta(aten.randint.default)
+def meta_randint(high, size, *, dtype=torch.long, **kwargs):
+    return torch.empty(size, dtype=dtype, **kwargs)
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
@@ -108,8 +115,14 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@register_meta([aten.max.default, aten.min.default])
+@register_meta([aten.max.default, aten.max.unary_out])
+@out_wrapper()
 def meta_max(self):
+    return self.new_empty(())
+
+
+@register_meta([aten.min.default])
+def meta_min(self):
     return self.new_empty(())
 
 
@@ -555,6 +568,7 @@ def vdot(self, other):
 # get shape inference through structured kernels
 @register_meta(aten.index.Tensor, register_dispatcher=False)
 def meta_index_Tensor(self, indices):
+    check_no_bool_index_tensors(aten.index.Tensor, self, indices)
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
     # checkIndexTensorTypes and expandTensors
@@ -562,8 +576,8 @@ def meta_index_Tensor(self, indices):
     for i, index in enumerate(indices):
         if index is not None:
             check(
-                index.dtype in [torch.long, torch.int8, torch.bool],
-                lambda: "tensors used as indices must be long, byte or bool tensors",
+                index.dtype in [torch.long, torch.int, torch.int8, torch.bool],
+                lambda: "tensors used as indices must be long, int, byte or bool tensors",
             )
             if index.dtype in [torch.int8, torch.bool]:
                 nonzero = index.nonzero()
@@ -1202,6 +1216,45 @@ def arange(end, **kwargs):
 @register_meta(aten.arange.start)
 def arange_start(start, end, **kwargs):
     return aten.arange(end - start, **kwargs)
+
+
+@register_meta(aten.select.int)
+def meta_select(self, dim, index):
+    ndim = self.dim()
+    check(
+        ndim != 0, lambda: "select() cannot be applied to a 0-dim tensor.", IndexError
+    )
+
+    dim = dim if dim >= 0 else dim + ndim
+    size = self.size(dim)
+
+    check(
+        not (-index > size or index >= size),
+        lambda: f"select(): index {index} out of range for tensor of size "
+        f"{self.size()} at dimension {dim}",
+        IndexError,
+    )
+
+    index = index if index >= 0 else index + size
+
+    new_size = list(self.size())
+    new_stride = list(self.stride())
+
+    new_storage_offset = self.storage_offset() + index * new_stride[dim]
+    del new_size[dim]
+    del new_stride[dim]
+
+    return self.as_strided(new_size, new_stride, new_storage_offset)
+
+
+@register_meta(aten.select_scatter.default)
+def meta_select_scatter(self, src, dim, index):
+    return torch.empty_like(self)
+
+
+@register_meta(aten.slice_scatter.default)
+def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
+    return torch.empty_like(self)
 
 
 # We must also trigger meta registrations from PrimTorch ref

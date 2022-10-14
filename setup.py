@@ -968,6 +968,8 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
+        'sympy',
+        'networkx',
     ]
 
     extras_require = {
@@ -1130,6 +1132,8 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        "_inductor/codegen/*.h",
+        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
