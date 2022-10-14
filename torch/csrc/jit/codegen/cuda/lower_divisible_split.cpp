@@ -46,7 +46,7 @@ std::unordered_set<Split*> getAllDivisibleSplits(
         tv->domain()->domain().begin(),
         tv->domain()->domain().end(),
         [](IterDomain* id) {
-          return isParallelTypeVectorize(id->getParallelType());
+          return id->getParallelType() == ParallelType::Vectorize;
         });
 
     if (vec_id_it == tv->domain()->domain().end()) {
