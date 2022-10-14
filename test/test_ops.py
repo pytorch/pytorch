@@ -10,6 +10,7 @@ import contextlib
 from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
+from typing import Dict
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -377,9 +378,15 @@ class TestCommon(TestCase):
         if executor == "nvfuser" and isinstance(op, ReductionPythonRefInfo):
             skip_zero_dim = True
 
-        # skip zero-dim tensors for some composites of reduction operations
-        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax", "_refs.sum_to_size"]
-        if executor == "nvfuser" and op.name in normalization_ops:
+        # skip zero-dim tensors for some composites of reduction operations and view
+        skip_zero_dim_ops = [
+            "_refs.softmax",
+            "_refs.logsumexp",
+            "_refs.log_softmax",
+            "_refs.sum_to_size",
+            "ops.nvprims.view",
+        ]
+        if executor == "nvfuser" and op.name in skip_zero_dim_ops:
             skip_zero_dim = True
 
         from torch._prims.executor import make_traced
@@ -1103,8 +1110,10 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
+        dtype_error: Dict[torch.dtype, Exception] = dict()
 
-        def unsupported(dtype):
+        def unsupported(dtype, e):
+            dtype_error[dtype] = e
             unsupported_dtypes.add(dtype)
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.add(dtype)
@@ -1119,7 +1128,7 @@ class TestCommon(TestCase):
                     op.sample_inputs(device, dtype, requires_grad=requires_grad)
                 )
             except Exception as e:
-                unsupported(dtype)
+                unsupported(dtype, e)
                 continue
 
             for sample in samples:
@@ -1132,7 +1141,7 @@ class TestCommon(TestCase):
                     # NOTE: some ops will fail in forward if their inputs
                     #   require grad but they don't support computing the gradient
                     #   in that type! This is a bug in the op!
-                    unsupported(dtype)
+                    unsupported(dtype, e)
                     continue
 
                 # Checks for backward support in the same dtype, if the input has
@@ -1177,6 +1186,7 @@ class TestCommon(TestCase):
                     backward_tensor.backward(grad)
                     supported_backward_dtypes.add(dtype)
                 except Exception as e:
+                    dtype_error[dtype] = e
                     unsupported_backward_dtypes.add(dtype)
 
         # Checks that dtypes are listed correctly and generates an informative
@@ -1270,6 +1280,12 @@ class TestCommon(TestCase):
                     claimed_but_unsupported_backward
                 )
             )
+
+        all_claimed_but_unsupported = set.union(claimed_but_unsupported_backward, claimed_but_unsupported_forward)
+        if all_claimed_but_unsupported:
+            msg += "Unexpected failures raised the following errors:\n"
+            for dtype in all_claimed_but_unsupported:
+                msg += f"{dtype} - {dtype_error[dtype]}\n"
 
         self.fail(msg)
 
@@ -1594,6 +1610,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
+        '_refs.special.expit',
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
@@ -1622,6 +1639,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
+        '_refs.nn.functional.triplet_margin_loss',
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
@@ -1653,6 +1671,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
+        '_refs.special.expit',
         '_refs.square',
         '_refs.tensor_split',
         '_refs.to',
@@ -1775,8 +1794,6 @@ data_dependent_op_tests = (
 
 aliasing_failures = (
     "histogramdd",
-    "nn.functional.pixel_shuffle",
-    "nn.functional.pixel_unshuffle",
 )
 
 # tests which have inconsistent fake tensor stride propagation
@@ -1930,7 +1947,7 @@ class TestFakeTensor(TestCase):
 
             # TODO: enable check_aliasing, batch norm fails
             with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                with warnings.catch_warnings(), context():
+                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
                         sample.output_process_fn_grad,
