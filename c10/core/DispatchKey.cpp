@@ -206,7 +206,7 @@ const char* toString(DispatchKey t) {
     switch (bc) {                                  \
       C10_FORALL_BACKEND_COMPONENTS(ENTRY, prefix) \
       default:                                     \
-        return #prefix "Unknown";                  \
+        return #prefix "Undefined";                \
     }
 
         C10_FORALL_FUNCTIONALITY_KEYS(FORALL_BC)
