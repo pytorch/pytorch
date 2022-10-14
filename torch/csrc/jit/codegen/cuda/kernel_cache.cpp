@@ -197,6 +197,8 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   auto kernel_runtime = getKernelRuntimeFor(args);
   most_recent_runtime_ = kernel_runtime;
   int seq_id = 0;
+  // Record kernel input and output tensors so profiler can construct
+  // the data flow graph
   RECORD_FUNCTION(
       "run_fused_kernel",
       std::vector<c10::IValue>(inputs.begin(), inputs.end()),
