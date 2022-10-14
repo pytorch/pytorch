@@ -148,7 +148,10 @@ function checkout_install_torchdynamo() {
 function install_triton() {
   local commit
   commit=$(get_pinned_commit triton)
-  pip_install --user "git+https://github.com/openai/triton@$(commit)#subdirectory=python"
+  if [[ -n "${commit}" ]]
+  then
+    pip_install --user "git+https://github.com/openai/triton@$(commit)#subdirectory=python"
+  fi
 }
 
 function test_functorch() {
