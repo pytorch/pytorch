@@ -569,6 +569,7 @@ def register_view():
         p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
         p.impl_nvfuser = _nvfuser_impls["view"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
+        p.impl_aten = _prim_impl
 
 
 def register_nvprims():
@@ -594,3 +595,4 @@ def register_nvprims():
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
+            p.impl_aten = main_prim.impl_aten

@@ -348,6 +348,19 @@ def maybe_partition_graph(
                     NvfuserGraphModule(nvfuser_submodule, use_python_fusion_cache),
                 )
 
+        # Go through the graph and replace all the nodes that were converted to
+        # nvprims but won't be sent to nvFuser with a call to PyTorch's eager
+        # mode. This is necessary because torch.ops.* have higher overhead than
+        # calling the eager mode directly.
+        for node in partitioned_graph.graph.nodes:
+            if (
+                node.op == "call_function"
+                and str(node.target).startswith("nvprims.")
+            ):
+                if getattr(node.target, "impl_aten", None) is not None:
+                    node.target = node.target.impl_aten
+        partitioned_graph.graph.eliminate_dead_code()
+        partitioned_graph.recompile()
         return partitioned_graph, any_unsupported
     else:
         return gm, any_unsupported
