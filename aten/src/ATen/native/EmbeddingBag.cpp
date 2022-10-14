@@ -1628,7 +1628,7 @@ Tensor _embedding_bag_sparse_backward(
     AT_ASSERT(mode == MODE_SUM);
     index_grad.mul_(per_sample_weights.unsqueeze(1));
   }
-  return native::embedding_backward(index_grad, indices, num_weights, padding_idx,
+  return native::embedding_backward_symint(index_grad, indices, c10::SymInt(num_weights), padding_idx,
                                     scale_grad_by_freq, true);
 }
 }

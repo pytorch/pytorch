@@ -1,9 +1,9 @@
 #include <c10/util/Exception.h>
-#include <c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 
 #ifdef USE_C10D_GLOO
 
-#include <c10d/GlooDeviceFactory.hpp>
+#include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <chrono>
 #include <exception>
 #include <ratio>

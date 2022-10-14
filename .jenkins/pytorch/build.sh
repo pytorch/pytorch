@@ -15,14 +15,12 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-tsan* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-tsan.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
-  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
-  # only on one config for now, can expand later
-  export USE_DEPLOY=ON
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
 echo "Python version:"
@@ -232,7 +230,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install dist/*.whl
+    python -mpip install "$(echo dist/*.whl)[opt-einsum]"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x

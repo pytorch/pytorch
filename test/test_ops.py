@@ -10,6 +10,7 @@ import contextlib
 from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
+from typing import Dict
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -1103,8 +1104,10 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
+        dtype_error: Dict[torch.dtype, Exception] = dict()
 
-        def unsupported(dtype):
+        def unsupported(dtype, e):
+            dtype_error[dtype] = e
             unsupported_dtypes.add(dtype)
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.add(dtype)
@@ -1119,7 +1122,7 @@ class TestCommon(TestCase):
                     op.sample_inputs(device, dtype, requires_grad=requires_grad)
                 )
             except Exception as e:
-                unsupported(dtype)
+                unsupported(dtype, e)
                 continue
 
             for sample in samples:
@@ -1132,7 +1135,7 @@ class TestCommon(TestCase):
                     # NOTE: some ops will fail in forward if their inputs
                     #   require grad but they don't support computing the gradient
                     #   in that type! This is a bug in the op!
-                    unsupported(dtype)
+                    unsupported(dtype, e)
                     continue
 
                 # Checks for backward support in the same dtype, if the input has
@@ -1177,6 +1180,7 @@ class TestCommon(TestCase):
                     backward_tensor.backward(grad)
                     supported_backward_dtypes.add(dtype)
                 except Exception as e:
+                    dtype_error[dtype] = e
                     unsupported_backward_dtypes.add(dtype)
 
         # Checks that dtypes are listed correctly and generates an informative
@@ -1270,6 +1274,12 @@ class TestCommon(TestCase):
                     claimed_but_unsupported_backward
                 )
             )
+
+        all_claimed_but_unsupported = set.union(claimed_but_unsupported_backward, claimed_but_unsupported_forward)
+        if all_claimed_but_unsupported:
+            msg += "Unexpected failures raised the following errors:\n"
+            for dtype in all_claimed_but_unsupported:
+                msg += f"{dtype} - {dtype_error[dtype]}\n"
 
         self.fail(msg)
 
@@ -1594,6 +1604,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
+        '_refs.special.expit',
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
@@ -1622,6 +1633,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
+        '_refs.nn.functional.triplet_margin_loss',
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
@@ -1653,6 +1665,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
+        '_refs.special.expit',
         '_refs.square',
         '_refs.tensor_split',
         '_refs.to',
@@ -1775,14 +1788,12 @@ data_dependent_op_tests = (
 
 aliasing_failures = (
     "histogramdd",
-    "nn.functional.pixel_shuffle",
-    "nn.functional.pixel_unshuffle",
 )
 
 # tests which have inconsistent fake tensor stride propagation
 # XXX: no new tests should be added to this list as a result of a
 # decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-fake_tensor_stride_failing_ops = [
+fake_tensor_stride_failing_ops = {
     "fft.fft2",
     "fft.fft",
     "fft.fftn",
@@ -1803,18 +1814,14 @@ fake_tensor_stride_failing_ops = [
     "fft.rfftn",
     "svd",
     "linalg.svd",
-]
+}
 
-fake_backward_xfails = fake_tensor_stride_failing_ops + [
+fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.svd",
     "linalg.svdvals",
-    "nn.functional.binary_cross_entropy_with_logits",
-    "nn.functional.huber_loss",
-    "nn.functional.logsigmoid",
-    "nn.functional.multilabel_soft_margin_loss",
     "pca_lowrank",
     "roll",
     "svd_lowrank",
@@ -1822,14 +1829,23 @@ fake_backward_xfails = fake_tensor_stride_failing_ops + [
     "cholesky",
     "linalg.eigh",
     "symeig",
-]
+}
 
-fake_backward_xfails = [xfail(stride_skip) for stride_skip in fake_backward_xfails] + [
+fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
     xfail("segment_reduce", "lengths"),
     xfail("norm", "nuc"),
-    xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
+    xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
-]
+}
+
+fake_autocast_backward_xfails = {
+    skip("nn.functional.binary_cross_entropy"),
+    skip("sparse.sampled_addmm"),
+    skip("linalg.pinv"),
+    skip("linalg.pinv", "hermitian"),
+    skip("linalg.pinv", "singular"),
+    skip('pinverse'),
+}
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensor(TestCase):
@@ -1908,13 +1924,7 @@ class TestFakeTensor(TestCase):
         context = torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
         self._test_fake_helper(device, dtype, op, context)
 
-    @skipIfRocm
-    @onlyCUDA
-    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps('TestFakeTensor', 'test_fake_crossref_backward', fake_backward_xfails)
-    def test_fake_crossref_backward(self, device, dtype, op):
-        # tests fake tensor property propagation through a cross ref mode
-        # on ops which support backward
+    def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for iter, sample in enumerate(samples):
@@ -1927,15 +1937,29 @@ class TestFakeTensor(TestCase):
                 aten.empty_strided.default,
                 aten.copy_.default,
                 aten.is_same_size.default,
-
             )
+
             # TODO: enable check_aliasing, batch norm fails
-            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=False):
-                with warnings.catch_warnings():
+            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
+                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
                         sample.output_process_fn_grad,
                         op.gradcheck_wrapper)
+
+    @skipIfRocm
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_no_amp', fake_backward_xfails)
+    def test_fake_crossref_backward_no_amp(self, device, dtype, op):
+        self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
+
+    @skipIfRocm
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
+    def test_fake_crossref_backward_amp(self, device, dtype, op):
+        self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
 
 instantiate_device_type_tests(TestCommon, globals())
