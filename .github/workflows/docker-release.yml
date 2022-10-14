@@ -6,6 +6,7 @@ on:
     paths:
       - Dockerfile
       - docker.Makefile
+      - .github/workflows/docker-release.yml
   push:
     branches:
       - nightly
@@ -47,7 +48,10 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required for git merge-base
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Setup SSH (Click me for login details)
