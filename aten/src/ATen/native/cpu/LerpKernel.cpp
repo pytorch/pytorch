@@ -19,9 +19,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
     at::native::cpu_kernel_vec(
       iter,
       [weight_val](BFloat16 self_val, BFloat16 end_val) -> BFloat16 {
-        return (weight_val < 0.5)
-              ? float(self_val) + weight_val * (float(end_val) - float(self_val))
-              : float(end_val) - (float(end_val) - float(self_val)) * (float(1) - weight_val);
+        return lerp(self_val, end_val, weight_val);
       },
       [=](bVec self_vec, bVec end_vec) -> bVec {
           fVec self_vec0, self_vec1, end_vec0, end_vec1;
@@ -39,15 +37,12 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const Scalar& weight) {
       });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_scalar", [&] {
-    using value_t = typename c10::scalar_value_type<scalar_t>::type;
-    scalar_t weight_val = weight.to<scalar_t>();
-    at::native::cpu_kernel(
-        iter,
-        [weight_val](scalar_t self_val, scalar_t end_val) {
-          return (zabs<scalar_t, value_t>(weight_val) < 0.5)
-              ? self_val + weight_val * (end_val - self_val)
-              : end_val - (end_val - self_val) * (scalar_t(1) - weight_val);
-        });
+      auto weight_val = weight.to<scalar_t>();
+      at::native::cpu_kernel(
+          iter,
+          [weight_val](scalar_t self_val, scalar_t end_val) {
+            return lerp(self_val, end_val, weight_val);
+          });
     });
   }
 }
@@ -61,9 +56,7 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
     at::native::cpu_kernel_vec(
       iter,
       [=](BFloat16 self_val, BFloat16 end_val, BFloat16 weight_val) -> BFloat16 {
-        return (weight_val < 0.5)
-              ? float(self_val) + weight_val * (float(end_val) - float(self_val))
-              : float(end_val) - (float(end_val) - float(self_val)) * (float(1) - weight_val);
+        return lerp(self_val, end_val, weight_val);
       },
       [=](bVec self_vec, bVec end_vec, bVec weight_vec) -> bVec {
           fVec self_vec0, self_vec1, end_vec0, end_vec1, weight_vec0, weight_vec1;
@@ -82,15 +75,12 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
       });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "lerp_kernel_tensor", [&] {
-    using value_t = typename c10::scalar_value_type<scalar_t>::type;
-    at::native::cpu_kernel(
-        iter,
-        [](scalar_t self_val, scalar_t end_val, scalar_t weight_val) {
-          return (zabs<scalar_t, value_t>(weight_val) < 0.5)
-              ? self_val + weight_val * (end_val - self_val)
-              : end_val - (end_val - self_val) * (scalar_t(1) - weight_val);
-        });
-  });
+      at::native::cpu_kernel(
+          iter,
+          [](scalar_t self_val, scalar_t end_val, scalar_t weight_val) {
+            return lerp(self_val, end_val, weight_val);
+          });
+    });
   }
 }
 
