@@ -1065,6 +1065,7 @@ symbolic_tensor_failures = {
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('chunk', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
+    xfail('combinations', ''),
     xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
@@ -1189,7 +1190,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.dropout', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.embedding_bag', ''),  # aten._embedding_bag_forward_only.default - couldn't find symbolic meta fun...
     xfail('nn.functional.embedding', ''),  # argument 'size' must be tuple of ints, but found element of type tor...
-    xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
@@ -1290,6 +1290,7 @@ symbolic_tensor_failures = {
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
+    skip('nn.functional.batch_norm')  # Segfault??
 }
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
