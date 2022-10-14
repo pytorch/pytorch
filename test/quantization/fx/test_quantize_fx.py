@@ -87,6 +87,7 @@ from torch.ao.quantization.backend_config.native import (
 )
 
 from torch.ao.quantization.qconfig_mapping import (
+    get_symmetric_qnnpack_qconfig_mapping,
     GLOBAL_DICT_KEY,
     MODULE_NAME_DICT_KEY,
     MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
@@ -5149,6 +5150,32 @@ class TestQuantizeFx(QuantizationTestCase):
         for qconfig, qconfig_name in all_qconfigs:
             self._validate_qconfig_against_backend_config_constraints(
                 MyModel(), qconfig, backend_config, satisfies_constraints=True, qconfig_name=qconfig_name)
+
+    def test_symmetric_qnnpack_qconfig_mapping(self):
+        """
+        Test whether `torch.ao.quantization.qconfig_mapping.get_symmetric_qnnpack_qconfig_mapping`
+        works with the QNNPACK BackendConfig.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        qconfig_mapping = get_symmetric_qnnpack_qconfig_mapping()
+        example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+        backend_config = get_qnnpack_backend_config()
+        model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+        model(*example_inputs)
+        model = convert_fx(model, backend_config=backend_config)
+        expected_node_occurrence = {
+            ns.call_module(torch.ao.nn.quantized.Linear) : 1,
+            ns.call_module(torch.nn.Linear) : 0,
+        }
+        self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+        model(*example_inputs)
 
     def test_get_executorch_backend_config(self):
         from torch.ao.quantization.backend_config import get_executorch_backend_config

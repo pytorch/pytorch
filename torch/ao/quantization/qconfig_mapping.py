@@ -27,6 +27,7 @@ from .qconfig import (
 __all__ = [
     "get_default_qconfig_mapping",
     "get_default_qat_qconfig_mapping",
+    "get_symmetric_qnnpack_qconfig_mapping",
     "QConfigMapping",
 ]
 
@@ -143,6 +144,17 @@ def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMappi
     """
     return _get_default_qconfig_mapping(True, backend, version)
 
+def get_symmetric_qnnpack_qconfig_mapping():
+    """
+    Return a QConfigMapping that uses `torch.ao.quantization.default_symmetric_qnnpack_qconfig`
+    as the default QConfig.
+    """
+    qconfig_mapping = get_default_qconfig_mapping("qnnpack") \
+        .set_global(default_symmetric_qnnpack_qconfig)
+    for pattern in qconfig_mapping.object_type_qconfigs.keys():
+        if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:
+            qconfig_mapping.set_object_type(pattern, default_symmetric_qnnpack_qconfig)
+    return qconfig_mapping
 
 class QConfigMapping:
     """
