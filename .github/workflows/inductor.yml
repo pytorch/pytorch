@@ -1,0 +1,19 @@
+name: Inductor Benchmark CI
+
+on:
+  push:
+    tags:
+      - ciflow/inductor/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  run-torchbench-with-inductor:
+    name: run-torchbench-with-inductor
+    uses: ./.github/workflows/_inductor_torchbench.yml
+    with:
+      sync-tag: run-torchbench-with-inductor
+      build-environment: linux-bionic-cuda11.7-py3.10-gcc7

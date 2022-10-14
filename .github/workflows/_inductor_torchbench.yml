@@ -1,14 +1,4 @@
-name: TorchBench with Inductor
-
-on:
-  push:
-    tags:
-      - ciflow/inductor/*
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
+name: Run TorchBench with Inductor
 
 env:
   PYTHON_VERSION: "3.8"
@@ -23,9 +13,7 @@ env:
 
 jobs:
   run-torchbench-with-inductor:
-    # We don't accept running on non-pytorch repos because of security concerns
-    # Only run the job when the body contains magic word "RUN_TORCHBENCH:"
-    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.body, 'RUN_TORCHBENCH:') }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: [self-hosted, bm-runner]
     # Set to 12 hours
     timeout-minutes: 720
@@ -63,7 +51,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          pushd $HOME/benchmark
+          pushd "${HOME}"/benchmark
           # Pin to specific version to avoid upstream breakages
           git checkout 24b95f2f627bf07a61cefed653419389a7586357
           python install.py
@@ -72,11 +60,6 @@ jobs:
       - name: Run TorchBench
         run: |
           set -x
-          pushd "${HOME}"/pytorch
-          PR_MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
-          popd
-          # PR_BODY_FILE=/tmp/pr-body.txt
-          # echo "$PR_BODY" > ${PR_BODY_FILE}
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
