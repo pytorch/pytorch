@@ -2278,8 +2278,8 @@ class TestComposability(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
-    # it is redundant to run this test twice on a machine that has GPUs
     @unittest.skipIf(IS_FBCODE, "can't subprocess in fbcode")
+    # it is redundant to run this test twice on a machine that has GPUs
     @onlyCPU
     def test_no_warning_on_import_functorch(self, device):
         out = subprocess.check_output(
