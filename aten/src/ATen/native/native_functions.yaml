@@ -4374,6 +4374,8 @@
     QuantizedCPU: relu_quantized_cpu
     QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
+    SparseCPU, SparseCUDA: relu_sparse
+    SparseCsrCPU, SparseCsrCUDA: relu_sparse_csr
   tags: canonical
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
@@ -4386,6 +4388,8 @@
     QuantizedCPU: relu_quantized_cpu_
     QuantizedCUDA: relu_quantized_cuda_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu_
+    SparseCPU, SparseCUDA: relu_sparse_
+    SparseCsrCPU, SparseCsrCUDA: relu_sparse_csr_
   autogen: relu.out
 
 - func: relu6(Tensor self) -> Tensor
@@ -5279,12 +5283,16 @@
   dispatch:
     CPU, CUDA: threshold_backward_out
     MPS: threshold_backward_out_mps
+    SparseCPU, SparseCUDA: threshold_backward_sparse_out
+    SparseCsrCPU, SparseCsrCUDA: threshold_backward_sparse_compressed_out
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   variants: function
   structured_delegate: threshold_backward.grad_input
   dispatch:
     MkldnnCPU: mkldnn_relu_backward
+    SparseCPU, SparseCUDA: threshold_backward_sparse
+    SparseCsrCPU, SparseCsrCUDA: threshold_backward_sparse_compressed
 
 - func: tile(Tensor self, int[] dims) -> Tensor
   variants: function, method
