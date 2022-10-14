@@ -12,14 +12,15 @@
 
 #include <torch/csrc/Export.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
-namespace autograd {
+// namespace autograd {
+// struct Node;
+// } // namespace autograd
 
-struct Node;
-
-namespace profiler {
+namespace profiler_legacy {
 
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
@@ -411,6 +412,5 @@ struct TORCH_API TLSLegacyProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-} // namespace profiler
-} // namespace autograd
+} // namespace profiler_legacy
 } // namespace torch
