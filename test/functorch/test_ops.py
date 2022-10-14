@@ -9,10 +9,11 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize, TEST_WITH_ASAN
 import torch
 from torch import Tensor
 import functools
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
@@ -40,6 +41,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from functorch._src.eager_transforms import _as_tuple, jvp
+
 aten = torch.ops.aten
 
 
@@ -333,7 +335,9 @@ aliasing_ops_list_return = {
 }
 
 
+@unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
@@ -576,6 +580,7 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             test(fn, inplace=True)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapvjpvjp', vjp_fail.union({
         skip("atleast_1d"),  # Takes too long
         skip("atleast_2d"),  # Takes too long
@@ -648,6 +653,7 @@ class TestOperators(TestCase):
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -715,6 +721,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -761,6 +768,7 @@ class TestOperators(TestCase):
         # ---------------------------------------------------------------------
     })
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjp', (
@@ -781,7 +789,6 @@ class TestOperators(TestCase):
         if is_inplace(op, op.get_op()):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
-
         for sample in samples:
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
@@ -841,8 +848,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
@@ -1105,6 +1114,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1267,6 +1277,7 @@ class TestOperators(TestCase):
             expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
             self.assertEqual(result, expected)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
         # Following operatos take too long, hence skipped
         skip('atleast_1d'),
@@ -1356,6 +1367,7 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1571,6 +1583,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         xfail('linalg.eig'),  # all close?
