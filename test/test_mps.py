@@ -5686,6 +5686,15 @@ class TestViewOpsMPS(TestCase):
         self.assertEqual(expected1, out1)
         self.assertEqual(expected2, out2)
 
+    def test_detached_view_copy(self, device="mps"):
+        # https://github.com/pytorch/pytorch/issues/86052
+        x = torch.arange(2)
+        # .detach() makes y not a view, but contig tensor
+        # with non-zero offset
+        y = x[1].detach()
+        z = y.to(device)
+        self.assertEqual(y, z.cpu())
+
     def test_empty_reshape(self, device="mps"):
         x = torch.randn(0, 6, device=device)
         self.assertEqual((1, 0, 6, 1, 1), x.reshape(1, 0, 6, 1, 1).shape)
