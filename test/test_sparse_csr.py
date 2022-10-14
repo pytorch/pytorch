@@ -100,12 +100,15 @@ def _test_addmm_addmv(
     def convert_layout(mat):
         if layout == torch.sparse_csr:
             return mat.to_sparse_csr()
+        elif layout == torch.sparse_csc:
+            return mat.to_sparse_csc()
         else:
             assert mat.layout == layout
             return mat
 
     if mode == "all_sparse":
         res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
+        test_case.assertEqual(res1.layout, layout)
         res1 = res1.to_dense()
     elif mode == "dense_result":
         res1 = f(t, convert_layout(m), convert_layout(v), alpha=alpha, beta=beta)
@@ -929,6 +932,10 @@ class TestSparseCompressed(TestCase):
             self.assertEqual(sparse.dense_dim(), dense_dim)
 
 
+def _npref_block_addmm_addmv(c, a, b, alpha, beta):
+    return alpha * (a @ b) + beta * c
+
+
 class TestSparseCSR(TestCase):
 
     def test_csr_stride(self):
@@ -1465,7 +1472,17 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
-    def run_test_block_addmm_addmv(self, addmv_addmm, c, a, b, op_b=False, op_out=False, *, dtype=None, device=None):
+    def run_test_block_addmm_addmv(self,
+                                   addmv_addmm,
+                                   c,
+                                   a,
+                                   b,
+                                   op_b=False,
+                                   op_out=False,
+                                   *,
+                                   dtype=None,
+                                   device=None,
+                                   ref=_npref_block_addmm_addmv):
         alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
         beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()
         b = b.mH if (op_b and a.shape == b.shape) else b
@@ -1474,16 +1491,8 @@ class TestSparseCSR(TestCase):
 
         out = torch.empty_like(c.mH if op_out and a.shape == b.shape else c)
         addmv_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
+        expected = ref(c, a, b, alpha, beta)
 
-        a_bsr = sp.bsr_matrix(
-            (
-                a.values().cpu().numpy(),
-                a.col_indices().cpu().numpy(),
-                a.crow_indices().cpu().numpy(),
-            ),
-            shape=a.shape,
-        )
-        expected = alpha * (a_bsr * b.cpu().resolve_conj().numpy()) + beta * c.cpu().numpy()
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
 
@@ -1493,26 +1502,112 @@ class TestSparseCSR(TestCase):
     @parametrize("noncontiguous", [True, False])
     @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypes(*floating_and_complex_types())
+    @dtypesIfCUDA(*floating_and_complex_types_and(
+                  *[torch.half] if SM53OrLater else [],
+                  *[torch.bfloat16] if SM80OrLater else []))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
-                        torch.float64: 1e-5, torch.complex128: 1e-5})
+                        torch.float64: 1e-5, torch.complex128: 1e-5,
+                        torch.float16: 1e-3, torch.bfloat16: 1e-3})
     def test_block_addmm(self, device, dtype, index_dtype, block_size, noncontiguous):
+
+        def make_transposed_addmm_op(f):
+
+            def tt(t):
+                if isinstance(t, torch.Tensor):
+                    return t.transpose(-2, -1)
+                else:
+                    # assume numpy/scipy spmatrix
+                    return t.transpose()
+
+            @functools.wraps(f)
+            def wrapper(c, a, b, alpha=None, beta=None, out=None):
+                if out is not None:
+                    # the ref takes no out kwarg
+                    assert isinstance(out, torch.Tensor)
+                    # tranpose inplace to propogate out to checking context
+                    out.transpose_(-2, -1)
+                    return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta, out=out)
+                else:
+                    return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta)
+
+            return wrapper
+
+        def ref_sp_numpy(c, a, b, alpha=None, beta=None, out=None):
+
+            def prep_input(t):
+
+                def to_sp_block_compressed(t):
+
+                    if t.layout is torch.sparse_bsc:
+                        tt = t.transpose(-1, -2)
+                    else:
+                        tt = t
+
+                    t_sp_bsr = sp.bsr_matrix(
+                        (
+                            tt.values().cpu().numpy(),
+                            tt.col_indices().cpu().numpy(),
+                            tt.crow_indices().cpu().numpy(),
+                        ),
+                        shape=tt.shape,
+                    )
+
+                    if t.layout is torch.sparse_bsc:
+                        return t_sp_bsr.transpose()
+                    else:
+                        return t_sp_bsr
+
+                if t.layout is not torch.strided:
+                    return to_sp_block_compressed(t)
+                else:
+                    return t.cpu().resolve_conj().numpy()
+
+            res = _npref_block_addmm_addmv(
+                *map(lambda t: prep_input(t), (c, a, b)),
+                alpha,
+                beta
+            )
+
+            if out is not None:
+                out.copy_(res)
+                return out
+            else:
+                return res
+
+        def ref_half_bfloat16(c, a, b, alpha=None, beta=None, out=None):
+            res = alpha * (a.to_dense().to(torch.float32) @ b.to_dense().to(torch.float32)).to(a.dtype) + beta * c
+            if out is not None:
+                out.copy_(res)
+                return out
+            else:
+                return res
+
+        if dtype in (torch.half, torch.bfloat16):
+            ref = ref_half_bfloat16
+        else:
+            ref = ref_sp_numpy
+
         for (m, n, k) in itertools.product([2, 5], repeat=3):
             nnz = random.randint(0, m * k)
-            if not noncontiguous:
-                a = self.genSparseCSRTensor((m * block_size, k * block_size), nnz,
-                                            dtype=dtype, device=device, index_dtype=index_dtype)
-                a = a.to_sparse_bsr((block_size, block_size))
-            else:
-                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-                a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
-                a_data = a_data.mT if noncontiguous else a_data   # Test column-major blocks
-                a = torch._sparse_bsr_tensor_unsafe(a.crow_indices(), a.col_indices(),
-                                                    a_data, (m * block_size, k * block_size))
+            a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
+            a_data = a_data.mT if noncontiguous else a_data
+            a = torch._sparse_bsr_tensor_unsafe(a.crow_indices(), a.col_indices(),
+                                                a_data, (m * block_size, k * block_size))
             b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for op_b, op_out in itertools.product([True, False], repeat=2):
-                self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
+                self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device, ref=ref)
+                self.run_test_block_addmm_addmv(make_transposed_addmm_op(torch.addmm),
+                                                c,
+                                                a,
+                                                b,
+                                                op_b,
+                                                op_out,
+                                                dtype=dtype,
+                                                device=device,
+                                                ref=make_transposed_addmm_op(ref))
 
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
@@ -1746,27 +1841,28 @@ class TestSparseCSR(TestCase):
                                       *[torch.bfloat16] if SM80OrLater else [],
                                       *[torch.half] if SM53OrLater else [],
                                       *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+    @sparse_compressed_nonblock_layouts()
     @skipCUDAIf(
         not _check_cusparse_spgemm_available(),
         "cuSparse Generic API SpGEMM is not available"
     )
-    def test_addmm_all_sparse_csr(self, device, dtype):
+    def test_addmm_all_sparse_csr(self, device, dtype, layout):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, mode="all_sparse")
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="all_sparse")
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
         m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, mode="all_sparse")
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="all_sparse")
 
         # Test beta=0, M=nan
         M = torch.full((10, 25), float('nan'), device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=torch.sparse_csr, mode="all_sparse")
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="all_sparse")
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
@@ -1778,28 +1874,29 @@ class TestSparseCSR(TestCase):
             M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, mode="all_sparse")
+            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="all_sparse")
 
     @onlyCPU
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
-    def test_addmm_dense_result(self, device, dtype):
+    @sparse_compressed_nonblock_layouts()
+    def test_addmm_dense_result(self, device, dtype, layout):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, mode="dense_result")
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
         m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, mode="dense_result")
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="dense_result")
 
         # Test beta=0, M=nan
         M = torch.full((10, 25), float('nan'), device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=torch.sparse_csr, mode="dense_result")
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="dense_result")
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
@@ -1811,7 +1908,7 @@ class TestSparseCSR(TestCase):
             M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, mode="dense_result")
+            _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="dense_result")
 
     @parametrize("k", [0, 1, 8])
     @parametrize("n", [0, 1, 10])

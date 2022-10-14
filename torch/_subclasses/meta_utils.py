@@ -142,35 +142,18 @@ class MetaConverter:
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
-        def sym(name, x):
-            if shape_env is None:
+        make_symbolic = shape_env is not None
+
+        def sym(x):
+            if make_symbolic:
+                return shape_env.create_symbol(x)
+            else:
                 return x
-            else:
-                return shape_env.create_symint(f"t{arg_cnt}.{name}()", x)
 
-        def sym_list(name, xs):
-            if shape_env is None:
-                return xs
-            else:
-                return [
-                    shape_env.create_symint(f"t{arg_cnt}.{name}({i})", x)
-                    for i, x in enumerate(xs)
-                ]
-
-        def sym_size(t):
-            return sym_list("size", t.size())
-
-        def sym_stride(t):
-            return sym_list("stride", t.stride())
-
-        # NB: Although sym_stride variables initially have no correlation
-        # with size, we will immediately introduce guards based on contiguity.
-        # Thus, if the input tensor is contiguous, the stride variables
-        # will typically immediately get reexpressed in terms of the size
-        # variables.
-
-        def sym_storage_offset(t):
-            return sym("storage_offset", t.storage_offset())
+        def sym_sizes_strides(t):
+            if make_symbolic:
+                return shape_env.create_symbolic_sizes_strides(t)
+            return (t.size(), t.stride())
 
         # see expired-storages
         self.check_expired_count += 1
@@ -227,9 +210,8 @@ class MetaConverter:
                         base = base.view(t.dtype)
 
                     with torch.enable_grad():
-                        r = base.as_strided(
-                            sym_size(t), sym_stride(t), sym_storage_offset(t)
-                        )
+                        sizes, strides = sym_sizes_strides(t)
+                        r = base.as_strided(sizes, strides, sym(t.storage_offset()))
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
@@ -253,8 +235,9 @@ class MetaConverter:
                     # meta storage
                     s = self.meta_storage(t.storage())
                     with no_dispatch():
+                        sizes, strides = sym_sizes_strides(t)
                         with torch.no_grad():
-                            r.set_(s, sym_storage_offset(t), sym_size(t), sym_stride(t))
+                            r.set_(s, sym(t.storage_offset()), sizes, strides)
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())

@@ -15,36 +15,24 @@ namespace at {
 namespace native {
 namespace mps {
 
-std::string getMetalScalarType(ScalarType scalar_type) {
-  std::string res = "";
-  switch (scalar_type) {
-    case ScalarType::Float:
-      res = "float"; break;
-    case ScalarType::Half:
-      res = "half";  break;
-    case ScalarType::Long:
-      res = "long";  break;
-    case ScalarType::Int:
-      res = "int";   break;
-    case ScalarType::Short:
-      res = "short"; break;
-    case ScalarType::Char:
-      res = "char"; break;
-    case ScalarType::Byte:
-      res = "uchar"; break;
-    case ScalarType::Bool:
-      res = "bool";  break;
-    default:
-      break;
-  }
-  return res;
+std::string getBitSizeString(ScalarType scalar_type) {
+  size_t scalarBitSize = c10::elementSize(scalar_type) * 8;
+  TORCH_CHECK(scalarBitSize <= 64, "Unsupported data type: ", getMPSTypeString(scalar_type));
+  return std::to_string(scalarBitSize) + "bit";
+
 }
 
 std::string getIndexFunctionName(ScalarType scalar_type, bool index_select, bool accumulate) {
-    std::string indexFunction = index_select ? "index_select_" :
-                        (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_" : "index_put_";
+  std::string indexFunction = index_select ? "index_select_" :
+                      (accumulate && (scalar_type != kBool)) ? "index_put_accumulate_" : "index_put_";
 
-  return indexFunction + getMetalScalarType(scalar_type);
+  indexFunction += getBitSizeString(scalar_type);
+  if (accumulate) {
+    TORCH_CHECK(scalar_type == ScalarType::Float || scalar_type == ScalarType::Int, "Unsupported data type for accumulate case: ", getMPSTypeString(scalar_type));
+    string dtypeString = (scalar_type == ScalarType::Float) ? "_float" : "_int";
+    indexFunction += dtypeString;
+  }
+  return indexFunction;
 }
 }
 }
