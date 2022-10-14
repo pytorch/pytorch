@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/core/ATen_fwd.h>
 #include <c10/macros/Macros.h>
 namespace at {

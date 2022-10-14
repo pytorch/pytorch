@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/ArrayRef.h>
 #include <cmath>
 
 namespace at {

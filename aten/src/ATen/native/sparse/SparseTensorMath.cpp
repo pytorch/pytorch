@@ -1,6 +1,5 @@
-#include <ATen/TensorIndexing.h>
-
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorIndexing.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 
 #include <c10/util/irange.h>
@@ -36,6 +35,7 @@
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/addmm_native.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/any.h>
 #include <ATen/ops/any_native.h>
 #include <ATen/ops/bmm_native.h>
