@@ -265,6 +265,13 @@ def make_signal_windows_opinfo(
             ),
             DecorateInfo(
                 unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
                 "TestNNCOpInfo",
                 "test_nnc_correctness",
                 dtypes=[torch.float16],
