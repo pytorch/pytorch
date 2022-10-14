@@ -1,5 +1,6 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
+#include <stdbool.h>
 
 // Only Python 3.7 through 3.10 supported
 #if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 11
@@ -14,13 +15,6 @@
 #include <internal/pycore_pystate.h>
 #undef Py_BUILD_CORE
 #endif
-
-// C doesn't have bool types
-#ifndef bool
-#define bool char
-#endif
-#define false 0
-#define true 1
 
 #ifdef _WIN32
 #define unlikely(x) (x)
