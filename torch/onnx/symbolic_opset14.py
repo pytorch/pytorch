@@ -33,19 +33,15 @@ def hardswish(g: jit_utils.GraphContext, self):
 
 
 @_onnx_symbolic("aten::tril")
-@symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def tril(g: jit_utils.GraphContext, self, diagonal, out=None):
-    k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
-    return g.op("Trilu", self, k, upper_i=0)
+    return g.op("Trilu", self, diagonal, upper_i=0)
 
 
 @_onnx_symbolic("aten::triu")
-@symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def triu(g: jit_utils.GraphContext, self, diagonal, out=None):
-    k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
-    return g.op("Trilu", self, k, upper_i=1)
+    return g.op("Trilu", self, diagonal, upper_i=1)
 
 
 @_onnx_symbolic("aten::reshape")
