@@ -7,7 +7,6 @@ import hypothesis
 import hypothesis.extra.numpy
 import hypothesis.strategies
 from numpy.testing import assert_array_equal
-from numpy.typing import DTypeLike
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -17,13 +16,13 @@ import torch.backends.mps
 
 
 @hypothesis.strategies.composite
-def ufunc_inputs(draw, ufunc, input_dtype: DTypeLike = np.int32):
+def ufunc_inputs(draw, ufunc, input_dtype: type = np.int32):
     shapes, result_shape = draw(mutually_broadcastable_shapes(signature=ufunc.signature))
     return [draw(hypothesis.extra.numpy.arrays(input_dtype, shape=shape)) for shape in shapes]
 
 
 @hypothesis.strategies.composite
-def where_inputs(draw, xy_dtype: DTypeLike = int):
+def where_inputs(draw, xy_dtype: type = int):
     # TODO: Could we do this with a ufunc sig? `where` doesn't seem to have one
     # @given(mutually_broadcastable_shapes(signature=np.where.signature))
     shapes, result_shape = draw(mutually_broadcastable_shapes(num_shapes=3))
