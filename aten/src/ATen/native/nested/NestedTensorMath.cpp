@@ -463,38 +463,221 @@ Tensor NestedTensor_embedding(
       result_buffer.reshape({-1}), std::move(new_sizes));
 }
 
+
+/**
+ * Broadcast a nested tensor and a dense tensor to the same shapes
+ *
+ * @return Returns a tuple of nested tensors of the same shape.
+ */
+std::tuple<Tensor, Tensor> _broadcast_nested_dense(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.is_nested() && !other.is_nested(),
+  "_broadcast_nested_nested(): self must be a nested tensor and other must be a dense tensor");
+
+  auto self_ptr = get_nested_tensor_impl(self);
+  const auto self_sizemat = self_ptr->get_nested_size_tensor();
+  const auto self_stridemat = self_ptr->get_nested_stride_tensor();
+  int64_t self_ndim = self_ptr->dim();
+  int64_t self_ntensors = self_sizemat.size(0);
+
+  int64_t other_ndim = other.dim();
+
+  // add 1 to other_ndim to account for nested dimension
+  int64_t expanded_ndim = self_ndim > other_ndim + 1 ? self_ndim : other_ndim + 1;
+
+  auto sizemat_ndim = expanded_ndim - 1;
+  auto expanded_sizemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
+  auto self_new_stridemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
+  auto other_new_stridemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
+
+  for (auto sizemat_idx = sizemat_ndim - 1; sizemat_idx >=0; --sizemat_idx) {
+    auto offset = sizemat_ndim - 1 - sizemat_idx;
+    auto self_dim = self_ndim - 2 - offset;
+    auto other_dim = other_ndim - 1 - offset;
+
+    if (self_dim >= 0 && other_dim >= 0) {
+      auto opt_size_self = self_ptr->opt_size(self_dim + 1);
+      auto other_size_dim = other.size(other_dim);
+      if (opt_size_self.has_value() && opt_size_self.value() == 1) {
+        expanded_sizemat.select(1, sizemat_idx).fill_(other_size_dim);
+
+        // stride is 0 for the expanded dim in self
+        self_new_stridemat.select(1, sizemat_idx).fill_(0);
+        other_new_stridemat.select(1, sizemat_idx).fill_(other.stride(other_dim));
+      } else if (other_size_dim == 1) {
+        auto self_size_dim = self_sizemat.select(1, self_dim);
+        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
+        
+        // stride is 0 for the expanded dim in other
+        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
+        other_new_stridemat.select(1, sizemat_idx).fill_(0);
+      } else {
+        auto self_size_dim = self_sizemat.select(1, self_dim);
+        TORCH_CHECK(opt_size_self.has_value() && opt_size_self.value() == other_size_dim,
+        "The size of tensor self (", self_size_dim,
+        ") must match the size of tensor other (", other_size_dim,
+        ") at non-singleton dimension ", sizemat_idx + 1,
+        "of self and ", sizemat_idx, "of other.");
+
+        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
+        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
+        other_new_stridemat.select(1, sizemat_idx).fill_(other.stride(other_dim));
+      }
+    } else if (self_dim >= 0) {
+      auto self_size_dim = self_sizemat.select(1, self_dim);
+      expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
+      self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
+      other_new_stridemat.select(1, sizemat_idx).fill_(0);
+    } else {
+      TORCH_INTERNAL_ASSERT(other_dim >= 0);
+      auto other_size_dim = other.size(other_dim);
+      expanded_sizemat.select(1, sizemat_idx).fill_(other_size_dim);
+      self_new_stridemat.select(1, sizemat_idx).fill_(0);
+      other_new_stridemat.select(1, sizemat_idx).fill_(other.stride(other_dim));
+    }
+  }
+
+  std::vector<int64_t> other_offsets(self_ntensors, 0);
+
+  auto expanded_self = create_nested_view_tensor(self,
+                                                 expanded_sizemat,
+                                                 self_new_stridemat,
+                                                 std::vector<int64_t>(self_ptr->get_storage_offsets()));
+  auto expanded_other = at::_nested_view_from_buffer(other,
+                                                     expanded_sizemat.clone(),
+                                                     other_new_stridemat,
+                                                     at::IntArrayRef(other_offsets));
+
+  return std::make_tuple(expanded_self, expanded_other);
+
+}
+
+
+/**
+ * Broadcast two nested tensors to the same shapes
+ *
+ * @return Returns a tuple of nested tensors that are
+ * broadcasted by modifying their metadata.
+ */
+std::tuple<Tensor, Tensor> _broadcast_nested_nested(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.is_nested() && other.is_nested(),
+  "_broadcast_tensors_nested(): both arguments must be nested tensors");
+  auto self_ptr = get_nested_tensor_impl(self);
+  auto other_ptr = get_nested_tensor_impl(other);
+
+  // metadata for self
+  const auto self_sizemat = self_ptr->get_nested_size_tensor();
+  const auto self_stridemat = self_ptr->get_nested_stride_tensor();
+  int64_t self_ndim = self_ptr->dim();
+  int64_t self_ntensors = self_sizemat.size(0);
+
+  // metadata for other
+  const auto other_sizemat = other_ptr->get_nested_size_tensor();
+  const auto other_stridemat = other_ptr->get_nested_stride_tensor();
+  int64_t other_ndim = other_ptr->dim();
+  int64_t other_ntensors = other_sizemat.size(0);
+
+  TORCH_CHECK(self_ntensors == other_ntensors,
+  "_broadcast_tensors_nested(): For now, we do not support broadcasting along the nested dimension.");
+
+  int64_t expanded_ndim = self_ndim > other_ndim ? self_ndim : other_ndim;
+  
+  // if nested tensors are empty just return
+  if (expanded_ndim == 1) {
+    return std::make_tuple(self, other);
+  }
+
+  auto sizemat_ndim = expanded_ndim - 1;
+  auto expanded_sizemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
+  auto self_new_stridemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
+  auto other_new_stridemat = other_sizemat.new_empty({other_ntensors, sizemat_ndim});
+
+  for (auto sizemat_idx = sizemat_ndim - 1; sizemat_idx >=0; --sizemat_idx) {
+    auto offset = sizemat_ndim - 1 - sizemat_idx;
+    auto self_dim = self_ndim - 2 - offset;
+    auto other_dim = other_ndim - 2 - offset;
+    if (self_dim >= 0 && other_dim >= 0) {
+      auto opt_size_self = self_ptr->opt_size(self_dim + 1);
+      auto opt_size_other = other_ptr->opt_size(other_dim + 1);
+      if (opt_size_self.has_value() && opt_size_self.value() == 1) {
+        auto other_size_dim = other_sizemat.select(1, other_dim);
+        expanded_sizemat.select(1, sizemat_idx).copy_(other_size_dim);
+
+        // stride is 0 for the expanded dim in self
+        self_new_stridemat.select(1, sizemat_idx).fill_(0);
+        other_new_stridemat.select(1, sizemat_idx).copy_(other_stridemat.select(1, other_dim));
+      } else if (opt_size_other.has_value() && opt_size_other.value() == 1) {
+        auto self_size_dim = self_sizemat.select(1, self_dim);
+        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
+        
+        // stride is 0 for the expanded dim in other
+        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
+        other_new_stridemat.select(1, sizemat_idx).fill_(0);
+      } else {
+        auto self_size_dim = self_sizemat.select(1, self_dim);
+        auto other_size_dim = other_sizemat.select(1, other_dim);
+        TORCH_CHECK(at::equal(other_size_dim, self_size_dim),
+        "The size of tensor self (", self_size_dim,
+        ") must match the size of tensor other (", other_size_dim,
+        ") at non-singleton dimension ", sizemat_idx + 1);
+
+        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
+        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
+        other_new_stridemat.select(1, sizemat_idx).copy_(other_stridemat.select(1, other_dim));
+      }
+    } else if (self_dim >= 0) {
+      auto self_size_dim = self_sizemat.select(1, self_dim);
+      expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
+      self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
+      other_new_stridemat.select(1, sizemat_idx).fill_(0);
+    } else {
+      TORCH_INTERNAL_ASSERT(other_dim >= 0);
+      auto other_size_dim = other_sizemat.select(1, other_dim);
+      expanded_sizemat.select(1, sizemat_idx).copy_(other_size_dim);
+      self_new_stridemat.select(1, sizemat_idx).fill_(0);
+      other_new_stridemat.select(1, sizemat_idx).copy_(other_stridemat.select(1, other_dim));
+    }
+  }
+
+  auto expanded_self = create_nested_view_tensor(self,
+                                                 expanded_sizemat,
+                                                 self_new_stridemat,
+                                                 std::vector<int64_t>(self_ptr->get_storage_offsets()));
+  auto expanded_other = create_nested_view_tensor(other,
+                                                  expanded_sizemat.clone(),
+                                                  other_new_stridemat,
+                                                  std::vector<int64_t>(other_ptr->get_storage_offsets()));
+
+  return std::make_tuple(expanded_self, expanded_other);
+
+}
+
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
 get_elementwise_nested_tensor_impl(
     const Tensor& self,
     const Tensor& other,
     const std::string& op_name) {
+  Tensor broadcasted_self, broadcasted_other;
   if (self.is_nested() && !(other.is_nested())) {
-    TORCH_CHECK(
-        false,
-        "Expected both self and other to be nested, but got a nested self and non-nested other");
+    auto broadcasted_tensors = _broadcast_nested_dense(self, other);
+    broadcasted_self = std::get<0>(broadcasted_tensors);
+    broadcasted_other = std::get<1>(broadcasted_tensors);
   } else if (!(self.is_nested()) && other.is_nested()) {
-    TORCH_CHECK(
-        false,
-        "Expected both self and other to be nested, but got a non-nested self and nested other");
+    auto broadcasted_tensors = _broadcast_nested_dense(other, self);
+    broadcasted_self = std::get<1>(broadcasted_tensors);
+    broadcasted_other = std::get<0>(broadcasted_tensors);
   } else if (!(self.is_nested()) || !(other.is_nested())) {
     TORCH_CHECK(
         false,
-        "Expected both self and other to be nested, but got a non-nested self and non-nested other");
+        "Expected either self or other to be nested, but got a non-nested self and non-nested other");
+  } else {
+    broadcasted_self = self;
+    broadcasted_other = other;
   }
 
   auto self_ptr = get_nested_tensor_impl(self);
   auto other_ptr = get_nested_tensor_impl(other);
 
-  TORCH_CHECK(
-      self.dim() == other.dim(),
-      op_name,
-      " does not support broadcasting when given a NestedTensor");
-  TORCH_CHECK(
-      at::equal(
-          self_ptr->get_nested_size_tensor(),
-          other_ptr->get_nested_size_tensor()),
-      op_name,
-      " does not support broadcasting when given a NestedTensor");
+  // FIXME: this check going to fail, we need an if statement to fix this
   TORCH_CHECK(
       nested_tensor_impl_is_contiguous(self_ptr) &&
           nested_tensor_impl_is_contiguous(other_ptr),
@@ -1369,194 +1552,6 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   }
   // reshape with other.opt_sizes_
   return self.reshape(sizes);
-}
-
-
-/**
- * Broadcast a nested tensor and a dense tensor to the same shapes
- *
- * @return Returns a tuple of nested tensors of the same shape.
- */
-std::tuple<Tensor, Tensor> _broadcast_nested_dense(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.is_nested() && !other.is_nested(),
-  "_broadcast_nested_nested(): self must be a nested tensor and other must be a dense tensor");
-
-  auto self_ptr = get_nested_tensor_impl(self);
-  const auto self_sizemat = self_ptr->get_nested_size_tensor();
-  const auto self_stridemat = self_ptr->get_nested_stride_tensor();
-  int64_t self_ndim = self_ptr->dim();
-  int64_t self_ntensors = self_sizemat.size(0);
-
-  int64_t other_ndim = other.dim();
-
-  // add 1 to other_ndim to account for nested dimension
-  int64_t expanded_ndim = self_ndim > other_ndim + 1 ? self_ndim : other_ndim + 1;
-
-  auto sizemat_ndim = expanded_ndim - 1;
-  auto expanded_sizemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
-  auto self_new_stridemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
-  auto other_new_stridemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
-
-  for (auto sizemat_idx = sizemat_ndim - 1; sizemat_idx >=0; --sizemat_idx) {
-    auto offset = sizemat_ndim - 1 - sizemat_idx;
-    auto self_dim = self_ndim - 2 - offset;
-    auto other_dim = other_ndim - 1 - offset;
-
-    if (self_dim >= 0 && other_dim >= 0) {
-      auto opt_size_self = self_ptr->opt_size(self_dim + 1);
-      auto other_size_dim = other.size(other_dim);
-      if (opt_size_self.has_value() && opt_size_self.value() == 1) {
-        expanded_sizemat.select(1, sizemat_idx).fill_(other_size_dim);
-
-        // stride is 0 for the expanded dim in self
-        self_new_stridemat.select(1, sizemat_idx).fill_(0);
-        other_new_stridemat.select(1, sizemat_idx).fill_(other.stride(other_dim));
-      } else if (other_size_dim == 1) {
-        auto self_size_dim = self_sizemat.select(1, self_dim);
-        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
-        
-        // stride is 0 for the expanded dim in other
-        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
-        other_new_stridemat.select(1, sizemat_idx).fill_(0);
-      } else {
-        auto self_size_dim = self_sizemat.select(1, self_dim);
-        TORCH_CHECK(opt_size_self.has_value() && opt_size_self.value() == other_size_dim,
-        "The size of tensor self (", self_size_dim,
-        ") must match the size of tensor other (", other_size_dim,
-        ") at non-singleton dimension ", sizemat_idx + 1,
-        "of self and ", sizemat_idx, "of other.");
-
-        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
-        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
-        other_new_stridemat.select(1, sizemat_idx).fill_(other.stride(other_dim));
-      }
-    } else if (self_dim >= 0) {
-      auto self_size_dim = self_sizemat.select(1, self_dim);
-      expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
-      self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
-      other_new_stridemat.select(1, sizemat_idx).fill_(0);
-    } else {
-      TORCH_INTERNAL_ASSERT(other_dim >= 0);
-      auto other_size_dim = other.size(other_dim);
-      expanded_sizemat.select(1, sizemat_idx).fill_(other_size_dim);
-      self_new_stridemat.select(1, sizemat_idx).fill_(0);
-      other_new_stridemat.select(1, sizemat_idx).fill_(other.stride(other_dim));
-    }
-  }
-
-  std::vector<int64_t> other_offsets(self_ntensors, 0);
-
-  auto expanded_self = create_nested_view_tensor(self,
-                                                 expanded_sizemat,
-                                                 self_new_stridemat,
-                                                 std::vector<int64_t>(self_ptr->get_storage_offsets()));
-  auto expanded_other = at::_nested_view_from_buffer(other,
-                                                     expanded_sizemat.clone(),
-                                                     other_new_stridemat,
-                                                     at::IntArrayRef(other_offsets));
-
-  return std::make_tuple(expanded_self, expanded_other);
-
-}
-
-
-/**
- * Broadcast two nested tensors to the same shapes
- *
- * @return Returns a tuple of nested tensors that are
- * broadcasted by modifying their metadata.
- */
-std::tuple<Tensor, Tensor> _broadcast_nested_nested(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.is_nested() && other.is_nested(),
-  "_broadcast_tensors_nested(): both arguments must be nested tensors");
-  auto self_ptr = get_nested_tensor_impl(self);
-  auto other_ptr = get_nested_tensor_impl(other);
-
-  // metadata for self
-  const auto self_sizemat = self_ptr->get_nested_size_tensor();
-  const auto self_stridemat = self_ptr->get_nested_stride_tensor();
-  int64_t self_ndim = self_ptr->dim();
-  int64_t self_ntensors = self_sizemat.size(0);
-
-  // metadata for other
-  const auto other_sizemat = other_ptr->get_nested_size_tensor();
-  const auto other_stridemat = other_ptr->get_nested_stride_tensor();
-  int64_t other_ndim = other_ptr->dim();
-  int64_t other_ntensors = other_sizemat.size(0);
-
-  TORCH_CHECK(self_ntensors == other_ntensors,
-  "_broadcast_tensors_nested(): For now, we do not support broadcasting along the nested dimension.");
-
-  int64_t expanded_ndim = self_ndim > other_ndim ? self_ndim : other_ndim;
-  
-  // if nested tensors are empty just return
-  if (expanded_ndim == 1) {
-    return std::make_tuple(self, other);
-  }
-
-  auto sizemat_ndim = expanded_ndim - 1;
-  auto expanded_sizemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
-  auto self_new_stridemat = self_sizemat.new_empty({self_ntensors, sizemat_ndim});
-  auto other_new_stridemat = other_sizemat.new_empty({other_ntensors, sizemat_ndim});
-
-  for (auto sizemat_idx = sizemat_ndim - 1; sizemat_idx >=0; --sizemat_idx) {
-    auto offset = sizemat_ndim - 1 - sizemat_idx;
-    auto self_dim = self_ndim - 2 - offset;
-    auto other_dim = other_ndim - 2 - offset;
-    if (self_dim >= 0 && other_dim >= 0) {
-      auto opt_size_self = self_ptr->opt_size(self_dim + 1);
-      auto opt_size_other = other_ptr->opt_size(other_dim + 1);
-      if (opt_size_self.has_value() && opt_size_self.value() == 1) {
-        auto other_size_dim = other_sizemat.select(1, other_dim);
-        expanded_sizemat.select(1, sizemat_idx).copy_(other_size_dim);
-
-        // stride is 0 for the expanded dim in self
-        self_new_stridemat.select(1, sizemat_idx).fill_(0);
-        other_new_stridemat.select(1, sizemat_idx).copy_(other_stridemat.select(1, other_dim));
-      } else if (opt_size_other.has_value() && opt_size_other.value() == 1) {
-        auto self_size_dim = self_sizemat.select(1, self_dim);
-        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
-        
-        // stride is 0 for the expanded dim in other
-        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
-        other_new_stridemat.select(1, sizemat_idx).fill_(0);
-      } else {
-        auto self_size_dim = self_sizemat.select(1, self_dim);
-        auto other_size_dim = other_sizemat.select(1, other_dim);
-        TORCH_CHECK(at::equal(other_size_dim, self_size_dim),
-        "The size of tensor self (", self_size_dim,
-        ") must match the size of tensor other (", other_size_dim,
-        ") at non-singleton dimension ", sizemat_idx + 1);
-
-        expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
-        self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
-        other_new_stridemat.select(1, sizemat_idx).copy_(other_stridemat.select(1, other_dim));
-      }
-    } else if (self_dim >= 0) {
-      auto self_size_dim = self_sizemat.select(1, self_dim);
-      expanded_sizemat.select(1, sizemat_idx).copy_(self_size_dim);
-      self_new_stridemat.select(1, sizemat_idx).copy_(self_stridemat.select(1, self_dim));
-      other_new_stridemat.select(1, sizemat_idx).fill_(0);
-    } else {
-      TORCH_INTERNAL_ASSERT(other_dim >= 0);
-      auto other_size_dim = other_sizemat.select(1, other_dim);
-      expanded_sizemat.select(1, sizemat_idx).copy_(other_size_dim);
-      self_new_stridemat.select(1, sizemat_idx).fill_(0);
-      other_new_stridemat.select(1, sizemat_idx).copy_(other_stridemat.select(1, other_dim));
-    }
-  }
-
-  auto expanded_self = create_nested_view_tensor(self,
-                                                 expanded_sizemat,
-                                                 self_new_stridemat,
-                                                 std::vector<int64_t>(self_ptr->get_storage_offsets()));
-  auto expanded_other = create_nested_view_tensor(other,
-                                                  expanded_sizemat.clone(),
-                                                  other_new_stridemat,
-                                                  std::vector<int64_t>(other_ptr->get_storage_offsets()));
-
-  return std::make_tuple(expanded_self, expanded_other);
-
 }
 
 } // namespace native
