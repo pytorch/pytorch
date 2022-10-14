@@ -1,5 +1,15 @@
 name: Run TorchBench with Inductor
 
+on:
+  push:
+    tags:
+      - ciflow/inductor/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.8"
   # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
@@ -59,14 +69,13 @@ jobs:
           touch env-v7.key
       - name: Run TorchBench
         run: |
-          set -x
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
+          # Testing with --only resnet18 for now
           python3 pytorch/benchmarks/dynamo/torchbench.py \
                   --ci --accuracy --skip-accuracy-check -d cuda \
                   --inductor --training --float32 \
-                  # TESTING
                   --only resnet18 \
                   --output=indcutor_torchbench_training.csv
       - name: TorchBench result check
