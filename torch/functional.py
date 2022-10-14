@@ -614,7 +614,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
             .. versionchanged:: 1.14.0
                ``return_complex`` is now a required argument for real inputs,
-               as the default is being trainsitioned to ``True``.
+               as the default is being transitioned to ``True``.
 
             .. deprecated:: 1.14.0
                ``return_complex=False`` is deprecated, instead use ``return_complex=True``
