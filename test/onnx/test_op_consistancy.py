@@ -304,12 +304,13 @@ class TestConsistency(common_utils.TestCase):
         for i, (opset, cpu_sample) in enumerate(
             itertools.product(TESTED_OPSETS, samples)
         ):
+            # Provide the repr to subtest because tensors are not serializable in parallel test runs
             with self.subTest(
                 opset=opset,
                 sample_num=i,
-                input=cpu_sample.input,
-                args=cpu_sample.args,
-                kwargs=cpu_sample.kwargs,
+                input=repr(cpu_sample.input),
+                args=repr(cpu_sample.args),
+                kwargs=repr(cpu_sample.kwargs),
             ):
                 model = SingleOpModel(op, cpu_sample.kwargs)
                 model.eval()
