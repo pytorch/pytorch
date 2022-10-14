@@ -294,6 +294,7 @@ PYTEST_INCOMPATIBLE = [
     "test_cuda",  # test_mem_get_info, memory freed doesn't match
     "test_autograd",  # memory leak/amount of memory allocated doesn't match
     "doctests",  # doesn't use run_test
+    "distributions/test_distributions",  # gets -inf for something
 ]
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
