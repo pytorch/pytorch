@@ -6,6 +6,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/NonSymbolicBC.h>
 
 #include <c10/util/irange.h>
 
@@ -1245,14 +1246,27 @@ void _embedding_bag_cpu_out(
       fbgemm_kernel_cache);
 }
 
-// Assumes all input tensors are contiguous.
-// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
                               const Tensor &offsets_,
                               const Tensor &offset2bag,
                               const Tensor &bag_size_,
                               const Tensor &max_indices_,
                               int64_t num_weights,
+                              bool scale_grad_by_freq, int64_t mode,
+                              bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
+                              int64_t padding_idx) {
+    return at::native::_embedding_bag_backward_symint(
+        grad, indices_, offsets_, offset2bag, bag_size_, max_indices_, num_weights, scale_grad_by_freq, mode, sparse, per_sample_weights_opt, padding_idx);
+}
+
+// Assumes all input tensors are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_,
+                              const Tensor &offsets_,
+                              const Tensor &offset2bag,
+                              const Tensor &bag_size_,
+                              const Tensor &max_indices_,
+                              c10::SymInt num_weights,
                               bool scale_grad_by_freq, int64_t mode,
                               bool sparse, const c10::optional<Tensor>& per_sample_weights_opt,
                               int64_t padding_idx) {
@@ -1292,11 +1306,11 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
   }
 
   if (sparse) {
-    return at::_embedding_bag_sparse_backward(
+    return at::_embedding_bag_sparse_backward_symint(
         grad, indices, offsets, offset2bag_, bag_size_, num_weights,
         scale_grad_by_freq, mode, per_sample_weights, padding_idx);
   } else {
-    return at::_embedding_bag_dense_backward(
+    return at::_embedding_bag_dense_backward_symint(
         grad, indices, offset2bag_, bag_size_, max_indices_, num_weights,
         scale_grad_by_freq, mode, per_sample_weights, padding_idx);
   }
@@ -1606,7 +1620,16 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu(
 
 Tensor _embedding_bag_sparse_backward(
     const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
-    const Tensor &offset2bag, const Tensor &bag_size_, int64_t num_weights,
+    const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
+    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
+    int64_t padding_idx) {
+    return at::native::_embedding_bag_sparse_backward_symint(grad_, indices, offsets, offset2bag, bag_size_, num_weights,
+        scale_grad_by_freq, mode, per_sample_weights_opt, padding_idx);
+}
+
+Tensor _embedding_bag_sparse_backward_symint(
+    const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
+    const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
     bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
     int64_t padding_idx) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -1628,7 +1651,7 @@ Tensor _embedding_bag_sparse_backward(
     AT_ASSERT(mode == MODE_SUM);
     index_grad.mul_(per_sample_weights.unsqueeze(1));
   }
-  return native::embedding_backward_symint(index_grad, indices, c10::SymInt(num_weights), padding_idx,
+  return native::embedding_backward_symint(index_grad, indices, num_weights, padding_idx,
                                     scale_grad_by_freq, true);
 }
 }

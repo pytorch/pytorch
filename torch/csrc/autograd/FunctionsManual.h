@@ -356,7 +356,7 @@ Tensor std_mean_backward(
 at::Tensor masked_scatter_backward(
     const at::Tensor& grad,
     const at::Tensor& mask,
-    at::IntArrayRef sizes);
+    c10::SymIntArrayRef sizes);
 at::Tensor cholesky_backward(
     const at::Tensor& grad,
     bool upper,
@@ -668,10 +668,10 @@ Tensor fft_backward(
     IntArrayRef output_sizes);
 Tensor fft_r2c_backward(
     const Tensor& grad,
-    IntArrayRef dim,
+    at::IntArrayRef dim,
     int64_t normalization,
     bool onesided,
-    int64_t last_dim_size);
+    c10::SymInt last_dim_size);
 Tensor fft_c2r_backward(
     const Tensor& grad,
     IntArrayRef dim,
@@ -824,8 +824,8 @@ Tensor linalg_solve_jvp(
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
-    const int64_t m,
-    const int64_t n);
+    const c10::SymInt m,
+    const c10::SymInt n);
 
 Tensor linalg_det_backward(
     const Tensor& grad,

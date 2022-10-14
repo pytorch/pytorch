@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/native/NonSymbolicBC.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>

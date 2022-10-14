@@ -1622,21 +1622,21 @@ Tensor std_mean_backward(
 Tensor masked_scatter_backward(
     const Tensor& grad,
     const Tensor& mask,
-    IntArrayRef sizes) {
-  int64_t numel = 1;
+    c10::SymIntArrayRef sizes) {
+  c10::SymInt numel = 1;
   for (auto size : sizes) {
     numel *= size;
   }
   auto mask_selected = grad.masked_select(mask);
-  auto diff_nelem = numel - mask_selected.numel();
+  auto diff_nelem = numel - mask_selected.sym_numel();
   if (diff_nelem > 0) {
     // because mask_selected returns a 1-d tensor with size of masked elements
     // that are 1, we need to fill out the rest with zeros then reshape back to
     // tensor2's size.
-    auto zeros_fillin = at::zeros({diff_nelem}, grad.options());
+    auto zeros_fillin = at::zeros_symint({diff_nelem}, grad.options());
     mask_selected = at::cat({mask_selected, zeros_fillin}, 0);
   }
-  return mask_selected.view(sizes);
+  return mask_selected.view_symint(sizes);
 }
 
 Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
@@ -4371,10 +4371,10 @@ Tensor fft_c2r_backward(
 
 Tensor fft_r2c_backward(
     const Tensor& grad,
-    IntArrayRef dim,
+    at::IntArrayRef dim,
     int64_t normalization,
     bool onesided,
-    int64_t last_dim_size) {
+    c10::SymInt last_dim_size) {
   if (!onesided) {
     return at::real(at::_fft_c2c(grad, dim, normalization, /*forward=*/false));
   }
@@ -4389,16 +4389,17 @@ Tensor fft_r2c_backward(
   //        (C2C ifft only take twosided inputs so we need to fill here)
   //     2. inverse C2C ifft
   //     3. discard the complex dim
-  auto half_sizes = grad.sizes();
-  at::DimVector new_grad_shape(half_sizes.begin(), half_sizes.end());
+  auto half_sizes = grad.sym_sizes();
+  std::vector<c10::SymInt> new_grad_shape(half_sizes.begin(), half_sizes.end());
   const auto last_dim = at::maybe_wrap_dim(dim.back(), half_sizes.size());
   new_grad_shape[last_dim] = last_dim_size;
 
-  const auto zero_length = last_dim_size - grad.size(dim.back());
+  const auto zero_length = last_dim_size - grad.sym_size(dim.back());
   auto complex_full_grad =
-      zero_length > 0 ? grad.new_zeros(new_grad_shape) : grad;
+      zero_length > 0 ? grad.new_zeros_symint(new_grad_shape) : grad;
   if (zero_length > 0) {
-    complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
+    complex_full_grad.slice_symint(last_dim, 0, half_sizes[last_dim])
+        .copy_(grad);
   }
   return at::real(
       at::_fft_c2c(complex_full_grad, dim, normalization, /*forward=*/false));
@@ -5622,8 +5623,8 @@ Tensor solve_jvp(
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
-    const int64_t m,
-    const int64_t n) {
+    const c10::SymInt m,
+    const c10::SymInt n) {
   if (!L_grad.defined() && !U_grad.defined()) {
     return {};
   }
@@ -5631,16 +5632,16 @@ Tensor lu_unpack_backward(
 
   // Getters for the principal and complementary part of the matrices
   const auto get_L1 = [m, k](const Tensor& L) {
-    return m == k ? L.tril(-1) : L.narrow(-2, 0, k).tril(-1);
+    return m == k ? L.tril(-1) : L.narrow_symint(-2, 0, k).tril(-1);
   };
   const auto get_L2 = [m, k](const Tensor& L) {
-    return L.narrow(-2, k, m - k);
+    return L.narrow_symint(-2, k, m - k);
   };
   const auto get_U1 = [n, k](const Tensor& U) {
-    return n == k ? U.triu() : U.narrow(-1, 0, k).triu();
+    return n == k ? U.triu() : U.narrow_symint(-1, 0, k).triu();
   };
   const auto get_U2 = [n, k](const Tensor& U) {
-    return U.narrow(-1, k, n - k);
+    return U.narrow_symint(-1, k, n - k);
   };
 
   if (L_grad.defined()) {
@@ -5657,20 +5658,22 @@ Tensor lu_unpack_backward(
       if (m >= n) {
         return L_grad.tril(-1);
       } else {
-        auto size = L_grad.sizes().vec();
+        auto size = L_grad.sym_sizes().vec();
         size.end()[-1] = n - m;
         return at::cat(
-            {L_grad.tril(-1), at::zeros(size, L_grad.options())}, /*dim=*/-1);
+            {L_grad.tril(-1), at::zeros_symint(size, L_grad.options())},
+            /*dim=*/-1);
       }
     }
   } else {
     if (n >= m) {
       return U_grad.triu();
     } else {
-      auto size = U_grad.sizes().vec();
+      auto size = U_grad.sym_sizes().vec();
       size.end()[-2] = m - n;
       return at::cat(
-          {U_grad.triu(), at::zeros(size, U_grad.options())}, /*dim=*/-2);
+          {U_grad.triu(), at::zeros_symint(size, U_grad.options())},
+          /*dim=*/-2);
     }
   }
 }

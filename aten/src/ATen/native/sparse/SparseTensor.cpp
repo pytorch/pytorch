@@ -9,6 +9,7 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
 
 #include <ATen/native/Copy.h>
@@ -407,13 +408,34 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       options.pinned_memory_opt());
 }
 
+Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+    return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory);
+
+  Tensor values = expand_values_if_needed(values_);
+
+  auto sparse_dim = indices.size(0);
+  auto dense_dim = values.dim() - 1;
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      sparse_dim,
+      dense_dim,
+      size,
+      indices,
+      values,
+      values.options().layout(kSparse));
+}
+
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
 // in that we don't check whether any indices are out of boundaries of `size`, thus avoiding a
 // copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
 // are guaranteed to be within bounds or if the caller is going to call
 // _validate_sparse_coo_tensor_args before using the tensor.
 // NB: Got rid of the size == NULL case
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, IntArrayRef size,
+Tensor _sparse_coo_tensor_unsafe_symint(const Tensor& indices, const Tensor& values_, c10::SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -422,10 +444,10 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, I
 
   Tensor values = expand_values_if_needed(values_);
 
-  int64_t sparse_dim = indices.size(0);
-  int64_t dense_dim = values.dim() - 1;
+  auto sparse_dim = indices.sym_size(0);
+  auto dense_dim = values.dim() - 1;
 
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
+  return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
       sparse_dim,
       dense_dim,
       size,

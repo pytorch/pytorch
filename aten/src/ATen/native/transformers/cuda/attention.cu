@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>

@@ -8,6 +8,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
 
