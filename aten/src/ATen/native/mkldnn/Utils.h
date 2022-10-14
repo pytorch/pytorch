@@ -27,6 +27,12 @@ std::vector<int64_t> pool_output_sizes(
     IntArrayRef dilation,
     bool ceil_mode);
 
+void check_mkldnn_binary_fusion_inputs(
+    const Tensor& input,
+    const Tensor& other,
+    const Tensor& weight,
+    const Tensor& bias);
+
 #if AT_MKLDNN_ENABLED()
 
 using AttrFunction = std::function<ideep::attr_t(
@@ -34,6 +40,8 @@ using AttrFunction = std::function<ideep::attr_t(
     c10::optional<c10::string_view>)>;
 
 const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map();
+
+const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 };

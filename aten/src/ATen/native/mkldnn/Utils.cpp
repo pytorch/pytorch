@@ -33,6 +33,46 @@ std::vector<int64_t> pool_output_sizes(
    return output_size;
 }
 
+void check_mkldnn_binary_fusion_inputs(
+    const Tensor& input,
+    const Tensor& other,
+    const Tensor& weight,
+    const Tensor& bias) {
+  TORCH_CHECK(
+      input.options().type_equal(weight.options()),
+      "Input type (",
+      input.toString(),
+      ") and weight type (",
+      weight.toString(),
+      ") should be the same");
+  TORCH_CHECK(
+      input.options().type_equal(other.options()),
+      "Input type (",
+      input.toString(),
+      ") and other type (",
+      other.toString(),
+      ") should be the same");
+  TORCH_CHECK(
+      !bias.defined() || (input.options().type_equal(bias.options())),
+      "Input type (",
+      input.toString(),
+      ") and bias type (",
+      bias.toString(),
+      ") should be the same");
+  TORCH_CHECK(
+      input.device().is_cpu(),
+      "mkldnn pointwise binary fusion: inputs' device should be CPU")
+  TORCH_CHECK(
+      input.scalar_type() == ScalarType::Float ||
+          input.scalar_type() == ScalarType::BFloat16,
+      "mkldnn pointwise binary: inputs' dtypoe should be float or bfloat16")
+  if (input.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(
+        mkldnn_bf16_device_check(),
+        "mkldnn pointwise binary: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
+}
+
 #if AT_MKLDNN_ENABLED()
 
 #define ATTR_FUNC(NAME)                              \
@@ -96,6 +136,16 @@ const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map() {
       {"leaky_relu", attr_func_leaky_relu},
       {"hardtanh", attr_func_hardtanh},
       {"gelu", attr_func_gelu},
+  };
+  return fusion_attr_map;
+};
+
+const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map() {
+  static const std::map<c10::string_view, ideep::algorithm> fusion_attr_map{
+      {"add", {ideep::algorithm::binary_add}},
+      {"sub", {ideep::algorithm::binary_sub}},
+      {"mul", {ideep::algorithm::binary_mul}},
+      {"div", {ideep::algorithm::binary_div}},
   };
   return fusion_attr_map;
 };
