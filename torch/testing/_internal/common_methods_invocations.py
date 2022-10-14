@@ -994,7 +994,9 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
         # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
         args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
-        yield SampleInput(*args, value=3.14).with_metadata(broadcasts_input=broadcasts_input)
+        yield SampleInput(
+            *args, value=3.14 if dtype.is_floating_point or dtype.is_complex else 3
+        ).with_metadata(broadcasts_input=broadcasts_input)
 
 def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_addcmul_addcdiv(
@@ -8294,9 +8296,6 @@ op_db: List[OpInfo] = [
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               # 76047
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
-                            dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
            ),
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
            reference_inputs_func=partial(
@@ -10550,6 +10549,11 @@ op_db: List[OpInfo] = [
         aten_name="relu",
         ref=lambda a: np.where(a <= 0, 0, a),
         supports_autograd=True,
+        supports_sparse=True,
+        supports_sparse_csr=True,
+        supports_sparse_csc=True,
+        supports_sparse_bsr=True,
+        supports_sparse_bsc=True,
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_nn_activation_relu,
@@ -17201,6 +17205,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.addcdiv",
         torch_opinfo_name="addcdiv",
+    ),
+    PythonRefInfo(
+        "_refs.addcmul",
+        torch_opinfo_name="addcmul",
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
