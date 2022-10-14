@@ -612,7 +612,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         elif tracing_mode == "fake":
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
         elif tracing_mode == "symbolic":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            shape_env = ShapeEnv()
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env)
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
@@ -628,15 +629,12 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
             return x
 
-        shape_env = None
-        if tracing_mode == "symbolic":
-            shape_env = ShapeEnv()
         sym_mode = proxy_mode.sym_mode
 
         # todo: Figure out a more informative name for symints
         def wrap_fake_symbolic(x):
             if isinstance(x, torch.Tensor):
-                return fake_tensor_mode.from_tensor(x, shape_env=shape_env)
+                return fake_tensor_mode.from_tensor(x)
             return x
 
         wrap_fn_map = {
