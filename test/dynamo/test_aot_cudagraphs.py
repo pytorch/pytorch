@@ -7,8 +7,10 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 def composed(*decs):
@@ -43,6 +45,7 @@ def assert_aot_autograd_counter(ok=True):
 
 def patch_all(ok=True):
     return composed(
+        unittest.skipIf(TEST_WITH_ROCM, "ROCm not supported"),
         patch("torch._dynamo.config.verify_correctness", True),
         assert_aot_autograd_counter(ok),
     )
@@ -52,7 +55,7 @@ N_ITERS = 5
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
-class TestAotCudagraphs(torch._dynamo.testing.TestCase):
+class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
     @patch_all()
     def test_basic(self):
         def model(x, y):
@@ -201,6 +204,6 @@ class TestAotCudagraphs(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

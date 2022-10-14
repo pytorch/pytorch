@@ -54,8 +54,6 @@ constant_functions = {
     torch.onnx.is_in_onnx_export: False,
 }
 
-# root folder of the project
-base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
@@ -151,6 +149,12 @@ dynamo_import = __name__.replace(".config", "")
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = dynamo_import.replace("dynamo", "inductor")
+
+# root folder of the project
+if "torch." in dynamo_import:
+    base_dir = dirname(dirname(dirname(abspath(__file__))))
+else:
+    base_dir = dirname(dirname(abspath(__file__)))
 
 
 class _AccessLimitingConfig(ModuleType):

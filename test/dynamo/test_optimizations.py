@@ -8,6 +8,7 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
+import torch._dynamo.test_case
 from torch._dynamo.optimizations import backends
 from torch._dynamo.optimizations.analysis import has_mutation
 from torch._dynamo.optimizations.log_args import conv_args_analysis
@@ -64,7 +65,7 @@ class Conv_Bn_Relu(torch.nn.Module):
         return self.relu(self.bn(self.conv(x)))
 
 
-class TestOptimizations(torch._dynamo.testing.TestCase):
+class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_inplacifier(self):
         gm = torch.fx.symbolic_trace(Seq())
         normalize(gm)
@@ -183,7 +184,7 @@ class TestOptimizations(torch._dynamo.testing.TestCase):
         self.assertEqual(r2.dtype, torch.bfloat16)
 
 
-class NormalizeIRTests(torch._dynamo.testing.TestCase):
+class NormalizeIRTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_inplace_normalize(self):
         def fn(a, b):
@@ -202,6 +203,6 @@ class NormalizeIRTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

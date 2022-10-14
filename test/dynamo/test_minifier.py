@@ -6,6 +6,7 @@ from unittest.mock import patch
 import torch
 
 import torch._dynamo
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.optimizations.backends import create_backend
 
@@ -23,7 +24,7 @@ class MockModule(torch.nn.Module):
         return x
 
 
-class MinfierTests(torch._dynamo.testing.TestCase):
+class MinfierTests(torch._dynamo.test_case.TestCase):
     def test_after_dynamo(self):
         @create_backend
         def bad_dynamo_backend(subgraph):
@@ -92,6 +93,6 @@ class MinfierTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

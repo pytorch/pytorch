@@ -43,13 +43,13 @@ class DDPOptimizer:
         bucket_actual_sizes = []
         node_splits = [[]]
         for node in reversed(gm.graph.nodes):
+            if node.op == "output" or node.op == "placeholder":
+                continue
+
             if bucket_bytes >= self.bucket_bytes_cap:
                 bucket_actual_sizes.insert(0, bucket_bytes)
                 bucket_bytes = 0
                 node_splits.insert(0, [])
-
-            if node.op == "output" or node.op == "placeholder":
-                continue
 
             elif node.op == "call_module":
                 target = gm.get_submodule(node.target)
@@ -62,6 +62,10 @@ class DDPOptimizer:
                 )
                 bucket_bytes += params_size_b
                 # print(f"accumulated {params_size_b} b from {node}")
+            elif node.op == "get_attr":
+                maybe_param = getattr(gm, node.target)
+                if maybe_param.requires_grad:
+                    bucket_bytes += maybe_param.storage().nbytes()
             else:
                 # TODO(whc) confirm this:
                 # (e.g. call_method, call_function aren't expected to 'have' parameters)

@@ -8,6 +8,7 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.config as config
+import torch._dynamo.test_case
 from torch._dynamo.optimizations import backends
 from torch._dynamo.testing import same
 
@@ -77,7 +78,7 @@ def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return gm
 
 
-class TestVerifyCorrectness(torch._dynamo.testing.TestCase):
+class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
     @patch.object(config, "verify_correctness", True)
     def test_example_inputs(self):
         def fn(a, bc, d):
@@ -169,6 +170,6 @@ class TestVerifyCorrectness(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

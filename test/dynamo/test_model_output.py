@@ -4,6 +4,7 @@ import unittest.mock
 
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 
@@ -22,7 +23,7 @@ def maybe_skip(fn):
     return fn
 
 
-class TestHFPretrained(torch._dynamo.testing.TestCase):
+class TestHFPretrained(torch._dynamo.test_case.TestCase):
     @maybe_skip
     def test_pretrained(self):
         def fn(a, tmp):
@@ -38,7 +39,7 @@ class TestHFPretrained(torch._dynamo.testing.TestCase):
         self.assertTrue(same(ref, res))
 
 
-class TestModelOutput(torch._dynamo.testing.TestCase):
+class TestModelOutput(torch._dynamo.test_case.TestCase):
     @maybe_skip
     def test_mo_create(self):
         def fn(a, b):
@@ -160,6 +161,6 @@ class TestModelOutput(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

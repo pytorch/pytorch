@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
@@ -17,7 +18,7 @@ def indirectly_unsupported(a, b):
     return unsupported(a, c)
 
 
-class SubGraphTests(torch._dynamo.testing.TestCase):
+class SubGraphTests(torch._dynamo.test_case.TestCase):
     def _common(self, fn, frame_count, op_count):
         torch._dynamo.reset()
         v1 = torch.ones(10)
@@ -528,6 +529,6 @@ class SubGraphTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

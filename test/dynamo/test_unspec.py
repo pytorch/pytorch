@@ -7,6 +7,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 
@@ -51,7 +52,7 @@ UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
 
 @patch.object(torch._dynamo.config, "specialize_int_float", False)
-class UnspecTests(torch._dynamo.testing.TestCase):
+class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
@@ -221,6 +222,6 @@ class UnspecTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

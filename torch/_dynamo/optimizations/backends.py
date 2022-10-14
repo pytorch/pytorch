@@ -681,9 +681,7 @@ def tvm_compile_inner(
         elif tuning_option == "meta_schedule":
             from os import path as osp
 
-            from tvm.meta_schedule import TuneConfig
-            from tvm.meta_schedule.database import JSONDatabase
-            from tvm.meta_schedule.tune import tune_relay
+            from tvm.contrib.torch import optimize_torch
 
             with tempfile.TemporaryDirectory() as work_dir:
                 if log_file is not None:
@@ -691,22 +689,16 @@ def tvm_compile_inner(
                         log_file
                     ), "TVM's meta_schedule requires a directory for storing log files."
                     work_dir = log_file
-                lib: tvm.runtime.Module = tune_relay(
-                    mod=mod,
-                    params=params,
-                    target=target,
-                    config=TuneConfig(
-                        strategy="evolutionary",
-                        num_trials_per_iter=64,
-                        max_trials_per_task=trials,
-                        max_trials_global=trials,
-                    ),
+
+                lib = optimize_torch(
+                    jit_mod,
+                    example_inputs,
+                    max_trials_global=20000,
                     work_dir=work_dir,
-                    database=JSONDatabase(
-                        osp.join(work_dir, "workload.json"),
-                        osp.join(work_dir, "records.json"),
-                    ),
+                    target=target,
+                    max_trials_per_task=64,
                 )
+
         elif tuning_option is None:
             # no autotuning (for debugging)
             with tvm.transform.PassContext(opt_level=10):
@@ -716,34 +708,41 @@ def tvm_compile_inner(
                 "This tuning option is invalid/not implemented for torchdynamo's TVM-related backend. "
                 "There are three available options including None, auto_scheduler and meta_schedule."
             )
+        if tune_option != "meta_schedule":
+            m = graph_executor.GraphModule(lib["default"](dev))
 
-        m = graph_executor.GraphModule(lib["default"](dev))
+            def to_torch_tensor(nd_tensor):
+                """A helper function to transfer a NDArray to torch.tensor."""
+                if nd_tensor.dtype == "bool":
+                    # DLPack does not support boolean so it can't be handled by
+                    # torch.utils.dlpack.from_pack. Workaround by going through
+                    # numpy, although this brings additional data copy overhead.
+                    return torch.from_numpy(nd_tensor.numpy())
+                return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
 
-        def to_torch_tensor(nd_tensor):
-            """A helper function to transfer a NDArray to torch.tensor."""
-            if nd_tensor.dtype == "bool":
-                # DLPack does not support boolean so it can't be handled by
-                # torch.utils.dlpack.from_pack. Workaround by going through
-                # numpy, although this brings additional data copy overhead.
-                return torch.from_numpy(nd_tensor.numpy())
-            return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
+            def exec_tvm(*args):
+                args = [a.contiguous() for a in args]
+                for idx, arg in enumerate(args, 0):
+                    if arg.dim() != 0:
+                        if arg.requires_grad:
+                            arg = arg.detach()
+                        m.set_input(
+                            f"inp_{idx}",
+                            tvm.nd.array(arg.numpy(), dev),
+                        )
+                m.run()
+                return [
+                    to_torch_tensor(m.get_output(i)) for i in range(m.get_num_outputs())
+                ]
 
-        def exec_tvm(*args):
-            args = [a.contiguous() for a in args]
-            for idx, arg in enumerate(args, 0):
-                if arg.dim() != 0:
-                    if arg.requires_grad:
-                        arg = arg.detach()
-                    m.set_input(
-                        f"inp_{idx}",
-                        tvm.nd.array(arg.numpy(), dev),
-                    )
-            m.run()
-            return [
-                to_torch_tensor(m.get_output(i)) for i in range(m.get_num_outputs())
-            ]
+        else:
+
+            def exec_tvm(*args):
+                args = [a.contiguous() for a in args]
+                return lib(*args)
 
         return exec_tvm
+
     except Exception:
         log.exception("tvm error")
         return jit_mod  # explicit fall back to eager

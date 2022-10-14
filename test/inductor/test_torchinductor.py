@@ -6,6 +6,7 @@ import importlib
 import random
 import sys
 import unittest
+import weakref
 from unittest.mock import patch
 
 import torch
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 try:
@@ -74,7 +76,6 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-
 torch._inductor.config.triton.autotune = False  # too slow
 
 
@@ -242,7 +243,6 @@ def check_model(
     #     for graph in exp[2]:
     #         print("Graph", graph)
     assert called, "Ran graph without calling compile_fx"
-
     assert type(actual) == type(correct)
 
     correct_flat, correct_spec = tree_flatten(correct)
@@ -2004,7 +2004,11 @@ class CommonTemplate:
     def test_cat(self):
         def fn(a):
             tmp = a * 2
-            return torch.cat((a, a[:, :4] + 1, a + 2), -1), torch.cat((tmp, tmp), 0)
+            return (
+                torch.cat((a, a[:, :4] + 1, a + 2), -1),
+                torch.cat((tmp, tmp), 0),
+                torch.cat((tmp, tmp.double()), 0),
+            )
 
         self.common(
             fn,
@@ -3171,6 +3175,15 @@ class CommonTemplate:
             ],
         )
 
+    # issue #1150
+    def test_dense_mask_index(self):
+        def fn(x, y):
+            y = torch.ops.aten.select.int(y, 0, 2)
+            z = x * y
+            return z.sum()
+
+        self.common(fn, [torch.randn(102400), torch.randn(3)])
+
     def test_new_empty_strided(self):
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1]).fill_(123)
@@ -3714,10 +3727,10 @@ class CommonTemplate:
         )
         compiled = compile_fx_inner(traced, [torch.randn(8, 4, device=self.device)])
 
-        out = compiled(torch.randn(8, 4, device=self.device))
+        out = compiled([torch.randn(8, 4, device=self.device)])
         self.assertEqual(out[0].shape, (16, 2))
 
-        out = compiled(torch.randn(12, 4, device=self.device))
+        out = compiled([torch.randn(12, 4, device=self.device)])
         self.assertEqual(out[0].shape, (24, 2))
 
     @requires_cuda()
@@ -3743,6 +3756,63 @@ class CommonTemplate:
             rand_strided((), (), device="cpu"),
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+    @patch.object(config.triton, "mm", "aten")
+    def test_list_clearing(self):
+
+        if self.device == "cpu":
+            contexts = [contextlib.nullcontext]
+        else:
+            contexts = [
+                contextlib.nullcontext,
+                lambda: patch.object(config.triton, "cudagraphs", True),
+            ]
+
+        for context in contexts:
+            with context():
+                inps = [
+                    torch.rand([5, 5]).to(self.device),
+                    torch.rand([5, 5]).to(self.device),
+                ]
+                inp_refs = [weakref.ref(inp) for inp in inps]
+
+                def fn(x, y):
+                    a = x + y
+                    return (a @ a,)
+
+                fn_fx = make_fx(fn)(inps[0], inps[1])
+                fn_compiled = compile_fx_inner(fn_fx, inps)
+
+                test_self = self
+                matmul_seen = False
+
+                class TestRefMode(TorchDispatchMode):
+                    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                        kwargs = kwargs if kwargs else {}
+
+                        nonlocal inps
+                        nonlocal inp_refs
+                        nonlocal test_self
+                        nonlocal matmul_seen
+
+                        # by matmul, inputs should be deallocated
+                        if func is aten.mm.out:
+                            matmul_seen = True
+                            test_self.assertEqual(len(inps), 0)
+                            test_self.assertIsNone(inp_refs[0]())
+                            test_self.assertIsNone(inp_refs[1]())
+
+                        return func(*args, **kwargs)
+
+                with TestRefMode():
+                    fn_compiled(inps)
+
+                # for some reason, TorchDispatch doesnt capture the
+                # cuda mm call (even without cudagraphs)
+                if self.device == "cpu":
+                    self.assertTrue(matmul_seen)
+                else:
+                    self.assertEqual(len(inps), 0)
 
 
 if HAS_CPU:
@@ -3781,7 +3851,7 @@ if HAS_CPU:
             fn_fx = make_fx(fn)(x1, y)
             fn_compiled = compile_fx_inner(fn_fx, [x1, y])
             fn(x2, y)
-            fn_compiled(x3, y)
+            fn_compiled([x3, y])
             assert same(x2, x3)
 
         def test_no_op_squeeze(self):
@@ -3872,7 +3942,7 @@ if HAS_CUDA:
             ]
             mod = make_fx(forward)(*inps)
             compiled = compile_fx_inner(mod, inps)
-            compiled(*inps)
+            compiled(inps)
 
         @patch.object(config, "fallback_random", True)
         def test_dtype_factory_issue(self):
@@ -3888,7 +3958,7 @@ if HAS_CUDA:
 
             mod = make_fx(forward)()
             compiled = compile_fx_inner(mod, ())
-            assert compiled()[0].device.type == "cuda"
+            assert compiled([])[0].device.type == "cuda"
 
         @patch.object(config.triton, "cudagraphs", True)
         def test_expanded_inputs_cudagraphs(self):
@@ -3952,6 +4022,7 @@ if HAS_CUDA:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
-    run_tests(needs="filelock")
+    if HAS_CPU or HAS_CUDA:
+        run_tests(needs="filelock")

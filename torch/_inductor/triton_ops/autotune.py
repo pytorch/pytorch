@@ -5,6 +5,7 @@ import json
 import logging
 import multiprocessing
 import os.path
+import re
 import threading
 from typing import List
 
@@ -110,11 +111,12 @@ class CachingAutotuner(KernelInterface):
                 # set_device(current_device())  # TODO(jansel): is this needed?
                 grid_0, grid_1, grid_2 = grid(grid_meta)
                 bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
-                              stream, bin.cu_function, None, None, None,
-                              {', '.join(call_args)})
+                            stream, bin.cu_function, None, None, None,
+                            {', '.join(call_args)})
             """.lstrip(),
             scope,
         )
+
         launcher = scope["launcher"]
         launcher.config = cfg
         return launcher
@@ -160,11 +162,22 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
             )
-        return launcher(
-            *args,
-            grid=grid,
-            stream=stream,
-        )
+        try:
+            result = launcher(
+                *args,
+                grid=grid,
+                stream=stream,
+            )
+        except TypeError as e:
+            if re.match(r"function takes exactly \d+ arguments \(\d+ given\)", str(e)):
+                raise RuntimeError(
+                    """Consider updating Triton with
+`pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
+                )
+            else:
+                raise e
+
+        return result
 
 
 def hash_configs(configs: List[Config]):

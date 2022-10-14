@@ -14,6 +14,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 from torch import nn
@@ -749,7 +750,7 @@ class TestModule(torch.nn.Module):
         return self.inner_fn(tensor.shape, (1, 2, 3))
 
 
-class ReproTests(torch._dynamo.testing.TestCase):
+class ReproTests(torch._dynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         opt__do_paste_mask = torch._dynamo.optimize(
@@ -1712,6 +1713,6 @@ class ReproTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

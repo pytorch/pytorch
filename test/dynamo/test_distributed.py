@@ -7,6 +7,7 @@ import pytest
 import torch
 
 import torch._dynamo
+import torch._dynamo.test_case
 import torch.distributed as dist
 from torch import nn
 from torch._dynamo import config
@@ -43,7 +44,7 @@ def skip_if_no_active_ddp():
 
 
 @pytest.mark.skip("Module hangs in PyTorch CI")
-class TestDistributed(torch._dynamo.testing.TestCase):
+class TestDistributed(torch._dynamo.test_case.TestCase):
     """
     Test harness initializes dist process group
     """
@@ -208,6 +209,63 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         opt_outputs = opt_fn(inputs)
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_custom_layer(self):
+        """
+        Just ensures that the appropriate number of splits happen (based on
+        bucket size and model parameters) - verifies the number of times
+        the user-provided compiler is called by the DDPOptimizer which is
+        doing the graph splitting
+        """
+        from torch.nn.parallel import DistributedDataParallel as DDP
+
+        skip_if_no_active_ddp()
+
+        class MyCustomLinear(torch.nn.Module):
+            def __init__(self):
+                super(MyCustomLinear, self).__init__()
+                self.weight = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x):
+                return torch.mm(x, self.weight.t())
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super(MyLinear, self).__init__()
+                self.linear = torch.nn.Linear(512, 512)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                mods = [
+                    (MyLinear(), torch.nn.ReLU()),
+                    # sandwitch the custom in the middle so it comes before and after
+                    (MyCustomLinear(), torch.nn.ReLU()),
+                    (MyLinear(), torch.nn.ReLU()),
+                ]
+                self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
+
+            def forward(self, x):
+                return self.seq(x)
+
+        m = MyModule().to(self.device)
+        inputs = torch.randn((512, 512)).to(self.device)
+        correct_outputs = m(inputs)
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=1)
+
+        check_splits_compiler = CheckSplitsCompiler()
+
+        @torch._dynamo.optimize(check_splits_compiler.compile_fn)
+        def opt_fn(inputs):
+            return ddp_m(inputs)
+
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+        self.assertEqual(check_splits_compiler.compiler_called, 3)
 
     def test_empty_graph(self):
         def fn():

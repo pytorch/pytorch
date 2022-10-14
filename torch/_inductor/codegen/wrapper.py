@@ -217,15 +217,20 @@ class WrapperCodeGen(CodeGen):
                 )
 
         self.prefix.splice(
-            f"""
+            """
 
             async_compile.wait(globals())
             del async_compile
 
-            def call({', '.join(V.graph.graph_inputs.keys())}):
+            def call(args):
             """
         )
         with self.prefix.indent():
+            inp_len = len(V.graph.graph_inputs.keys())
+            if inp_len != 0:
+                lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
+                self.prefix.writeline(f"{lhs} = args")
+                self.prefix.writeline("args.clear()")
             for name in V.graph.randomness_seeds:
                 self.prefix.writeline(
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
@@ -275,6 +280,12 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
+
+        # can be freed but not reused
+        if isinstance(buffer, ir.InputBuffer):
+            self.writeline(f"del {name}")
+            return
+
         if not self.can_reuse(buffer):
             return
         self.freed.add(name)
@@ -380,7 +391,7 @@ class WrapperCodeGen(CodeGen):
                 )
 
             output.writeline(
-                f"print_performance(lambda: call({', '.join(V.graph.graph_inputs.keys())}))"
+                f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
             )
 
     def define_kernel(self, name: str, kernel: str):

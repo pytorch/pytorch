@@ -42,6 +42,10 @@ from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
 
+class _missing:
+    pass
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -189,8 +193,9 @@ class TensorVariable(VariableTracker):
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,
-            torch.distributed.get_rank,
-            torch.distributed.get_world_size,
+            # some mac builds are missing torch.distributed.get_rank()
+            getattr(torch.distributed, "get_rank", _missing),
+            getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
