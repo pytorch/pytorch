@@ -265,6 +265,7 @@ Adapter::Adapter(
     const uint32_t num_queues)
     : queue_usage_mutex_{},
       physical_device_(physical_device),
+      gpu_name_(physical_device_.properties.deviceName),
       queues_{},
       queue_usage_{},
       queue_mutexes_{},
@@ -386,6 +387,7 @@ std::string Adapter::stringize() const {
   PRINT_LIMIT_PROP_VEC3(maxComputeWorkGroupCount);
   PRINT_LIMIT_PROP(maxComputeWorkGroupInvocations);
   PRINT_LIMIT_PROP_VEC3(maxComputeWorkGroupSize);
+  PRINT_LIMIT_PROP(timestampPeriod);
   ss << "    }" << std::endl;
   ss << "  }" << std::endl;
   ;

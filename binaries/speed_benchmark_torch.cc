@@ -28,6 +28,10 @@
 
 #include <c10/mobile/CPUCachingAllocator.h>
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+#include <ATen/native/vulkan/api/api.h>
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
 #include <chrono>
 using namespace std::chrono;
 
@@ -70,7 +74,8 @@ C10_DEFINE_bool(
   "Whether to print performance stats for AI-PEP.");
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
-C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
+C10_DEFINE_bool(use_vulkan, false, "Whether to use Vulkan backend (GPU).");
+C10_DEFINE_bool(use_gpu_profiling, false, "Whether to enable GPU timestamp collection");
 
 namespace {
 
@@ -278,8 +283,8 @@ int main(int argc, char** argv) {
   using ModuleType = torch::jit::Module;
 #endif
 
-  const auto runner = FLAGS_vulkan ? std::make_unique<vkRunner<ModuleType>>()
-                                   : std::make_unique<Runner<ModuleType>>();
+  const auto runner = FLAGS_use_vulkan ? std::make_unique<vkRunner<ModuleType>>()
+                                       : std::make_unique<Runner<ModuleType>>();
 
 #ifndef BUILD_LITE_INTERPRETER
   module.eval();
@@ -305,6 +310,15 @@ int main(int argc, char** argv) {
     runner->run(module, inputs);
   }
 
+#if USE_VULKAN_GPU_DIAGNOSTICS
+  if (FLAGS_use_gpu_profiling) {
+    at::native::vulkan::api::context()->enable_op_profiling();
+    std::cout << *(at::native::vulkan::api::context()->adapter_ptr()) << std::endl;
+  }
+
+  std::stringstream gpu_timestamp_report;
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
+
   std::cout << "Main runs." << std::endl;
   CAFFE_ENFORCE(
       FLAGS_iter >= 0,
@@ -315,11 +329,23 @@ int main(int argc, char** argv) {
   std::vector<float> times;
   auto micros = timer.MicroSeconds();
   for (int i = 0; i < FLAGS_iter; ++i) {
+#if USE_VULKAN_GPU_DIAGNOSTICS
+    if (FLAGS_use_gpu_profiling) {
+      at::native::vulkan::api::context()->reset_querypool();
+    }
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
     auto start = high_resolution_clock::now();
     runner->run(module, inputs);
     auto stop = high_resolution_clock::now();
     auto duration = duration_cast<microseconds>(stop - start);
     times.push_back(duration.count());
+#if USE_VULKAN_GPU_DIAGNOSTICS
+    if (FLAGS_use_gpu_profiling) {
+      at::native::vulkan::api::context()->querypool().extract_results();
+      gpu_timestamp_report
+        << at::native::vulkan::api::context()->querypool().gen_string_for_aibench();
+    }
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
   }
   micros = timer.MicroSeconds();
   if (FLAGS_report_pep) {
@@ -327,6 +353,11 @@ int main(int argc, char** argv) {
       std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
     }
   }
+#if USE_VULKAN_GPU_DIAGNOSTICS
+  if (FLAGS_use_gpu_profiling) {
+    std::cout << gpu_timestamp_report.str() << std::endl;
+  }
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
   std::cout << "Main run finished. Microseconds per iter: "
             << micros / FLAGS_iter
             << ". Iters per second: " << 1000.0 * 1000 * FLAGS_iter / micros

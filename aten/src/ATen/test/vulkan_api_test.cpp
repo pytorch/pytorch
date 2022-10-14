@@ -233,6 +233,7 @@ class VulkanAPITest : public ::testing::Test {
       GTEST_SKIP() << "Vulkan is not available";
     }
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+    at::native::vulkan::api::context()->enable_op_profiling();
     at::native::vulkan::api::context()->reset_querypool();
 #endif
   }

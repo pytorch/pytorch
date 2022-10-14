@@ -20,6 +20,7 @@ constexpr int64_t default_ns_per_tick = 52; // lround(52.08f);
 QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
     : mutex_{},
       device_(adapter_p->device_handle()),
+      gpu_name_(adapter_p->gpu_name()),
       config_(config),
       querypool_(VK_NULL_HANDLE),
       shader_log_{},
@@ -148,6 +149,24 @@ std::string stringize(const VkExtent3D& extents) {
   return ss.str();
 }
 
+std::string QueryPool::create_shader_event_name(
+    const ShaderDuration& entry,
+    const bool include_gpuname,
+    const bool include_idx) {
+  std::stringstream ss;
+  ss << entry.kernel_name;
+  ss << "_" << entry.global_workgroup_size.width;
+  ss << "x" << entry.global_workgroup_size.height;
+  ss << "x" << entry.global_workgroup_size.depth;
+  if (include_idx) {
+    ss << "_" << entry.idx;
+  }
+  if (include_gpuname) {
+    ss << "/" << gpu_name_;
+  }
+  return ss.str();
+}
+
 std::string QueryPool::generate_string_report() {
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -185,6 +204,25 @@ std::string QueryPool::generate_string_report() {
 
 void QueryPool::print_results() {
   std::cout << generate_string_report() << std::endl;
+}
+
+std::string QueryPool::gen_string_for_aibench(
+    const bool include_gpuname,
+    const bool include_idx) {
+  std::stringstream ss;
+  uint64_t total_duration_us = 0;
+  for (ShaderDuration& entry : shader_log_) {
+    std::string shader_event_name =
+        create_shader_event_name(entry, include_gpuname, include_idx);
+    uint64_t duration_us = entry.execution_duration_ns / 1000;
+    total_duration_us += duration_us;
+
+    ss << R"(PyTorchObserver {"type": ")" << shader_event_name << "\"";
+    ss << R"(, "unit": "us", "metric": "latency", "value": ")";
+    ss << entry.execution_duration_ns / 1000 << "\"}" << std::endl;
+  }
+
+  return ss.str();
 }
 
 uint64_t QueryPool::get_total_op_ns(std::string op_name) {

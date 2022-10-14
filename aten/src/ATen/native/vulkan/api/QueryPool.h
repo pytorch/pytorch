@@ -51,6 +51,7 @@ class QueryPool final {
   std::mutex mutex_;
 
   VkDevice device_;
+  std::string gpu_name_;
   QueryPoolConfig config_;
 
   VkQueryPool querypool_;
@@ -60,6 +61,11 @@ class QueryPool final {
 
  private:
   size_t write_timestamp(const CommandBuffer&);
+
+  std::string create_shader_event_name(
+      const ShaderDuration& entry,
+      const bool include_gpuname,
+      const bool include_idx);
 
   std::string generate_string_report();
 
@@ -79,6 +85,10 @@ class QueryPool final {
 
   void extract_results();
   void print_results();
+  std::string gen_string_for_aibench(
+      const bool include_gpuname = false,
+      const bool include_idx = true);
+
   uint64_t get_total_op_ns(std::string op_name);
   uint64_t ns_per_tick_;
   void shader_log_for_each(std::function<void(const ShaderDuration&)> fn);
