@@ -192,7 +192,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     def __dir__(self):
         # for auto-completion in a REPL (e.g. Jupyter notebook)
-        return super().__dir__() + list(self.functions.keys())
+        return list(super().__dir__()) + list(self.functions.keys())
 
     def reset(self) -> None:
         r"""
@@ -319,7 +319,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
     def __dir__(self):
         # for auto-completion in a REPL (e.g. Jupyter notebook)
-        return super().__dir__() + list(self.functions.keys())
+        return list(super().__dir__()) + list(self.functions.keys())
 
 
 
