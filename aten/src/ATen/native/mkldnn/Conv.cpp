@@ -1,17 +1,18 @@
-#define TORCH_ONLY_METHOD_OPERATORS
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <torch/library.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ConvUtils.h>
 
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/empty.h>
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/conv2d.h>
+#include <ATen/ops/conv3d.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/mkldnn_convolution_native.h>
 #endif
 
