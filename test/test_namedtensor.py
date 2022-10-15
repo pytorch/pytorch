@@ -1178,6 +1178,9 @@ class TestNamedTensor(TestCase):
 
         def test_simple_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
+            check_output(op(t, 1), ['N', 'L'])
+            check_output(op(t, -1), ['N', 'C'])
+            check_output(op(t, 'C'), ['N', 'L'])
             ops_support_dim_none = [
                 'sum',
                 'mean',
@@ -1188,11 +1191,6 @@ class TestNamedTensor(TestCase):
                 'nanmean',
                 'nansum',
             ]
-
-            check_output(op(t, 1), ['N', 'L'])
-            check_output(op(t, -1), ['N', 'C'])
-            check_output(op(t, 'C'), ['N', 'L'])
-
             if op.__name__ in ops_support_dim_none:
                 check_output(op(t, None), [])
             else:
