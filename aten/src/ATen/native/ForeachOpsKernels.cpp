@@ -46,6 +46,8 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
@@ -228,14 +230,20 @@ FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);
 FOREACH_BINARY_OP_SCALAR(mul);
 FOREACH_BINARY_OP_SCALAR(div);
+FOREACH_BINARY_OP_SCALAR(clamp_min);
+FOREACH_BINARY_OP_SCALAR(clamp_max);
 
 FOREACH_BINARY_OP_SCALARLIST(add);
 FOREACH_BINARY_OP_SCALARLIST(sub);
 FOREACH_BINARY_OP_SCALARLIST(mul);
 FOREACH_BINARY_OP_SCALARLIST(div);
+FOREACH_BINARY_OP_SCALARLIST(clamp_min);
+FOREACH_BINARY_OP_SCALARLIST(clamp_max);
 
 FOREACH_BINARY_OP_LIST(mul);
 FOREACH_BINARY_OP_LIST(div);
+FOREACH_BINARY_OP_LIST(clamp_min);
+FOREACH_BINARY_OP_LIST(clamp_max);
 
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
