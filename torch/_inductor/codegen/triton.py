@@ -1177,10 +1177,6 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        for node in node_schedule:
-            if node not in (EnableReduction, DisableReduction):
-                node.mark_run()
-
         log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
@@ -1214,6 +1210,9 @@ class TritonScheduling:
             reduction_hint_val = ReductionHint.DEFAULT
         with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
             stack = contextlib.ExitStack()
+            for node in node_schedule:
+                if node not in (EnableReduction, DisableReduction):
+                    node.mark_run()
             for node in node_schedule:
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())
