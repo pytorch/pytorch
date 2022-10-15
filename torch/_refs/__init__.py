@@ -3555,12 +3555,11 @@ def t(a: TensorLikeType):
 # CompositeImplicitAutograd, but Python name doesn't match the ATen name
 @register_decomposition(torch.ops.aten.numpy_T)
 def T(a: TensorLikeType) -> TensorLikeType:
-    n = a.ndim
     # n != 2 && n != 0 is deprecated in regular PyTorch.  Maybe T could even be
     # defined as an alias for t:
     # https://github.com/pytorch/pytorch/issues/86968
     check(
-        n in (0, 2),
+        a.ndim in (0, 2),
         lambda: (
             "The use of `x.T` on tensors of dimension other than 0 or 2 "
             "to reverse their shape is not supported."
