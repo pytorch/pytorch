@@ -204,7 +204,7 @@ class DataFlowGraph:
         self._leaf_events = self._extract_leaf_events(tree)
 
     @property
-    def leaf_events(self) -> Tuple[_ProfilerEvent]:
+    def leaf_events(self) -> Tuple[_ProfilerEvent, ...]:
         return self._leaf_events
 
     @staticmethod
