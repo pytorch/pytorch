@@ -287,9 +287,6 @@ class TensorVariable(VariableTracker):
 
             return UserDefinedObjectVariable(example_value)
         else:
-            import pdb
-
-            pdb.set_trace()
             raise AssertionError(
                 "torch.* op returned non-Tensor "
                 + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
