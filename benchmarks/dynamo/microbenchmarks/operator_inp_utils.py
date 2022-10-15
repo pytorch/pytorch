@@ -198,12 +198,22 @@ class OperatorInputsMode(TorchDispatchMode):
 
 
 def map_to_device(e, device):
-    return e.to(device) if isinstance(e, torch.Tensor) else e
+    if isinstance(e, torch.Tensor):
+        return e.to(device)
+    elif isinstance(e, torch.device):
+        return device
+    elif isinstance(e, str):
+        if e == "cuda" or e == "cpu":
+            return device.type
+    else:
+        return e
 
 
 def map_to_dtype(e, dtype):
     if isinstance(e, torch.Tensor) and e.is_floating_point():
         return e.to(dtype)
+    elif isinstance(e, torch.dtype):
+        return dtype
     else:
         return e
 
