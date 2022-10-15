@@ -425,25 +425,6 @@ class TestReductions(TestCase):
     # TODO: Legacy tests - port to ReductionOpInfo
     ###########################################################################
 
-    def test_var_unbiased(self, device):
-        tensor = torch.randn(100, device=device)
-        self.assertEqual(tensor.var(0, correction=1), tensor.var(0, unbiased=True))
-        self.assertEqual(tensor.var(correction=1), tensor.var(unbiased=True))
-        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False))
-
-        tensor = torch.tensor([1.0, 2.0], device=device)
-        self.assertEqual(tensor.var(unbiased=True), 0.5)
-        self.assertEqual(tensor.var(unbiased=False), 0.25)
-
-        tensor = torch.tensor([1.0, 2.0, 3.0], device=device)
-        self.assertEqual(tensor.var(unbiased=True), 1.0)
-        self.assertEqual(tensor.var(unbiased=False), 2.0 / 3.0)
-
-        tensor = torch.randn(100, device=device)
-        self.assertEqual(tensor.std(0, correction=1), tensor.std(0, unbiased=True))
-        self.assertEqual(tensor.std(correction=1), tensor.std(unbiased=True))
-        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
-
     def test_var_stability(self, device):
         tensor = torch.tensor([2281.5, 2281.25], device=device)
         self.assertEqual(tensor.var(dim=0, correction=1), 0.03125)
@@ -738,18 +719,18 @@ class TestReductions(TestCase):
 
     @onlyCPU
     def test_std_dim(self, device):
-        for unbiased in [False, True]:
+        for correction in [0, 1]:
             self._test_dim_ops(
-                lambda t, d: t.std(d, unbiased=unbiased),
-                lambda n, d: n.std(d, ddof=1 if unbiased else 0),
+                lambda t, d: t.std(d, correction=correction),
+                lambda n, d: n.std(d, ddof=correction),
                 use_integral=False)
 
     @onlyCPU
     def test_var_dim(self, device):
-        for unbiased in [False, True]:
+        for correction in [0, 1]:
             self._test_dim_ops(
-                lambda t, d: t.var(d, unbiased=unbiased),
-                lambda n, d: n.var(d, ddof=1 if unbiased else 0),
+                lambda t, d: t.var(d, correction=correction),
+                lambda n, d: n.var(d, ddof=correction),
                 use_integral=False)
 
     @onlyCPU
@@ -991,10 +972,10 @@ class TestReductions(TestCase):
         for num_of_dims in range(2, dims):
             dim_list = list(combinations(list(range(dims)), r=num_of_dims))
             for dim in dim_list:
-                for unbiased in [False, True]:
+                for correction in [0, 1]:
                     for keepdim in [False, True]:
-                        var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
-                        var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        var1, mean1 = torch.var_mean(x, dim=dim, correction=correction, keepdim=keepdim)
+                        var2 = x.var(dim=dim, correction=correction, keepdim=keepdim)
                         mean2 = x.mean(dim=dim, keepdim=keepdim)
                         self.assertEqual(var1, var2)
                         self.assertEqual(mean1, mean2)
@@ -2488,19 +2469,19 @@ class TestReductions(TestCase):
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
         for dim in range(x.dim()):
-            for unbiased in [False, True]:
+            for correction in [0, 2]:
                 for keepdim in [False, True]:
-                    std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
-                    std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                    std1, mean1 = torch.std_mean(x, dim=dim, correction=correction, keepdim=keepdim)
+                    std2 = x.std(dim=dim, correction=correction, keepdim=keepdim)
                     mean2 = x.mean(dim=dim, keepdim=keepdim)
                     self.assertEqual(std1, std2)
                     self.assertEqual(mean1, mean2)
 
     def test_std_mean_all_dims(self, device):
         x = torch.rand(100, 50, 20, device=device)
-        for unbiased in [False, True]:
-            std1, mean1 = torch.std_mean(x, unbiased=unbiased)
-            std2 = x.std(unbiased=unbiased)
+        for correction in [0, 1]:
+            std1, mean1 = torch.std_mean(x, correction=correction)
+            std2 = x.std(correction=correction)
             mean2 = x.mean()
             self.assertEqual(std1, std2)
             self.assertEqual(mean1, mean2)
@@ -2508,19 +2489,19 @@ class TestReductions(TestCase):
     def test_var_mean(self, device):
         x = torch.rand(100, 300, 50, device=device)
         for dim in range(x.dim()):
-            for unbiased in [False, True]:
+            for correction in [0, 2]:
                 for keepdim in [False, True]:
-                    var1, mean1 = torch.var_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
-                    var2 = x.var(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                    var1, mean1 = torch.var_mean(x, dim=dim, correction=correction, keepdim=keepdim)
+                    var2 = x.var(dim=dim, correction=correction, keepdim=keepdim)
                     mean2 = x.mean(dim=dim, keepdim=keepdim)
                     self.assertEqual(var1, var2)
                     self.assertEqual(mean1, mean2)
 
     def test_var_mean_all_dims(self, device):
         x = torch.rand(100, 50, 20, device=device)
-        for unbiased in [False, True]:
-            var1, mean1 = torch.var_mean(x, unbiased=unbiased)
-            var2 = x.var(unbiased=unbiased)
+        for correction in [0, 2]:
+            var1, mean1 = torch.var_mean(x, correction=correction)
+            var2 = x.var(correction=correction)
             mean2 = x.mean()
             self.assertEqual(var1, var2)
             self.assertEqual(mean1, mean2)
@@ -2532,21 +2513,21 @@ class TestReductions(TestCase):
         for num_of_dims in range(2, dims):
             dim_list = list(combinations(list(range(dims)), r=num_of_dims))
             for dim in dim_list:
-                for unbiased in [False, True]:
+                for correction in [0, 1]:
                     for keepdim in [False, True]:
-                        std1, mean1 = torch.std_mean(x, dim=dim, unbiased=unbiased, keepdim=keepdim)
-                        std2 = x.std(dim=dim, unbiased=unbiased, keepdim=keepdim)
+                        std1, mean1 = torch.std_mean(x, dim=dim, correction=correction, keepdim=keepdim)
+                        std2 = x.std(dim=dim, correction=correction, keepdim=keepdim)
                         mean2 = x.mean(dim=dim, keepdim=keepdim)
                         self.assertEqual(std1, std2)
                         self.assertEqual(mean1, mean2)
 
     def _compare_std_var_with_numpy(self, op, device, dtype, input, dim,
-                                    keepdim, unbiased, use_out):
+                                    keepdim, correction, use_out):
         a = input.cpu().numpy() if input.dtype is not torch.bfloat16 else input.float().cpu().numpy()
         numpy_kwargs = {
             'axis' : dim,
             'keepdims' : keepdim,
-            'ddof' : 1 if unbiased else 0,
+            'ddof' : correction,
         }
 
         if dim is None:
@@ -2565,15 +2546,15 @@ class TestReductions(TestCase):
         numpy_result = numpy_op(a, **numpy_kwargs)
 
         if dim is None and use_out is False:
-            torch_result = torch_op(input, unbiased)
+            torch_result = torch_op(input, correction=correction)
         elif dim is not None and use_out is False:
-            torch_result = torch_op(input, dim, unbiased, keepdim)
+            torch_result = torch_op(input, dim, correction=correction, keepdim=keepdim)
         elif dim is not None and use_out is True:
             out = torch.empty(0, device=device, dtype=dtype)
-            torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
+            torch_result = torch_op(input, dim, correction=correction, keepdim=keepdim, out=out)
         else:
             out = torch.empty(0, device=device, dtype=dtype)
-            torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
+            torch_result = torch_op(input, dim, correction=correction, keepdim=keepdim, out=out)
 
         exact_dtype = input.dtype not in (torch.bfloat16, torch.complex32, torch.complex64, torch.complex128)
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
@@ -2585,7 +2566,7 @@ class TestReductions(TestCase):
         for test_case in product((torch.randn(_size, device=device, dtype=dtype),),
                                  (None, 0, 1),
                                  (False, True),
-                                 (False, True),
+                                 (0, 1, 2),
                                  (False, True),):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
@@ -2596,7 +2577,7 @@ class TestReductions(TestCase):
         for test_case in product((torch.randn(_size, device=device, dtype=dtype),),
                                  (None, 0, 1),
                                  (False, True),
-                                 (False, True),
+                                 (0, 1, 2),
                                  (False, True),):
             self._compare_std_var_with_numpy('std', device, dtype, *test_case)
 
@@ -2726,7 +2707,7 @@ class TestReductions(TestCase):
         x = torch.rand((10,), device=device)
 
         for op in [torch.std, torch.var, torch.var_mean, torch.std_mean]:
-            with self.assertRaisesRegex(RuntimeError, "correction parameter must be given"):
+            with self.assertRaisesRegex(RuntimeError, "'unbiased' parameter and its default value"):
                 op(x)
             with self.assertRaisesRegex(RuntimeError, "correction parameter must be given"):
                 op(x, dim=-1)

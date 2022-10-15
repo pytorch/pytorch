@@ -1749,32 +1749,41 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
   return std::tuple<Tensor&, Tensor&>(result1, result2);
 }
 
+static inline c10::optional<int64_t> correction_from_unbiased(
+    c10::string_view fname, bool unbiased) {
+  if (unbiased) {
+    TORCH_CHECK(
+        false, fname, ": The 'unbiased' parameter and its default value have been removed. "
+        "Use correction=1 for Bessel's correction, equivalent to unbiased=True.");
+    return 1;
+  } else {
+    TORCH_CHECK(
+        false, fname, ": The 'unbiased; parameter has been removed. "
+        "Use correction=0 to apply no Bessel's correction, equivalent to unbiased=False.");
+    return 0;
+  }
+}
+
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::var_mean(
-      self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
-      keepdim);
+  const auto correction = correction_from_unbiased("var_mean", unbiased);
+  return at::var_mean(self, dim, correction, keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::std_mean(
-      self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
-      keepdim);
+  const auto correction = correction_from_unbiased("std_mean", unbiased);
+  return at::std_mean(self, dim, correction, keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
-  return at::std_mean(
-      self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+  const auto correction = correction_from_unbiased("std_mean", unbiased);
+  return at::std_mean(self, /*dim=*/c10::nullopt, correction);
 }
 
 std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
-  return at::var_mean(
-      self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+  const auto correction = correction_from_unbiased("var_mean", unbiased);
+  return at::var_mean(self, /*dim=*/c10::nullopt, correction);
 }
 
 std::tuple<Tensor&, Tensor&> var_mean_out(
@@ -1808,38 +1817,34 @@ std::tuple<Tensor, Tensor> std_mean(
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
-  return at::var(
-      self, /*dim=*/c10::nullopt,
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+  const auto correction = correction_from_unbiased("var", unbiased);
+  return at::var(self, /*dim=*/c10::nullopt, correction);
 }
 
-Tensor var(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::var(
-      self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
-      keepdim);
+Tensor var(const Tensor& self, at::OptionalIntArrayRef dim,
+           bool unbiased, bool keepdim) {
+  const auto correction = correction_from_unbiased("var", unbiased);
+  return at::var(self, dim, correction, keepdim);
 }
 
 Tensor& var_out(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
-  return at::var_out(
-      result, self, /*dim=*/at::OptionalIntArrayRef(dim),
-      /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}),
-      keepdim);
+  const auto correction = correction_from_unbiased("var", unbiased);
+  return at::var_out(result, self, dim, correction, keepdim);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
-  return at::std(
-      self, /*dim=*/c10::nullopt, /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}));
+  const auto correction = correction_from_unbiased("std", unbiased);
+  return at::std(self, /*dim=*/c10::nullopt, correction);
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::std(self, dim,
-                 /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
+  const auto correction = correction_from_unbiased("std", unbiased);
+  return at::std(self, dim, correction, keepdim);
 }
 
 Tensor& std_out(const Tensor& self, at::OptionalIntArrayRef opt_dim, bool unbiased, bool keepdim, Tensor& result) {
-  return at::std_out(result, self, opt_dim,
-                     /*correction=*/c10::make_optional<int64_t>({unbiased ? 1 : 0}), keepdim);
+  const auto correction = correction_from_unbiased("std", unbiased);
+  return at::std_out(result, self, opt_dim, correction, keepdim);
 }
 
 Tensor std(const Tensor& self, at::OptionalIntArrayRef dim,

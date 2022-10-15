@@ -4948,20 +4948,15 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
                         requires_grad=requires_grad)
 
     return [
-        SampleInput(tensor_nd(), kwargs=dict(unbiased=True)),
-        SampleInput(tensor_nd(), kwargs=dict(dim=1, unbiased=True)),
-        SampleInput(tensor_nd(), kwargs=dict(dim=1, unbiased=True, keepdim=True)),
-        SampleInput(tensor_1d(), kwargs=dict(dim=0, unbiased=True, keepdim=True)),
-        SampleInput(tensor_1d(), kwargs=dict(dim=0, unbiased=False, keepdim=False)),
+        SampleInput(tensor_nd(), correction=1),
+        SampleInput(tensor_nd(), dim=1, correction=1),
+        SampleInput(tensor_nd(), dim=1, correction=1, keepdim=True),
+        SampleInput(tensor_1d(), dim=0, correction=1, keepdim=True),
+        SampleInput(tensor_1d(), dim=0, correction=0, keepdim=False),
 
-        SampleInput(tensor_nd(), kwargs=dict(dim=(1,), correction=S // 2)),
-        SampleInput(tensor_nd(), kwargs=dict(dim=None, correction=0, keepdim=True)),
-        SampleInput(tensor_nd(), kwargs=dict(correction=0, keepdim=True)),
-
-        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-        SampleInput(tensor_nd(), args=(True,)),
-        SampleInput(tensor_nd(), args=(False,)),
-        SampleInput(tensor_nd(), dim=None, correction=None),
+        SampleInput(tensor_nd(), dim=(1,), correction=S // 2),
+        SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True),
+        SampleInput(tensor_nd(), correction=0, keepdim=True),
     ]
 
 
@@ -8134,16 +8129,12 @@ def reference_smooth_l1_loss(input, target, beta=1.0):
     return loss
 
 def reference_std_var(f):
-    """Forwards unbiased/correction kwargs as NumPy's equivalent ddof"""
+    """Forwards correction kwargs as NumPy's equivalent ddof"""
     g = reference_reduction_numpy(f)
 
     @wraps(g)
     def wrapper(x: np.ndarray, *args, **kwargs):
-        assert not ('unbiased' in kwargs and 'correction' in kwargs)
-
-        if 'unbiased' in kwargs:
-            kwargs['ddof'] = int(kwargs.pop('unbiased'))
-        elif 'correction' in kwargs:
+        if 'correction' in kwargs:
             kwargs['ddof'] = kwargs.pop('correction')
 
         return g(x, *args, **kwargs)
@@ -8151,18 +8142,12 @@ def reference_std_var(f):
     return wrapper
 
 def generate_std_var_kwargs(t: torch.Tensor, **kwargs):
-    """Generates unbiased/correction kwargs for std/var operators"""
-    yield ((), {'unbiased': True})
-    yield ((), {'unbiased': False})
+    """Generates correction kwargs for std/var operators"""
+    yield ((), {'correction': 0})
+    yield ((), {'correction': 1})
 
-    # Currently, calling std with correction is only enabled when
-    # both dim and keepdim are provided.
-    if 'dim' in kwargs and 'keepdim' in kwargs:
-        yield ((), {'correction': 0})
-        yield ((), {'correction': 1})
-
-        numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
-        yield ((), {'correction': numel // 2})
+    numel = torch.tensor(t.shape)[kwargs.get('dim')].prod()
+    yield ((), {'correction': int(numel // 2)})
 
 def error_inputs_mean(op_info, device, **kwargs):
     err_msg1 = (r"mean\(\): could not infer output dtype. "
