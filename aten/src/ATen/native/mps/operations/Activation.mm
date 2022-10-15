@@ -2417,10 +2417,8 @@ Tensor& hardtanh_backward_out_mps(
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() :
-          gradOutputPlaceholder.getMPSGraphTensorData(),
-      selfPlaceholder.getMPSGraphTensor() :
-          selfPlaceholder.getMPSGraphTensorData()
+      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
     };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
