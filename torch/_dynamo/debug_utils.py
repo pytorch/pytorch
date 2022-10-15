@@ -474,7 +474,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
         gm.zero_grad(True)
 
     # TorchInductor returned callable expects lists. So, boxing the call.
-    if not hasattr(gm, "_boxed_call"):
+    if not hasattr(gm, "_boxed_call") and hasattr(gm, "named_parameters"):
         orig_named_parameters = gm.named_parameters
         gm = make_boxed_func(gm)
         gm.named_parameters = orig_named_parameters

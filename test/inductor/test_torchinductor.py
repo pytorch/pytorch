@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import os
 import random
 import sys
 import unittest
@@ -18,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -3666,7 +3668,11 @@ class CommonTemplate:
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
         self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "TODO: debug this with asan")
+    @unittest.skipIf(
+        TEST_WITH_ASAN
+        or os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
+        "TODO: debug this with asan",
+    )
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
             div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
@@ -4051,5 +4057,5 @@ if HAS_CUDA:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
