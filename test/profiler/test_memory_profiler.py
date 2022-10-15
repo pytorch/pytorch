@@ -279,6 +279,7 @@ class TestDataFlow(TestCase):
     ) -> str:
         with profile() as prof:
             outputs = f(**inputs) or {}
+            gc.collect()
 
         memory_profile = prof._memory_profile()
         graph = memory_profile._data_flow_graph
@@ -418,7 +419,6 @@ class TestDataFlow(TestCase):
     def test_data_flow_graph_non_op_allocations(self) -> None:
         def f(x):
             x.mul(2)
-            gc.collect()
 
         # The python arg parser will convert the python scalar `2` to a Tensor
         # to pass to `aten::mul`. As a result there is no op that "owns" the

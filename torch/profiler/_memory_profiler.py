@@ -1,6 +1,17 @@
 import collections
 import dataclasses
-from typing import Any, cast, DefaultDict, Dict, Iterator, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    cast,
+    DefaultDict,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 from torch._C import FunctionSchema
@@ -276,7 +287,7 @@ class DataFlowNode:
                 edges[TensorKey.from_allocation(i.typed[1])].input_version = None
 
         # We don't need to sort the inputs, but it makes debugging and unit tests nicer.
-        return dict((k, v) for k, v in edges.items() if k is not None)
+        return dict(sorted((k, v) for k, v in edges.items() if k is not None))
 
     @property
     def inputs(self) -> Dict[TensorKey, Tuple[bool, int]]:
@@ -321,7 +332,15 @@ class DataFlowGraph:
         return tuple(self._flow_nodes)
 
     def validate(self):
-        """Make sure `self._nodes` forms a valid topologically sorted DAG."""
+        # Check that each (Tensor, version) pair has a unique creation node
+        outputs: Set[Tuple[TensorKey, int]] = set()
+        for node in self.flow_nodes:
+            node_outputs = set(node.outputs.items())
+            duplicates = outputs & node_outputs
+            assert not duplicates, f"{node._event.name} {node._edges} {duplicates}"
+            outputs |= node_outputs
+
+        # And check that `self._nodes` forms a valid topologically sorted DAG.
         tensor_versions: Dict[TensorKey, int] = {}
         for node in self.flow_nodes:
             for key, (_, version) in node.inputs.items():
