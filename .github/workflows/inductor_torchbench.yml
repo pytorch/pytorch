@@ -51,7 +51,7 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           repository: pytorch/benchmark
-          path: "${HOME}"/benchmark
+          path: benchmark
           lfs: false
           # Pin to specific version to avoid upstream breakages
           ref: 24b95f2f627bf07a61cefed653419389a7586357
@@ -60,7 +60,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          pushd "${HOME}"/benchmark
+          pushd "${GITHUB_WORKSPACE}"/benchmark
           python install.py
           pip install gym==0.25.2  # workaround issue in 0.26.0
       - name: Run TorchBench
@@ -82,9 +82,8 @@ jobs:
       - name: Remove conda environment and cleanup
         run: |
           conda env remove --name pr-ci
-          rm /tmp/pr-body.txt
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
           name: TorchBench Running with Inductor result
-          path: "${HOME}"//indcutor_torchbench_training.csv
+          path: indcutor_torchbench_training.csv
