@@ -538,6 +538,10 @@ def register_var_mean():
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
+def _nvprims_view_impl_aten(a, original_shape, new_shape):
+    return a.reshape(new_shape)
+
+
 def register_view():
     """This function is used to register the view function in torch.ops.view module."""
     # View is implemented as a decomposition into prims.split_dim,
@@ -569,7 +573,7 @@ def register_view():
         p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
         p.impl_nvfuser = _nvfuser_impls["view"]
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
-        p.impl_aten = _prim_impl
+        p.impl_aten = _nvprims_view_impl_aten
 
 
 def register_nvprims():
