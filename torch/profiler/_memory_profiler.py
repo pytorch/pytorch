@@ -1,5 +1,4 @@
 import dataclasses
-import functools
 from typing import Any, Iterator, List, Optional, Tuple, Union
 
 import torch
@@ -189,22 +188,27 @@ class SchemaMatcher:
 class OpTree:
     def __init__(self, result: _ProfilerResult) -> None:
         self._root_nodes = result.experimental_event_tree()
+        self._sorted_nodes = tuple(sorted(self.dfs(), key=lambda x: x.start_time_ns))
 
-    @functools.wraps(_utils.traverse_dfs)
     def dfs(self, *args, **kwargs) -> Iterator[_ProfilerEvent]:
         yield from _utils.traverse_dfs(self._root_nodes, *args, **kwargs)
 
-    @functools.cached_property
+    @property
     def sorted_nodes(self) -> Tuple[_ProfilerEvent, ...]:
-        return tuple(sorted(self.dfs(), key=lambda x: x.start_time_ns))
+        return self._sorted_nodes
 
 
 class DataFlowGraph:
     def __init__(self, tree: OpTree) -> None:
         self._tree = tree
+        self._leaf_events = self._extract_leaf_events(tree)
 
-    @functools.cached_property
-    def leaf_events(self):
+    @property
+    def leaf_events(self) -> Tuple[_ProfilerEvent]:
+        return self._leaf_events
+
+    @staticmethod
+    def _extract_leaf_events(tree: OpTree) -> Tuple[_ProfilerEvent]:
         """Partially traverse the op tree and extract top level ops.
 
         Consider the following code:
@@ -251,7 +255,7 @@ class DataFlowGraph:
 
             return e.children
 
-        for _ in self._tree.dfs(children_fn=children_fn):
+        for _ in tree.dfs(children_fn=children_fn):
             pass
 
         return tuple(sorted(leaf_events, key=lambda x: x.start_time_ns))
