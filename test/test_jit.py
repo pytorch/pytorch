@@ -3027,6 +3027,46 @@ class TestFrontend(JitTestCase):
         checker.check("def forward")
         checker.run(str(cm.exception))
 
+    def test_dictionary_as_example_inputs_for_jit_trace(self):
+        class TestModule_v1(torch.nn.Module):
+            def __init__(self):
+                super(TestModule_v1, self).__init__()
+
+            def forward(self, key2=None, key3=None, key4=None, key5=None, key1=None, key6=None):
+                return key1 + key2 + key3
+
+        class TestModule_v2(torch.nn.Module):
+            def __init__(self):
+                super(TestModule_v2, self).__init__()
+
+            def forward(self, x, y):
+                return x + y
+
+        def test_func(x, y):
+            return x + y
+        model_1 = TestModule_v1()
+        model_2 = TestModule_v2()
+        value1 = torch.ones(1)
+        value2 = torch.ones(1)
+        value3 = torch.ones(1)
+        example_input_dict = {'key1': value1, 'key2': value2, 'key3': value3}
+        example_input_dict_func = {'x': value1, 'y': value2}
+        traced_model_1 = torch.jit.trace(model_1, example_kwarg_inputs=example_input_dict, strict=False)
+        traced_model_1_m = torch.jit.trace_module(
+            model_1, {'forward': example_input_dict}, example_inputs_is_kwarg=True, strict=False)
+        traced_model_2 = torch.jit.trace(model_2, example_kwarg_inputs={'x': torch.rand([2]), 'y': torch.rand([2])})
+        traced_func = torch.jit.trace(test_func, example_kwarg_inputs=example_input_dict_func, strict=False)
+        res_1 = traced_model_1(**example_input_dict)
+        res_1_m = traced_model_1_m(**example_input_dict)
+        self.assertEqual(res_1, 3 * torch.ones(1))
+        self.assertEqual(res_1_m, 3 * torch.ones(1))
+        res_func = traced_func(**example_input_dict_func)
+        self.assertEqual(res_func, 2 * torch.ones(1))
+        with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'x'."):
+            res_2 = traced_model_2(**{'z': torch.rand([2]), 'y': torch.rand([2])})
+        with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'y'."):
+            res_2 = traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})
+
 
 class TestScript(JitTestCase):
 

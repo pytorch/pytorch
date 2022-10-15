@@ -1219,6 +1219,43 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("force_outplace"),
           py::arg("argument_names") = std::vector<std::string>())
       .def(
+          "_create_method_from_trace_with_dict",
+          [](Module& self,
+             const std::string& name,
+             const py::function& func,
+             const py::dict& input_dict,
+             const py::function& var_name_lookup_fn,
+             bool strict,
+             bool force_outplace,
+             const std::vector<std::string>& argument_names) {
+            // prereq: Module's buffers and parameters are unique
+            // this was ensured in python before calling this function
+            auto typed_inputs = toTraceableStack(input_dict);
+
+            std::shared_ptr<Graph> graph =
+                std::get<0>(tracer::createGraphByTracingWithDict(
+                    func,
+                    input_dict,
+                    typed_inputs,
+                    var_name_lookup_fn,
+                    strict,
+                    force_outplace,
+                    &self,
+                    argument_names));
+            const auto method_name = QualifiedName(*self.type()->name(), name);
+            auto fn = self._ivalue()->compilation_unit()->create_function(
+                method_name, graph);
+            self.type()->addMethod(fn);
+            didFinishEmitModule(self);
+          },
+          py::arg("name"),
+          py::arg("func"),
+          py::arg("input_dict"),
+          py::arg("var_name_lookup_fn"),
+          py::arg("strict"),
+          py::arg("force_outplace"),
+          py::arg("argument_names") = std::vector<std::string>())
+      .def(
           "_get_forward_hooks",
           [](const Module& m) {
             std::vector<StrongFunctionPtr> funcs;
@@ -1663,6 +1700,43 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("name"),
       py::arg("func"),
       py::arg("input_tuple"),
+      py::arg("var_name_lookup_fn"),
+      py::arg("strict"),
+      py::arg("force_outplace"),
+      py::arg("argument_names") = std::vector<std::string>());
+
+  m.def(
+      "_create_function_from_trace_with_dict",
+      [](const std::string& qualname,
+         const py::function& func,
+         const py::dict& input_dict,
+         const py::function& var_name_lookup_fn,
+         bool strict,
+         bool force_outplace,
+         const std::vector<std::string>& argument_names) {
+        auto typed_inputs = toTraceableStack(input_dict);
+        std::shared_ptr<Graph> graph =
+            std::get<0>(tracer::createGraphByTracingWithDict(
+                func,
+                input_dict,
+                typed_inputs,
+                var_name_lookup_fn,
+                strict,
+                force_outplace,
+                /*self=*/nullptr,
+                argument_names));
+
+        auto cu = get_python_cu();
+        auto name = c10::QualifiedName(qualname);
+        auto result = cu->create_function(
+            std::move(name), std::move(graph), /*shouldMangle=*/true);
+        StrongFunctionPtr ret(std::move(cu), result);
+        didFinishEmitFunction(ret);
+        return ret;
+      },
+      py::arg("name"),
+      py::arg("func"),
+      py::arg("input_dict"),
       py::arg("var_name_lookup_fn"),
       py::arg("strict"),
       py::arg("force_outplace"),
