@@ -36,19 +36,11 @@ jobs:
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
                            setuptools cmake=3.22 cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
-      - name: Setup TorchBench branch
-        run: |
-          # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
-          conda activate pr-ci
-          PR_BODY_FILE=/tmp/pr-body.txt
-          echo "$PR_BODY" > ${PR_BODY_FILE}
-          python pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch
       - name: Checkout TorchBench
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           repository: pytorch/benchmark
-          path: benchmark
+          path: "${HOME}"/benchmark
           lfs: false
           # Pin to specific version to avoid upstream breakages
           ref: 24b95f2f627bf07a61cefed653419389a7586357
@@ -84,4 +76,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: TorchBench Running with Inductor result
-          path: ~/indcutor_torchbench_training.csv
+          path: "${HOME}"//indcutor_torchbench_training.csv
