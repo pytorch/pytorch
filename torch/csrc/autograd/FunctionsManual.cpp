@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
@@ -830,39 +831,43 @@ Tensor logcumsumexp_backward(
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
-  IntArrayRef sizes;
+  c10::SymIntArrayRef sizes;
   at::TensorOptions o;
   for (const auto& v : grads) {
     if (v.defined()) {
-      sizes = v.sizes();
+      sizes = v.sym_sizes();
       o = static_cast<Tensor>(v).options();
       break;
     }
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }
 
-Tensor unsqueeze_to(const Tensor& self, IntArrayRef sizes) {
+Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
-  int64_t nDims = sizes.size();
+  int64_t nDims = sym_sizes.size();
   for (const auto dim : c10::irange(nDims)) {
-    if (sizes[dim] == 1) {
+    if (sym_sizes[dim] == 1) {
       result = result.unsqueeze(dim);
     }
   }
   return result;
 }
 
-Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
+Tensor unsqueeze_to(
+    const Tensor& self,
+    int64_t dim,
+    c10::SymIntArrayRef sym_sizes) {
+  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to
   // avoided unsqueezing in the backward.
-  if (sizes.size() > 0 && sizes[dim] == 1) {
+  if (sym_sizes.size() > 0 && sym_sizes[dim] == 1) {
     return self.unsqueeze(dim);
   }
   return self;
@@ -870,15 +875,15 @@ Tensor unsqueeze_to(const Tensor& self, int64_t dim, IntArrayRef sizes) {
 
 std::vector<Tensor> cat_tensors_backward(
     const Tensor& grad,
-    const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<std::vector<c10::SymInt>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim) {
   std::vector<Tensor> grad_inputs(sizes.size());
   if (!grad.defined()) {
     return grad_inputs;
   }
-  dim = at::legacy_cat_wrap_dim(dim, sizes);
-  int64_t accumulate = 0;
+  dim = at::legacy_cat_wrap_dim_symint(dim, sizes);
+  c10::SymInt accumulate = 0;
 
   Tensor grad_;
   bool grad_is_complex = grad.is_complex();
@@ -895,13 +900,13 @@ std::vector<Tensor> cat_tensors_backward(
     }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<int64_t>({0})) {
+    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
       grad_inputs[i] = at::zeros({0}, grad_val.options());
       continue;
     }
     auto size = shape[dim];
     accumulate += size;
-    grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
+    grad_inputs[i] = grad_val.narrow_symint(dim, accumulate - size, size);
   }
   return grad_inputs;
 }
@@ -1198,7 +1203,7 @@ Tensor convolution_backward_jvp_grad_bias(
 
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
-// set, this function returns its strides or throws an error if the tensor
+// set, this function returns its strides or an empty array if the tensor
 // is sparse. If requires_grad is not set, an empty array is returned since
 // there will be no backward pass. There has one special case, if input is
 // MKLDNN tensor and has requires_grad set, just return an empty array, the
@@ -1219,17 +1224,9 @@ at::SymIntArrayRef strides_or_error(
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
   if (input.requires_grad()) {
-    TORCH_CHECK(
-        !input.is_sparse(),
-        "The backward pass for this operation requires the '",
-        input_name,
-        "' tensor to be strided, but a sparse tensor was given instead. ",
-        "Please either use a strided tensor or set requires_grad=False for '",
-        input_name,
-        "'");
     if (input.is_mkldnn())
       return {};
-    if (input.is_sparse_csr())
+    if (input.is_sparse() || at::sparse_csr::is_sparse_compressed(input))
       return {};
     return input.sym_strides();
   } else {
@@ -1625,21 +1622,21 @@ Tensor std_mean_backward(
 Tensor masked_scatter_backward(
     const Tensor& grad,
     const Tensor& mask,
-    IntArrayRef sizes) {
-  int64_t numel = 1;
+    c10::SymIntArrayRef sizes) {
+  c10::SymInt numel = 1;
   for (auto size : sizes) {
     numel *= size;
   }
   auto mask_selected = grad.masked_select(mask);
-  auto diff_nelem = numel - mask_selected.numel();
+  auto diff_nelem = numel - mask_selected.sym_numel();
   if (diff_nelem > 0) {
     // because mask_selected returns a 1-d tensor with size of masked elements
     // that are 1, we need to fill out the rest with zeros then reshape back to
     // tensor2's size.
-    auto zeros_fillin = at::zeros({diff_nelem}, grad.options());
+    auto zeros_fillin = at::zeros_symint({diff_nelem}, grad.options());
     mask_selected = at::cat({mask_selected, zeros_fillin}, 0);
   }
-  return mask_selected.view(sizes);
+  return mask_selected.view_symint(sizes);
 }
 
 Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
@@ -2842,21 +2839,27 @@ Tensor as_strided_backward(
 
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
-      std::min(input_geometry.sym_storage_offset(), sym_storage_offset);
+      // TODO: symint-ify. Do we need a min() and max() for SymInts?
+      input_geometry.sym_storage_offset().min(sym_storage_offset);
   auto inp_effective_offset =
       input_geometry.sym_storage_offset() - shared_offset;
   auto out_effective_offset = sym_storage_offset - shared_offset;
-  auto base_size = std::max(
-      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
-      _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
-  auto storage = grad.new_empty_symint(c10::SymIntArrayRef(base_size));
-  storage.zero_();
+  auto base_size1 =
+      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset);
+  auto base_size2 =
+      _min_storage_size(out_sizes_, out_strides_, out_effective_offset);
+  auto base_size = base_size1.max(base_size2);
+  auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
-        at::arange(0, base_size, grad.options().dtype(at::kLong));
+        // TODO: should we symint-ify arange? Need SymScalar.
+        at::arange(
+            0,
+            base_size.guard_int(__FILE__, __LINE__),
+            grad.options().dtype(at::kLong));
   }
 
   // Step (2): use output geometry to scatter gradients into storage
@@ -4368,10 +4371,10 @@ Tensor fft_c2r_backward(
 
 Tensor fft_r2c_backward(
     const Tensor& grad,
-    IntArrayRef dim,
+    at::IntArrayRef dim,
     int64_t normalization,
     bool onesided,
-    int64_t last_dim_size) {
+    c10::SymInt last_dim_size) {
   if (!onesided) {
     return at::real(at::_fft_c2c(grad, dim, normalization, /*forward=*/false));
   }
@@ -4386,16 +4389,17 @@ Tensor fft_r2c_backward(
   //        (C2C ifft only take twosided inputs so we need to fill here)
   //     2. inverse C2C ifft
   //     3. discard the complex dim
-  auto half_sizes = grad.sizes();
-  at::DimVector new_grad_shape(half_sizes.begin(), half_sizes.end());
+  auto half_sizes = grad.sym_sizes();
+  std::vector<c10::SymInt> new_grad_shape(half_sizes.begin(), half_sizes.end());
   const auto last_dim = at::maybe_wrap_dim(dim.back(), half_sizes.size());
   new_grad_shape[last_dim] = last_dim_size;
 
-  const auto zero_length = last_dim_size - grad.size(dim.back());
+  const auto zero_length = last_dim_size - grad.sym_size(dim.back());
   auto complex_full_grad =
-      zero_length > 0 ? grad.new_zeros(new_grad_shape) : grad;
+      zero_length > 0 ? grad.new_zeros_symint(new_grad_shape) : grad;
   if (zero_length > 0) {
-    complex_full_grad.slice(last_dim, 0, half_sizes[last_dim]).copy_(grad);
+    complex_full_grad.slice_symint(last_dim, 0, half_sizes[last_dim])
+        .copy_(grad);
   }
   return at::real(
       at::_fft_c2c(complex_full_grad, dim, normalization, /*forward=*/false));
@@ -5619,8 +5623,8 @@ Tensor solve_jvp(
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
-    const int64_t m,
-    const int64_t n) {
+    const c10::SymInt m,
+    const c10::SymInt n) {
   if (!L_grad.defined() && !U_grad.defined()) {
     return {};
   }
@@ -5628,16 +5632,16 @@ Tensor lu_unpack_backward(
 
   // Getters for the principal and complementary part of the matrices
   const auto get_L1 = [m, k](const Tensor& L) {
-    return m == k ? L.tril(-1) : L.narrow(-2, 0, k).tril(-1);
+    return m == k ? L.tril(-1) : L.narrow_symint(-2, 0, k).tril(-1);
   };
   const auto get_L2 = [m, k](const Tensor& L) {
-    return L.narrow(-2, k, m - k);
+    return L.narrow_symint(-2, k, m - k);
   };
   const auto get_U1 = [n, k](const Tensor& U) {
-    return n == k ? U.triu() : U.narrow(-1, 0, k).triu();
+    return n == k ? U.triu() : U.narrow_symint(-1, 0, k).triu();
   };
   const auto get_U2 = [n, k](const Tensor& U) {
-    return U.narrow(-1, k, n - k);
+    return U.narrow_symint(-1, k, n - k);
   };
 
   if (L_grad.defined()) {
@@ -5654,20 +5658,22 @@ Tensor lu_unpack_backward(
       if (m >= n) {
         return L_grad.tril(-1);
       } else {
-        auto size = L_grad.sizes().vec();
+        auto size = L_grad.sym_sizes().vec();
         size.end()[-1] = n - m;
         return at::cat(
-            {L_grad.tril(-1), at::zeros(size, L_grad.options())}, /*dim=*/-1);
+            {L_grad.tril(-1), at::zeros_symint(size, L_grad.options())},
+            /*dim=*/-1);
       }
     }
   } else {
     if (n >= m) {
       return U_grad.triu();
     } else {
-      auto size = U_grad.sizes().vec();
+      auto size = U_grad.sym_sizes().vec();
       size.end()[-2] = m - n;
       return at::cat(
-          {U_grad.triu(), at::zeros(size, U_grad.options())}, /*dim=*/-2);
+          {U_grad.triu(), at::zeros_symint(size, U_grad.options())},
+          /*dim=*/-2);
     }
   }
 }
