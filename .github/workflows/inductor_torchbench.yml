@@ -13,7 +13,7 @@ concurrency:
 jobs:
   run-torchbench-with-inductor:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: [self-hosted, linux.4xlarge.nvidia.gpu]
+    runs-on: [self-hosted, bm-runner]
     # Set to 12 hours
     timeout-minutes: 720
     steps:

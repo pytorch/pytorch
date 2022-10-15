@@ -17,7 +17,7 @@ jobs:
   run-torchbench:
     # We don't accept running on non-pytorch repos because of security concerns
     # Only run the job when the body contains magic word "RUN_TORCHBENCH:"
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'pytorch' && contains(github.event.pull_request.body, 'RUN_TORCHBENCH:') }}
     runs-on: [self-hosted, bm-runner]
     # Set to 12 hours
     timeout-minutes: 720
