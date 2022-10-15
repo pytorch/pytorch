@@ -5078,13 +5078,15 @@
 
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: std(Tensor self, bool unbiased) -> Tensor
+- func: std(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  cpp_no_default_args: ["unbiased"]
 
-- func: std.dim(Tensor self, int[1]? dim, bool unbiased, bool keepdim=False) -> Tensor
+- func: std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  cpp_no_default_args: ["unbiased"]
 
 - func: std.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5094,13 +5096,15 @@
     MPS: std_mps
     QuantizedCPU: std_quantized_cpu
 
-- func: std_mean(Tensor self, bool unbiased) -> (Tensor, Tensor)
+- func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
+  cpp_no_default_args: ["unbiased"]
 
-- func: std_mean.dim(Tensor self, int[1]? dim, bool unbiased, bool keepdim=False) -> (Tensor, Tensor)
+- func: std_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
+  cpp_no_default_args: ["unbiased"]
 
 - func: std_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
@@ -5109,16 +5113,18 @@
     CPU, CUDA: std_mean
   autogen: std_mean.correction_out
 
-- func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased, bool keepdim=False) -> (Tensor, Tensor)
+- func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
+  cpp_no_default_args: ["unbiased"]
 
 - func: std_mean.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
 
-- func: std.out(Tensor self, int[1]? dim, bool unbiased, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: std.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  cpp_no_default_args: ["unbiased"]
 
 - func: std.correction_out(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5126,12 +5132,14 @@
     CPU, CUDA: std_out
     QuantizedCPU: std_out_quantized_cpu
 
-- func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased, bool keepdim=False) -> Tensor
+- func: std.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  cpp_no_default_args: ["unbiased"]
 
-- func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: std.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  cpp_no_default_args: ["unbiased"]
 
 - func: std.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5540,14 +5548,16 @@
 
 - func: vander(Tensor x, int? N=None, bool increasing=False) -> Tensor
 
-- func: var(Tensor self, bool unbiased) -> Tensor
+- func: var(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  cpp_no_default_args: ["unbiased"]
 
-- func: var.dim(Tensor self, int[1]? dim, bool unbiased, bool keepdim=False) -> Tensor
+- func: var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   tags: canonical
+  cpp_no_default_args: ["unbiased"]
 
 - func: var.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5556,20 +5566,23 @@
     CPU, CUDA: var
     MPS: var_mps
 
-- func: var.out(Tensor self, int[1]? dim, bool unbiased, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: var.out(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  cpp_no_default_args: ["unbiased"]
 
 - func: var.correction_out(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: var_out
 
-- func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased, bool keepdim=False) -> Tensor
+- func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  cpp_no_default_args: ["unbiased"]
 
-- func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  cpp_no_default_args: ["unbiased"]
 
 - func: var.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5579,13 +5592,15 @@
   device_check: NoCheck   # TensorIterator
   variants: function
 
-- func: var_mean(Tensor self, bool unbiased) -> (Tensor, Tensor)
+- func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
+  cpp_no_default_args: ["unbiased"]
 
-- func: var_mean.dim(Tensor self, int[1]? dim, bool unbiased, bool keepdim=False) -> (Tensor, Tensor)
+- func: var_mean.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
+  cpp_no_default_args: ["unbiased"]
 
 - func: var_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
@@ -5594,9 +5609,10 @@
     CPU, CUDA: var_mean
   autogen: var_mean.correction_out
 
-- func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased, bool keepdim=False) -> (Tensor, Tensor)
+- func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator
   variants: function
+  cpp_no_default_args: ["unbiased"]
 
 - func: var_mean.correction_names(Tensor self, Dimname[1] dim, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   device_check: NoCheck   # TensorIterator

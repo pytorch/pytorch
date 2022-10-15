@@ -427,8 +427,8 @@ class TestReductions(TestCase):
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
-        self.assertEqual(tensor.var(0, correction=1), tensor.var(0, unbiased=True))
-        self.assertEqual(tensor.var(correction=1), tensor.var(unbiased=True))
+        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
+        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
         self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False))
 
         tensor = torch.tensor([1.0, 2.0], device=device)
@@ -440,8 +440,8 @@ class TestReductions(TestCase):
         self.assertEqual(tensor.var(unbiased=False), 2.0 / 3.0)
 
         tensor = torch.randn(100, device=device)
-        self.assertEqual(tensor.std(0, correction=1), tensor.std(0, unbiased=True))
-        self.assertEqual(tensor.std(correction=1), tensor.std(unbiased=True))
+        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
+        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
 
     def test_var_stability(self, device):
@@ -2721,17 +2721,6 @@ class TestReductions(TestCase):
 
             self.assertEqual(var1, var2)
             self.assertEqual(mean1, mean2)
-
-    def test_std_var_errors_on_no_correction(self, device):
-        x = torch.rand((10,), device=device)
-
-        for op in [torch.std, torch.var, torch.var_mean, torch.std_mean]:
-            with self.assertRaisesRegex(RuntimeError, "correction parameter must be given"):
-                op(x)
-            with self.assertRaisesRegex(RuntimeError, "correction parameter must be given"):
-                op(x, dim=-1)
-            with self.assertRaisesRegex(RuntimeError, "correction parameter must be given"):
-                op(x, keepdim=True)
 
     def test_amin_amax_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
