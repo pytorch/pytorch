@@ -105,7 +105,7 @@ def extract_gradients(
                     yield TensorKey.from_tensor(p), p_grad_key
 
 
-def tensor_inputs(t: _ExtraFields_TorchOp) -> Tuple[Optional[TensorKey]]:
+def tensor_inputs(t: _ExtraFields_TorchOp) -> Tuple[Optional[TensorKey], ...]:
     return tuple(TensorKey.from_tensor(i) for i in t.inputs.tensor_metadata)
 
 
@@ -227,6 +227,7 @@ class DataFlowEdge:
     def is_deletion(self) -> bool:
         return self.mutated is None
 
+
 class DataFlowNode:
     def __init__(self, event: _ProfilerResult, graph: "DataFlowGraph") -> None:
         self._event = event
@@ -244,7 +245,9 @@ class DataFlowNode:
     def _determine_edges(self) -> Dict[TensorKey, DataFlowEdge]:
         subtree = tuple(_utils.traverse_dfs([self._event]))
 
-        def zip_mutable(t: _ExtraFields_TorchOp) -> Iterator[Tuple[TensorKey, bool]]:
+        def zip_mutable(
+            t: _ExtraFields_TorchOp,
+        ) -> Iterator[Tuple[Optional[TensorKey], bool]]:
             return zip(tensor_inputs(t), SchemaMatcher.inputs_are_mutable(t))
 
         edges: DefaultDict[Optional[TensorKey], DataFlowEdge]
@@ -273,7 +276,7 @@ class DataFlowNode:
                 edges[TensorKey.from_allocation(i.typed[1])].input_version = None
 
         # We don't need to sort the inputs, but it makes debugging and unit tests nicer.
-        return {k: v for k, v in sorted(i for i in edges.items() if i[0] is not None)}
+        return dict((k, v) for k, v in edges.items() if k is not None)
 
     @property
     def inputs(self) -> Dict[TensorKey, Tuple[bool, int]]:
@@ -333,7 +336,7 @@ class DataFlowGraph:
         return self._leaf_events
 
     @staticmethod
-    def _extract_leaf_events(op_tree: OpTree) -> Tuple[_ProfilerEvent]:
+    def _extract_leaf_events(op_tree: OpTree) -> Tuple[_ProfilerEvent, ...]:
         """Partially traverse the op tree and extract top level ops.
 
         Consider the following code:
@@ -370,7 +373,7 @@ class DataFlowGraph:
         def leaf_op(e: _ProfilerEvent) -> bool:
             return e.typed[0] == _EventType.TorchOp and (
                 e.typed[1].scope == RecordScope.BACKWARD_FUNCTION
-                or SchemaMatcher.match_schemas(e.typed[1])
+                or bool(SchemaMatcher.match_schemas(e.typed[1]))
             )
 
         def children_fn(e: _ProfilerEvent):

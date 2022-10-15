@@ -308,7 +308,7 @@ class TestDataFlow(TestCase):
                     f"{event_name:<25} {', '.join(inputs):<15}  ->  {', '.join(outputs)}"
                 )
 
-        return textwrap.indent("\n".join(lines).strip(), " " * indent)
+        return textwrap.indent("\n".join([l.rstrip() for l in lines]), " " * indent)
 
     def test_match_schemas(self) -> None:
         with profile() as prof:
@@ -406,9 +406,9 @@ class TestDataFlow(TestCase):
             y0:      T5
 
             aten::zeros                                ->  T0(v0)
-            [memory]                  T0(v0*)          ->  
+            [memory]                  T0(v0*)          ->
             aten::zeros                                ->  T1(v0)
-            [memory]                  T1(v0*)          ->  
+            [memory]                  T1(v0*)          ->
             aten::zero_               T2(v0)           ->  T2(v1)
             aten::zero_               T3(v0)           ->  T3(v1)
             aten::ones_like           T2(v1)           ->  T4(v0)
@@ -430,7 +430,7 @@ class TestDataFlow(TestCase):
             x:       T1
 
             [memory]                                   ->  T0(v0)
-            aten::mul                 T0(v0), T1(v0)   ->  
+            aten::mul                 T0(v0), T1(v0)   ->
             [memory]                  T0(v0*)          ->""",
         )
 
@@ -516,11 +516,11 @@ class TestDataFlow(TestCase):
             aten::sin                 T2(v0)           ->  T3(v0)
             aten::ones_like           T3(v0)           ->  T4(v0)
             SinBackward0              T2(v0), T4(v0)   ->  T4(v1), T6(v0)
-            [memory]                  T2(v0*)          ->  
+            [memory]                  T2(v0*)          ->
             MulBackward0              T0(v0), T6(v0)   ->  T6(v1), T7(v0)
-            [memory]                  T6(v1*)          ->  
+            [memory]                  T6(v1*)          ->
             AccumulateGrad            T7(v0)           ->  T7(v1)
-            [memory]                  T4(v1*)          ->  
+            [memory]                  T4(v1*)          ->
             [memory]                  T3(v0*)          ->""",
         )
 
@@ -544,10 +544,10 @@ class TestDataFlow(TestCase):
             aten::ones                                 ->  T0(v0)
             [memory]                                   ->  T1(v0)
             aten::mul                 T0(v0), T1(v0)   ->  T3(v0)
-            [memory]                  T1(v0*)          ->  
+            [memory]                  T1(v0*)          ->
             [memory]                                   ->  T4(v0)
             aten::add_                T3(v0), T4(v0)   ->  T3(v1)
-            [memory]                  T4(v0*)          ->  
+            [memory]                  T4(v0*)          ->
             aten::empty_like          T3(v1)           ->  T6(v0)
             aten::sin                 T3(v1), T6(v0)   ->  T6(v1)""",
         )
@@ -591,13 +591,14 @@ class TestDataFlow(TestCase):
 
             aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
             aten::relu                T2(v0)           ->  T3(v0)
-            [memory]                  T2(v0*)          ->  
+            [memory]                  T2(v0*)          ->
             aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
-            [memory]                  T3(v0*)          ->  
+            [memory]                  T3(v0*)          ->
             aten::relu                T5(v0)           ->  T6(v0)
-            [memory]                  T5(v0*)          ->  
+            [memory]                  T5(v0*)          ->
             aten::sum                 T6(v0)           ->  T7(v0)
-            [memory]                  T6(v0*)          ->""")
+            [memory]                  T6(v0*)          ->""",
+        )
 
         self.assertExpectedInline(
             self._run_and_format_data_flow(inputs, f_fwd_bwd),
@@ -611,29 +612,30 @@ class TestDataFlow(TestCase):
 
             aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
             aten::relu                T2(v0)           ->  T3(v0)
-            [memory]                  T2(v0*)          ->  
+            [memory]                  T2(v0*)          ->
             aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
             aten::relu                T5(v0)           ->  T6(v0)
-            [memory]                  T5(v0*)          ->  
+            [memory]                  T5(v0*)          ->
             aten::sum                 T6(v0)           ->  T7(v0)
             aten::ones_like           T7(v0)           ->  T8(v0)
             SumBackward0              T8(v0)           ->  T8(v1)
             ReluBackward0             T6(v0), T8(v1)   ->  T8(v2), T9(v0)
-            [memory]                  T6(v0*)          ->  
+            [memory]                  T6(v0*)          ->
             MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T9(v1), T10(v0), T11(v0)
             aten::sum                 T10(v0)          ->  T12(v0)
-            [memory]                  T10(v0*)         ->  
-            [memory]                  T9(v1*)          ->  
+            [memory]                  T10(v0*)         ->
+            [memory]                  T9(v1*)          ->
             AccumulateGrad            T12(v0)          ->  T12(v1)
             ReluBackward0             T3(v0), T11(v0)  ->  T11(v1), T13(v0)
-            [memory]                  T11(v1*)         ->  
-            [memory]                  T3(v0*)          ->  
+            [memory]                  T11(v1*)         ->
+            [memory]                  T3(v0*)          ->
             MulBackward0              T0(v0), T13(v0)  ->  T13(v1), T14(v0)
             aten::sum                 T14(v0)          ->  T15(v0)
-            [memory]                  T14(v0*)         ->  
-            [memory]                  T13(v1*)         ->  
+            [memory]                  T14(v0*)         ->
+            [memory]                  T13(v1*)         ->
             AccumulateGrad            T15(v0)          ->  T15(v1)
-            [memory]                  T8(v2*)          ->""")
+            [memory]                  T8(v2*)          ->""",
+        )
 
         # Second time grads are already initialized.
         self.assertExpectedInline(
@@ -648,32 +650,32 @@ class TestDataFlow(TestCase):
 
             aten::mul                 T0(v0), T1(v0)   ->  T2(v0)
             aten::relu                T2(v0)           ->  T3(v0)
-            [memory]                  T2(v0*)          ->  
+            [memory]                  T2(v0*)          ->
             aten::mul                 T3(v0), T4(v0)   ->  T5(v0)
             aten::relu                T5(v0)           ->  T6(v0)
-            [memory]                  T5(v0*)          ->  
+            [memory]                  T5(v0*)          ->
             aten::sum                 T6(v0)           ->  T7(v0)
             aten::ones_like           T7(v0)           ->  T8(v0)
             SumBackward0              T8(v0)           ->  T8(v1)
             ReluBackward0             T6(v0), T8(v1)   ->  T8(v2), T9(v0)
-            [memory]                  T6(v0*)          ->  
+            [memory]                  T6(v0*)          ->
             MulBackward0              T3(v0), T4(v0), T9(v0)  ->  T9(v1), T10(v0), T11(v0)
             aten::sum                 T10(v0)          ->  T12(v0)
-            [memory]                  T10(v0*)         ->  
-            [memory]                  T9(v1*)          ->  
+            [memory]                  T10(v0*)         ->
+            [memory]                  T9(v1*)          ->
             AccumulateGrad            T12(v0*), T13(v0)  ->  T13(v1)
             ReluBackward0             T3(v0), T11(v0)  ->  T11(v1), T14(v0)
-            [memory]                  T11(v1*)         ->  
-            [memory]                  T3(v0*)          ->  
+            [memory]                  T11(v1*)         ->
+            [memory]                  T3(v0*)          ->
             MulBackward0              T0(v0), T14(v0)  ->  T14(v1), T15(v0)
             aten::sum                 T15(v0)          ->  T16(v0)
-            [memory]                  T15(v0*)         ->  
-            [memory]                  T14(v1*)         ->  
+            [memory]                  T15(v0*)         ->
+            [memory]                  T14(v1*)         ->
             AccumulateGrad            T16(v0*), T17(v0)  ->  T17(v1)
-            [memory]                  T8(v2*)          ->""")
+            [memory]                  T8(v2*)          ->""",
+        )
 
         return
-
 
         x = torch.ones((25,))
         w0 = torch.ones((1,), requires_grad=True)
