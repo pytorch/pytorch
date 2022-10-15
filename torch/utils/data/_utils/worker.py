@@ -62,7 +62,7 @@ _worker_info = None
 
 
 class WorkerInfo(object):
-    i: int
+    id: int
     num_workers: int
     seed: int
     dataset: 'Dataset'
