@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
+#include <ATen/native/NonSymbolicBC.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -17,6 +18,7 @@
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
 #endif
 
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
