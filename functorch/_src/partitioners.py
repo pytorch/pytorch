@@ -207,7 +207,7 @@ def _tensor_nbytes(numel, dtype):
 
     return numel * sizes[dtype]
 
-def _size_of(node):
+def _size_of(node: fx.Node) -> int:
     def to_size_hint(s):
         if isinstance(s, torch.SymIntNode):
             py_s = s.get_pyobj()
@@ -226,14 +226,13 @@ def _size_of(node):
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
-
+    # Only needed since we don't always trace with fake tensors.
     if 'tensor_meta' in node.meta:
         metadata = node.meta['tensor_meta']
         numel = _prod(map(to_size_hint, metadata.shape))
         dtype = metadata.dtype
     else:
-        breakpoint()
-        raise RuntimeError("???")
+        return 0
 
     return _tensor_nbytes(numel, dtype)
 
@@ -379,7 +378,7 @@ def min_cut_rematerialization_partition(
 
         return not all(is_fusible(node, user) for user in node.users)
 
-    def get_node_weight(node):
+    def get_node_weight(node) -> int:
         mem_sz = _size_of(node)
 
         # Heuristic to bias towards nodes closer to the backwards pass
