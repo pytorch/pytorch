@@ -2444,9 +2444,6 @@ Tensor& hardswish_out_mps(const Tensor& self, Tensor& output) {
     return output;
   }
 
-  int64_t input_ndim = self.dim();
-  TORCH_CHECK(input_ndim > 0, "Zero-dim input tensor not allowed.");
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
@@ -2556,9 +2553,6 @@ Tensor hardswish_mps(const Tensor& self) {
   if (output.numel() == 0) {
     return output;
   }
-
-  int64_t input_ndim = self.dim();
-  TORCH_CHECK(input_ndim > 0, "Zero-dim input tensor not allowed.");
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -2671,9 +2665,6 @@ Tensor& hardswish_mps_(Tensor& self) {
     return output;
   }
 
-  int64_t input_ndim = self.dim();
-  TORCH_CHECK(input_ndim > 0, "Zero-dim input tensor not allowed.");
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
@@ -2782,9 +2773,6 @@ Tensor hardswish_backward_mps(const Tensor& grad_output, const Tensor& self) {
   }
 
   Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
-
-  int64_t input_ndim = self.dim();
-  TORCH_CHECK(input_ndim > 0, "Zero-dim input tensor not allowed.");
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
