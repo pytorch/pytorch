@@ -10,6 +10,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: "3.8"
+  # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
+  NUMPY_VERSION: "1.21.2"
+  PR_NUM: ${{ github.event.number }}
+  PR_BODY: ${{ github.event.pull_request.body }}
+  PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
 jobs:
   run-torchbench-with-inductor:
     if: ${{ github.repository_owner == 'pytorch' }}
