@@ -83,6 +83,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers = []
         self.constants = {}
         self.removed_buffers = set()
+        self.inplaced_to_remove = set()
         self.wrapper_code = None
         self.num_dynamic_inputs = num_dynamic_inputs
         self.num_static_inputs = None
