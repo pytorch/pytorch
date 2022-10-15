@@ -4057,6 +4057,34 @@ class TestNLLLoss(TestCase):
                 helper(shape, min_val, max_val)
                 helper(shape, min_val, max_val, inplace=True)
 
+    def test_hardswish(self):
+        def helper(shape, inplace=False, requires_grad=True):
+            m = nn.Hardswish(inplace=inplace)
+
+            input_cpu = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=requires_grad)
+            input_mps = input_cpu.detach().clone().to('mps').requires_grad(requires_grad)
+
+            output_cpu = m(input_cpu)
+            output_mps = m(input_mps)
+
+            cpu_grad = torch.ones_like(output_cpu)
+            mps_grad = cpu_grad.to('mps')
+
+            self.assertEqual(output_cpu, output_mps)
+
+            if requires_grad:
+                output_cpu.backward(gradient=cpu_grad)
+                output_mps.backward(gradient=mps_grad)
+
+                self.assertEqual(input_cpu.grad, input_mps.grad)
+
+        print('ok')
+        for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
+            helper(shape, inplace=False, requires_grad=False)
+            helper(shape, inplace=True, requires_grad=False)
+            helper(shape, inplace=False, requires_grad=True)
+            helper(shape, inplace=True, requires_grad=True)
+
     def test_transpose_2D(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         values1 = [[1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]
