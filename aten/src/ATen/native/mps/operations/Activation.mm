@@ -2544,16 +2544,17 @@ Tensor& hardswish_out_mps(const Tensor& self, Tensor& output) {
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
+  return output;
 }
 
 Tensor hardswish_mps(const Tensor& self) {
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
 
-  Tensor result = at::empty_like(self, self.suggest_memory_format());
+  Tensor output = at::empty_like(self, self.suggest_memory_format());
 
-  if (result.numel() == 0) {
-    return result;
+  if (output.numel() == 0) {
+    return output;
   }
 
   int64_t input_ndim = self.dim();
@@ -2641,7 +2642,7 @@ Tensor hardswish_mps(const Tensor& self) {
     }
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, result);
+        Placeholder(cachedGraph->outputTensor_, output);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -2656,6 +2657,7 @@ Tensor hardswish_mps(const Tensor& self) {
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
+  return output;
 }
 
 Tensor& hardswish_mps_(Tensor& self) {
@@ -2769,14 +2771,17 @@ Tensor& hardswish_mps_(Tensor& self) {
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
+  return output;
 }
 
 Tensor hardswish_backward_mps(const Tensor& grad_output, const Tensor& self) {
   using namespace mps;
 
   if (grad_output.numel() == 0) {
-    return result;
+    return grad_output;
   }
+
+  Tensor grad_input = at::empty_like(self, self.suggest_memory_format());
 
   int64_t input_ndim = self.dim();
   TORCH_CHECK(input_ndim > 0, "Zero-dim input tensor not allowed.");
@@ -2876,23 +2881,29 @@ Tensor hardswish_backward_mps(const Tensor& grad_output, const Tensor& self) {
           });
       cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
     }
+
+    Placeholder gradOutputPlaceholder =
+        Placeholder(cachedGraph->gradOutputTensor_, grad_output);
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, result);
+    Placeholder gradInputPlaceholder =
+        Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      gradOutputPlaceholder.getMPSGraphTensor() :
+          gradOutputPlaceholder.getMPSGraphTensorData(),
       selfPlaceholder.getMPSGraphTensor() :
           selfPlaceholder.getMPSGraphTensorData()
     };
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() :
-          outputPlaceholder.getMPSGraphTensorData()
+      gradInputPlaceholder.getMPSGraphTensor() :
+          gradInputPlaceholder.getMPSGraphTensorData()
     };
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
+  return grad_input;
 }
 } // namespace native
 } // namespace at
