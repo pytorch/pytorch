@@ -304,14 +304,16 @@ void multiReductionInliner(
       }
     }
 
-    // Propagate vectorization/unrolling to those tensors that need it
-    scheduler_utils::parallelizeAllLike(
-        reference_tv,
-        -1,
-        {are_unrolled.begin(), are_unrolled.end()},
-        {ParallelType::Unroll,
-         ParallelType::Vectorize,
-         ParallelType::MisalignedVectorize});
+    if (!are_unrolled.empty()) {
+      // Propagate vectorization/unrolling to those tensors that need it
+      scheduler_utils::parallelizeAllLike(
+          reference_tv,
+          -1,
+          {are_unrolled.begin(), are_unrolled.end()},
+          {ParallelType::Unroll,
+           ParallelType::Vectorize,
+           ParallelType::MisalignedVectorize});
+    }
 
     std::vector<TensorView*> rfactor_and_reduction_tvs = {
         reference_tv, reduction_tv};

@@ -6630,6 +6630,35 @@ TEST_F(NVFuserTest, FusionHuggingFaceRepro2064_CUDA) {
       "");
 }
 
+TEST_F(NVFuserTest, FusionIssue2074_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int x = 4, y = 1024;
+
+  auto tv0 = makeContigTensor(2, DataType::Int32);
+  fusion.addInput(tv0);
+  auto tv1 = ne(tv0, IrBuilder::create<Int>(0));
+  auto tv2 = castOp(DataType::Int32, tv1);
+  auto tv3 = sum(tv2, {1});
+  auto tv4 = sub(tv3, IrBuilder::create<Int>(1));
+  fusion.addOutput(tv0);
+  fusion.addOutput(tv4);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({x, y}, options).to(at::kInt);
+  auto t1 = t0.ne(0);
+  auto t2 = t1.to(at::kInt);
+  auto t3 = t2.sum({1});
+  auto t4 = t3 - 1;
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+  ASSERT_TRUE(at::allclose(cg_outputs[1], t4));
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

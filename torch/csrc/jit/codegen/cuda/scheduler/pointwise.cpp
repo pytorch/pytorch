@@ -790,13 +790,15 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       vectorized_tvs.insert(
           vectorized_tvs.end(), consumer_tvs.begin(), consumer_tvs.end());
     }
-    // Aggressively mark with vectorized and cleanup later. That way we
-    // don't have to manually specify parallelization outside the reference.
-    vectorize_id->parallelize(ParallelType::Vectorize);
-    scheduler_utils::parallelizeAllLike(
-        reference_tv, vectorized_tvs, {ParallelType::Vectorize});
-    if (!should_vectorize_reference_tv) {
-      vectorize_id->parallelize(ParallelType::Serial);
+    if (!vectorized_tvs.empty()) {
+      // Aggressively mark with vectorized and cleanup later. That way we
+      // don't have to manually specify parallelization outside the reference.
+      vectorize_id->parallelize(ParallelType::Vectorize);
+      scheduler_utils::parallelizeAllLike(
+          reference_tv, vectorized_tvs, {ParallelType::Vectorize});
+      if (!should_vectorize_reference_tv) {
+        vectorize_id->parallelize(ParallelType::Serial);
+      }
     }
   }
 

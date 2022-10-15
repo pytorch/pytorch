@@ -1014,8 +1014,12 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
         vectorized_group2_cached_inputs.push_back(gin);
       }
     }
-    scheduler_utils::parallelizeAllLike(
-        reference2, vectorized_group2_cached_inputs, {ParallelType::Vectorize});
+    if (!vectorized_group2_cached_inputs.empty()) {
+      scheduler_utils::parallelizeAllLike(
+          reference2,
+          vectorized_group2_cached_inputs,
+          {ParallelType::Vectorize});
+    }
 
     // Only unroll the axes that exactly maps to the unrolled axes
     //  on reference as support for permissively mapped axes are not
@@ -1032,8 +1036,10 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
         unrolled_group2_cached_inputs.push_back(gin);
       }
     }
-    scheduler_utils::parallelizeAllLike(
-        reference2, unrolled_group2_cached_inputs, {ParallelType::Unroll});
+    if (!unrolled_group2_cached_inputs.empty()) {
+      scheduler_utils::parallelizeAllLike(
+          reference2, unrolled_group2_cached_inputs, {ParallelType::Unroll});
+    }
   }
 
   //////////////////////////////
@@ -1094,8 +1100,12 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
         vectorized_group1_cached_inputs.push_back(gin);
       }
     }
-    scheduler_utils::parallelizeAllLike(
-        reference1, vectorized_group1_cached_inputs, {ParallelType::Vectorize});
+    if (!vectorized_group1_cached_inputs.empty()) {
+      scheduler_utils::parallelizeAllLike(
+          reference1,
+          vectorized_group1_cached_inputs,
+          {ParallelType::Vectorize});
+    }
 
     // Only unroll the axes that exactly maps to the unrolled axes
     //  on reference as support for permissively mapped axes are not
@@ -1112,8 +1122,11 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
         unrolled_group1_cached_inputs.push_back(gin);
       }
     }
-    scheduler_utils::parallelizeAllLike(
-        reference1, unrolled_group1_cached_inputs, {ParallelType::Unroll});
+
+    if (!unrolled_group1_cached_inputs.empty()) {
+      scheduler_utils::parallelizeAllLike(
+          reference1, unrolled_group1_cached_inputs, {ParallelType::Unroll});
+    }
   }
 
   ////////////////////////////////
