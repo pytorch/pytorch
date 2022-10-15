@@ -67,6 +67,7 @@ class CapabilityBasedPartitioner:
             merged_nodes.update(partitions_by_id[other_id].nodes)
 
             visited: Set[Node] = set()
+            visited_partitions: Set[int] = set()
 
             def dfs_find_cycle(node):
                 if node in visited:
@@ -81,6 +82,9 @@ class CapabilityBasedPartitioner:
                     # hit a node in a partition through DFS, we need to
                     # traverse all nodes in the partition to properly reflect
                     # dependencies after the fusion
+                    if assignment[node] in visited_partitions:
+                        return False
+                    visited_partitions.add(assignment[node])
                     for p_node in partitions_by_id[assignment[node]].nodes:
                         for user_node in p_node.users:
                             if dfs_find_cycle(user_node):
