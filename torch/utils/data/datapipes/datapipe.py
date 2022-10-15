@@ -190,6 +190,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         # Instead of showing <torch. ... .MapperIterDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
 
+    def __dir__(self):
+        # for auto-completion in a REPL (e.g. Jupyter notebook)
+        return list(super().__dir__()) + list(self.functions.keys())
+
     def reset(self) -> None:
         r"""
         Reset the `IterDataPipe` to the initial state. By default, no-op. For subclasses of `IterDataPipe`,
@@ -312,6 +316,11 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             return self.str_hook(self)
         # Instead of showing <torch. ... .MapperMapDataPipe object at 0x.....>, return the class name
         return str(self.__class__.__qualname__)
+
+    def __dir__(self):
+        # for auto-completion in a REPL (e.g. Jupyter notebook)
+        return list(super().__dir__()) + list(self.functions.keys())
+
 
 
 class _DataPipeSerializationWrapper:
