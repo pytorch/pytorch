@@ -76,6 +76,7 @@ if torch.cuda.is_available():
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
 torch._inductor.config.triton.autotune = False  # too slow
 
 
@@ -1949,6 +1950,26 @@ class CommonTemplate:
             ),
         )
 
+    def test_masked_fill_promotion(self):
+        def fn(mask, value):
+            return aten.masked_fill(value, mask, torch.tensor(3.5))
+
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        for inp in (
+            torch.randn(
+                [16, 16],
+                dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device=self.device,
+            ),
+            torch.randint(16, (16, 16), device=self.device),
+        ):
+
+            inputs = (
+                torch.randint(0, 1, [1, 16], dtype=torch.bool, device=self.device),
+                inp,
+            )
+            self.assertEqual(fn(*inputs), opt_fn(*inputs))
+
     def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)
@@ -2013,6 +2034,19 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([8, 16]),),
+        )
+
+    def test_cat_upcasting(self):
+        def fn(arg4_1, slice_7):
+            cat_1 = aten.cat.default([arg4_1, slice_7], 1)
+            return (cat_1,)
+
+        self.common(
+            fn,
+            (
+                torch.randn([8, 16], dtype=torch.float32),
+                torch.randn([8, 20], dtype=torch.float16),
+            ),
         )
 
     def test_cat_extern_kernel(self):

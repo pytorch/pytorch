@@ -409,12 +409,12 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        example_inputs,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        example_inputs,
                         f"{compiler_name}_accuracy",
                     )
                     raise ValueError("Bad accuracy detected")
@@ -431,11 +431,15 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            example_inputs,
+                            compiler_name,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            example_inputs,
+                            compiler_name,
                         )
                     raise e
 
