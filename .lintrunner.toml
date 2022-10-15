@@ -288,8 +288,10 @@ include_patterns=['**']
 exclude_patterns=[
     '**/contrib/**',
     'third_party/**',
+    '**/*.bat',
     '**/*.expect',
     '**/*.ipynb',
+    '**/*.ps1',
     '**/*.ptl',
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
