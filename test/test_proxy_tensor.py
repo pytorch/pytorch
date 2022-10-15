@@ -765,6 +765,19 @@ def forward(self, x_1):
     alias = torch.ops.aten.alias.default(x_1);  x_1 = None
     return alias""")
 
+    def test_meta(self):
+        def f(x):
+            a = x.cos()
+            b = torch.var_mean(a, dim=0)
+            c = b * 2
+            return c
+
+        out = make_fx(f, tracing_mode="fake")(torch.randn(5, 5))
+        for n in out.graph.nodes:
+            if n.op == 'output':
+                continue
+            self.assertTrue('val' in n.meta)
+
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):
