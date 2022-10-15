@@ -1,6 +1,6 @@
 import collections
 import dataclasses
-from typing import Any, DefaultDict, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, cast, DefaultDict, Dict, Iterator, List, Optional, Tuple, Union
 
 import torch
 from torch._C import FunctionSchema
@@ -229,7 +229,7 @@ class DataFlowEdge:
 
 
 class DataFlowNode:
-    def __init__(self, event: _ProfilerResult, graph: "DataFlowGraph") -> None:
+    def __init__(self, event: _ProfilerEvent, graph: "DataFlowGraph") -> None:
         self._event = event
         self._graph = graph
         self._edges: Dict[TensorKey, DataFlowEdge] = self._determine_edges()
@@ -281,7 +281,9 @@ class DataFlowNode:
     @property
     def inputs(self) -> Dict[TensorKey, Tuple[bool, int]]:
         return {
-            k: (bool(v.mutated), v.input_version)
+            # MyPy can't see through `is_allocation` to know that
+            # `v.input_version` is not None.
+            k: (bool(v.mutated), cast(int, v.input_version))
             for k, v in self._edges.items()
             if not v.is_allocation
         }
@@ -295,7 +297,7 @@ class DataFlowNode:
         }
 
     @property
-    def intermediates(self) -> Tuple[TensorKey]:
+    def intermediates(self) -> Tuple[TensorKey, ...]:
         return tuple(
             k for k, v in self._edges.items() if v.is_allocation and v.is_deletion
         )
@@ -332,7 +334,7 @@ class DataFlowGraph:
                 tensor_versions[key] = version
 
     @property
-    def leaf_events(self) -> Tuple[_ProfilerEvent]:
+    def leaf_events(self) -> Tuple[_ProfilerEvent, ...]:
         return self._leaf_events
 
     @staticmethod
@@ -394,8 +396,9 @@ class DataFlowGraph:
         return version
 
     def bump(self, key: TensorKey) -> None:
-        assert self._active_version.get(key, None) is not None
-        self._active_version[key] += 1
+        prior_version = self._active_version.get(key, None)
+        assert prior_version is not None
+        self._active_version[key] = prior_version + 1
 
     def delete(self, key: TensorKey) -> None:
         assert self._active_version.setdefault(key, 0) is not None
