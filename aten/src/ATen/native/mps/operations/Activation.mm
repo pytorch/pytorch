@@ -2854,7 +2854,7 @@ Tensor hardswish_backward_mps(const Tensor& grad_output, const Tensor& self) {
               MPSGraphTensor* gradTensor =
                   [mpsGraph selectWithPredicateTensor:lessThanMinPredicateTensor
                                   truePredicateTensor:zeroTensor
-                                 falsePredicateTensor:lessThanMaxPredicateTensor
+                                 falsePredicateTensor:lessThanMaxGradTensor
                                                  name:nil];
               MPSGraphTensor* gradInputTensor =
                   [mpsGraph multiplicationWithPrimaryTensor:gradTensor
