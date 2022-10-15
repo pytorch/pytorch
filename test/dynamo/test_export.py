@@ -3,12 +3,13 @@ from unittest.mock import patch
 
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
-class ExportTests(torch._dynamo.testing.TestCase):
+class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
     # They all take a func, run it with eager, then export it, then compare
@@ -1423,6 +1424,6 @@ class ExportTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()
