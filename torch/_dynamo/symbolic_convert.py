@@ -18,6 +18,7 @@ from unittest.mock import patch
 import torch
 
 from . import (
+    allowed_functions,
     config,
     exc,
     logging as torchdynamo_logging,
@@ -1524,6 +1525,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if func.get_name() == "patched_init":
             unimplemented("Patched init cannot be inlined.")
+
+        try:
+            if id(func.get_function()) in allowed_functions._disallowed_function_ids:
+                unimplemented(f"inlining disallowed: {func.get_function()}")
+        except NotImplementedError:
+            pass  # closures
 
         if skipfiles.check(
             func.get_filename()

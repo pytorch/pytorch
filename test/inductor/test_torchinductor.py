@@ -36,7 +36,7 @@ try:
     from torch._inductor.compile_fx import compile_fx
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align, timed
+    from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -67,14 +67,7 @@ except (
 
 aten = torch.ops.aten
 
-HAS_CUDA = False
-if torch.cuda.is_available():
-    try:
-        importlib.import_module("triton")
-        HAS_CUDA = True
-    except ImportError:
-        pass
-
+HAS_CUDA = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 torch._inductor.config.triton.autotune = False  # too slow

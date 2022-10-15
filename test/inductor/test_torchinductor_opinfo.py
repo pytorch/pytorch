@@ -157,6 +157,9 @@ inductor_skips["cuda"] = {
     # Triton bug leads to segfault
     "nn.functional.softplus": {f64},
     "nn.functional.mish": {f64},
+    # Disabled on migration to core
+    "linalg.pinv.singular": {f32, f64},
+    "linalg.householder_product": {f32},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
