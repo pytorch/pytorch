@@ -988,6 +988,11 @@ class Scheduler:
                 node = self.name_to_node[name]
                 if node.can_free():
                     V.graph.wrapper_code.codegen_free(node.node)
+            elif name in V.graph.graph_inputs:
+                storage = V.graph.graph_inputs[name].data
+                assert storage.is_input_buffer()
+                V.graph.wrapper_code.codegen_free(storage.data)
+
         self.buffer_names_to_free.clear()
 
     def remove_kernel_local_buffers(self):
