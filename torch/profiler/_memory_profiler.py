@@ -208,7 +208,7 @@ class DataFlowGraph:
         return self._leaf_events
 
     @staticmethod
-    def _extract_leaf_events(tree: OpTree) -> Tuple[_ProfilerEvent]:
+    def _extract_leaf_events(tree: OpTree) -> Tuple[_ProfilerEvent, ...]:
         """Partially traverse the op tree and extract top level ops.
 
         Consider the following code:
@@ -245,7 +245,7 @@ class DataFlowGraph:
         def leaf_op(e: _ProfilerEvent) -> bool:
             return e.typed[0] == _EventType.TorchOp and (
                 e.typed[1].scope == RecordScope.BACKWARD_FUNCTION
-                or SchemaMatcher.match_schemas(e.typed[1])
+                or bool(SchemaMatcher.match_schemas(e.typed[1]))
             )
 
         def children_fn(e: _ProfilerEvent):
