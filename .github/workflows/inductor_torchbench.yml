@@ -36,24 +36,30 @@ jobs:
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
                            setuptools cmake=3.22 cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
+      - name: Setup TorchBench branch
+        run: |
+          # shellcheck disable=SC1091
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          PR_BODY_FILE=/tmp/pr-body.txt
+          echo "$PR_BODY" > ${PR_BODY_FILE}
+          python pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch
       - name: Checkout TorchBench
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           repository: pytorch/benchmark
           path: benchmark
           lfs: false
-          ref: ${{ env.TORCHBENCH_BRANCH }}
-      - name: Setup TorchBench branch
+          # Pin to specific version to avoid upstream breakages
+          ref: 24b95f2f627bf07a61cefed653419389a7586357
+      - name: Install TorchBench
         run: |
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           pushd "${HOME}"/benchmark
-          # Pin to specific version to avoid upstream breakages
-          git checkout 24b95f2f627bf07a61cefed653419389a7586357
           python install.py
           pip install gym==0.25.2  # workaround issue in 0.26.0
-          touch env-v7.key
       - name: Run TorchBench
         run: |
           # shellcheck disable=SC1091
