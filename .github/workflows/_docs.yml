@@ -38,7 +38,7 @@ jobs:
   build-docs:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, ${{ matrix.runner }}]
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
