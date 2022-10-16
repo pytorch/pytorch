@@ -1,0 +1,9 @@
+"module: dynamo":
+- torch/_dynamo/**
+- torch/csrc/dynamo/**
+- benchmarks/dynamo/**
+- test/dynamo/**
+
+"module: inductor":
+- torch/_inductor/**
+- test/inductor/**
