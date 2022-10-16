@@ -5299,7 +5299,7 @@ for shape in [(1,), ()]:
             out.grad_fn._raw_saved_indices[0].register_hooks(lambda x: x, lambda x: x)
 
         out = a.mean()
-        self.assertEqual(out.grad_fn._saved_self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
+        self.assertEqual(out.grad_fn._saved_self_sym_sizes, a.shape)          # IntArrayRef -> Tuple[int]
 
         a = torch.ones(2, 2, requires_grad=True)
         out = a * a
@@ -5328,8 +5328,8 @@ for shape in [(1,), ()]:
 
         a = torch.ones(1, 3, 3, requires_grad=True)
         out = torch.addbmm(a.squeeze(0), a, a)
-        self.assertEqual(out.grad_fn._saved_batch1_argsize_0, 1)          # int64_t
-        self.assertEqual(out.grad_fn._saved_batch1_argsize_1, 3)          # int64_t
+        self.assertEqual(out.grad_fn._saved_batch1_sym_argsize_0, 1)      # int64_t
+        self.assertEqual(out.grad_fn._saved_batch1_sym_argsize_1, 3)      # int64_t
 
         a = torch.ones(1, 1, 3, 3, requires_grad=True)
         out = torch.nn.functional.unfold(a, 3)
