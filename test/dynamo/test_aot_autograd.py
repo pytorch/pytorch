@@ -204,6 +204,81 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         aot_fn(x, y)
         self.assertTrue(not is_safe[0])
 
+    def test_call_fn_with_non_const_inputs_aot_unsafe_control_flow(self):
+        class ModuleSpecialFwd(torch.nn.Module):
+            def __init__(self):
+                super(ModuleSpecialFwd, self).__init__()
+
+            def _some_bad_fwd(self, param, y):
+                if y[0][0] < 3:
+                    return y + param
+                return param * y
+
+            def forward(self, x, y):
+                a = x * y
+                a = self._some_bad_fwd(a, a)
+                b = x + y
+                return a * b
+
+        # Init mod
+        mod = ModuleSpecialFwd()
+        x = torch.nn.Parameter(torch.randn([2, 2]))
+        y = torch.randn([2, 2])
+
+        # Run it for real
+        real = mod(x, y)
+
+        # Run it through optimize, with our capturing fn
+
+        gms = []
+
+        def capturing_fn(gm, inputs):
+            nonlocal gms
+            gms.append(gm)
+            return gm.forward
+
+        optimized_mod = torch._dynamo.optimize(capturing_fn)(mod)
+
+        # Assert equal
+        self.assertTrue(torch._dynamo.testing.same(real, optimized_mod(x, y)))
+
+        # Uncomment to reproduce commented out graphs below.
+        # for gm in gms:
+        #     print("GM CODE", gm.code)
+        
+        self.assertTrue(len(gms) == 4)  # 4 graphs made
+        # Graph 1
+        # def forward(self, x : torch.nn.parameter.Parameter, y : torch.Tensor):
+        #     mul = x * y;  x = y = None
+        #     return (mul,)
+        # BREAK
+        # Graph 2
+        # def forward(self, y : torch.Tensor):
+        #     getitem = y[0];  y = None
+        #     getitem_1 = getitem[0];  getitem = None
+        #     lt = getitem_1 < 3;  getitem_1 = None
+        #     return (lt,)
+        # BREAK
+        # Graph 3
+        # def forward(self, param : torch.Tensor, y : torch.Tensor):
+        #     add = y + param;  y = param = None
+        #     return (add,)
+        # BREAK
+        # Graph 4
+        # def forward(self, _stack0 : torch.Tensor, x : torch.nn.parameter.Parameter, y : torch.Tensor):
+        #     add = x + y;  x = y = None
+        #     mul = _stack0 * add;  _stack0 = add = None
+        #     return (mul,)
+
+        # Run fn with AOT
+        torch._dynamo.reset()
+        is_safe = [True]
+
+        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
+        aot_fn = torch._dynamo.optimize(compiler_fn)(optimized_mod)
+        aot_fn(x, y)
+        self.assertTrue(is_safe[0])
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
