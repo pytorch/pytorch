@@ -930,18 +930,69 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Bool, DataType::ComplexFloat):
     case supported_switch_pair(DataType::ComplexDouble, DataType::ComplexFloat):
       return "(std::complex<float>)";
+
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
     case supported_switch_pair(DataType::Double, DataType::Half):
       return "__double2half";
-    case supported_switch_pair(DataType::Float, DataType::BFloat16):
-      return "__float2bfloat";
+    case supported_switch_pair(DataType::Int32, DataType::Half):
+      return "__int322half";
+    case supported_switch_pair(DataType::Int, DataType::Half):
+      return "__int2half";
+    case supported_switch_pair(DataType::Bool, DataType::Half):
+      return "__bool2half";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Half):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Half):
+      return "__real_then_2half";
+
     case supported_switch_pair(DataType::Half, DataType::Float):
       return "__half2float";
     case supported_switch_pair(DataType::Half, DataType::Double):
       return "__half2double";
+    case supported_switch_pair(DataType::Half, DataType::Int32):
+      return "__half2int32";
+    case supported_switch_pair(DataType::Half, DataType::Int):
+      return "__half2int";
+    case supported_switch_pair(DataType::Half, DataType::Bool):
+      return "__half2bool";
+    case supported_switch_pair(DataType::Half, DataType::ComplexFloat):
+      return "(std::complex<float>)__half2float";
+    case supported_switch_pair(DataType::Half, DataType::ComplexDouble):
+      return "(std::complex<double>)__half2double";
+
+    case supported_switch_pair(DataType::Float, DataType::BFloat16):
+      return "__float2bfloat";
+    case supported_switch_pair(DataType::Double, DataType::BFloat16):
+      return "__double2bfloat";
+    case supported_switch_pair(DataType::Half, DataType::BFloat16):
+      return "__half2bfloat";
+    case supported_switch_pair(DataType::Int32, DataType::BFloat16):
+      return "__int322bfloat";
+    case supported_switch_pair(DataType::Int, DataType::BFloat16):
+      return "__int2bfloat";
+    case supported_switch_pair(DataType::Bool, DataType::BFloat16):
+      return "__bool2bfloat";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::BFloat16):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::BFloat16):
+      return "__real_then_2bfloat";
+
     case supported_switch_pair(DataType::BFloat16, DataType::Float):
       return "__bfloat2float";
+    case supported_switch_pair(DataType::BFloat16, DataType::Double):
+      return "__bfloat2double";
+    case supported_switch_pair(DataType::BFloat16, DataType::Half):
+      return "__bfloat2half";
+    case supported_switch_pair(DataType::BFloat16, DataType::Int32):
+      return "__bfloat2int32";
+    case supported_switch_pair(DataType::BFloat16, DataType::Int):
+      return "__bfloat2int";
+    case supported_switch_pair(DataType::BFloat16, DataType::Bool):
+      return "__bfloat2bool";
+    case supported_switch_pair(DataType::BFloat16, DataType::ComplexFloat):
+      return "(std::complex<float>)__bfloat2float";
+    case supported_switch_pair(DataType::BFloat16, DataType::ComplexDouble):
+      return "(std::complex<double>)__bfloat2double";
+
     default:
       return nullptr;
   }
