@@ -244,7 +244,7 @@ TensorView* permute(TensorView* x, const std::vector<int64_t>& new2old) {
 
   TensorView* out_tensor = IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
+          out_domain, TensorDomain::getContiguousContiguity(out_domain)),
       x->getDataType().value());
   IrBuilder::create<TransposeOp>(out_tensor, x, normalized_new2old);
   return out_tensor;

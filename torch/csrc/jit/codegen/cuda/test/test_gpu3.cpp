@@ -6659,6 +6659,61 @@ TEST_F(NVFuserTest, FusionIssue2074_CUDA) {
   ASSERT_TRUE(at::allclose(cg_outputs[1], t4));
 }
 
+TEST_F(NVFuserTest, FusionIssue2075_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int x = 2, y = 128, z = 128;
+
+  auto tv0 = makeContigConcreteTensor({1, -1, 1});
+  fusion.addInput(tv0);
+  auto tv1 = makeContigConcreteTensor({1, 1, -1});
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = expand(
+      tv2,
+      {IrBuilder::create<Int>(x),
+       tv2->axis(1)->extent(),
+       IrBuilder::create<Int>(z)});
+
+  // [1, 1, 128] -> [1, 1, 1, 1, 1, 128]
+  auto tv4 = broadcast(tv1, {{false, false, true, true, true, false}});
+  // [1, 1, 1, 1, 1, 128] -> [2, 128, 1, 1, 1, 128]
+  auto tv5 = expand(
+      tv4,
+      {IrBuilder::create<Int>(x),
+       IrBuilder::create<Int>(y),
+       tv4->axis(2)->extent(),
+       tv4->axis(3)->extent(),
+       tv4->axis(4)->extent(),
+       tv4->axis(5)->extent()});
+  auto tv6 = set(tv5);
+  // [2, 128, 1, 1, 1, 128] -> [2, 1, 128, 1, 1, 128]
+  auto tv7 = permute(tv6, {0, 3, 1, 2, 4, 5});
+  auto tv8 = sum(tv7, {1, 3, 4});
+  auto tv9 = le(tv8, tv3);
+  auto tv10 = castOp(DataType::Float, tv9);
+  fusion.addOutput(tv10);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({1, y, 1}, options);
+  at::Tensor t1 = at::randn({1, 1, z}, options);
+  auto t3 = t0.expand({x, y, z});
+  auto t4 = t1.unsqueeze(-2).unsqueeze(-2).unsqueeze(-2);
+  auto t5 = t4.expand({x, y, 1, 1, 1, z});
+  auto t7 = t5.permute({0, 3, 1, 2, 4, 5});
+  auto t8 = t7.squeeze(-2).squeeze(-2).squeeze(-3);
+  auto t9 = t8 < t3;
+  auto t10 = t9.to(at::kFloat);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1});
+  testValidate(&fusion, cg_outputs, {t0, t1}, {t10}, __LINE__, __FILE__);
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

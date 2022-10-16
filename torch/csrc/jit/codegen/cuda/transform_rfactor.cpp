@@ -410,7 +410,7 @@ std::pair<TensorDomain*, TensorDomain*> TransformRFactor::runReplay(
       new_producer_root,
       new_producer_rfactor_domain,
       new_producer_domain,
-      std::vector<bool>(new_producer_rfactor_domain.size(), true));
+      TensorDomain::getContiguousContiguity(new_producer_rfactor_domain));
 
   // Producer has been finished, now work on consumer.
 
@@ -467,7 +467,7 @@ std::pair<TensorDomain*, TensorDomain*> TransformRFactor::runReplay(
       original_td->container(),
       new_consumer_root_domain,
       new_consumer_domain,
-      std::vector<bool>(new_consumer_root_domain.size(), true));
+      TensorDomain::getContiguousContiguity(new_consumer_root_domain));
 
   return std::make_pair(producer_domain, consumer_domain);
 }

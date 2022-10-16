@@ -697,7 +697,8 @@ TensorView* castIntermediateValueInCompleteFusion(
     // Create the actual domain and tv.
     return IrBuilder::create<TensorView>(
         IrBuilder::create<TensorDomain>(
-            new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
+            new_root_domain,
+            TensorDomain::getContiguousContiguity(new_root_domain)),
         data_type);
   };
 
