@@ -3552,8 +3552,7 @@ def t(a: TensorLikeType):
     return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
 
 
-# CompositeImplicitAutograd, but Python name doesn't match the ATen name
-@register_decomposition(torch.ops.aten.numpy_T)
+# CompositeImplicitAutograd - don't register decomp
 def T(a: TensorLikeType) -> TensorLikeType:
     # n != 2 && n != 0 is deprecated in regular PyTorch.  Maybe T could even be
     # defined as an alias for t:
