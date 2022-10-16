@@ -4269,16 +4269,16 @@ def sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
         # 1-dim
         ((M,), (0, 0, 0)),    # 0 elems from the left
         ((M,), (-1, -1, 0)),  # 0 elems from the right
-        ((M,), (0, 5, 3)),    # 3 elems from the right
-        ((M,), (0, -5, 2)),   # 2 elems from the left
-        ((M,), (-1, 0, M)),   # M elems from the right
-        ((M,), (0, -M, M)),   # M elems from the left
+        ((M,), (0, 5, 3)),    # 3 elems from the left
+        ((M,), (0, -5, 2)),   # 2 elems from the right
+        ((M,), (-1, 0, M)),   # M elems from the left
+        ((M,), (0, -M, M)),   # M elems from the right
 
         # 2-dim
         ((M, S), (1, 0, 0)),    # dim 1, 0 elems from the left
         ((S, M), (-2, -1, 0)),  # dim 0, 0 elems from the right
         ((L, S), (1, 2, 3)),    # dim 1, 3 elems from the left
-        ((L, S), (-1, 3, 2)),   # dim 0, 2 elems from the right
+        ((L, S), (-1, 3, 2)),   # dim 0, 2 elems from the left
         ((M, L), (0, 0, M)),    # dim 0, M elems from the left
         ((M, L), (-1, -L, L)),  # dim 1, L elems from the right
 
