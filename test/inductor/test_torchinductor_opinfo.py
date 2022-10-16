@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipCUDAMemoryLeakCheckIf,
     suppress_warnings,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -33,7 +34,7 @@ try:
         from .test_torchinductor import check_model, check_model_cuda
     except ImportError:
         from test_torchinductor import check_model, check_model_cuda
-except (unittest.SkipTest, ImportError, AssertionError) as e:
+except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
         sys.exit(0)
@@ -157,6 +158,9 @@ inductor_skips["cuda"] = {
     # Triton bug leads to segfault
     "nn.functional.softplus": {f64},
     "nn.functional.mish": {f64},
+    # Disabled on migration to core
+    "linalg.pinv.singular": {f32, f64},
+    "linalg.householder_product": {f32},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -613,5 +617,5 @@ instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     torch._dynamo.config.raise_on_assertion_error = True
-    if has_triton():
+    if has_triton() and not TEST_WITH_ROCM:
         run_tests()

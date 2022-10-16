@@ -438,7 +438,7 @@ def register_pointwise(
     return fn
 
 
-@register_lowering(aten.where, broadcast=True, type_promotion_kind=None)
+@register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):
     def fn(*args):
         return ops.where(*args)
@@ -448,9 +448,18 @@ def where(cond, a, b):
     if isinstance(b, (float, int)):
         b = constant_like(b)(a)
 
-    dtype = torch.promote_types(a.get_dtype(), b.get_dtype())
+    args = [cond, a, b]
+    dtype = get_promoted_dtype(
+        args[1], args[2], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+    for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
+        args[i] = x
+    for i in range(len(args)):
+        if isinstance(args[i], ir.Constant):
+            args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
     return make_pointwise(fn, override_return_dtype=dtype)(
-        cond, to_dtype(a, dtype), to_dtype(b, dtype)
+        args[0], to_dtype(args[1], dtype), to_dtype(args[2], dtype)
     )
 
 
@@ -756,7 +765,12 @@ def as_strided_(x, size, stride, storage_offset=None):
 def cat(inputs, dim=0):
     if len(inputs) == 1:
         return inputs[0]
+
     dim = _validate_dim(inputs[0], dim, 0)
+    dtype = get_promoted_dtype(
+        *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    inputs = [to_dtype(inp, dtype) for inp in inputs]
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 

@@ -289,6 +289,34 @@ class TestMkldnnFusion(JitTestCase):
                         )
                     self.assertEqual(ref, fused)
 
+    def test_linear_binary_fusion_ops(self):
+        class M(nn.Module):
+            def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
+                self.binary = binary_fn
+
+            def forward(self, x, other):
+                x = self.linear(x)
+                x = self.binary(x, other)
+                return x
+
+        out_feature = 20
+        for pointwise_name, pointwise_fn in self._binary_list().items():
+            options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+            for input_shape, bias in options:
+                with torch.no_grad():
+                    mod = M(pointwise_fn, input_shape[-1], out_feature, bias).eval()
+                    v = torch.randn(input_shape)
+                    other = torch.randn(input_shape[:-1] + [out_feature])
+                    ref = mod(v, other)
+                    attr = pointwise_name
+                    fused = torch.ops.mkldnn._linear_pointwise(
+                        v, other, mod.linear.weight, mod.linear.bias, attr
+                    )
+                    self.assertEqual(ref, fused)
 
 if __name__ == "__main__":
     run_tests()
