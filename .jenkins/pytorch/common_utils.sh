@@ -145,6 +145,16 @@ function checkout_install_torchdynamo() {
   popd
 }
 
+function install_triton() {
+  local commit
+  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    echo "skipping triton due to rocm"
+  else
+    commit=$(get_pinned_commit triton)
+    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+  fi
+}
+
 function test_functorch() {
   python test/run_test.py --functorch --verbose
 }
