@@ -51,7 +51,7 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = 1
+compile_threads = min(32, os.cpu_count())
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
