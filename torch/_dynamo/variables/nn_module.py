@@ -149,7 +149,6 @@ class NNModuleVariable(VariableTracker):
         tx,
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
-        custom_name=None,
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
@@ -190,45 +189,6 @@ class NNModuleVariable(VariableTracker):
                 if is_lazy:
                     self.module_type = mod.cls_to_become
 
-                # Custom name denotes that we do not want to just call the module
-                if custom_name:
-                    # TODO(voz): Refactor this into a generic as_proxy() for nn module
-                    # We use variations of this pattern in a few places now.
-                    def make_attr(name):
-                        node = tx.output.create_proxy(
-                            "get_attr",
-                            name,
-                            tuple(),
-                            {},
-                        )
-                        return node
-
-                    # Bind in self
-                    name = self.module_key
-
-                    tx.output.register_attr_or_module(
-                        mod,
-                        name,
-                        name,
-                        source=NNModuleSource(GetItemSource(self.source, name)),
-                        **options,
-                    )
-                    proxy_for_mod = make_attr(name)
-                    proxy_for_mod.node.meta["example_value"] = mod
-
-                    proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
-                    return variables.TensorVariable.create(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_method",
-                            custom_name,
-                            args=tuple([proxy_for_mod, *proxy_args]),
-                            kwargs=proxy_kwargs,
-                            current_tx=tx,
-                        ),
-                        nnmodule=mod,
-                        **options,
-                    )
                 return variables.TensorVariable.create(
                     tx=tx,
                     proxy=tx.output.create_proxy(
@@ -240,17 +200,15 @@ class NNModuleVariable(VariableTracker):
                     nnmodule=mod,
                     **options,
                 )
+
             else:
                 # for lazy modules, run the pre-hooks which will update the type
                 # TODO mlazos: we don't fully support all of the hooks that exist,
                 # so restrict using __call__ only to lazy modules for now
-                if not custom_name:
-                    if is_lazy:
-                        fn = mod.__class__.__call__
-                    else:
-                        fn = mod.__class__.forward
+                if is_lazy:
+                    fn = mod.__class__.__call__
                 else:
-                    fn = mod.__class__.__dict__[custom_name]
+                    fn = mod.__class__.forward
 
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
@@ -301,7 +259,6 @@ class NNModuleVariable(VariableTracker):
 
         # A loose heuristic, but seems to be generally good before we drop into the
         # manual handling of inputs
-
         if (
             name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
@@ -310,8 +267,42 @@ class NNModuleVariable(VariableTracker):
                 for x in itertools.chain(args, kwargs.values())
             )
         ):
-            return self.call_function(tx, args, kwargs, custom_name=name)
+            # TODO(voz): Refactor this into a generic as_proxy() for nn module
+            # We use variations of this pattern in a few places now.
+            def make_attr(name):
+                node = tx.output.create_proxy(
+                    "get_attr",
+                    name,
+                    tuple(),
+                    {},
+                )
+                return node
 
+            # Bind in self
+            tx.output.register_attr_or_module(
+                module,
+                self.module_key,
+                self.module_key,
+                source=NNModuleSource(GetItemSource(self.source, self.module_key)),
+                **options,
+            )
+            proxy_for_mod = make_attr(self.module_key)
+            proxy_for_mod.node.meta["example_value"] = module
+
+            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+
+            return variables.TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    args=tuple([proxy_for_mod, *proxy_args]),
+                    kwargs=proxy_kwargs,
+                    current_tx=tx,
+                ),
+                nnmodule=module,
+                **options,
+            )
         if not all(
             x.is_python_constant() for x in itertools.chain(args, kwargs.values())
         ):

@@ -132,6 +132,78 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         aot_fn(x, y)
         self.assertTrue(is_safe[0])
 
+    def test_call_fn_with_non_const_inputs_aot_safe(self):
+        class ModuleSpecialFwd(torch.nn.Module):
+            def __init__(self):
+                super(ModuleSpecialFwd, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=20, kernel_size=(5, 5)
+                )
+
+            def _conv_forward(self, x):
+                return self.conv._conv_forward(x, self.conv.weight, self.conv.bias)
+
+            def forward(self, x):
+                return self._conv_forward(x)
+
+        # Init mod
+        mod = ModuleSpecialFwd()
+        rx = torch.randn([3, 10, 10])
+
+        # Run it for real
+        real = mod(rx)
+
+        # Run it in export
+        graph, _ = torch._dynamo.export(mod, rx)
+
+        # Run exported graph with AOT
+        is_safe = [True]
+        self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+
+        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
+        aot_fn = torch._dynamo.optimize(compiler_fn)(graph)
+        aot_fn(rx)
+        self.assertTrue(is_safe[0])
+
+    def test_call_fn_with_non_const_inputs_aot_unsafe(self):
+        class ModuleSpecialFwd(torch.nn.Module):
+            def __init__(self):
+                super(ModuleSpecialFwd, self).__init__()
+
+            def _some_bad_fwd(self, param, y):
+                prev_grad = torch.is_grad_enabled()
+                try:
+                    torch.set_grad_enabled(False)
+                    param.add_(y)
+                finally:
+                    torch.set_grad_enabled(prev_grad)
+                return y
+
+            def forward(self, x, y):
+                return self._some_bad_fwd(x, y)
+
+        # Init mod
+        mod = ModuleSpecialFwd()
+        x = torch.nn.Parameter(torch.randn(4))
+        y = torch.randn([4])
+
+        # Run it for real
+        real = mod(x, y)
+
+        # Run it in export
+        graph, _ = torch._dynamo.export(mod, x, y)
+
+        # Assert equal
+        self.assertTrue(torch._dynamo.testing.same(real, graph(x, y)))
+
+        # Run exported graph with AOT
+        is_safe = [True]
+
+        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
+        aot_fn = torch._dynamo.optimize(compiler_fn)(graph)
+        aot_fn(x, y)
+        self.assertTrue(not is_safe[0])
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
