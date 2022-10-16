@@ -1539,6 +1539,18 @@ class TestLRScheduler(TestCase):
         scheduler = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         self._test(scheduler, targets, epochs)
 
+    def test_linearlr_start_factor_limits1(self):
+        start_factor = 0.
+        iters = 4
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+
+    def test_linearlr_start_factor_limits2(self):
+        start_factor = 1.1
+        iters = 4
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+
     def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
