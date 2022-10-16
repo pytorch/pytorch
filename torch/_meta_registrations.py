@@ -582,8 +582,9 @@ def meta_avg_pool2d_backward(
         mem_format,
     )
 
-    # TODO: should new_empty() get a memory_format kwarg?
-    return input.new_empty((input_size)).to(memory_format=mem_format)
+    return torch.empty(
+        input_size, dtype=input.dtype, device=input.device, memory_format=mem_format
+    )
 
 
 @register_meta(aten._adaptive_avg_pool2d.default)
