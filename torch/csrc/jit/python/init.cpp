@@ -1462,7 +1462,8 @@ void initJITBindings(PyObject* module) {
               [](c10::SymIntNode a, py::object b) -> py::object {
                 if (PyFloat_Check(b.ptr())) {
                   auto float_a = a->sym_float();
-                  return py::cast(float_a->pow(float_a->wrap(py::cast<double>(b))));
+                  return py::cast(
+                      float_a->pow(float_a->wrap(py::cast<double>(b))));
                 }
                 // TODO: integer pow
                 return py::reinterpret_borrow<py::object>(Py_NotImplemented);
