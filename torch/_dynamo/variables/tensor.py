@@ -72,6 +72,7 @@ class TensorVariable(VariableTracker):
     def run_proxy(proxy, args, kwargs, nnmodule):
         op = proxy.node.op
         if op == "call_function":
+            breakpoint()
             return proxy.node.target(*args, **kwargs)
         elif op == "call_method":
             return getattr(args[0], proxy.node.target)(*args[1:], **kwargs)
