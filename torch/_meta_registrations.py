@@ -582,8 +582,9 @@ def meta_avg_pool2d_backward(
         mem_format,
     )
 
-    # TODO: should new_empty() get a memory_format kwarg?
-    return input.new_empty((input_size)).to(memory_format=mem_format)
+    return torch.empty(
+        input_size, dtype=input.dtype, device=input.device, memory_format=mem_format
+    )
 
 
 @register_meta(aten._adaptive_avg_pool2d.default)
@@ -742,6 +743,36 @@ def meta_index_Tensor(self, indices):
         else:
             replacement_shape = list(index.shape)
     return self.new_empty(before_shape + replacement_shape + after_shape)
+
+
+@register_meta([aten.convolution_backward.default])
+def meta_convolution_backward(
+    grad_output_,
+    input_,
+    weight_,
+    bias_sizes_opt,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    output_mask,
+):
+    # High level logic taken from slow_conv3d_backward_cpu which should
+    # be representative of all convolution_backward impls
+    backend_grad_input = None
+    backend_grad_weight = None
+    backend_grad_bias = None
+
+    if output_mask[0]:
+        backend_grad_input = grad_output_.new_empty(input_.size())
+    if output_mask[1]:
+        backend_grad_weight = grad_output_.new_empty(weight_.size())
+    if output_mask[2]:
+        backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
+
+    return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
 
 @register_meta([aten.addbmm.default, aten.addbmm.out])
