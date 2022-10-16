@@ -407,6 +407,7 @@ class VariableBuilder:
             and type(getattr(value, "__self__", None))
             is torch.autograd.function.FunctionMeta
             and getattr(value, "__name__", "") == "apply"
+            and value == getattr(value.__self__, "apply", None)
         ):
             # handle aliased autograd function `apply` calls
             return GetAttrVariable(
