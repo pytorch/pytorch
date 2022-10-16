@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import os
 import random
 import sys
 import unittest
@@ -18,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -36,7 +38,7 @@ try:
     from torch._inductor.compile_fx import compile_fx
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align, timed
+    from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -67,15 +69,9 @@ except (
 
 aten = torch.ops.aten
 
-HAS_CUDA = False
-if torch.cuda.is_available():
-    try:
-        importlib.import_module("triton")
-        HAS_CUDA = True
-    except ImportError:
-        pass
-
+HAS_CUDA = has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
 torch._inductor.config.triton.autotune = False  # too slow
 
 
@@ -1949,6 +1945,26 @@ class CommonTemplate:
             ),
         )
 
+    def test_masked_fill_promotion(self):
+        def fn(mask, value):
+            return aten.masked_fill(value, mask, torch.tensor(3.5))
+
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        for inp in (
+            torch.randn(
+                [16, 16],
+                dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                device=self.device,
+            ),
+            torch.randint(16, (16, 16), device=self.device),
+        ):
+
+            inputs = (
+                torch.randint(0, 1, [1, 16], dtype=torch.bool, device=self.device),
+                inp,
+            )
+            self.assertEqual(fn(*inputs), opt_fn(*inputs))
+
     def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)
@@ -2013,6 +2029,19 @@ class CommonTemplate:
         self.common(
             fn,
             (torch.randn([8, 16]),),
+        )
+
+    def test_cat_upcasting(self):
+        def fn(arg4_1, slice_7):
+            cat_1 = aten.cat.default([arg4_1, slice_7], 1)
+            return (cat_1,)
+
+        self.common(
+            fn,
+            (
+                torch.randn([8, 16], dtype=torch.float32),
+                torch.randn([8, 20], dtype=torch.float16),
+            ),
         )
 
     def test_cat_extern_kernel(self):
@@ -3639,7 +3668,11 @@ class CommonTemplate:
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
         self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "TODO: debug this with asan")
+    @unittest.skipIf(
+        TEST_WITH_ASAN
+        or os.environ.get("BUILD_ENVIRONMENT", "").startswith("parallelnative"),
+        "TODO: debug this with asan",
+    )
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
             div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
@@ -4024,5 +4057,5 @@ if HAS_CUDA:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
