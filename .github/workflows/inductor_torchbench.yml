@@ -75,8 +75,9 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
+          pushd "${GITHUB_WORKSPACE}"/pytorch
           # Testing with --only resnet18 for now
-          python3 pytorch/benchmarks/dynamo/torchbench.py \
+          python3 benchmarks/dynamo/torchbench.py \
                   --ci --accuracy --skip-accuracy-check -d cuda \
                   --inductor --training --float32 \
                   --only resnet18 \
@@ -85,7 +86,8 @@ jobs:
         run: |
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          python pytorch/benchmarks/dynamo/check_csv.py -f indcutor_torchbench_training.csv
+          pushd "${GITHUB_WORKSPACE}"/pytorch
+          python benchmarks/dynamo/check_csv.py -f indcutor_torchbench_training.csv
       - name: Remove conda environment and cleanup
         run: |
           conda env remove --name pr-ci
@@ -93,4 +95,4 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: TorchBench Running with Inductor result
-          path: indcutor_torchbench_training.csv
+          path: pytorch/indcutor_torchbench_training.csv
