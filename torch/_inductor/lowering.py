@@ -1043,7 +1043,6 @@ if has_torchvision_roi_align():
 # https://github.com/pytorch/torchdynamo/issues/327
 make_fallback(aten._adaptive_avg_pool2d_backward)
 make_fallback(aten.as_strided_scatter)
-make_fallback(aten.convolution_backward)
 make_fallback(aten._cudnn_rnn)
 make_fallback(aten._cudnn_rnn_backward)
 make_fallback(aten.cumsum)
@@ -1116,6 +1115,36 @@ def _convolution(
     return convolution(
         x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
     )
+
+
+@register_lowering(aten.convolution_backward)
+def convolution_backward(
+    grad_output: TensorBox,
+    x: TensorBox,
+    weight: TensorBox,
+    bias_sizes: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int,
+    output_mask: List[bool],
+):
+    result = ir.ConvolutionBackward.create(
+        grad_output,
+        x,
+        weight,
+        bias_sizes,
+        stride,
+        padding,
+        dilation,
+        transposed,
+        output_padding,
+        groups,
+        output_mask,
+    )
+    return list(map(TensorBox.create, result))
 
 
 @register_lowering(aten.clone)
