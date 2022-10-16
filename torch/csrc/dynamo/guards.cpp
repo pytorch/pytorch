@@ -366,7 +366,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
-      char msg[256];
+      char msg[128];
       snprintf(
           msg,
           sizeof msg,
