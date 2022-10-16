@@ -792,25 +792,22 @@ class TestPrims(TestCase):
         # correctly overriden to call aten implementation.
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
-        from torch._prims.nvfuser_executor import maybe_partition_graph, nvfuser_execute_partitioned
+        from torch._prims.nvfuser_executor import maybe_partition_graph
 
         make_arg = partial(make_tensor, device=device, dtype=dtype)
         a = make_arg((4, 5))
         b = make_arg((5, 4))
 
         def func(a, b):
-            aa = a.view(a.shape)
-            aa = aa.view(b.shape)
-            bb = b.view(b.shape)
-            bb = bb.view(a.shape)
-            return torch.mm(aa, bb)
+            aa = a.view(b.shape)
+            aa = aa.view(a.shape)
+            return aa.digamma()
 
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a, b)
         gm, _ = maybe_partition_graph(gm, False, False)
-        gm.graph.print_tabular()
 
-        out = nvfuser_execute_partitioned(gm, a, b)
+        out = gm(a, b)
         self.assertEqual(out, func(a, b))
 
     @onlyCUDA
