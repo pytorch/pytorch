@@ -145,7 +145,11 @@ class NNModuleVariable(VariableTracker):
         return variables.GetAttrVariable(self, name, **options)
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]", custom_name=None
+        self,
+        tx,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+        custom_name=None,
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
@@ -199,7 +203,7 @@ class NNModuleVariable(VariableTracker):
                             {},
                         )
                         return node
-                    
+
                     fn = mod.__class__.__dict__[custom_name]
                     # Bind in self
                     name = self.module_key
@@ -208,13 +212,11 @@ class NNModuleVariable(VariableTracker):
                         mod,
                         name,
                         name,
-                        source=NNModuleSource(
-                            GetItemSource(self.source, name)
-                        ),
+                        source=NNModuleSource(GetItemSource(self.source, name)),
                         **options,
                     )
                     proxy_for_mod = make_attr(name)
-                    proxy_for_mod.node.meta['example_value'] = mod
+                    proxy_for_mod.node.meta["example_value"] = mod
 
                     proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
                     return variables.TensorVariable.create(
@@ -301,9 +303,14 @@ class NNModuleVariable(VariableTracker):
 
         # A loose heuristic, but seems to be generally good before we drop into the
         # manual handling of inputs
-        
-        if name in module.__class__.__dict__ and callable(module.__class__.__dict__[name]) and all(
-            isinstance(x, variables.TensorVariable) for x in itertools.chain(args, kwargs.values())
+
+        if (
+            name in module.__class__.__dict__
+            and callable(module.__class__.__dict__[name])
+            and all(
+                isinstance(x, variables.TensorVariable)
+                for x in itertools.chain(args, kwargs.values())
+            )
         ):
             return self.call_function(tx, args, kwargs, custom_name=name)
 

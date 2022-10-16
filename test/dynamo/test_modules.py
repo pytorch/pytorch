@@ -887,8 +887,9 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):
                 super(ModuleSpecialFwd, self).__init__()
-                self.conv = torch.nn.Conv2d(in_channels=3, out_channels=20,
-                    kernel_size=(5, 5))
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=20, kernel_size=(5, 5)
+                )
 
             def _conv_forward(self, x):
                 return self.conv._conv_forward(x, self.conv.weight, self.conv.bias)
@@ -901,6 +902,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         real = mod(rx)
         graph, _ = torch._dynamo.export(mod, rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
