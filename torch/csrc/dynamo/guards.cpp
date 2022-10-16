@@ -367,17 +367,10 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
-      char msg[128];
-      snprintf(
-          msg,
-          sizeof msg,
-          "expected size %li==%li, stride %li==%li at dim=%li",
-          want_size,
-          actual_size,
-          want_stride,
-          actual_stride,
-          i);
-      PyErr_SetString(PyExc_AssertionError, msg);
+      std::stringstream msg;
+      msg << "expected size " << actual_size << "==" << want_size << ", stride "
+          << actual_stride << "==" << want_stride << " at dim=" << i;
+      PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
       return NULL;
     }
   }
