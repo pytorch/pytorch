@@ -1,6 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
 #include <sstream>
 
@@ -353,16 +354,16 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     return NULL;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
-  long ndim = tensor.ndimension();
+  int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
     return NULL;
   }
   for (auto i : c10::irange(ndim)) {
-    long want_size = PyLong_AsLong(PyTuple_GET_ITEM(size, i));
-    long want_stride = PyLong_AsLong(PyTuple_GET_ITEM(stride, i));
-    long actual_size = tensor.size(i);
-    long actual_stride = tensor.stride(i);
+    int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
+    int64_t want_stride = THPUtils_unpackLong(PyTuple_GET_ITEM(stride, i));
+    int64_t actual_size = tensor.size(i);
+    int64_t actual_stride = tensor.stride(i);
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
