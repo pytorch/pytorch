@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 import torch._prims as prims
@@ -48,6 +48,7 @@ __all__ = [
     "softshrink",
     "tanhshrink",
     "threshold",
+    "triplet_margin_loss",
     "glu",
     "pairwise_distance",
     "pdist",
@@ -364,7 +365,8 @@ def l1_loss(
     Reference implementation of torch.nn.functional.l1_loss
     """
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
@@ -408,7 +410,8 @@ def mse_loss(
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
@@ -649,6 +652,84 @@ def threshold(
     return torch.where(a <= threshold, value, a)
 
 
+# CompositeImplicitAutograd - don't register decomp
+# No elementwise type promotion - core op doesn't explicitly type promote
+def triplet_margin_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    margin: float = 1.0,
+    p: float = 2,
+    eps: float = 1e-6,
+    swap: bool = False,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+
+    # torch.nn.functional.triplet_margin_with_distance_loss has no ref defined
+    # since it's a pure Python implementation.  Use this helper instead.
+    return _triplet_margin_with_distance_loss(
+        anchor=anchor,
+        positive=positive,
+        negative=negative,
+        distance_function=lambda x, y: torch.pairwise_distance(x, y, p, eps),
+        margin=margin,
+        swap=swap,
+        reduction=reduction,
+    )
+
+
+# Pure Python impl - don't register decomp and don't add a ref.  Defined as a
+# helper here since triplet_margin_loss can be nicely implemented with it.
+def _triplet_margin_with_distance_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    *,
+    distance_function: Optional[
+        Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
+    ] = None,
+    margin: float = 1.0,
+    swap: bool = False,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    _check_reduction_value(reduction)
+
+    a_dim = anchor.ndim
+    p_dim = positive.ndim
+    n_dim = negative.ndim
+    check(
+        a_dim == p_dim and p_dim == n_dim,
+        lambda: (
+            f"The anchor, positive, and negative tensors are expected to have "
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs"
+        ),
+    )
+
+    if distance_function is None:
+        distance_function = torch.pairwise_distance
+
+    dist_pos = distance_function(anchor, positive)
+    dist_neg = distance_function(anchor, negative)
+    # The distance swap is described in the paper "Learning shallow
+    # convolutional feature descriptors with triplet losses" by V. Balntas, E.
+    # Riba et al.  If True, and if the positive example is closer to the
+    # negative example than the anchor is, swaps the positive example and the
+    # anchor in the loss computation.
+    if swap:
+        dist_swap = distance_function(positive, negative)
+        dist_neg = torch.minimum(dist_neg, dist_swap)
+    loss = torch.clamp_min(margin + dist_pos - dist_neg, 0)
+    return _apply_loss_reduction(loss, reduction)
+
+
 @register_decomposition(torch.ops.aten.hardtanh)
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -730,7 +811,8 @@ def poisson_nll_loss(
     Reference implementation of torch.nn.functional.poisson_nll_loss
     """
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
     _check_reduction_value(reduction)
