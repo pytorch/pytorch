@@ -47,6 +47,12 @@ jobs:
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
                            setuptools cmake=3.22 cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
+      - name: Build PyTorch
+        run: |
+          # shellcheck disable=SC1091
+          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          conda activate pr-ci
+          .jenkins/pytorch/build.sh
       - name: Checkout TorchBench
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -61,6 +67,7 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           pushd "${GITHUB_WORKSPACE}"/benchmark
+          pip3 install --pre torchtext torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           python install.py
           pip install gym==0.25.2  # workaround issue in 0.26.0
       - name: Run TorchBench
