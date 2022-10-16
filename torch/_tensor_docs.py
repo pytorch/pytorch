@@ -3435,18 +3435,7 @@ add_docstr_all(
     r"""
 narrow(dimension, start, length) -> Tensor
 
-See :func:`torch.narrow`
-
-Example::
-
-    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> x.narrow(0, 0, 2)
-    tensor([[ 1,  2,  3],
-            [ 4,  5,  6]])
-    >>> x.narrow(1, 1, 2)
-    tensor([[ 2,  3],
-            [ 5,  6],
-            [ 8,  9]])
+See :func:`torch.narrow`.
 """,
 )
 

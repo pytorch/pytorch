@@ -7951,10 +7951,17 @@ Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
 dimension :attr:`dim` is input from :attr:`start` to ``start + length``. The
 returned tensor and :attr:`input` tensor share the same underlying storage.
 
+:attr:`start` accepts a `Tensor` for models that have it as such before calling
+`narrow`.  This avoids the call to `item()` for backends where it is expensive
+(like XLA).
+
 Args:
     input (Tensor): the tensor to narrow
-    dim (int): the dimension along which to narrow
-    start (Tensor or int): the starting dimension
+    dim (int): the dimension along which to narrow. Can be negative, which means
+        counting from the right
+    start (Tensor or int): the starting dimension. If `Tensor`, it must be an
+        0-dim integral `Tensor` (bools not allowed). Can be negative, which
+        means counting from the right
     length (int): the distance to the ending dimension
 
 Example::
@@ -7967,6 +7974,10 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+    >>> torch.narrow(x, -1, torch.tensor(-1), 1)
+    tensor([[3],
+            [6],
+            [9]])
 """,
 )
 
@@ -7981,8 +7992,10 @@ do not have a shared-storage narrow method.
 
 Args:
     input (Tensor): the tensor to narrow
-    dim (int): the dimension along which to narrow
-    start (int): the starting offset
+    dim (int): the dimension along which to narrow. Can be negative, which means
+        counting from the right
+    start (int): the starting offset. Can be negative, which means counting from
+        the right
     length (int): the distance to the ending dimension
 
 Keyword args:
