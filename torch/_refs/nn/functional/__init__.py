@@ -459,18 +459,20 @@ def _nll_loss_nd(
     flat_target = torch.flatten(target)
     ignore_classes_mask = torch.eq(flat_target, ignore_index)
 
+    # TODO: Enable data-dependent checks with debug mode
+    # TODO: This check does not work with FakeTensor inputs; See Issue #85834
+    # Explicit cast for class_check to bool; See Issue #78071
+    """
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
     valid_classes_mask = torch.logical_and(
         (flat_target >= 0), (flat_target < num_classes)
     )
     class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
-
-    # TODO: This check does not work with FakeTensor inputs; See Issue #85834
-    # Explicit cast for class_check to bool; See Issue #78071
     utils.check(
         isinstance(target, FakeTensor) or bool(class_check.item()),
         lambda: "A target class is out-of-bounds and not the ignore index.",
     )
+    """
 
     ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
     class_weight = (
@@ -514,6 +516,7 @@ def _nll_loss_nd(
 
 
 @register_decomposition(torch.ops.aten.nll_loss)
+@out_wrapper()
 def nll_loss(
     input: TensorLikeType,
     target: TensorLikeType,
