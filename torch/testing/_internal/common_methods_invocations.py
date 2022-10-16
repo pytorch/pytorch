@@ -16865,6 +16865,9 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.nll_loss",
         torch_opinfo_name="nn.functional.nll_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
         supports_nvfuser=False,
         # For simpler indexing, we flatten target indices, then reshape the result tensor.
         # This creates inconsistent view state with reference impl.
