@@ -61,6 +61,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "_buffers",
     "_non_persistent_buffers_set",
     "_backward_hooks",
+    "_backward_pre_hooks",
     "_is_full_backward_hook",
     "_forward_hooks",
     "_forward_pre_hooks",
@@ -356,7 +357,7 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
-        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, Tensor]]
+        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
