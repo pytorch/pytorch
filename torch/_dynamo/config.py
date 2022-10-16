@@ -85,6 +85,9 @@ raise_on_backend_error = True
 replay_record_enabled = False
 replay_record_dir_name = "./torchdynamo_error_records"
 
+# Show a warning on every graph break
+print_graph_breaks = False
+
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
 skipfiles_inline_module_allowlist = {

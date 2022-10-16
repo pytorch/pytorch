@@ -27,6 +27,9 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
             )
         )
         cls._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "print_graph_breaks", True)
+        )
+        cls._exit_stack.enter_context(
             unittest.mock.patch.object(
                 torch._dynamo.config,
                 "replay_record_dir_name",
