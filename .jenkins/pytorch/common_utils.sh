@@ -123,6 +123,10 @@ function clone_pytorch_xla() {
   fi
 }
 
+function install_filelock() {
+  pip_install filelock
+}
+
 function install_torchdynamo() {
   local commit
   commit=$(get_pinned_commit torchdynamo)
@@ -139,6 +143,16 @@ function checkout_install_torchdynamo() {
   time python setup.py develop
   popd
   popd
+}
+
+function install_triton() {
+  local commit
+  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    echo "skipping triton due to rocm"
+  else
+    commit=$(get_pinned_commit triton)
+    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+  fi
 }
 
 function test_functorch() {

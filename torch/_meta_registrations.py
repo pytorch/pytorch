@@ -288,12 +288,7 @@ def meta__fused_moving_avg_obs_fq_helper(
 
 
 @register_meta(aten.bernoulli_.float, register_dispatcher=False)
-def meta_bernoulli_(self, p, generator=None):
-    return self.new_empty(())
-
-
-@register_meta(aten.bernoulli_.float, register_dispatcher=False)
-def meta_bernoulli_(self, p=0.53841497, generator=None):
+def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
 
