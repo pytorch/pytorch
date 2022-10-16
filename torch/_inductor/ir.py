@@ -2344,8 +2344,9 @@ class ExternKernel(InputsKernel):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
             stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
-            wrapper.writeline(f"assert {self.get_name()}.size() == {size}")
-            wrapper.writeline(f"assert {self.get_name()}.stride() == {stride}")
+            wrapper.writeline(
+                f"assert_size_stride({self.get_name()}, {size}, {stride})"
+            )
 
     def get_group_stride(self):
         """

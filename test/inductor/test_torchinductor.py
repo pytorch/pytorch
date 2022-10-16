@@ -4053,6 +4053,24 @@ if HAS_CUDA:
             with torch.cuda.amp.autocast(enabled=False):
                 assert same_two_models(mod, opt_mod, args), "Dynamo failed"
 
+        @requires_cuda()
+        def test_sort_stride_issue(self):
+            # This minified testcase comes from detectron2_maskrcnn_r_50_fpn
+            # There was a false error from our size_assert code
+            @torch._dynamo.optimize(nopython=True)
+            def forward(pred_objectness_logits_3_: torch.Tensor):
+                sort_3 = pred_objectness_logits_3_.sort(descending=True, dim=1)
+                getitem_12 = sort_3[0]
+                return getitem_12
+
+            args = [((1, 100), (0, 1), torch.float16, "cuda", False)]
+            args = [
+                rand_strided(sh, st, dt, dev).requires_grad_(rg)
+                for (sh, st, dt, dev, rg) in args
+            ]
+            result = forward(*args)
+            assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
