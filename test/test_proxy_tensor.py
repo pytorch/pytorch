@@ -765,6 +765,19 @@ def forward(self, x_1):
     alias = torch.ops.aten.alias.default(x_1);  x_1 = None
     return alias""")
 
+    def test_meta(self):
+        def f(x):
+            a = x.cos()
+            b = torch.var_mean(a, dim=0)
+            c = b * 2
+            return c
+
+        out = make_fx(f, tracing_mode="fake")(torch.randn(5, 5))
+        for n in out.graph.nodes:
+            if n.op == 'output':
+                continue
+            self.assertTrue('val' in n.meta)
+
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):
@@ -1190,7 +1203,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.dropout', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.embedding_bag', ''),  # aten._embedding_bag_forward_only.default - couldn't find symbolic meta fun...
     xfail('nn.functional.embedding', ''),  # argument 'size' must be tuple of ints, but found element of type tor...
-    xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
