@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipCUDAMemoryLeakCheckIf,
     suppress_warnings,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -154,6 +155,12 @@ inductor_skips["cuda"] = {
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # Triton bug leads to segfault
+    "nn.functional.softplus": {f64},
+    "nn.functional.mish": {f64},
+    # Disabled on migration to core
+    "linalg.pinv.singular": {f32, f64},
+    "linalg.householder_product": {f32},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -372,24 +379,13 @@ inductor_expected_failures_single_sample["cuda"] = {
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "amax": {f16, f32, f64},
-    "amin": {f16, f32, f64},
     "asin": {f16},
     "cumprod": {f16},
     "linalg.vector_norm": {f64, f64},
     "linalg.householder_product": {f32},
     "linalg.lu": {f32, f64},
     "kron": {f16},
-    "masked.amax": {f16, f32, f64},
-    "masked.amin": {f16, f32, f64},
-    "max.reduction_no_dim": {f16, f32, f64},
-    "median": {f16, f32, f64},
-    "min.reduction_no_dim": {f16, f32, f64},
-    "nan_to_num": {f16, f32, f64},
-    "nanmean": {f16, f32, f64},
-    "nanmedian": {f16, f32, f64},
     "nanquantile": {f32, f64},
-    "nansum": {f16, f32, f64},
     "native_batch_norm": {f16, f32, f64},
     "native_layer_norm": {f16, f32, f64},
     "nn.functional._scaled_dot_product_attention": {f16},
@@ -446,6 +442,7 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
     "linalg.solve_triangular": {"check_gradient": False},
@@ -461,6 +458,8 @@ inductor_all_samples = {
     "index_copy",
     "scatter_reduce.sum",
     "select_scatter",
+    "squeeze",
+    "unsqueeze",
 }
 
 
@@ -618,5 +617,5 @@ instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     torch._dynamo.config.raise_on_assertion_error = True
-    if has_triton():
+    if has_triton() and not TEST_WITH_ROCM:
         run_tests()

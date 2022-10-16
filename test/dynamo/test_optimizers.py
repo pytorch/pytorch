@@ -6,6 +6,7 @@ import unittest
 import torch
 
 import torch._dynamo
+import torch._dynamo.test_case
 import torch._dynamo.testing
 
 input = torch.ones([10, 10])
@@ -37,7 +38,7 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     return test_fn
 
 
-class OptimizerTests(torch._dynamo.testing.TestCase):
+class OptimizerTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -97,6 +98,6 @@ for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()
