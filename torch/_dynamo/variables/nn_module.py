@@ -168,7 +168,6 @@ class NNModuleVariable(VariableTracker):
                 isinstance(mod, torch.nn.Sequential)
                 and mod.__class__.forward is torch.nn.Sequential.forward
             ):
-                breakpoint()
                 # unroll Sequential()
                 assert not kwargs
                 (arg,) = args
@@ -204,7 +203,6 @@ class NNModuleVariable(VariableTracker):
                         )
                         return node
 
-                    fn = mod.__class__.__dict__[custom_name]
                     # Bind in self
                     name = self.module_key
 
