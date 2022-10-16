@@ -58,7 +58,7 @@ jobs:
         uses: ./.github/actions/setup-rocm
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.docker-image }}
 

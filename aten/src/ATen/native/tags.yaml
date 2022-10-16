@@ -25,7 +25,7 @@
 - tag: nondeterministic_seeded
   desc: |
           This tag indicates if an operator is nondeterminstically seeded (ie is random)
-          such that the operator intentially produces different results when run twice on the same inputs.
+          such that the operator intentionally produces different results when run twice on the same inputs.
 - tag: nondeterministic_bitwise
   desc: |
           This tag indicates if an operator doesn't guarentee bitwise equivalence

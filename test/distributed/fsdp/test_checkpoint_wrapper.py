@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
-    apply_activation_checkpointing_wrapper,
+    apply_activation_checkpointing,
     CheckpointWrapper,
     CheckpointImpl
 )
@@ -176,9 +176,9 @@ class CheckpointWrapperTest(TestCase):
         m._foo = 'bar'
         self.assertEqual(wrapped._foo, 'bar')
 
-    def test_apply_activation_checkpointing_wrapper(self):
+    def test_apply_activation_checkpointing(self):
         """
-        Ensures that `apply_activation_checkpointing_wrapper` can be used
+        Ensures that `apply_activation_checkpointing` can be used
         to swap modules for their checkpoint-wrapped counterparts given
         a model.
         """
@@ -219,7 +219,7 @@ class CheckpointWrapperTest(TestCase):
                 )
 
             with self.subTest(wrapper=wrapper):
-                apply_activation_checkpointing_wrapper(
+                apply_activation_checkpointing(
                     model, checkpoint_wrapper_fn=wrapper, check_fn=check_fn
                 )
                 n_linear_wrapped = sum(1 if isinstance(x, nn.Linear) else 0 for x in model.modules())

@@ -8,6 +8,7 @@ from torchgen.api.types import (
     CType,
     DispatcherSignature,
     FunctionalizationLambda,
+    iTensorListRefT,
     NativeSignature,
     tensorListT,
     tensorT,
@@ -84,12 +85,12 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
     # clone() calls in their graph (which is normally needed by reshape).
     if str(g.view_copy.func.name) == "view_copy":
         return """\
-at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
-  DimVector shape = infer_size_dv(size, self.numel());
-  if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
-    return self.reshape(size);
+at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
+  c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
+  if (!at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape).has_value()) {
+    return self.reshape_symint(size);
   } else {
-    auto output = at::_ops::view::call(self, c10::fromIntArrayRef(size));
+    auto output = at::_ops::view::call(self, size);
     return output.clone();
   }
 }
@@ -173,6 +174,8 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
+    if t == BaseCType(iTensorListRefT):
+        return VectorCType(BaseCType(tensorT)), lambda x: f"{{{x}.begin(), {x}.end()}}"
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x

@@ -282,6 +282,7 @@ Tensor flash_attention_helper(
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
+    bool need_attn_weights,
     bool causal) {
   //  Query is of size (batch_size x ragged_seq_len x (3 or 1) x n_heads x
   //  head_did

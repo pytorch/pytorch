@@ -206,7 +206,7 @@ def checkpoint_wrapper(
     )
 
 
-def apply_activation_checkpointing_wrapper(
+def apply_activation_checkpointing(
     model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=lambda _: True
 ):
     """
@@ -227,13 +227,13 @@ def apply_activation_checkpointing_wrapper(
         check_fn = lambda l: isinstance(l, nn.Linear)
         apply_activation_checkpointing(model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn)
     Args:
-        module (nn.Module):
-            The model who's submodules (or self) should be wrapped with activation checkpointing.
+        model (nn.Module):
+            The model whose submodules should be wrapped with activation checkpointing.
         checkpoint_wrapper_fn (Optional[Callable[nn.Module]])
-            A `Callable` which will wrap modules
+            A ``Callable`` which will wrap modules
         check_fn (Optional[Callable[nn.Module, nn.Module]])
-            A lambda function which will be passed current layer and returns
-            ``True`` or ``False`` depending on whether input layer should be wrapped.
+            A lambda function which will be passed each child submoule of ``model`` and returns
+            ``True`` or ``False`` depending on whether the submodule should be wrapped.
     Returns: None (`model` is modified inplace)
     """
     # TODO: Importing inside function to avoid circular import issue between FSDP and

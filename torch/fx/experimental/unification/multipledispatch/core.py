@@ -5,6 +5,7 @@ from .dispatcher import Dispatcher, MethodDispatcher
 
 global_namespace = {}  # type: ignore[var-annotated]
 
+__all__ = ["dispatch", "ismethod"]
 
 def dispatch(*types, **kwargs):
     """ Dispatch function on the types of the inputs

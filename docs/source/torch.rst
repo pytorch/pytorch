@@ -566,13 +566,11 @@ BLAS and LAPACK Operations
     det
     logdet
     slogdet
-    lstsq
     lu
     lu_solve
     lu_unpack
     matmul
     matrix_power
-    matrix_rank
     matrix_exp
     mm
     mv
@@ -632,3 +630,14 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+
+.. automodule:: torch.autograd
+.. currentmodule:: torch.autograd
+
+Engine Configuration
+----------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_multithreading_enabled

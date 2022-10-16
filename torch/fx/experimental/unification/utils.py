@@ -1,3 +1,4 @@
+__all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
 def hashable(x):
     try:
         hash(x)

@@ -203,7 +203,7 @@ grad mode in the next forward pass.
 
 The implementations in :ref:`nn-init-doc` also
 rely on no-grad mode when initializing the parameters as to avoid
-autograd tracking when updating the intialized parameters in-place.
+autograd tracking when updating the initialized parameters in-place.
 
 Inference Mode
 ^^^^^^^^^^^^^^

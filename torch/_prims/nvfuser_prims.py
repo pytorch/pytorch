@@ -13,6 +13,7 @@ from torch._prims_common import (
     DimsSequenceType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
+    make_contiguous_strides_for,
     ShapeType,
     TensorLikeType,
 )
@@ -66,6 +67,7 @@ nvprim_names = [
     "sqrt",
     "tan",
     "tanh",
+    "transpose",
     "trunc",
     "add",
     "atan2",
@@ -208,6 +210,29 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
     )
 
 
+def _native_batch_norm_nvfuser(
+    fd, input, weight, bias, running_mean, running_var, training, momentum, eps
+):
+    if weight is None:
+        weight = fd.define_null_tensor()
+    if bias is None:
+        bias = fd.define_null_tensor()
+    if running_mean is None:
+        running_mean = fd.define_null_tensor()
+    if running_var is None:
+        running_var = fd.define_null_tensor()
+    return fd.ops.batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        momentum,
+        eps,
+    )
+
+
 def _broadcast_in_dim_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -220,6 +245,10 @@ def _broadcast_in_dim_nvfuser(
 def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype):
     nvfuser_dtype = getnvFuserDtype(dtype)
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
+
+
+def _transpose_nvfuser(fd, a, permutation):
+    return fd.ops.permute(a, permutation)  # type: ignore[attr-defined]
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
@@ -271,6 +300,10 @@ def _var_mean_nvfuser(
     return fd.ops.var_mean(a, dims, correction, keepdim)
 
 
+def _rand_like_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.ops.rand_like(a)
+
+
 def _amax_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -289,15 +322,106 @@ def _amin_nvfuser(
     return fd.ops.min(a, dims, keep_dims)
 
 
+_nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
+_nvfuser_impls["transpose"] = _transpose_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["view_of"] = _view_of_nvfuser
+_nvfuser_impls["rand_like"] = _rand_like_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
+
+
+def register_native_batch_norm():
+    """This function is used to register the native_batch_norm function in torch.ops.nvprims module."""
+    name = "native_batch_norm"
+
+    nvprim.define(
+        f"{name}(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, "
+        + "bool training, float momentum, float eps)"
+        + " -> (Tensor, Tensor, Tensor)"
+    )
+
+    def _prim_impl(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    ):
+        return torch.native_batch_norm(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+
+    nvprim_impl.impl(name, _prim_impl)
+    nvprim_autograd_impl.impl(
+        name, backwards_not_supported(torch.ops.nvprims.native_batch_norm.default)
+    )
+
+    prim_packet = torch.ops.nvprims.native_batch_norm
+    prim = prim_packet.default
+    for p in (prim_packet, prim):
+        p.__doc__ = "Computes batch normalization."
+        p.impl_nvfuser = _nvfuser_impls["native_batch_norm"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
+
+
+def register_rand_like():
+    name = "rand_like"
+
+    nvprim.define(
+        "rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, "
+        + "Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"
+    )
+
+    def _meta_rand_like(
+        self,
+        *,
+        dtype=None,
+        layout=None,
+        device=None,
+        pin_memory=None,
+        memory_format=None,
+    ):
+        strides = make_contiguous_strides_for(self.shape)
+        return torch._prims.TensorMeta(
+            self,
+            shape=self.shape,
+            strides=strides,
+            dtype=dtype,
+            device=device,
+        )
+
+    def _prim_impl(
+        self,
+        *,
+        dtype=None,
+        layout=None,
+        device=None,
+        pin_memory=None,
+        memory_format=None,
+    ):
+        return torch.rand_like(
+            self,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            memory_format=memory_format,
+        )
+
+    nvprim_impl.impl(name, _prim_impl)
+    nvprim_meta_impl.impl(name, _meta_rand_like)
+
+    prim_packet = getattr(torch.ops.nvprims, name)
+    prim = prim_packet.default
+
+    nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
+
+    for p in (prim_packet, prim):
+        p.__doc__ = "Computes rand_like"
+        p.impl_nvfuser = _nvfuser_impls["rand_like"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
 def register_var_mean():
@@ -401,6 +525,9 @@ def register_var_mean():
 def register_nvprims():
     """Registers all nvFuser primitives in the torch.ops.nvprims module."""
     register_var_mean()
+    register_native_batch_norm()
+    register_rand_like()
+
     for name in nvprim_names:
         main_prim = getattr(torch.ops.prims, name)
 

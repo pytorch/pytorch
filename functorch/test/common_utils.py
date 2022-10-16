@@ -6,7 +6,6 @@
 
 import itertools
 import torch
-import functorch
 from functorch import vmap
 import torch.utils._pytree as pytree
 from functorch_additional_op_db import additional_op_db
@@ -15,6 +14,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 import os
 import unittest
 from torch.testing._internal.common_device_type import toleranceOverride
+from collections import namedtuple
 
 IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
 
@@ -173,27 +173,6 @@ def construct_in_dims(bdim_choice_for_tensors, is_tensors):
         result.append(next(bdim))
     return tuple(result)
 
-def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=2):
-    flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
-    is_tensors = [isinstance(a, torch.Tensor) for a in flat_args]
-    bdim_choices = get_bdim_choices(sum(is_tensors))
-
-    @memoize
-    def get_batched_arg(arg, bdim):
-        assert isinstance(arg, torch.Tensor)
-        assert bdim is not None
-        result, _ = add_batch_dim(arg, bdim, batch_size)
-        return result
-
-    for bdim_choice in bdim_choices:
-        flat_in_dims = construct_in_dims(bdim_choice, is_tensors)
-
-        flat_batched_args = tuple(arg if in_dim is None else get_batched_arg(arg, in_dim)
-                                  for arg, in_dim in zip(flat_args, flat_in_dims))
-        batched_args = pytree.tree_unflatten(flat_batched_args, arg_spec)
-        in_dims = pytree.tree_unflatten(flat_in_dims, arg_spec)
-        yield batched_args, in_dims, kwarg_values
-
 
 def is_batch_norm_training(op_name, kwarg_values):
     batch_norm_fns = ("nn.functional.batch_norm", "nn.functional.instance_norm")  # instance norm calls batch norm
@@ -210,13 +189,16 @@ def is_batch_norm_training(op_name, kwarg_values):
         return is_training[0]
 
 
-def get_exhaustive_batched_inputs_batch_norm_is_training(arg_values, kwarg_values, batch_size=2):
+def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=False, batch_size=2):
     flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
     is_tensors = [isinstance(a, torch.Tensor) for a in flat_args]
     num_tensors = sum(is_tensors)
-    if num_tensors == 1:  # if there's only an input, can't batch it since running_mean/var will be seen as unbatched tensors
+    # For Batch Norm, if there's only an input, we can't
+    # batch it since running_mean/var will be seen as unbatched tensors
+    if num_tensors == 1 and is_batch_norm_and_training:
         return
-    bdim_choices = get_bdim_choices_batch_norm(num_tensors, *arg_values)
+    bdim_choices = get_bdim_choices_batch_norm(
+        num_tensors, *arg_values) if is_batch_norm_and_training else get_bdim_choices(num_tensors)
 
     @memoize
     def get_batched_arg(arg, bdim):
@@ -233,13 +215,6 @@ def get_exhaustive_batched_inputs_batch_norm_is_training(arg_values, kwarg_value
         batched_args = pytree.tree_unflatten(flat_batched_args, arg_spec)
         in_dims = pytree.tree_unflatten(flat_in_dims, arg_spec)
         yield batched_args, in_dims, kwarg_values
-
-
-def generate_vmap_inputs(args, kwargs, is_batch_norm_and_training=False, batch_size=2):
-    if is_batch_norm_and_training:
-        return get_exhaustive_batched_inputs_batch_norm_is_training(
-            args, kwargs, batch_size)
-    return get_exhaustive_batched_inputs(args, kwargs, batch_size)
 
 
 def clone_if_tensor(x):
@@ -311,41 +286,72 @@ def opinfo_in_dict(opinfo, d):
     return (opinfo.name in d) or (f'{opinfo.name}.{opinfo.variant_test_name}' in d)
 
 
-def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
+DecorateMeta = namedtuple("DecorateMeta", [
+    "op_name",
+    "variant_name",
+    "decorator",
+    "device_type",
+    "dtypes",
+])
 
-# TODO: this doesn't work in python < 3.8
+
+def decorate(op_name, variant_name='', *, decorator=None, device_type=None, dtypes=None):
+    assert decorator is not None
+    return DecorateMeta(op_name=op_name,
+                        variant_name=variant_name,
+                        decorator=decorator,
+                        device_type=device_type,
+                        dtypes=dtypes)
+
+
+def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
+    return decorate(op_name=op_name,
+                    variant_name=variant_name,
+                    decorator=unittest.expectedFailure,
+                    device_type=device_type,
+                    dtypes=dtypes)
 
 
 def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
+    return decorate(op_name=op_name,
+                    variant_name=variant_name,
+                    decorator=unittest.skip("Skipped!"),
+                    device_type=device_type,
+                    dtypes=dtypes)
 
 
 def skipOps(test_case_name, base_test_name, to_skip):
     all_opinfos = op_db + additional_op_db
-    for xfail in to_skip:
-        op_name, variant_name, device_type, dtypes, expected_failure = xfail
+    for decorate_meta in to_skip:
         matching_opinfos = [o for o in all_opinfos
-                            if o.name == op_name and o.variant_test_name == variant_name]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
-        for opinfo in matching_opinfos:
-            decorators = list(opinfo.decorators)
-            if expected_failure:
-                decorator = DecorateInfo(unittest.expectedFailure,
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            else:
-                decorator = DecorateInfo(unittest.skip("Skipped!"),
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            opinfo.decorators = tuple(decorators)
+                            if o.name == decorate_meta.op_name and
+                            o.variant_test_name == decorate_meta.variant_name]
+        assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {decorate_meta}"
+        assert len(matching_opinfos) == 1, (
+            "OpInfos should be uniquely determined by their (name, variant_name). "
+            f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
+        )
+        opinfo = matching_opinfos[0]
+        decorators = list(opinfo.decorators)
+        new_decorator = DecorateInfo(decorate_meta.decorator,
+                                     test_case_name, base_test_name,
+                                     device_type=decorate_meta.device_type,
+                                     dtypes=decorate_meta.dtypes)
+        decorators.append(new_decorator)
+        opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way
     def wrapped(fn):
         return fn
     return wrapped
+
+
+def expectedFailureIf(condition):
+    def decorator(fn):
+        if condition:
+            return unittest.expectedFailure(fn)
+        return fn
+    return decorator
 
 
 def tol2(op_name, variant_name, override_dct, *, device_type=None):
@@ -378,11 +384,11 @@ def opsToleranceOverride(test_case_name, base_test_name, overrides):
 
 class DisableVmapFallback:
     def __enter__(self):
-        self.prev_state = functorch._C._is_vmap_fallback_enabled()
-        functorch._C._set_vmap_fallback_enabled(False)
+        self.prev_state = torch._C._functorch._is_vmap_fallback_enabled()
+        torch._C._functorch._set_vmap_fallback_enabled(False)
 
     def __exit__(self, *ignored):
-        functorch._C._set_vmap_fallback_enabled(self.prev_state)
+        torch._C._functorch._set_vmap_fallback_enabled(self.prev_state)
 
 
 def check_vmap_fallback(test_case, thunk, opinfo, dry_run=False):

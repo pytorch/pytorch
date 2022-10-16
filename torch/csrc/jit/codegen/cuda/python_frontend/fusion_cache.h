@@ -67,6 +67,8 @@ class TORCH_CUDA_CU_API FusionCache {
   size_t numFusions() const;
   //! print cache stats
   void print(std::ostream& os);
+  //! Reset Cache to an empty state
+  static void reset();
 
   //! The rest of the public methods are only used in C++
 
