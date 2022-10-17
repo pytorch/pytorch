@@ -13,6 +13,9 @@ __all__ = [
     "bfloat16",
     "bool",
     "byte",
+    "cdouble",
+    "cfloat",
+    "chalf",
     "char",
     "double",
     "float",
@@ -20,85 +23,41 @@ __all__ = [
     "int",
     "long",
     "short",
-    "chalf",
-    "cfloat",
-    "cdouble",
 ]
 
 
-def bool(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.bool, memory_format=memory_format)  # type: ignore[call-overload]
+def _make_conversion_method(name: str, dtype: torch.dtype):
+    def fn(
+        self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
+    ) -> TensorLikeType:
+        return self.to(dtype, memory_format=memory_format)  # type: ignore[call-overload]
+
+    fn.__name__ = name
+    return fn
 
 
-def bfloat16(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.bfloat16, memory_format=memory_format)  # type: ignore[call-overload]
+bfloat16 = _make_conversion_method("bfloat16", torch.bfloat16)
 
+bool = _make_conversion_method("bool", torch.bool)
 
-def byte(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.uint8, memory_format=memory_format)  # type: ignore[call-overload]
+byte = _make_conversion_method("byte", torch.uint8)
 
+cdouble = _make_conversion_method("cdouble", torch.cdouble)
 
-def char(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.int8, memory_format=memory_format)  # type: ignore[call-overload]
+cfloat = _make_conversion_method("cfloat", torch.cfloat)
 
+chalf = _make_conversion_method("chalf", torch.complex32)
 
-def double(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.double, memory_format=memory_format)  # type: ignore[call-overload]
+char = _make_conversion_method("char", torch.int8)
 
+double = _make_conversion_method("double", torch.double)
 
-def float(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.float, memory_format=memory_format)  # type: ignore[call-overload]
+float = _make_conversion_method("float", torch.float)
 
+half = _make_conversion_method("half", torch.half)
 
-def half(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.half, memory_format=memory_format)  # type: ignore[call-overload]
+int = _make_conversion_method("int", torch.int)
 
+long = _make_conversion_method("long", torch.long)
 
-def int(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.int, memory_format=memory_format)  # type: ignore[call-overload]
-
-
-def long(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.long, memory_format=memory_format)  # type: ignore[call-overload]
-
-
-def short(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.short, memory_format=memory_format)  # type: ignore[call-overload]
-
-
-def chalf(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.complex32, memory_format=memory_format)  # type: ignore[call-overload]
-
-
-def cfloat(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.cfloat, memory_format=memory_format)  # type: ignore[call-overload]
-
-
-def cdouble(
-    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
-) -> TensorLikeType:
-    return self.to(torch.cdouble, memory_format=memory_format)  # type: ignore[call-overload]
+short = _make_conversion_method("short", torch.short)
