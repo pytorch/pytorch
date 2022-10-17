@@ -4,6 +4,7 @@ import os
 
 # logging level for dynamo generated graphs/bytecode/guards
 CODE = 15
+logging.addLevelName(CODE, "CODE")
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for

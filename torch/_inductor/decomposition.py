@@ -81,23 +81,25 @@ decompositions = get_decompositions(
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
+        aten.sgn,
         aten.sigmoid_backward,
         aten.silu_backward,
         aten.slice_backward,
-        aten.sgn,
-        aten.std_mean.correction,
         aten._softmax,
         aten._softmax_backward_data,
+        aten.softplus,
+        aten.softplus_backward,
         aten.stack,
+        aten.std_mean.correction,
         aten.t,
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
         aten.tril.default,
+        aten.unfold,
+        aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
     ]
 )
 
@@ -194,9 +196,12 @@ def rsub(a, b):
 def masked_fill(value, mask, other):
     if isinstance(other, numbers.Number):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
+    assert other.numel() == 1 and other.ndim == 0
     if other.device != value.device and other.numel() == 1:
         other = other.to(value.device)
-    value, mask, other = torch.broadcast_tensors(value, mask, other)
+    if other.dtype != value.dtype:
+        # TODO: error out on improper complex conversions
+        other = other.to(value.dtype)
     return torch.where(mask, other, value)
 
 
