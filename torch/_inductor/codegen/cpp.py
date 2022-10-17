@@ -151,7 +151,7 @@ class CppPrinter(ExprPrinter):
 cexpr = CppPrinter().doprint
 
 
-class CppSimdVecOverrides(OpOverrides):
+class CppVecOverrides(OpOverrides):
     """Map element-wise ops to aten vectorization C++"""
 
     @staticmethod
@@ -491,10 +491,13 @@ class CppKernel(Kernel):
     def size_hint(self):
         return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
-    def codegen_loops(self, code, worksharing):
+    def num_threads(self):
         threads = config.cpp.threads
         if threads < 1:
             threads = torch.get_num_threads()
+
+    def codegen_loops(self, code, worksharing):
+        threads = self.num_threads
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
@@ -589,13 +592,13 @@ class CppKernel(Kernel):
         (self.loads, self.compute, self.stores, self.cse) = prior
 
 
-class CppSimdVecKernel(CppKernel):
-    overrides = CppSimdVecOverrides
+class CppVecKernel(CppKernel):
+    overrides = CppVecOverrides
 
     def __init__(self, args, num_threads):
-        super(CppSimdVecKernel, self).__init__(args, num_threads)
+        super(CppVecKernel, self).__init__(args, num_threads)
         self.simd_len = config.cpp.simdlen
-        metrics.generated_simd_vec_kernel_count += 1
+        metrics.generated_cpp_vec_kernel_count += 1
 
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
         replacement = {var: var + 1}
@@ -643,19 +646,19 @@ class CppSimdVecKernel(CppKernel):
         self.stores.writeline(name, line)
 
 
-class CppSimdVecKernelChecker(CppSimdVecKernel):
+class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads):
-        super(CppSimdVecKernelChecker, self).__init__(args, num_threads)
+        super(CppVecKernelChecker, self).__init__(args, num_threads)
 
         # Since this kernel is only for checker but does not genreate any
         # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
-        metrics.generated_simd_vec_kernel_count -= 1
+        metrics.generated_cpp_vec_kernel_count -= 1
 
         self.simd_vec = True
         self.fast_vec_list = []
-        for dict_obj in CppSimdVecOverrides.__dict__:
-            if isinstance(CppSimdVecOverrides.__dict__[dict_obj], staticmethod):
+        for dict_obj in CppVecOverrides.__dict__:
+            if isinstance(CppVecOverrides.__dict__[dict_obj], staticmethod):
                 self.fast_vec_list.append(dict_obj)
         self.exit_stack = contextlib.ExitStack()
 
@@ -699,7 +702,7 @@ class CppSimdVecKernelChecker(CppSimdVecKernel):
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
-        class SimdVecCheckerProxy:
+        class VecCheckerProxy:
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
@@ -736,7 +739,7 @@ class CppSimdVecKernelChecker(CppSimdVecKernel):
             def masked(mask, body, other):
                 return V.kernel.cse.newvar()
 
-        self.exit_stack.enter_context(V.set_ops_handler(SimdVecCheckerProxy()))
+        self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
 
@@ -764,9 +767,7 @@ class CppKernelProxy(CppKernel):
         return loop_nest
 
     def codegen_loops(self, code, worksharing):
-        threads = config.cpp.threads
-        if threads < 1:
-            threads = torch.get_num_threads()
+        threads = self.num_threads()
 
         if self.simd_vec_kernel is None:
             assert self.simd_omp_kernel
@@ -778,12 +779,11 @@ class CppKernelProxy(CppKernel):
         itervars = self.simd_vec_kernel.itervars
         rangs = self.simd_vec_kernel.ranges
         loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
+
+        # TODO: Support reductions
         loops_nest_non_reduc, _ = LoopNest(loops[: self.reduction_depth]), LoopNest(
             loops[self.reduction_depth :]
         )
-
-        # TODO: Support reductions
-        # assert reductions is None or len(reductions.loops) == 0
 
         assert config.cpp.simdlen
         loops_nest_non_reduc.loops[-1].simd_omp = True
@@ -845,7 +845,7 @@ class CppScheduling:
     def can_fuse_vertical(cls, node1, node2):
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
-    def check_simd_vec(self, nodes):
+    def can_vec(self, nodes):
         # TODO: Query cpu arch and vec length from aten
         if config.cpp.simdlen is None or config.cpp.simdlen != 8:
             return False
@@ -854,7 +854,7 @@ class CppScheduling:
             nodes, key=lambda x: int(x.is_reduction())
         ).group
 
-        with CppSimdVecKernelChecker(
+        with CppVecKernelChecker(
             self.kernel_group.args, self.kernel_group.ws.num_threads
         ) as kernel_checker:
             vars, reduction_vars = kernel_checker.set_ranges(group, reduction_group)
@@ -911,7 +911,7 @@ class CppScheduling:
         """
         kernel_group = self.kernel_group
 
-        can_be_simd_vec = self.check_simd_vec(nodes)
+        can_be_simd_vec = self.can_vec(nodes)
         simd_vec_kernel = (
             self._codegen_nodes_impl(nodes, can_be_simd_vec)
             if can_be_simd_vec
@@ -950,7 +950,7 @@ class KernelGroup:
 
     def new_kernel(self, simd_vec=False):
         if simd_vec:
-            return CppSimdVecKernel(self.args, self.ws.num_threads)
+            return CppVecKernel(self.args, self.ws.num_threads)
         else:
             return CppKernel(self.args, self.ws.num_threads)
 
