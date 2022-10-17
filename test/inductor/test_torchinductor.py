@@ -1294,13 +1294,17 @@ class CommonTemplate:
             ]
             return unary_list
 
+        test_memory_format = [torch.contiguous_format]
+        # TODO: GPU path doesn't support channels_last now.
+        if not HAS_CUDA:
+            test_memory_format.append(torch.channels_last)
         options = itertools.product(
             _unary_list(),
             [True, False],
             [1, 3],
             [1, 2],
             [1, 4],
-            [torch.contiguous_format, torch.channels_last],
+            test_memory_format,
         )
 
         for (
