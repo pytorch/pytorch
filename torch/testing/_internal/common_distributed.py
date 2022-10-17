@@ -80,7 +80,7 @@ class DistTestCases:
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo"}  # TODO(ucc): add sequence number support to ucc and enable it here
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}  # TODO(ucc): add sequence number support to ucc and enable it here
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
     backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
     backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
@@ -280,6 +280,11 @@ def requires_nccl():
         "c10d was not compiled with the NCCL backend",
     )
 
+def requires_ucc():
+    return sandcastle_skip_if(
+        not c10d.is_ucc_available(),
+        "c10d was not compiled with the UCC backend",
+    )
 
 def requires_mpi():
     return sandcastle_skip_if(
