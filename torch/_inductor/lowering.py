@@ -904,6 +904,11 @@ def linear_unary(x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algori
     return TensorBox.create(ir.LinearUnary.create(x, w, b, attr, scalars, algorithm))
 
 
+@register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
+def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
+    return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+
 def fallback_handler(kernel):
     fallbacks.add(kernel)
 

@@ -1451,6 +1451,36 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_linear_binary(self):
+        class M(torch.nn.Module):
+            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
+                self.eltwise = eltwise_fn
+
+            def forward(self, x, y):
+                x = self.linear(x)
+                x = self.eltwise(x, y)
+                return x
+
+        options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
+        dtype = torch.bfloat16
+        out_feature = 30
+        for binary_ops, input_shape, bias in options:
+            mod = M(binary_ops, input_shape[-1], out_feature, bias).eval()
+
+            # only fuse for linear when the dtype is bf16
+            mod = mod.to(dtype)
+            v = torch.randn(input_shape).to(dtype)
+            other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
+
+            self.common(
+                mod,
+                (v, other),
+            )
+
     def test_gather1(self):
         def fn(a, b):
             return (
