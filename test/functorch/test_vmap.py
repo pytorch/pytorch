@@ -3262,6 +3262,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('int'),
         xfail('long'),
         xfail('short'),
+        xfail('cdouble'),
+        xfail('cfloat'),
 
         xfail('jiterator_binary', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
         xfail('jiterator_binary_return_by_ref', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
