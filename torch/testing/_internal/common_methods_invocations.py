@@ -344,8 +344,6 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S, S), {'training': True, 'momentum': 0.5, 'eps': 0.6}),
         ((3, 2, 4), {'training': False, 'momentum': -1.2}),
         ((3, 1), {'training': True, 'momentum': 0.0}),
-        ((0,), {'training': True}),
-        ((0,), {'training': False}),
         ((3, 2, 3, 4), {'training': True, 'momentum': -1.0, 'eps': 0.5}),
         ((3, 2, 3, 4), {'training': False, 'momentum': -1.0, 'eps': 0.5}),
         ((2, 1), {}),
@@ -16785,6 +16783,16 @@ python_ref_db = [
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
         torch_opinfo_name="nn.functional.gelu",
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.batch_norm",
+        torch_opinfo_name="nn.functional.batch_norm",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.instance_norm",
+        torch_opinfo_name="nn.functional.instance_norm",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.layer_norm",

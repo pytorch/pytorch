@@ -417,11 +417,13 @@ class TestCommon(TestCase):
 
         # skip zero-dim tensors for some composites of reduction operations and view
         skip_zero_dim_ops = [
-            "_refs.softmax",
-            "_refs.logsumexp",
-            "_refs.log_softmax",
-            "_refs.sum_to_size",
             "ops.nvprims.view",
+            "_refs.instance_norm",
+            "_refs.log_softmax",
+            "_refs.logsumexp",
+            "_refs.native_batch_norm",
+            "_refs.softmax",
+            "_refs.sum_to_size",
         ]
         if executor == "nvfuser" and op.name in skip_zero_dim_ops:
             skip_zero_dim = True
@@ -1658,6 +1660,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
+        '_refs.instance_norm',
+        '_refs.native_batch_norm',
         # These should be tested with their out-of-place counterparts
         '_refs.index_add_',
         '_refs.index_copy_',
@@ -1668,6 +1672,7 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
+        '_refs.instance_norm',
         '_refs.var',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp

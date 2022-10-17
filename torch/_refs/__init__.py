@@ -226,10 +226,12 @@ __all__ = [
     "flipud",
     "hsplit",
     "hstack",
+    "instance_norm",
     "meshgrid",
     "movedim",
     "narrow",
     "narrow_copy",
+    "native_batch_norm",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -2683,6 +2685,63 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
     return flip(a, (0,))
 
 
+# Apply repeat if tensor is not None
+def _repeat_if_defined(a: Optional[Tensor], sizes: int):
+    if a is not None:
+        return a.repeat(sizes)
+    return a
+
+
+# CompositeImplicitAutograd - don't register decomp
+def instance_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    use_input_stats: bool,
+    momentum: float,
+    eps: float,
+    cudnn_enabled: bool,
+) -> Tensor:
+    print("here")
+    batch_size = input.shape[0]
+    num_channels = input.shape[1]
+    instance_norm_channels = batch_size * num_channels
+    shape = [1, instance_norm_channels] + [
+        input.shape[dim] for dim in range(2, input.ndim)
+    ]
+
+    repeated_weight = _repeat_if_defined(weight, batch_size)
+    repeated_bias = _repeat_if_defined(bias, batch_size)
+    repeated_running_mean = _repeat_if_defined(running_mean, batch_size)
+    repeated_running_var = _repeat_if_defined(running_var, batch_size)
+
+    input_reshaped = torch.reshape(input, shape)
+    # TODO support cudnn_batch_norm
+    output, save_mean, save_rstd = torch.native_batch_norm(
+        input_reshaped,
+        repeated_weight,
+        repeated_bias,
+        repeated_running_mean,
+        repeated_running_var,
+        use_input_stats,
+        momentum,
+        eps,
+    )
+
+    if running_mean is not None:
+        running_mean_square = repeated_running_mean.view([batch_size, num_channels])
+        new_running_mean = running_mean_square.mean(dim=0, keepdim=False)
+        copy_to(running_mean, new_running_mean)
+
+    if running_var is not None:
+        running_var_square = repeated_running_var.view([batch_size, num_channels])
+        new_running_var = running_var_square.mean(dim=0, keepdim=False)
+        copy_to(running_var, new_running_var)
+    return output.view(input.shape)
+
+
 # CompositeImplicitAutograd - don't register decomp
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
@@ -2701,7 +2760,7 @@ def narrow_copy(a: TensorLikeType, dim: int, start: int, length: int) -> TensorL
 
 def _normalize(
     a: Tensor, norm_dims: DimsType, eps: float
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Computes mean and 1/std of a tensor along norm_dims.
 
     Used as a helper function for normalization layers.
@@ -2715,6 +2774,7 @@ def _normalize(
         out (Tensor): normalized tensor.
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
+        biased_var (Tensor): variance of the tensor along norm_dims.
     """
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
@@ -2724,7 +2784,118 @@ def _normalize(
     )
     rstd = torch.rsqrt(biased_var + eps)
     out = (a - mean) * rstd
-    return out, mean, rstd
+    return out, mean, rstd, biased_var
+
+
+# Apply exponential moving average given update
+def _momentum_update(a: Tensor, update: Tensor, momentum: float):
+    return (momentum * a) + ((1 - momentum) * update)
+
+
+@register_decomposition(torch.ops.aten.native_batch_norm)
+def native_batch_norm(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    training: bool,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    if len(input.shape) > 1:
+        reduction_dims = [0] + list(range(2, input.ndim))
+        num_features = input.shape[1]
+    else:
+        reduction_dims = []
+        num_features = 0
+
+    utils.check(
+        running_mean is not None or training,
+        lambda: "running_mean must be defined in evalution mode",
+    )
+    utils.check(
+        running_var is not None or training,
+        lambda: "running_var must be defined in evalution mode",
+    )
+    utils.check(
+        running_mean is None or num_features == running_mean.numel(),
+        lambda: "running_mean should contain " + str(num_features),
+    )
+    utils.check(
+        running_var is None or num_features == running_var.numel(),
+        lambda: "running_var should contain " + str(num_features),
+    )
+    utils.check(
+        weight is None or (weight.ndim == 1 and weight.shape[0] == num_features),
+        lambda: "Expected weight to be a vector of size equal to the number of channels in input, "
+        + "but got weight of shape "
+        + str(weight.shape)  # type: ignore[union-attr]
+        + " and input of shape "
+        + str(input.shape),
+    )
+    utils.check(
+        bias is None or (bias.ndim == 1 and bias.shape[0] == num_features),
+        lambda: "Expected bias to be a vector of size equal to the number of channels in input, "
+        + "but got weight of shape "
+        + str(bias.shape)  # type: ignore[union-attr]
+        + " and input of shape "
+        + str(input.shape),
+    )
+
+    if training:
+        out, mean, rstd, unbiased_var = _normalize(input, reduction_dims, eps)
+        save_mean = prims.squeeze(mean, reduction_dims)
+        save_rstd = prims.squeeze(rstd, reduction_dims)
+
+        # update running_mean and running_var
+        if running_mean is not None:
+            copy_to(running_mean, _momentum_update(running_mean, save_mean, momentum))
+
+        if running_var is not None:
+            squeeze_var = prims.squeeze(unbiased_var, reduction_dims)
+            copy_to(running_var, _momentum_update(running_var, squeeze_var, momentum))
+    else:
+        assert running_mean is not None and running_var is not None
+
+        compute_dtype = utils.get_computation_dtype(input.dtype)
+        mean = prims.expand_dims(
+            prims.convert_element_type(running_mean, compute_dtype),
+            reduction_dims,
+            input.ndim,
+        )
+        var = prims.expand_dims(
+            prims.convert_element_type(running_var, compute_dtype),
+            reduction_dims,
+            input.ndim,
+        )
+        rstd = torch.rsqrt(var + eps)
+        out = (input - mean) * rstd
+
+        if input.device.type == "cpu" or input.device.type == "meta":
+            save_mean = torch.empty([0], device=running_mean.device)
+            save_rstd = torch.empty([0], device=rstd.device)
+        else:
+            squeeze_rstd = prims.squeeze(rstd, reduction_dims)
+            save_mean = prims.convert_element_type(running_mean, compute_dtype)
+            save_rstd = prims.convert_element_type(squeeze_rstd, compute_dtype)
+
+    if weight is None and bias is not None:
+        unsqueeze_bias = prims.expand_dims(bias, reduction_dims, input.ndim)
+        out = out + unsqueeze_bias
+    elif weight is not None and bias is None:
+        unsqueeze_weight = prims.expand_dims(weight, reduction_dims, input.ndim)
+        out = out * unsqueeze_weight
+    elif weight is not None and bias is not None:
+        unsqueeze_weight = prims.expand_dims(weight, reduction_dims, input.ndim)
+        unsqueeze_bias = prims.expand_dims(bias, reduction_dims, input.ndim)
+        out = out * unsqueeze_weight + unsqueeze_bias
+
+    out = prims.convert_element_type(out, input.dtype)
+    if input.device.type == "cpu":
+        save_mean = prims.convert_element_type(save_mean, input.dtype)
+        save_rstd = prims.convert_element_type(save_rstd, input.dtype)
+    return (out, save_mean, save_rstd)
 
 
 @register_decomposition(torch.ops.aten.native_layer_norm)
@@ -2780,7 +2951,7 @@ def native_layer_norm(
 
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
-    out, mean, rstd = _normalize(input, reduction_dims, eps)
+    out, mean, rstd, _ = _normalize(input, reduction_dims, eps)
 
     if weight is None and bias is not None:
         out = out + bias

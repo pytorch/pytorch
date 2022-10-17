@@ -168,6 +168,50 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return torch.where(torch.le(a, 0), 0, a)
 
 
+def batch_norm(
+    input: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    weight: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    training: bool = False,
+    momentum: float = 0.1,
+    eps: float = 1e-5,
+) -> Tensor:
+    """
+    Reference implementation of :func:`torch.nn.functional.batch_norm`.
+    """
+    return torch.native_batch_norm(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    )[0]
+
+
+def instance_norm(
+    input: Tensor,
+    running_mean: Optional[Tensor] = None,
+    running_var: Optional[Tensor] = None,
+    weight: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    use_input_stats: bool = True,
+    momentum: float = 0.1,
+    eps: float = 1e-5,
+) -> Tensor:
+    """
+    Reference implementation of :func:`torch.nn.functional.instance_norm`.
+    """
+    return torch.instance_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        use_input_stats,
+        momentum,
+        eps,
+        torch.backends.cudnn.enabled,
+    )
+
+
 def layer_norm(
     input: Tensor,
     normalized_shape: ShapeType,
