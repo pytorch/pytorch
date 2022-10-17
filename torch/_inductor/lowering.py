@@ -899,6 +899,11 @@ def convolution_binary(
     )
 
 
+@register_lowering(torch.ops.mkldnn._linear_pointwise)
+def linear_unary(x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm):
+    return TensorBox.create(ir.LinearUnary.create(x, w, b, attr, scalars, algorithm))
+
+
 def fallback_handler(kernel):
     fallbacks.add(kernel)
 
