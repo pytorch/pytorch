@@ -838,14 +838,6 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // This task is equivilent to https://leetcode.com/problems/number-of-islands/
   // We first cluster events with a greedy index assignment, and then merge
   // groups that overlap.
-
-  using storage_id_t = strong::type<
-      size_t,
-      struct _StorageID,
-      strong::regular,
-      strong::hashable,
-      strong::arithmetic>;
-
   using versioned_tensorimpl_t = std::pair<TensorImplAddress, size_t>;
   using versioned_storage_t = std::pair<StorageImplData, size_t>;
 
