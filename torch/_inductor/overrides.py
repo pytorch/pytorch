@@ -370,7 +370,7 @@ def check_node_is_binary(node):
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
-        return
+        return gm
     gm = fuse_unary(gm, example_inputs)
     gm = fuse_binary(gm)
 
