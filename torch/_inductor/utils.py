@@ -16,6 +16,7 @@ import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
+from .cuda_properties import get_device_capability
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
@@ -35,7 +36,7 @@ def has_triton():
     try:
         import triton
 
-        return triton is not None and torch.cuda.get_device_capability() >= (7, 0)
+        return triton is not None and get_device_capability() >= (7, 0)
     except ImportError:
         return False
 
