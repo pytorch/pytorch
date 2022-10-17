@@ -683,8 +683,8 @@ Args:
         where the ``channel`` dimension is optional.
 
         .. versionchanged:: 1.14.0
-            Real input is no longer supported. Input must be complex, as returned by
-            ``stft(..., return_complex=True)``.
+            Real datatype inputs are no longer supported. Input must now have a
+            complex datatype, as returned by ``stft(..., return_complex=True)``.
     n_fft (int): Size of Fourier transform
     hop_length (Optional[int]): The distance between neighboring sliding window frames.
         (Default: ``n_fft // 4``)

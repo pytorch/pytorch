@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch.testing._internal.common_cuda import SM53OrLater
+from torch._prims_common import corresponding_complex_dtype
 
 from setuptools import distutils
 from typing import Optional, List
@@ -43,14 +44,6 @@ REFERENCE_NORM_MODES = (
     if LooseVersion(np.__version__) >= '1.20.0' and (
         not has_scipy_fft or LooseVersion(scipy.__version__) >= '1.6.0')
     else (None, "ortho"))
-
-def _complex_from_float_dtype(real_dtype):
-    return {
-        torch.float16: torch.complex32,
-        torch.float32: torch.complex64,
-        torch.float64: torch.complex128
-    }[real_dtype]
-
 
 
 def _complex_stft(x, *args, **kwargs):
@@ -745,7 +738,7 @@ class TestFFT(TestCase):
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
-        complex_dtype = _complex_from_float_dtype(dtype)
+        complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(torch.randn(*sizes, dtype=complex_dtype, device=device))
@@ -1394,7 +1387,7 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     @dtypes(torch.double)
     def test_istft_of_sine(self, device, dtype):
-        complex_dtype = _complex_from_float_dtype(dtype)
+        complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test(amplitude, L, n):
             # stft of amplitude*sin(2*pi/L*n*x) with the hop length and window size equaling L
@@ -1431,7 +1424,7 @@ class TestFFT(TestCase):
     @dtypes(torch.double)
     def test_istft_linearity(self, device, dtype):
         num_trials = 100
-        complex_dtype = _complex_from_float_dtype(dtype)
+        complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test(data_size, kwargs):
             for i in range(num_trials):
