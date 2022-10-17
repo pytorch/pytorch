@@ -47,13 +47,13 @@ jobs:
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
                            setuptools cmake=3.22 cffi typing_extensions boto3 \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
-          conda install -y -c pytorch magma-cuda116 cudatoolkit=11.6 -c conda-forge
+          conda install -y -c pytorch magma-cuda116
       - name: Build PyTorch
         run: |
           # shellcheck disable=SC1091
           . "${HOME}"/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          .jenkins/pytorch/build.sh
+          USE_MKL=0 .jenkins/pytorch/build.sh
       - name: Checkout TorchBench
         uses: actions/checkout@v3
         with:
