@@ -496,7 +496,7 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
 };
 
 std::string post_process_dispatch_key_str(std::string dispatch_key) {
-  std::string substr = "PrivateUse1";
+  const std::string substr = "PrivateUse1";
   if (substr.size() <= dispatch_key.size() && std::equal(substr.rbegin(), substr.rend(), dispatch_key.rbegin())) {
     auto privateuse1_backend = get_privateuse1_backend();
     if (privateuse1_backend != "privateuseone") {
@@ -504,8 +504,9 @@ std::string post_process_dispatch_key_str(std::string dispatch_key) {
       dispatch_key.erase(dispatch_key.length() - substr.length());
       // append the registered backend's name.
       // AutogradPrivateUse1 -> AutogradFoo
-      dispatch_key = dispatch_key + c10::get_privateuse1_backend();
-      return dispatch_key;
+      auto backend_name = c10::get_privateuse1_backend();
+      backend_name[0] = std::toupper(backend_name[0]);
+      dispatch_key = dispatch_key + backend_name;
     }
   }
   return dispatch_key;

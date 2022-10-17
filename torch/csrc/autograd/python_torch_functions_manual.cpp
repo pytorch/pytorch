@@ -505,22 +505,6 @@ static PyObject* THPVariable__disable_functionalization(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable_register_privateuse1_backend(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {"register_privateuse1_backend(c10::string_view backend)"},
-      /*traceable=*/true);
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  auto backend_name = r.stringView(0);
-  c10::register_privateuse1_backend(std::string(backend_name));
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 // XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
@@ -561,10 +545,6 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_disable_functionalization",
      castPyCFunctionWithKeywords(THPVariable__disable_functionalization),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"register_privateuse1_backend",
-     castPyCFunctionWithKeywords(THPVariable_register_privateuse1_backend),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"nonzero",
