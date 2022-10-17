@@ -8468,11 +8468,8 @@ Also supports batched inputs, and, if the input is batched, the output is batche
         from the QR decomposition.
 
 .. note::
-        This function supports backward. However, unless ``(input, tau)`` do not require gradients and/or
-        ``tau.size(-1)`` is very small, it is recommended to use a combination of :func:`torch.linalg.qr`
-        with :func:`torch.matmul` for much faster backward. Note that the backward for :func:`torch.linalg.qr`
-        is only stable for full-rank inputs, and if the input is not full-rank, it is better to use
-        :func:`torch.ormqr` trading performance for numerical stability.
+        This function supports backward but it is only fast when ``(input, tau)`` do not require gradients
+        and/or ``tau.size(-1)`` is very small.
         ``
 
 Args:
