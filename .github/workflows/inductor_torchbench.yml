@@ -52,8 +52,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          # .jenkins/pytorch/build.sh
-          python setup.py develop
+          CUDA_HOME=/usr/local/cuda-11.6 .jenkins/pytorch/build.sh
       - name: Checkout TorchBench
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -67,7 +66,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          pushd "${GITHUB_WORKSPACE}"/torchbenchmark
+          pushd torchbenchmark
           pip3 install --pre torchtext torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           python install.py
           pip install gym==0.25.2  # workaround issue in 0.26.0
