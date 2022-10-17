@@ -156,6 +156,7 @@ Tensor& func_out(const Tensor& self, Tensor& output) {                          
 
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp_out_mps, exponent)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp2_out_mps, exponentBase2)
+//CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(expm1_out_mps, exponentBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sqrt_out_mps, squareRoot)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(rsqrt_out_mps, reverseSquareRoot)
@@ -245,6 +246,19 @@ TORCH_IMPL_FUNC(frac_out_mps) (const Tensor& self, const Tensor& output) {
                                                                     name:nil];
                   return [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                secondaryTensor:truncTensor
+                                                   name: nil];
+                });
+}
+
+TORCH_IMPL_FUNC(expm1_out_mps) (const Tensor& self, const Tensor& output) {
+  mps::unary_op(self, output, "expm1_out_mps",
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+                  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
+                                                       dataType:inputTensor.dataType];
+                  MPSGraphTensor* ePowYTensor = [mpsGraph exponentWithTensor:yTensor
+                                                                         name:nil];
+                  return [mpsGraph subtractionWithPrimaryTensor:exponentTensor
+                                               secondaryTensor:oneTensor
                                                    name: nil];
                 });
 }
