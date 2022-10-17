@@ -297,7 +297,7 @@ class FlatParamHandle:
         device: torch.device,
         config: HandleConfig,
         use_orig_params: bool,
-    ) -> None:
+    ):
         super().__init__()
         self.device = device
         self._config = config
