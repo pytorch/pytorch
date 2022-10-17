@@ -246,14 +246,17 @@ def create_static_inputs(inps, known_static_input_idxs):
             src_storage = x.storage()
             # If common buffer is not created for this storage, create it; otherwise retrieve it.
             if src_storage.data_ptr() not in dst_buffers:
-                dst_buffers[src_storage.data_ptr()] = torch.empty(
+                new_dst_buffer = torch.zeros(
                     src_storage.size(), dtype=src_storage.dtype, device=src_storage.device)
+                # torch.zeros() should return 16-byte-aligned data. Asserting here to be safe.
+                assert new_dst_buffer.data_ptr() % 16 == 0
+                dst_buffers[src_storage.data_ptr()] = new_dst_buffer
             dst_buffer = dst_buffers[src_storage.data_ptr()]
             storage_offset = (x.data_ptr() - x.storage().data_ptr()) // x.element_size()
             static_inp = torch.as_strided(dst_buffer, x.size(), x.stride(), storage_offset)
             static_inps.append(static_inp)
         else:
-            static_inps.append(x)
+            static_inps.append(x.detach())
     return static_inps
 
 
