@@ -3173,7 +3173,7 @@ class FullyShardedDataParallel(nn.Module):
         visible to ``nn.Module`` methods.
 
         We do not use :meth:`nn.Module.register_parameter` because we want
-        ``flat_param`` to always be an attribute but dynamically change whether
+        ``FLAT_PARAM`` to always be an attribute but dynamically change whether
         it is visible to ``nn.Module`` methods.
         """
         if self._has_params:
@@ -3184,9 +3184,9 @@ class FullyShardedDataParallel(nn.Module):
         De-registers the flattened parameter from the wrapped module, hiding it
         from ``nn.Module`` methods.
 
-        We do not use ``del self.flat_param`` because we want ``flat_param`` to
-        always be an attribute but dynamically change whether it is visible to
-        ``nn.Module`` methods.
+        We do not use ``del`` because we want ``FLAT_PARAM`` to always be an
+        attribute but dynamically change whether it is visible to ``nn.Module``
+        methods.
         """
         self.module._parameters.pop(FLAT_PARAM, None)
 
