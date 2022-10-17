@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+import textwrap
 import unittest
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -1369,6 +1370,265 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(d_storage_data, c_storage_data_new)
         self.assertEqual(c_id, c_id_new)
         self.assertEqual(d_id, c_id_new)
+
+    @staticmethod
+    def _format_allocations(prof: torch.profiler.profile):
+        root_events = prof.profiler.kineto_results.experimental_event_tree()
+        events = sorted(_utils.traverse_dfs(root_events), key=lambda x: x.start_time_ns)
+        allocations = tuple(
+            event.extra_fields
+            for event in events
+            if isinstance(event.extra_fields, torch._C._profiler._ExtraFields_Allocation)
+        )
+
+        return textwrap.indent("\n".join(
+            f"{repr(i.id):>5}{' ' * 6}"
+            f"{'Allocation' if i.alloc_size > 0 else 'Free'}"
+            for i in allocations
+        ), " " * 12)
+
+    def test_tensorimpl_invalidation_set(self) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            x = torch.ones((1,))
+            x.set_(torch.ones((1,)).storage())
+            x.view_as(x)
+
+            del x
+            gc.collect()
+
+        self.assertExpectedInline(
+            self._format_allocations(p),
+            """\
+                0      Allocation
+                0      Allocation
+                0      Free
+                0      Free"""
+        )
+
+    def test_tensorimpl_invalidation_set_breaking(self) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            x = torch.ones((1,))
+
+            # This call breaks the chain by freeing the old storage before the
+            # new one is allocated. (And so they should not share an ID.)
+            x.set_()
+
+            x.set_(torch.ones((1,)).storage())
+            x.view_as(x)
+
+            del x
+            gc.collect()
+
+        self.assertExpectedInline(
+            self._format_allocations(p),
+            """\
+                0      Allocation
+                0      Free
+                1      Allocation
+                1      Free"""
+        )
+
+    def test_tensorimpl_invalidation_keep_alive(self) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            x = torch.ones((1,))
+            x_storages = [x.storage()]
+            for _ in range(3):
+                x.set_()
+                x.set_(torch.ones((1,)).storage())
+
+                # This keeps the StorageImpls alive and preserves the chain.
+                # (Despite the `set_()` call.)
+                x_storages.append(x.storage())
+            x.view_as(x)
+
+            # Free storage in a deterministic fashion.
+            while x_storages:
+                x_storages.pop()
+                gc.collect()
+
+            for _ in range(3):
+                x.set_(torch.ones((1,)).storage())
+            x.view_as(x)
+
+            del x
+            gc.collect()
+
+        self.assertExpectedInline(
+            self._format_allocations(p),
+            """\
+                0      Allocation
+                0      Allocation
+                0      Allocation
+                0      Allocation
+                0      Free
+                0      Free
+                0      Free
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Free"""
+        )
+
+    def test_tensorimpl_invalidation_keep_alive_break(self) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            x = torch.ones((1,))
+            x_storages = [x.storage()]
+            for _ in range(3):
+                x.set_()
+                x.set_(torch.ones((1,)).storage())
+
+                # This keeps the StorageImpls alive and preserves the chain.
+                # (Despite the `set_()` call.)
+                x_storages.append(x.storage())
+            x.view_as(x)
+
+            # Free storage in a deterministic fashion.
+            while x_storages:
+                x_storages.pop()
+                gc.collect()
+
+            x.set_()
+            for _ in range(3):
+                x.set_(torch.ones((1,)).storage())
+            x.view_as(x)
+
+            del x
+            gc.collect()
+
+        self.assertExpectedInline(
+            self._format_allocations(p),
+            """\
+                0      Allocation
+                0      Allocation
+                0      Allocation
+                0      Allocation
+                0      Free
+                0      Free
+                0      Free
+                0      Free
+                1      Allocation
+                1      Allocation
+                1      Free
+                1      Allocation
+                1      Free
+                1      Free"""
+        )
+
+    def test_tensorimpl_invalidation_full(self) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            x = torch.ones((1,))
+            x_storages = [x.storage()]
+            for _ in range(3):
+                x.set_()
+                x.set_(torch.ones((1,)).storage())
+                x_storages.append(x.storage())
+            x.view_as(x)
+
+            # Free storage in a deterministic fashion.
+            while x_storages:
+                x_storages.pop()
+                gc.collect()
+
+            for _ in range(3):
+                x.set_(torch.ones((1,)).storage())
+
+            for _ in range(3):
+                x.set_()
+                x.set_(torch.ones((1,)).storage())
+
+            for i in range(4):
+                x.resize_((1 + i,))
+            x.view_as(x)
+
+            del x
+            gc.collect()
+
+        self.assertExpectedInline(
+            self._format_allocations(p),
+            """\
+                0      Allocation
+                0      Allocation
+                0      Allocation
+                0      Allocation
+                0      Free
+                0      Free
+                0      Free
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Free
+                1      Allocation
+                1      Free
+                2      Allocation
+                2      Free
+                3      Allocation
+                3      Allocation
+                3      Free
+                3      Allocation
+                3      Free
+                3      Allocation
+                3      Free
+                3      Free"""
+        )
+
+    def test_tensorimpl_invalidation_scalar_args(self) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            with torch.no_grad():
+                x = torch.ones((1,))
+                for _ in range(10):
+                    x.add_(2)
+
+        self.assertExpectedInline(
+            self._format_allocations(p),
+            """\
+                0      Allocation
+                1      Allocation
+                2      Allocation
+                2      Free
+                1      Free
+                3      Allocation
+                4      Allocation
+                4      Free
+                3      Free
+                5      Allocation
+                6      Allocation
+                6      Free
+                5      Free
+                7      Allocation
+                8      Allocation
+                8      Free
+                7      Free
+                9      Allocation
+               10      Allocation
+               10      Free
+                9      Free
+               11      Allocation
+               12      Allocation
+               12      Free
+               11      Free
+               13      Allocation
+               14      Allocation
+               14      Free
+               13      Free
+               15      Allocation
+               16      Allocation
+               16      Free
+               15      Free
+               17      Allocation
+               18      Allocation
+               18      Free
+               17      Free
+               19      Allocation
+               20      Allocation
+               20      Free
+               19      Free""")
+
 
     def test_module_and_optimizer_ids(self) -> None:
         model = torch.nn.Linear(2, 1, bias=True)
