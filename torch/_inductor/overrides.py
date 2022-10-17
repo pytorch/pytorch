@@ -47,10 +47,10 @@ def replace_fx(gm: torch.fx.GraphModule):
 
 
 class UnaryFusionOp:
-    def __init__(self, post_op, scalars=[], algorithm=""):
+    def __init__(self, post_op, scalars=None, algorithm=None):
         self.post_op = post_op
-        self.scalars = scalars
-        self.algorithm = algorithm
+        self.scalars = scalars if scalars else []
+        self.algorithm = algorithm if algorithm else ""
 
 
 class ConvUnary2d(nn.Conv2d):
