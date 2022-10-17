@@ -1463,6 +1463,31 @@ class TestQuantizedTensor(TestCase):
         dedequantized_X = quantized_X.to(torch.float32)
         torch.testing.assert_allclose(X, dedequantized_X, rtol=1e-4, atol=5e-3)
 
+    def test_decomposed_quantize(self):
+        X = torch.randn(5, 10)
+        qdtype = torch.quint8
+        dtype = torch.uint8
+        scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
+
+        quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
+        decomposed_quantized_X = torch.decomposed_quantize_per_tensor(X, scale, zero_point, dtype)
+        self.assertEqual(decomposed_quantized_X.dtype, dtype)
+        self.assertEqual(quantized_X.int_repr(), decomposed_quantized_X)
+
+    def test_decomposed_dequantize(self):
+        X = torch.randn(5, 10)
+        dtype = torch.uint8
+        qdtype = torch.quint8
+        scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
+
+        quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
+        dequantized_X = torch.dequantize(quantized_X)
+
+        decomposed_quantized_X = torch.decomposed_quantize_per_tensor(X, scale, zero_point, dtype)
+        decomposed_dequantized_X = torch.decomposed_dequantize_per_tensor(decomposed_quantized_X, scale, zero_point, dtype)
+        self.assertEqual(quantized_X.int_repr(), decomposed_quantized_X)
+        self.assertEqual(dequantized_X, decomposed_dequantized_X)
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

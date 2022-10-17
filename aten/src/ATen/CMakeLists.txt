@@ -111,7 +111,8 @@ file(GLOB_RECURSE native_mps_h "native/mps/*.h")
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
-            "native/quantized/cpu/*.cpp")
+            "native/quantized/cpu/*.cpp"
+            "native/quantized/decomposed/*.cpp")
 file(GLOB native_nested_cpp "native/nested/*.cpp")
 file(GLOB native_transformers_cpp "native/transformers/*.cpp")
 

@@ -3417,6 +3417,12 @@
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
+- func: decomposed_quantize_per_tensor(Tensor input, float scale, int zero_point, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: decomposed_dequantize_per_tensor(Tensor input, float scale, int zero_point, ScalarType dtype) -> Tensor
+  variants: function
+  
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
 # are namespacing issues in C++
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
