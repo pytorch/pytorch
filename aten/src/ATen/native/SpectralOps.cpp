@@ -848,20 +848,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
   if (!return_complex) {
-    if (!return_complexOpt.has_value()) {
-      TORCH_WARN_ONCE(
-        "stft will soon require the return_complex parameter be given for real inputs, "
-        "and will further require that return_complex=True in a future PyTorch release."
-      );
-    }
+    TORCH_CHECK(return_complexOpt.has_value(),
+        "stft requires the return_complex parameter be given for real inputs, "
+        "and will further require that return_complex=True in a future PyTorch release.");
 
 
-    // TORCH_WARN_ONCE(
-    //     "stft with return_complex=False is deprecated. In a future pytorch "
-    //     "release, stft will return complex tensors for all inputs, and "
-    //     "return_complex=False will raise an error.\n"
-    //     "Note: you can still call torch.view_as_real on the complex output to "
-    //     "recover the old return format.");
+    TORCH_WARN_ONCE(
+        "stft with return_complex=False is deprecated. In a future pytorch "
+        "release, stft will return complex tensors for all inputs, and "
+        "return_complex=False will raise an error.\n"
+        "Note: you can still call torch.view_as_real on the complex output to "
+        "recover the old return format.");
   }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
