@@ -6,20 +6,6 @@
 
 using namespace ::testing;
 
-void f(int x);
-
-void iterateOldStyle(int bound) {
-  for (int ii = 0; ii < bound; ++ii) {
-    f(ii);
-  }
-}
-
-void iterateIrange(int bound) {
-  for (auto ii : c10::irange(bound)) {
-    f(ii);
-  }
-}
-
 TEST(irange_test, range_test) {
   std::vector<int> test_vec;
   for (const auto i : c10::irange(4, 11)) {
