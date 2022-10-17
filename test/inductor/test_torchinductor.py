@@ -3920,6 +3920,8 @@ if HAS_CPU:
 
 
 if HAS_CUDA:
+    import triton
+    import triton.language as tl
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
@@ -4052,6 +4054,85 @@ if HAS_CUDA:
             ]
             with torch.cuda.amp.autocast(enabled=False):
                 assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+
+        def test_autotune_inplace_kernel(self):
+            """
+            This UT tests autotune on an inplace kernel. The autotune should not contaminate
+            the input buffers when tuning with multiple configs. For more details, refer to
+            https://github.com/openai/triton/issues/781
+            https://github.com/pytorch/torchdynamo/issues/1670
+            """
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            from torch._inductor.triton_ops.autotune import CachingAutotuner, grid
+            from torch._inductor.utils import instance_descriptor
+
+            def autotune(configs, meta):
+                def decorator(fn):
+                    return CachingAutotuner(
+                        # force autotune by setting save_cache_hook to False
+                        fn,
+                        meta=meta,
+                        configs=configs,
+                        save_cache_hook=False,
+                    )
+
+                return decorator
+
+            @autotune(
+                configs=[
+                    triton.Config({"XBLOCK": 1}),
+                    triton.Config({"XBLOCK": 2}),
+                ],
+                meta={
+                    "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+                    "device": 0,
+                    "configs": [
+                        instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())
+                    ],
+                    "constants": {},
+                },
+            )
+            @triton.jit
+            def kernel(in_out_ptr0, in_ptr0, xnumel, XBLOCK: tl.constexpr):
+                pid = tl.program_id(0)
+                block_start = pid * XBLOCK
+                offsets = block_start + tl.arange(0, XBLOCK)
+                mask = offsets < xnumel
+                x = tl.load(in_out_ptr0 + offsets, mask=mask)
+                y = tl.load(in_ptr0 + offsets, mask=mask)
+                output = x + y
+                tl.store(in_out_ptr0 + offsets, output, mask=mask)
+
+            xnumel = 384
+            in0 = rand_strided((xnumel,), (1,), device="cuda", dtype=torch.float32)
+            inout1 = rand_strided((xnumel,), (1,), device="cuda", dtype=torch.float32)
+            inout2 = inout1.clone()
+
+            stream0 = get_cuda_stream(0)
+            kernel.run(inout1, in0, xnumel, grid=grid(xnumel), stream=stream0)
+            kernel.run(inout2, in0, xnumel, grid=grid(xnumel), stream=stream0)
+
+            assert same(
+                inout1, inout2, tol=0.001, equal_nan=True
+            ), "failed autotune with inplace kernel"
+
+        @requires_cuda()
+        def test_sort_stride_issue(self):
+            # This minified testcase comes from detectron2_maskrcnn_r_50_fpn
+            # There was a false error from our size_assert code
+            @torch._dynamo.optimize(nopython=True)
+            def forward(pred_objectness_logits_3_: torch.Tensor):
+                sort_3 = pred_objectness_logits_3_.sort(descending=True, dim=1)
+                getitem_12 = sort_3[0]
+                return getitem_12
+
+            args = [((1, 100), (0, 1), torch.float16, "cuda", False)]
+            args = [
+                rand_strided(sh, st, dt, dev).requires_grad_(rg)
+                for (sh, st, dt, dev, rg) in args
+            ]
+            result = forward(*args)
+            assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
 
 
 if __name__ == "__main__":
