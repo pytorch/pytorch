@@ -565,6 +565,17 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
   return info.toTupleRef().elements().vec();
 }
 
+// Serialize the python dictionary into a traceable stack.
+inline Stack toTraceableStack(const py::dict& inputs) {
+  Stack res;
+  for (auto it = inputs.begin(); it != inputs.end(); it++) {
+    if (THPVariable_Check(it->second.ptr())) {
+      res.push_back(toIValue(it->second, tryToInferType(it->second).type()));
+    }
+  }
+  return res;
+}
+
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   auto elems = c10::impl::GenericList(elem_type);
   for (auto elem : obj) {
