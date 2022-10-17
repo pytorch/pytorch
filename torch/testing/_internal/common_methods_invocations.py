@@ -16872,6 +16872,23 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.nn.functional.nll_loss",
+        torch_opinfo_name="nn.functional.nll_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
+        supports_nvfuser=False,
+        # For simpler indexing, we flatten target indices, then reshape the result tensor.
+        # This creates inconsistent view state with reference impl.
+        validate_view_consistency=False,
+        skips=(
+            # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+            ),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.huber_loss",
         torch_opinfo_name="nn.functional.huber_loss",
         # The corresponding PyTorch op doesn't support out.  But the ref is
