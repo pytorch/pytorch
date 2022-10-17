@@ -79,13 +79,24 @@ def _is_compiled() -> bool:
     r"""Returns true if compile with CUDA support."""
     return hasattr(torch._C, '_cuda_getDeviceCount')
 
+def _nvml_based_avail() -> bool:
+    return os.getenv('PYTORCH_NVML_BASED_CUDA_CHECK') == '1'
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
     if not _is_compiled():
         return False
-    # This function never throws and returns 0 if driver is missing or can't
-    # be initialized
-    return torch._C._cuda_getDeviceCount() > 0
+    if _nvml_based_avail():
+        # The user has set an env variable to request this availability check that attempts to avoid fork poisoning by
+        # using NVML at the cost of a weaker CUDA availability assessment. Note that if NVML discovery/initialization
+        # fails, this assessment falls back to the default CUDA Runtime API assessment (`cudaGetDeviceCount`)
+        return device_count() > 0
+    else:
+        # The default availability inspection never throws and returns 0 if the driver is missing or can't
+        # be initialized. This uses the CUDA Runtime API `cudaGetDeviceCount` which in turn initializes the CUDA Driver
+        # API via `cuInit`
+        return torch._C._cuda_getDeviceCount() > 0
+
 
 def is_bf16_supported():
     r"""Returns a bool indicating if the current CUDA/ROCm device supports dtype bfloat16"""
@@ -224,6 +235,8 @@ def _lazy_init():
                 "libcudart functions unavailable. It looks like you have a broken build?")
         # This function throws if there's a driver initialization error, no GPUs
         # are found or any other error occurs
+        if 'CUDA_MODULE_LOADING' not in os.environ:
+            os.environ['CUDA_MODULE_LOADING'] = 'LAZY'
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
@@ -837,10 +850,10 @@ __all__ = [
     'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError',
     'Stream', 'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
     'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream', 'default_generators',
-    'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_arch_list', 'get_device_capability',
-    'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_rng_state', 'get_rng_state_all', 'get_sync_debug_mode',
-    'graph', 'graph_pool_handle', 'graphs', 'has_half', 'has_magma', 'init', 'initial_seed', 'ipc_collect', 'is_available',
-    'is_bf16_supported', 'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes',
+    'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_allocator_backend', 'get_arch_list',
+    'get_device_capability', 'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_rng_state', 'get_rng_state_all',
+    'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs', 'has_half', 'has_magma', 'init', 'initial_seed', 'ipc_collect',
+    'is_available', 'is_bf16_supported', 'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes',
     'make_graphed_callables', 'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
     'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot', 'memory_stats',
     'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'nccl', 'nvtx', 'profiler', 'random',

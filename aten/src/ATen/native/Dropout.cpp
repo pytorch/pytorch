@@ -14,7 +14,7 @@ using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
 Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sym_sizes();
   TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
-  std::vector<c10::SymInt> sizes;
+  c10::SymDimVector sizes;
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
