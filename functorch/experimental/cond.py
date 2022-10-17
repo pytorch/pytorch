@@ -43,7 +43,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     for i in range(0, len(flat_true_outs)):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
-        assert true_out.meta == false_out.meta
+        assert true_out.meta['tensor_meta'] == false_out.meta['tensor_meta']
 
     # There are probably better ways - I know that create_arg has some self incrementing name
     # magic to it, but since we explicitly have to get the name for register_module,
