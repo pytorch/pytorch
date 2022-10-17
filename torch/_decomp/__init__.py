@@ -110,25 +110,29 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 if op_overload._schema.overload_name:
                     name += "." + op_overload._schema.overload_name
 
+                disable_meta = \
+                    not torch._C._dispatch_has_kernel(name) or \
+                    torch._C._dispatch_has_computed_kernel_for_dispatch_key(name, "Meta")
+
                 if disable_meta:
                     global _disabled_meta_decomps
                     _disabled_meta_decomps.add(op_overload)
 
                 if (
                     not disable_meta
-                    # TorchScript dumps a bunch of extra nonsense overloads
-                    # which don't have corresponding dispatcher entries, we need
-                    # to filter those out
-                    and torch._C._dispatch_has_kernel(name)
-                    # Don't register a python meta kernel to any operator that has
-                    # should already work with meta tensors today.
-                    # We can check that by seeing if the "computed table" for the operator
-                    # has a registration to Meta;
-                    # either through a direct registration, or an indirect one through
-                    # an alias dispatch key (e.g. CompositeImplicitAutograd)
-                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
-                        name, "Meta"
-                    )
+                    # # TorchScript dumps a bunch of extra nonsense overloads
+                    # # which don't have corresponding dispatcher entries, we need
+                    # # to filter those out
+                    # and torch._C._dispatch_has_kernel(name)
+                    # # Don't register a python meta kernel to any operator that has
+                    # # should already work with meta tensors today.
+                    # # We can check that by seeing if the "computed table" for the operator
+                    # # has a registration to Meta;
+                    # # either through a direct registration, or an indirect one through
+                    # # an alias dispatch key (e.g. CompositeImplicitAutograd)
+                    # and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                    #     name, "Meta"
+                    # )
                 ):
                     if any(
                         a.alias_info is not None and not a.alias_info.is_write
