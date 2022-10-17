@@ -141,6 +141,10 @@ from torch.ao.ns.fx.n_shadows_utils import (
 import copy
 from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type, Union
 
+__all__ = [
+    "QConfigMultiMapping"
+]
+
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
 class OutputLogger(nn.Module):
@@ -804,7 +808,7 @@ class QConfigMultiMapping:
     def __init__(self):
         self.qconfig_mappings_list: List[QConfigMapping]=[]
 
-    def _handle_list_size_mismatch(self, qconfig_list, style) -> None:
+    def _handle_list_size_mismatch(self, qconfig_list: List[QConfigAny], style: str) -> None:
         # this method handles cases where the size of qconfig_list does not match
         # the size of qconfig_mappings_list.
         # Issue: Consider a user inserting global_qconfig A and B first, then inserting
@@ -846,7 +850,7 @@ class QConfigMultiMapping:
             while len(qconfig_list)<len(self.qconfig_mappings_list):
                 qconfig_list.append(None)
 
-    def _remove_duplicates(self, qconfig_list) -> List[QConfigAny]:
+    def _remove_duplicates(self, qconfig_list) -> None:
         to_remove = []
         for index, cur_qconfig in enumerate(qconfig_list):
             for checked_qconfig in qconfig_list[:index]:
@@ -858,7 +862,7 @@ class QConfigMultiMapping:
 
 
     # this function applies the insertion method across each QConfigMapping
-    def _insert_qconfig_list(self, style, args, qconfig_list: List[QConfigAny]) -> None:
+    def _insert_qconfig_list(self, style: str, args: Tuple[Any], qconfig_list: List[QConfigAny]) -> None:
         self._remove_duplicates(qconfig_list)
         self._handle_list_size_mismatch(qconfig_list, style)
         method_name = _QCONFIG_STYLE_TO_METHOD[style]
@@ -995,7 +999,7 @@ def prepare_n_shadows_model(
         _get_dedup_subgraphs(matches)
 
     if isinstance(qconfig_mappings, QConfigMultiMapping):
-        qconfig_mappings = qconfig_mappings.qconfig_mappings_list
+        qconfig_mappings: List[QConfigMapping] = qconfig_mappings.qconfig_mappings_list
 
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries
