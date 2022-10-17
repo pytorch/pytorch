@@ -483,14 +483,14 @@ class CodeGen(object):
             if verbose:
                 # override annotation with more detailed information
                 from torch._subclasses.fake_tensor import FakeTensor
-                from torch.fx.experimental.proxy_tensor import _py_sym_types
+                from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
 
                 if isinstance(meta_val, FakeTensor):
                     maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
-                elif isinstance(meta_val, _py_sym_types):
+                elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': Sym({meta_val.expr})'
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'

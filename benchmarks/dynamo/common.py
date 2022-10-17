@@ -1463,6 +1463,12 @@ def parse_args():
         help="Fail a benchmark if backend throws an exception",
     )
     parser.add_argument(
+        "--raise-on-any",
+        "--raise",
+        action="store_true",
+        help="Raise on assertion or backend errors",
+    )
+    parser.add_argument(
         "--output",
         help="Overrides the output filename",
     )
@@ -1653,8 +1659,7 @@ def main(runner, original_dir=None):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
-        args.raise_on_assertion_error = True
-        args.raise_on_backend_error = True
+        args.raise_on_any = True
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1718,8 +1723,12 @@ def main(runner, original_dir=None):
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
 
-    torch._dynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
-    torch._dynamo.config.raise_on_backend_error = args.raise_on_backend_error
+    torch._dynamo.config.raise_on_assertion_error = (
+        args.raise_on_assertion_error or args.raise_on_any
+    )
+    torch._dynamo.config.raise_on_backend_error = (
+        args.raise_on_backend_error or args.raise_on_any
+    )
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass
@@ -1772,20 +1781,20 @@ def main(runner, original_dir=None):
         # TODO(whc) should we move this to a more general part of the script?
         torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
-        import torch._inductor.config
+        from torch._inductor import config as inductor_config
 
-        torch._inductor.config.debug = args.verbose
+        inductor_config.debug = args.verbose
         if args.threads:
-            torch._inductor.config.cpp.threads = args.threads
+            inductor_config.cpp.threads = args.threads
 
         if args.inductor_dynamic:
-            torch._inductor.config.triton.cudagraphs = False
-            torch._inductor.config.dynamic_shapes = True
+            inductor_config.triton.cudagraphs = False
+            inductor_config.dynamic_shapes = True
         else:
-            torch._inductor.config.dynamic_shapes = False
+            inductor_config.dynamic_shapes = False
             if args.export_profiler_trace:
                 print("Profiling requested, setting cudagraphs to False")
-                torch._inductor.config.triton.cudagraphs = False
+                inductor_config.triton.cudagraphs = False
 
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
