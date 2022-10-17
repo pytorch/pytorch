@@ -399,8 +399,19 @@ static void isin_sorting(
   }
 }
 
+template<typename... Args>
+Device out_device(Args&... inps){
+  for (const auto& i : {inps...}){
+    if (i.device() != at::kCPU) {
+      return i.device();
+    }
+  }
+  return at::kCPU;
+}
+
+
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  Tensor self_, other_;
+  Tensor self_, other_, condition_;
   if (self.dtype() != other.dtype()) {
     auto result_type = at::native::result_type(self, other);
     self_ = self.to(result_type);
@@ -409,16 +420,30 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
     self_ = self;
     other_ = other;
   }
+  auto device = out_device(condition, self_, other_);
+  condition_ = condition;
+  if (device != at::kCPU) { // allow CPU scalars on non-cpu device
+    if (condition.device() != device && condition.ndimension() == 0) {
+      condition_ = condition.to(device);
+    }
+    if (self_.device() != device && self_.ndimension() == 0) {
+        self_ = self_.to(device);
+    }
+    if (other_.device() != device && other_.ndimension() == 0) {
+        other_ = other_.to(device);
+    }
+  }
   if (condition.scalar_type() == ScalarType::Byte) {
   TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
   } else {
   TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
   }
-  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
+  condition_ = condition_.scalar_type() == ScalarType::Byte ? condition_.to(ScalarType::Bool) : condition_;
+  // if there's still a device mismatch, let tensoriterator error out with it
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(out)
-    .add_input(cond_bool)
+    .add_input(condition_)
     .add_input(self_)
     .add_input(other_)
     .build();
@@ -426,9 +451,11 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
   return out;
 }
 
+
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  auto device = out_device(condition, self, other);
   auto result_type = at::native::result_type(self, other);
-  Tensor ret = at::empty({0}, self.options().dtype(result_type));
+  Tensor ret = at::empty({0}, self.options().dtype(result_type).device(device));
   at::native::where_self_out(condition, self, other, ret);
   return ret;
 }
