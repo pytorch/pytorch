@@ -2722,9 +2722,9 @@ def native_group_norm(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
-    N: int,
-    C: int,
-    HxW: int,
+    batch_size: int,
+    num_channels: int,
+    flattened_inner_size: int,
     group: int,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
@@ -2734,33 +2734,42 @@ def native_group_norm(
         + str(input.ndim),
     )
     utils.check(
-        C % group == 0,
+        num_channels % group == 0,
         lambda: "Expected number of channels in input to be divisible by num_groups, but got input of shape "
         + str(input.shape)
         + " and num_groups="
         + str(group),
     )
-    reduction_dims = [2, 3]
-    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
+    reduction_dims = list(dim for dim in range(2, input.ndim))
+    broadcast_dims = [0] + reduction_dims
 
-    input_reshaped = torch.reshape(input, [N, group, C // group, HxW])
+    input_reshaped = torch.reshape(
+        input, [batch_size, group, num_channels // group, flattened_inner_size]
+    )
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
-    if weight is None and bias is not None:
+    unsqueeze_bias = None
+    if bias is not None:
         unsqueeze_bias = prims.expand_dims(bias, broadcast_dims, input.ndim)
-        out = out + unsqueeze_bias
-    elif weight is not None and bias is None:
-        unsqueeze_weight = prims.expand_dims(weight, broadcast_dims, input.ndim)
-        out = out * unsqueeze_weight
-    elif weight is not None and bias is not None:
-        unsqueeze_weight = prims.expand_dims(weight, broadcast_dims, input.ndim)
-        unsqueeze_bias = prims.expand_dims(bias, broadcast_dims, input.ndim)
-        out = out * unsqueeze_weight + unsqueeze_bias
 
-    out = prims.convert_element_type(out, input.dtype)
-    mean = prims.convert_element_type(mean, input.dtype)
-    rstd = prims.convert_element_type(rstd, input.dtype)
+    unsqueeze_weight = None
+    if weight is not None:
+        unsqueeze_weight = prims.expand_dims(weight, broadcast_dims, input.ndim)
+
+    if unsqueeze_weight is not None:
+        out = out * unsqueeze_weight
+    if unsqueeze_bias is not None:
+        out = out + unsqueeze_bias
+
+    if out.dtype != input.dtype:
+        out = prims.convert_element_type(out, input.dtype)
+
+    if mean.dtype != input.dtype:
+        mean = prims.convert_element_type(mean, input.dtype)
+
+    if rstd.dtype != input.dtype:
+        rstd = prims.convert_element_type(rstd, input.dtype)
 
     mean = prims.squeeze(mean, reduction_dims)
     rstd = prims.squeeze(rstd, reduction_dims)

@@ -181,12 +181,21 @@ def group_norm(
         lambda: "Expected at least 2 dimensions for input tensor but recieved "
         + str(input.ndim),
     )
-    N = input.shape[0]
-    C = input.shape[1]
-    HxW = 1
-    for dim_size in input.shape[2:]:
-        HxW *= dim_size
-    return torch.native_group_norm(input, weight, bias, N, C, HxW, num_groups, eps)[0]
+    batch_size = input.shape[0]
+    num_channels = input.shape[1]
+    flattened_inner_size = 1
+    for dim_length in input.shape[2:]:
+        flattened_inner_size *= dim_length
+    return torch.native_group_norm(
+        input,
+        weight,
+        bias,
+        batch_size,
+        num_channels,
+        flattened_inner_size,
+        num_groups,
+        eps,
+    )[0]
 
 
 def layer_norm(
