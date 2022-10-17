@@ -1723,6 +1723,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.reshape',
         '_refs.special.expit',
         '_refs.square',
+        '_refs.T',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
