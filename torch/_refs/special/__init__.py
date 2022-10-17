@@ -139,38 +139,22 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
-def _xlog1py(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
-):
+@register_decomposition(torch.ops.aten.special_xlog1py)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
     assert isinstance(a, TensorLike) or isinstance(b, TensorLike)
-
-    # 1) Operations derived from elementwise_unary_scalar_wrapper contain non-ref
-    # functions, which causes a runtime error in TorchRefsMode context manager
-    # when strict = True
-    # 2) where requires all tensors to be on the same device
-    if isinstance(a, TensorLike):
-        if isinstance(b, Number):
-            b = refs.scalar_tensor(b, dtype=a.dtype, device=a.device)
-        elif utils.is_cpu_scalar_tensor(b):
-            b = prims.device_put(b, device=a.device)
-    elif isinstance(b, TensorLike):
-        if isinstance(a, Number):
-            a = refs.scalar_tensor(a, dtype=b.dtype, device=b.device)
-        elif utils.is_cpu_scalar_tensor(a):
-            a = prims.device_put(a, device=b.device)
-
+    if isinstance(a, TensorLike) and isinstance(b, Number):
+        b = refs.scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(b, TensorLike) and isinstance(a, Number):
+        a = refs.scalar_tensor(a, dtype=b.dtype, device=b.device)
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
-    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, torch.log1p(b)))
+    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, refs.log1p(b)))
     return torch.where(torch.isnan(b), float("nan"), rhs)
-
-
-# TODO add docstring
-xlog1py = _make_elementwise_binary_reference(
-    _xlog1py,
-    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_xlog1py,
-)
 
 
 @register_decomposition(torch.ops.aten.mvlgamma)
