@@ -148,7 +148,7 @@ class PackagingError(Exception):
             message.write(f"* {reason.value}\n")
             for module_name in module_names:
                 message.write(f"    {module_name}\n")
-
+                message.write(f"    {dependency_graph.first_path(module_name)}\n")
                 # Print additional context if it's provided.
                 error_context = dependency_graph.nodes[module_name].get("error_context")
                 if error_context is not None:
