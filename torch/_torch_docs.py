@@ -8462,9 +8462,16 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
 .. seealso::
-
         :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
         from the QR decomposition.
+
+.. note::
+        This function supports backward. However, unless ``(input, tau)`` do not require gradients and/or
+        ``tau.size(-1)`` is very small, it is recommended to use a combination of :func:`torch.linalg.qr`
+        with :func:`torch.matmul` for much faster backward. Note that the backward for :func:`torch.linalg.qr`
+        is only stable for full-rank inputs, and if the input is not full-rank, it is better to use
+        :func:`torch.ormqr` trading performance for numerical stability.
+        ``
 
 Args:
     input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
