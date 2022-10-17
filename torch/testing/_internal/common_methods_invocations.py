@@ -17495,6 +17495,7 @@ python_ref_db = [
         supports_nvfuser=False,
         validate_view_consistency=False,
     ),
+    PythonRefInfo(
         "_refs.narrow_copy",
         torch_opinfo_name="narrow_copy",
         supports_out=True,
