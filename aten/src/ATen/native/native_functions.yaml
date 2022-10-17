@@ -4380,6 +4380,8 @@
     QuantizedCPU: relu_quantized_cpu
     QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
+    SparseCPU, SparseCUDA: relu_sparse
+    SparseCsrCPU, SparseCsrCUDA: relu_sparse_csr
   tags: canonical
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
@@ -4392,6 +4394,8 @@
     QuantizedCPU: relu_quantized_cpu_
     QuantizedCUDA: relu_quantized_cuda_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu_
+    SparseCPU, SparseCUDA: relu_sparse_
+    SparseCsrCPU, SparseCsrCUDA: relu_sparse_csr_
   autogen: relu.out
 
 - func: relu6(Tensor self) -> Tensor
@@ -4840,7 +4844,7 @@
     CUDA: softmax_backward_cuda_out
     MPS: softmax_backward_mps_out
 
-- func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+- func: unsafe_split.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4848,18 +4852,20 @@
     CompositeExplicitAutograd: unsafe_split
   autogen: unsafe_split.Tensor_out
 
-- func: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
+- func: split.Tensor(Tensor(a -> *) self, SymInt split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split
 
-- func: split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
+- func: split.sizes(Tensor(a -> *) self, SymInt[] split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: split_symint
 
-- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4867,7 +4873,7 @@
     CompositeExplicitAutograd: unsafe_split_with_sizes
   autogen: unsafe_split_with_sizes.out
 
-- func: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+- func: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -5285,12 +5291,16 @@
   dispatch:
     CPU, CUDA: threshold_backward_out
     MPS: threshold_backward_out_mps
+    SparseCPU, SparseCUDA: threshold_backward_sparse_out
+    SparseCsrCPU, SparseCsrCUDA: threshold_backward_sparse_compressed_out
 
 - func: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   variants: function
   structured_delegate: threshold_backward.grad_input
   dispatch:
     MkldnnCPU: mkldnn_relu_backward
+    SparseCPU, SparseCUDA: threshold_backward_sparse
+    SparseCsrCPU, SparseCsrCUDA: threshold_backward_sparse_compressed
 
 - func: tile(Tensor self, int[] dims) -> Tensor
   variants: function, method
@@ -12919,13 +12929,13 @@
     CompositeExplicitAutogradNonFunctional: slice_copy_Tensor
   tags: view_copy
 
-- func: split_copy.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+- func: split_copy.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: split_copy_Tensor
   tags: view_copy
 
-- func: split_with_sizes_copy(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: split_with_sizes_copy(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: split_with_sizes_copy
@@ -13131,13 +13141,13 @@
     CompositeExplicitAutograd: slice_copy_Tensor_out
 
 
-- func: split_copy.Tensor_out(Tensor self, int split_size, int dim=0, *, Tensor(a!)[] out) -> ()
+- func: split_copy.Tensor_out(Tensor self, SymInt split_size, int dim=0, *, Tensor(a!)[] out) -> ()
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_copy_Tensor_out
 
 
-- func: split_with_sizes_copy.out(Tensor self, int[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()
+- func: split_with_sizes_copy.out(Tensor self, SymInt[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_with_sizes_copy_out
