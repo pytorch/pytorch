@@ -12139,7 +12139,7 @@ class TestNNDeviceType(NNTestCase):
         out_reshaped = output.view(b * c, -1)
 
         mean = out_reshaped.mean(1)
-        var = out_reshaped.var(1, unbiased=False)
+        var = out_reshaped.var(1, correction=0)
 
         self.assertEqual(torch.abs(mean.data).mean(), 0, atol=1e-5, rtol=0)
         self.assertEqual(torch.abs(var.data).mean(), 1, atol=1e-5, rtol=0)
@@ -12169,7 +12169,7 @@ class TestNNDeviceType(NNTestCase):
         mean = input_reshaped.mean(1)
 
         input_reshaped = input_var.transpose(1, 0).reshape(c, b, -1)
-        var = input_reshaped.var(2, unbiased=True)[:, :]
+        var = input_reshaped.var(2, correction=1)[:, :]
 
         self.assertEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, atol=1e-5, rtol=0)
         self.assertEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, atol=1e-5, rtol=0)
@@ -12216,7 +12216,7 @@ class TestNNDeviceType(NNTestCase):
             output = ln(x)
             out_reshaped = output.view(*(unnormalized_shape + [-1]))
             mean = out_reshaped.mean(-1)
-            var = out_reshaped.var(-1, unbiased=False)
+            var = out_reshaped.var(-1, correction=0)
 
             delta = 1e-1 if dtype == torch.bfloat16 else 1e-5
             self.assertEqual(torch.abs(mean.data).mean(), 0, atol=delta, rtol=0)
@@ -12229,7 +12229,7 @@ class TestNNDeviceType(NNTestCase):
             output = ln(x)
             out_reshaped = output.view(*(unnormalized_shape + [-1]))
             mean = out_reshaped.mean(-1)
-            var = out_reshaped.var(-1, unbiased=False)
+            var = out_reshaped.var(-1, correction=0)
             self.assertEqual(torch.abs(mean.data).mean(), bias, atol=delta, rtol=0)
             self.assertEqual(torch.abs(var.data).mean(), scale ** 2, atol=delta, rtol=0)
 
@@ -12274,7 +12274,7 @@ class TestNNDeviceType(NNTestCase):
             output = gn(x)
             out_reshaped = output.view(b, g, -1)
             mean = out_reshaped.mean(-1)
-            var = out_reshaped.var(-1, unbiased=False)
+            var = out_reshaped.var(-1, correction=0)
             self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
             self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
@@ -12292,7 +12292,7 @@ class TestNNDeviceType(NNTestCase):
             out_normed = (out_reshaped - bias.view(c, 1)) / scale.view(c, 1)
             out_normed_reshaped = out_normed.view(b, g, -1)
             mean = out_normed_reshaped.mean(-1)
-            var = out_normed_reshaped.var(-1, unbiased=False)
+            var = out_normed_reshaped.var(-1, correction=0)
             self.assertEqual(torch.abs(mean).mean(), 0, atol=1e-5, rtol=0)
             self.assertEqual(torch.abs(var).mean(), 1, atol=1e-5, rtol=0)
 
@@ -13574,7 +13574,7 @@ class TestNNDeviceType(NNTestCase):
             feature_size = np.prod(normalized_shape)
             X_view = X.view(-1, feature_size)
             mean = X_view.mean(dim=-1, keepdim=True)
-            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
+            var = X_view.var(dim=-1, correction=0, keepdim=True)
             Y = (X_view - mean) / torch.sqrt(var + eps)
             Y = Y * gamma.view(-1) + beta.view(-1)
             return Y.view(*X.size())
@@ -13677,7 +13677,7 @@ class TestNNDeviceType(NNTestCase):
             batch_size = X.size()[0]
             X_view = X.view(batch_size, groups, -1)
             mean = X_view.mean(dim=-1, keepdim=True)
-            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
+            var = X_view.var(dim=-1, correction=0, keepdim=True)
             Y = ((X_view - mean) / torch.sqrt(var + eps)).view(
                 batch_size, channels, -1)
             Y = Y * gamma.view(channels, 1) + beta.view(channels, 1)
