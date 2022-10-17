@@ -135,7 +135,7 @@ class LayerNorm(jit.ScriptModule):
     @jit.script_method
     def compute_layernorm_stats(self, input):
         mu = input.mean(-1, keepdim=True)
-        sigma = input.std(-1, keepdim=True, unbiased=False)
+        sigma = input.std(-1, keepdim=True, correction=0)
         return mu, sigma
 
     @jit.script_method
