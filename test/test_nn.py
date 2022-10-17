@@ -260,6 +260,14 @@ class TestNN(NNTestCase):
             self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
             counter['backwards'] += inc
 
+        # backward_pre_hook expects callback with only `module` and `grad_output`
+        # as arguments.
+        def bw_pre_hook(inc, h_module, grad_output):
+            self.assertIsInstance(grad_output, tuple)
+            self.assertTrue(h_module is module)
+            self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
+            counter['backwards'] += inc
+
         test_fwd = module.register_forward_hook(lambda *args: fw_hook(1, *args))
 
         module(input)
@@ -267,8 +275,9 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 2)
         self.assertEqual(counter['backwards'], 0)
 
+        bw_hook_fn = bw_pre_hook if backward_register_fn == 'register_full_backward_pre_hook' else bw_hook
         test_bwd = getattr(module, backward_register_fn)(
-            lambda *args: bw_hook(1, *args))
+            lambda *args: bw_hook_fn(1, *args))
 
         output = module(input)
         self.assertEqual(counter['forwards'], 3)
@@ -288,7 +297,7 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 6)
         self.assertEqual(counter['backwards'], 2)
 
-        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook(2, *args))
+        test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook_fn(2, *args))
 
         module(input).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 9)
@@ -313,6 +322,7 @@ class TestNN(NNTestCase):
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
+        self._test_hooks("register_full_backward_pre_hook")
 
     def test_hook_cpp(self):
         bn = nn.BatchNorm1d(5)
@@ -325,6 +335,31 @@ class TestNN(NNTestCase):
         bn.register_full_backward_hook(hook)
         output = bn(torch.randn(5, 5, requires_grad=True))
         output.sum().backward()
+
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
+    def test_backward_hooks_interaction(self):
+        # Test to make sure that the grad_outputs
+        # updated by full_backward_pre_hook are received by
+        # the full_backward_hook
+        module = torch.nn.Sigmoid()
+
+        cnt = {'backward_cnt': 0}
+
+        def bw_pre_hook(m, grad_output):
+            cnt['backward_cnt'] += 1
+            return (grad_output[0] * 0.5, )
+
+        def bw_hook(m, grad_in, grad_output):
+            self.assertEqual(torch.full_like(grad_output[0], 0.5), grad_output[0])
+            cnt['backward_cnt'] += 1
+            return grad_output
+
+        module.register_full_backward_pre_hook(bw_pre_hook)
+        module.register_full_backward_hook(bw_hook)
+
+        t = torch.ones(1, 2, requires_grad=True)
+        module(t).sum().backward()
+        self.assertEqual(cnt['backward_cnt'], 2)
 
     def test_hook_invalid_outputs(self):
         module = nn.Sigmoid()
@@ -341,6 +376,20 @@ class TestNN(NNTestCase):
                 module(input).sum().backward()
 
         with module.register_backward_hook(bw_fail2):
+            with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
+                module(input).sum().backward()
+
+        def bw_pre_fail1(self, grad_output):
+            return ()
+
+        def bw_pre_fail2(self, grad_output):
+            return grad_output + (torch.randn(2, 2),)
+
+        with module.register_full_backward_pre_hook(bw_pre_fail1):
+            with self.assertRaisesRegex(RuntimeError, 'got 0, but expected 1'):
+                module(input).sum().backward()
+
+        with module.register_full_backward_pre_hook(bw_pre_fail2):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
@@ -446,34 +495,39 @@ class TestNN(NNTestCase):
         def hook(mod, grad_input, grad_output):
             hook_called[0] += 1
 
+        def hook_pre(mod, grad_output):
+            hook_called[0] += 1
+
         inp = torch.rand(10, requires_grad=True)
         mod = MyModule()
-        mod.register_full_backward_hook(hook)
+        for hook_fn, register_fn in [(hook, mod.register_full_backward_hook),
+                                     (hook_pre, mod.register_full_backward_pre_hook)]:
+            hook_called[0] = 0
+            with register_fn(hook_fn):
+                # No inplace should work
+                mod(inp, False).sum().backward()
+                self.assertEqual(hook_called[0], 1)
 
-        # No inplace should work
-        mod(inp, False).sum().backward()
-        self.assertEqual(hook_called[0], 1)
+                # Input inplace error should throw an error
+                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                            "a view and is being modified inplace."):
+                    mod(inp.clone(), True)
 
-        # Input inplace error should throw an error
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                    "a view and is being modified inplace."):
-            mod(inp.clone(), True)
+                # Input inplace error should throw an error if we try to re-use the view after they have
+                # been modified
+                local_inp = inp.clone()
+                out = mod(local_inp, False)
+                local_inp[0] *= 1
+                with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
+                                            "a view and its base or another view"):
+                    # Any operation involving the view will fail here
+                    mod.inp + 2
 
-        # Input inplace error should throw an error if we try to re-use the view after they have
-        # been modified
-        local_inp = inp.clone()
-        out = mod(local_inp, False)
-        local_inp[0] *= 1
-        with self.assertRaisesRegex(RuntimeError, "Output 0 of BackwardHookFunctionBackward is "
-                                    "a view and its base or another view"):
-            # Any operation involving the view will fail here
-            mod.inp + 2
-
-        # Output inplace error should throw an error
-        out = mod(inp, False)
-        with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
-                                    "and is being modified inplace."):
-            out += 1
+                # Output inplace error should throw an error
+                out = mod(inp, False)
+                with self.assertRaisesRegex(RuntimeError, "BackwardHookFunctionBackward is a view "
+                                            "and is being modified inplace."):
+                    out += 1
 
     def test_hook_non_full_warning(self):
         def noop(*args):
@@ -590,6 +644,46 @@ class TestNN(NNTestCase):
         mask = (input > 0).double()
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
+
+    def test_hook_buffer_registration(self):
+        def buffer_registration_hook(module, name, buffer):
+            buffer.registered = True
+        handle = torch.nn.modules.module.register_module_buffer_registration_hook(
+            buffer_registration_hook
+        )
+        try:
+            l, n, s = self._create_basic_net()
+            for b in s.buffers():
+                self.assertTrue(getattr(b, "registered", False))
+        finally:
+            handle.remove()
+
+    def test_hook_submodule_registration(self):
+        def module_registration_hook(module, name, submodule):
+            module.registered = True
+            submodule.registered = True
+        handle = torch.nn.modules.module.register_module_module_registration_hook(
+            module_registration_hook
+        )
+        try:
+            l, n, s = self._create_basic_net()
+            for m in s.modules():
+                self.assertTrue(getattr(m, "registered", False))
+        finally:
+            handle.remove()
+
+    def test_hook_parameter_registration(self):
+        def parameter_registration_hook(module, name, parameter):
+            parameter.registered = True
+        handle = torch.nn.modules.module.register_module_parameter_registration_hook(
+            parameter_registration_hook
+        )
+        try:
+            l, n, s = self._create_basic_net()
+            for p in s.parameters():
+                self.assertTrue(getattr(p, "registered", False))
+        finally:
+            handle.remove()
 
     def test_to(self):
         m = nn.Linear(3, 5)
@@ -896,6 +990,19 @@ class TestNN(NNTestCase):
         self.assertEqual(
             names(s.named_buffers()),
             ['0.dummy_buf', '0.l1.layer_dummy_buf'])
+
+        # test remove_duplicate
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.empty(3, 5))
+                self.register_buffer("buffer2", self.buffer1)
+
+        m = M()
+        self.assertEqual(names(m.named_buffers()),
+                         ["buffer1"])
+        self.assertEqual(names(m.named_buffers(remove_duplicate=False)),
+                         ["buffer1", "buffer2"])
 
     def test_call_supports_python_dict_output(self):
         class Net(nn.Module):
@@ -8830,6 +8937,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
+        input_bf = torch.arange(24, dtype=torch.bfloat16).reshape(1, 3, 2, 4)
+        input_bf = input_bf.permute(0, 2, 1, 3)
+        input_f = input_bf.float()
+        bn_mix = torch.nn.BatchNorm2d(2).float().eval()
+        ref_bn_f = deepcopy(bn_mix)
+        out_bf = bn_mix(input_bf)
+        ref_out_bf = ref_bn_f(input_f)
+        self.assertEqual(ref_out_bf, out_bf.float(), atol=0.05, rtol=0.05)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_batchnorm_cudnn_nhwc(self):
@@ -9188,21 +9304,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             x1, x2, x3, swap=True, reduction='none'), (input1, input2, input3)))
         self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduction='none'),
                          loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduction='none'))
-
-    def test_triplet_margin_loss_invalid(self):
-        input1 = torch.randn(5, 10, requires_grad=True)
-        input2 = torch.randn(5, 10, requires_grad=True)
-        input3 = torch.randn(5, 10, requires_grad=True)
-        input_1d = torch.randn(10, requires_grad=True)
-
-        with self.assertRaisesRegex(RuntimeError, "All inputs should have same dimension"):
-            F.triplet_margin_loss(input1, input2, input_1d)
-
-        with self.assertRaisesRegex(RuntimeError, "All inputs should have same dimension"):
-            F.triplet_margin_loss(input1, input_1d, input3)
-
-        with self.assertRaisesRegex(RuntimeError, "All inputs should have same dimension"):
-            F.triplet_margin_loss(input_1d, input2, input3)
 
     def test_pointwise_loss_target_grad_none_reduction(self):
         i = torch.randn(5, 10)
@@ -12591,9 +12692,11 @@ class TestNNDeviceType(NNTestCase):
             i2 = i.detach()[:, 1:].clone().requires_grad_()
             output2 = m2(i2)
             output2.backward(grad_output[:, offset:].contiguous())
+            is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+            atol, rtol = (3e-4, 3e-2) if dtype == torch.float32 and is_cuda_sm86 else (dtype2prec_DONTUSE[dtype], 0)
 
             self.assertEqual(output, torch.cat([output1, output2], 1),
-                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+                             atol=atol, rtol=rtol)
             self.assertEqual(i.grad.data,
                              torch.cat([i1.grad.data, i2.grad.data], 1),
                              atol=dtype2prec_DONTUSE[dtype], rtol=0)

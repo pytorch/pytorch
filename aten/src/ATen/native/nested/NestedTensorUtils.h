@@ -1,11 +1,22 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/ones_native.h>
+#include <ATen/ops/prod.h>
+#include <ATen/ops/stack_native.h>
+#include <ATen/ops/tensor.h>
+#endif
 
 #include <vector>
 
