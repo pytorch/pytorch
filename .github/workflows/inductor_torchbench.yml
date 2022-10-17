@@ -40,7 +40,7 @@ jobs:
         run: |
           conda create -y -n pr-ci python="${PYTHON_VERSION}"
           # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          . "${HOME}"/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           # pin cmake version to 3.22 since 3.23 breaks pytorch build
           # see details at: https://github.com/pytorch/pytorch/issues/74985
@@ -51,7 +51,7 @@ jobs:
       - name: Build PyTorch
         run: |
           # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          . "${HOME}"/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           .jenkins/pytorch/build.sh
       - name: Checkout TorchBench
@@ -65,7 +65,7 @@ jobs:
       - name: Install TorchBench
         run: |
           # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          . "${HOME}"/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           pushd torchbenchmark
           pip3 install --pre torchtext torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
@@ -75,7 +75,7 @@ jobs:
       - name: Run TorchBench
         run: |
           # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          . "${HOME}"/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           # Testing with --only resnet18 for now
           python3 benchmarks/dynamo/torchbench.py \
@@ -85,7 +85,7 @@ jobs:
                   --output=indcutor_torchbench_training.csv
       - name: TorchBench result check
         run: |
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
+          . "${HOME}"/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           python benchmarks/dynamo/check_csv.py -f indcutor_torchbench_training.csv
       - name: Remove conda environment and cleanup
