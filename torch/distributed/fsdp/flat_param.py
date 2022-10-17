@@ -296,11 +296,15 @@ class FlatParamHandle:
         module: nn.Module,
         device: torch.device,
         config: HandleConfig,
+        process_group: dist.ProcessGroup,
         use_orig_params: bool,
     ):
         super().__init__()
         self.device = device
         self._config = config
+        self.process_group = process_group
+        self.rank = process_group.rank()
+        self.world_size = process_group.size()
         self._use_orig_params = use_orig_params
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
@@ -436,7 +440,7 @@ class FlatParamHandle:
     # SHARD INITIALIZATION & METADATA #
     ###################################
     @torch.no_grad()
-    def shard(self, process_group: dist.ProcessGroup):
+    def shard(self):
         """
         Shards the handle's ``FlatParameter``. In terms of memory, this
         allocates new memory for the sharded flattened parameter and frees the
@@ -446,16 +450,8 @@ class FlatParamHandle:
         Shard metadata attributes are set for all sharding strategies.
         ``process_group``, ``rank``, and ``world_size`` attributes are set if
         using a sharded strategy.
-
-        TODO (awgu): Once we retire ``FlattenParamsWrapper``, we should pass
-        the process group directly to the ``FlatParamHandle`` constructor. For
-        now, we decouple ``FlattenParamsWrapper` from a process group, but this
-        makes the process-group-related attributes not necessarily defined.
         """
         flat_param = self.flat_param
-        self.process_group = process_group
-        self.rank = process_group.rank()
-        self.world_size = process_group.size()
         if not self.uses_sharded_strategy:
             self._init_shard_metadata(0, 0, flat_param.numel() - 1)
         else:
@@ -863,7 +859,9 @@ class FlatParamHandle:
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
         dist._all_gather_base(padded_unsharded_grad, sharded_grad, self.process_group)
         unsharded_size = self.flat_param._unpadded_unsharded_size
-        flat_param.grad = padded_unsharded_grad[:unsharded_size.numel()].view(unsharded_size)
+        flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
+            unsharded_size
+        )
         self._use_unsharded_grad_views()
 
     def reshard_grad(self):
@@ -913,7 +911,7 @@ class FlatParamHandle:
                 else:
                     p_assert(
                         hasattr(flat_param, "_cpu_grad"),
-                        "`_cpu_grad` should be defined if the gradient is on CPU"
+                        "`_cpu_grad` should be defined if the gradient is on CPU",
                     )
                     sharded_grad = flat_param._cpu_grad  # type: ignore[attr-defined]
                 # If user specified to keep the gradient in low precision, then
@@ -944,12 +942,15 @@ class FlatParamHandle:
         Prepares the gradient for optimizer computation by moving the sharded
         gradient to the ``.grad`` attribute.
         """
+
         def cast_grad_to_param_dtype_if_needed(flat_param):
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
                 # This cast is meaningful when `param_dtype` is a low precision
                 # dtype.
-                flat_param.grad.data = flat_param.grad.to(self._config.low_prec_param_dtype)
+                flat_param.grad.data = flat_param.grad.to(
+                    self._config.low_prec_param_dtype
+                )
 
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
@@ -1517,7 +1518,10 @@ class FlatParamHandle:
         Returns if ``tensor`` is *currently* sharded. For ``NO_SHARD``, we
         choose to have this always return ``False`` for clarity.
         """
-        if not hasattr(self.flat_param, "_sharded_size") or not self.uses_sharded_strategy:
+        if (
+            not hasattr(self.flat_param, "_sharded_size")
+            or not self.uses_sharded_strategy
+        ):
             # `_sharded_size` is defined iff `handle.shard()` has been called
             return False
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]

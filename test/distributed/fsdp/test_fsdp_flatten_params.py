@@ -149,6 +149,7 @@ class TestFlattenParams(FSDPTest):
                 module,
                 torch.device("cuda"),
                 self._get_default_config(),
+                self.process_group,
                 False,
             )
 
@@ -220,6 +221,7 @@ class TestFlattenParams(FSDPTest):
             module,
             torch.device("cuda"),
             self._get_default_config(),
+            self.process_group,
             False,
         )
         self.assertEqual(ref_numel, flat_param_handle.flat_param.numel())
@@ -320,6 +322,7 @@ class TestFlattenParams(FSDPTest):
             module,
             torch.device("cuda"),
             self._get_default_config(),
+            self.process_group,
             False,
         )
 
