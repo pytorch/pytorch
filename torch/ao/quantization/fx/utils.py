@@ -213,6 +213,7 @@ def get_quantize_node_info(
         return None
     return node_type, quantize_op, qparams
 
+# TODO: looks like this is not used, remove
 def quantize_node(
         in_node: Node,
         obs_module: torch.nn.Module,
@@ -259,7 +260,7 @@ def quantize_node(
         module_path = ""
     root_module = modules['']
     graph = quantized_graph
-    maybe_quantize_node_info = get_quantize_node_info(obs_module)
+    maybe_quantize_node_info = get_quantize_node_info(obs_module, False)
     assert maybe_quantize_node_info is not None, \
         f"Expecting quantize node info not to be None, observer: {obs_module}"
     node_type, quantize_op, qparams = maybe_quantize_node_info
