@@ -1261,6 +1261,7 @@ class TestFSDPOptimState(FSDPTest):
                     optim_input=nonwrapped_optim_input,
                 )
 
+    @skip_if_lt_x_gpu(2)
     def test_optim_state_dict(
         self,
     ) -> None:

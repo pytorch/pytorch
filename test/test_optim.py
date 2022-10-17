@@ -19,7 +19,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm, skipIfTorchDynamo
+    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -34,7 +34,7 @@ def drosenbrock(tensor):
     x, y = tensor
     return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
-@skipIfTorchDynamo()
+
 class TestOptim(TestCase):
     exact_dtype = True
 
@@ -1539,6 +1539,18 @@ class TestLRScheduler(TestCase):
         scheduler = LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
         self._test(scheduler, targets, epochs)
 
+    def test_linearlr_start_factor_limits1(self):
+        start_factor = 0.
+        iters = 4
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+
+    def test_linearlr_start_factor_limits2(self):
+        start_factor = 1.1
+        iters = 4
+        with self.assertRaises(ValueError):
+            LinearLR(self.opt, start_factor=start_factor, total_iters=iters)
+
     def test_constantlr_with_epoch(self):
         # lr = 0.025     if epoch < 5
         # lr = 0.005    if 5 <= epoch
@@ -2999,7 +3011,7 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     opt.state[p].update(opt_differentiable_state)
     opt.step()
     return (p,) + tuple(
-        v for v in opt_differentiable_state.values() if isinstance(v, torch.Tensor) and v.requires_grad)
+        v for v in opt.state[p].values() if isinstance(v, torch.Tensor) and v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -3085,6 +3097,39 @@ class TestDifferentiableOptimizer(TestCase):
             _diff_fn,
             (p, grad, state, torch.optim.Adamax,
              {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
+    def test_asgd(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` `eta` & `mu` are not continuous variables (even though we define them as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['eta'] = torch.tensor(0.9, requires_grad=False, dtype=torch.float64)
+        state['mu'] = torch.tensor(1.0, requires_grad=False, dtype=torch.float64)
+        state['ax'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.ASGD,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
+
+    def test_rprop(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['prev'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['step_size'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Rprop,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
         )
 
 
