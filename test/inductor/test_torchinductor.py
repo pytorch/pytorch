@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import itertools
 import os
 import random
 import sys
@@ -1278,6 +1279,61 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    def test_conv2d_unary(self):
+        def _unary_list():
+            unary_list = [
+                torch.nn.ReLU(),
+                torch.nn.Sigmoid(),
+                torch.nn.Tanh(),
+                torch.nn.Hardswish(),
+                torch.nn.LeakyReLU(0.1, inplace=False),
+                torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
+                torch.nn.GELU(approximate="none"),
+                torch.nn.GELU(approximate="tanh"),
+            ]
+            return unary_list
+
+        options = itertools.product(
+            _unary_list(),
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            [torch.contiguous_format, torch.channels_last],
+        )
+
+        for (
+            unary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 112, 112)
+            mod = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                unary_fn,
+            ).eval()
+
+            # TODO: add bf16 test
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            self.common(
+                mod,
+                (v,),
+            )
 
     def test_gather1(self):
         def fn(a, b):
