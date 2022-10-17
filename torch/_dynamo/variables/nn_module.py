@@ -193,7 +193,6 @@ class NNModuleVariable(VariableTracker):
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
                     ),
-                    nnmodule=mod,
                     **options,
                 )
             else:
