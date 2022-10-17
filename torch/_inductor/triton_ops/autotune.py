@@ -138,8 +138,16 @@ class CachingAutotuner(KernelInterface):
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
+        from ..compile_fx import clone_preserve_strides
+
+        # clone the input args to avoid autotune contaminating them if
+        # the kernel does in-place stores
+        cloned_args = [
+            clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+            for arg in args
+        ]
         timings = {
-            launcher: self.bench(launcher, *args, **kwargs)
+            launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
         }
         self.launchers = [builtins.min(timings, key=timings.get)]
