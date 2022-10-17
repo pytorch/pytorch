@@ -1,8 +1,16 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/Resize.h>
@@ -10,6 +18,32 @@
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/argsort_native.h>
+#include <ATen/ops/broadcast_tensors.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/kthvalue.h>
+#include <ATen/ops/kthvalue_native.h>
+#include <ATen/ops/masked_fill.h>
+#include <ATen/ops/median.h>
+#include <ATen/ops/median_native.h>
+#include <ATen/ops/msort_native.h>
+#include <ATen/ops/nanmedian.h>
+#include <ATen/ops/nanmedian_native.h>
+#include <ATen/ops/nanquantile_native.h>
+#include <ATen/ops/quantile_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/sort.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/topk_native.h>
+#endif
 
 #include <utility>
 

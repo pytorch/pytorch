@@ -1,16 +1,67 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cufft_clear_plan_cache_native.h>
+#include <ATen/ops/_cufft_get_plan_cache_max_size_native.h>
+#include <ATen/ops/_cufft_get_plan_cache_size_native.h>
+#include <ATen/ops/_cufft_set_plan_cache_max_size_native.h>
+#include <ATen/ops/_fft_c2c.h>
+#include <ATen/ops/_fft_c2r.h>
+#include <ATen/ops/_fft_r2c.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/col2im.h>
+#include <ATen/ops/conj.h>
+#include <ATen/ops/conj_physical.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/fft_fft2_native.h>
+#include <ATen/ops/fft_fft_native.h>
+#include <ATen/ops/fft_fftfreq_native.h>
+#include <ATen/ops/fft_fftn_native.h>
+#include <ATen/ops/fft_fftshift_native.h>
+#include <ATen/ops/fft_hfft2_native.h>
+#include <ATen/ops/fft_hfft_native.h>
+#include <ATen/ops/fft_hfftn_native.h>
+#include <ATen/ops/fft_ifft2_native.h>
+#include <ATen/ops/fft_ifft_native.h>
+#include <ATen/ops/fft_ifftn_native.h>
+#include <ATen/ops/fft_ifftshift_native.h>
+#include <ATen/ops/fft_ihfft2_native.h>
+#include <ATen/ops/fft_ihfft_native.h>
+#include <ATen/ops/fft_ihfftn_native.h>
+#include <ATen/ops/fft_irfft2_native.h>
+#include <ATen/ops/fft_irfft_native.h>
+#include <ATen/ops/fft_irfftn_native.h>
+#include <ATen/ops/fft_rfft2_native.h>
+#include <ATen/ops/fft_rfft_native.h>
+#include <ATen/ops/fft_rfftfreq_native.h>
+#include <ATen/ops/fft_rfftn_native.h>
+#include <ATen/ops/istft_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/pad.h>
+#include <ATen/ops/roll.h>
+#include <ATen/ops/stft.h>
+#include <ATen/ops/stft_native.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <algorithm>
-#include <vector>
-#include <cmath>
 
 namespace at { namespace native {
 
@@ -157,7 +208,7 @@ Tensor fft_c2r(c10::string_view function_name,
   const auto norm = norm_from_string(norm_str, forward);
   if (forward) {
     // FIXME: _fft does not support complex_output=false with inverse=false
-    input = at::conj(input);
+    input = input.conj();
   }
   return fft_c2r_maybe_out(
       function_name, out, input, dim, static_cast<int64_t>(norm), n);
@@ -192,7 +243,7 @@ Tensor fft_r2c(c10::string_view function_name,
 
   if (!forward) {
     // FIXME: _fft_r2c doesn't support native r2c IFFT
-    return out.defined() ? at::conj_physical_out(out, ret) : at::conj(ret);
+    return out.defined() ? at::conj_physical_out(out, ret) : ret.conj();
   } else {
     return ret;
   }
@@ -521,7 +572,7 @@ static Tensor fft_hfftn_impl(
   }
 
   const auto last_dim = desc.dim.back();
-  tmp = at::conj(tmp);
+  tmp = tmp.conj();
   return fft_c2r_maybe_out(fname, out, tmp, last_dim, norm, last_dim_size);
 }
 
@@ -559,7 +610,7 @@ static Tensor fft_ihfftn_impl(
   const auto last_dim = desc.dim.back();
   auto tmp = at::_fft_r2c(x, last_dim, norm, /*onesided=*/true);
   if (desc.dim.size() == 1) {
-    return out.defined() ? at::conj_physical_out(tmp, out) : at::conj(tmp);
+    return out.defined() ? at::conj_physical_out(tmp, out) : tmp.conj();
   }
 
   tmp = at::conj_physical(tmp);
