@@ -844,11 +844,11 @@ class TestSerialization(TestCase, SerializationMixin):
         big_model = torch.nn.Conv2d(20000, 320000, kernel_size=3, device='meta')
 
         with BytesIOContext() as f:
-            torch.save(big_model, f)
+            torch.save(big_model.state_dict(), f)
             f.seek(0)
             state = torch.load(f)
 
-        self.assertEqual(state.weight.size(), big_model.weight.size())
+        self.assertEqual(state['weight'].size(), big_model.weight.size())
 
 
     def run(self, *args, **kwargs):
