@@ -3961,10 +3961,6 @@ if HAS_CPU:
                 metrics.reset()
                 traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
-                print("<" * 20)
-                print(fn(x1, x2)[0])
-                print(">" * 20)
-                print(compiled([x1, x2])[0])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_simd_vec_kernel_count == 1
 
