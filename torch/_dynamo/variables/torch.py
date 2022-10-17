@@ -559,7 +559,7 @@ class TorchPyOperator(VariableTracker):
 
         def unwrap_real(arg):
             if isinstance(arg, TensorVariable):
-                return arg.as_proxy().node.meta["example_value"]
+                return arg.get_real_value()
             if isinstance(arg, UserFunctionVariable):
                 return arg.fn
             if isinstance(arg, NNModuleVariable):
