@@ -758,7 +758,6 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
-    aten.narrow_copy.out: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::narrow_copy.out
     aten.native_batch_norm.default: {bf16},
     aten.native_layer_norm.default: {bf16},
 }
@@ -923,6 +922,12 @@ class TestMeta(TestCase):
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
+
+    def test_huber_loss_backward(self):
+        inps = [torch.rand(2**52, device='meta') for _ in range(3)]
+        r = torch.ops.aten.huber_loss_backward(*inps, 0, 1.0)
+        self.assertEqual(r.device.type, 'meta')
+        self.assertEqual(r.shape, inps[0].shape)
 
     def test_map_location_deserialize(self):
         import io
