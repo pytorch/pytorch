@@ -253,6 +253,7 @@ TORCH_IMPL_FUNC(expm1_out_mps) (const Tensor& self, const Tensor& output) {
   mps::unary_op(self, output, "expm1_out_mps",
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
                   MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
+                                                       shape:@[@1]
                                                        dataType:inputTensor.dataType];
                   MPSGraphTensor* ePowTensor = [mpsGraph exponentWithTensor:inputTensor
                                                                          name:nil];
