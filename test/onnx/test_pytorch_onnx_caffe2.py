@@ -2964,7 +2964,7 @@ class TestCaffe2Backend_opset9(common_utils.TestCase):
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
-                return torch.std(input, unbiased=False)
+                return torch.std(input, correction=0)
 
         model = StandardDeviation()
         inputs = torch.randn(2, 3, 4)
@@ -2973,7 +2973,7 @@ class TestCaffe2Backend_opset9(common_utils.TestCase):
     def test_std_along_dims(self):
         class StandardDeviationAlongDims(torch.nn.Module):
             def forward(self, input):
-                return torch.std(input, dim=(0, 1), unbiased=False, keepdim=False)
+                return torch.std(input, dim=(0, 1), correction=0, keepdim=False)
 
         model = StandardDeviationAlongDims()
         inputs = torch.randn(2, 3, 4)

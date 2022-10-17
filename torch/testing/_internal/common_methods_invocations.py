@@ -4663,7 +4663,6 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
 
     return [
         SampleInput(tensor_nd(), correction=1),
-        SampleInput(tensor_nd(), dim=1),
         SampleInput(tensor_nd(), dim=1, correction=1, keepdim=True),
         SampleInput(tensor_1d(), dim=0, correction=1, keepdim=True),
         SampleInput(tensor_1d(), dim=0, correction=0, keepdim=False),

@@ -110,7 +110,7 @@ def recompute_mean_var(
     # We recompute the mean and variance so that they track gradients through input
 
     mean = torch.mean(input, dim=inner_dim_indices, keepdim=keepdim)
-    var = torch.var(input, dim=inner_dim_indices, unbiased=False, keepdim=keepdim)
+    var = torch.var(input, dim=inner_dim_indices, correction=0, keepdim=keepdim)
     eps = torch.pow(1 / rstd, 2) - var  # this makes me so sad inside
     eps = eps.detach()
     rstd = 1 / torch.sqrt(var + eps)

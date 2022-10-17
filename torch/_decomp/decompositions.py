@@ -1123,7 +1123,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
 def normalize(input, norm_dims, eps):
     computation_dtype = utils.get_computation_dtype(input.dtype)
     input_acc = input.to(dtype=computation_dtype)
-    biased_var = torch.var(input_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    biased_var = torch.var(input_acc, dim=norm_dims, correction=0, keepdim=True)
     mean = torch.mean(input_acc, dim=norm_dims, keepdim=True)
     rstd = torch.rsqrt(biased_var + eps)
 
@@ -1359,7 +1359,7 @@ def native_batch_norm(
             # This doesn't strictly match eager's numerics, which accumulates var sum and then directly applies the correction
             # But... that would require re-implementing var here, for negligible numerics gain on a tensor whose
             # numerics probably don't matter.
-            unbiased_var = torch.var(input, reduction_dims, unbiased=False) * (
+            unbiased_var = torch.var(input, reduction_dims, correction=0) * (
                 n / (n - 1)
             )
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)

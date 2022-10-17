@@ -170,7 +170,7 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
             else:
                 conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
             batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
-            batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
+            batch_var = torch.var(conv_orig, dim=[0, 2, 3], correction=0)
             n = float(conv_orig.numel() / conv_orig.size()[1])
             unbiased_batch_var = batch_var * (n / (n - 1))
             batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
