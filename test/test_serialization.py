@@ -721,13 +721,14 @@ class TestOldSerialization(TestCase, SerializationMixin):
             module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
-            # First check that the checkpoint can be loaded without warnings
+            # First check that the checkpoint can be loaded without warning about unsafe loads
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEqual(len(w), 0)
+                    self.assertEqual(len(w), 1)
+                    self.assertTrue(w[0].category, 'WarningMessage')
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -738,8 +739,9 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEqual(len(w), 1)
-                    self.assertTrue(w[0].category, 'SourceChangeWarning')
+                    self.assertEqual(len(w), 2)
+                    self.assertTrue(w[0].category, 'WarningMessage')
+                    self.assertTrue(w[1].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):
         self._test_serialization_container('file', tempfile.NamedTemporaryFile)
