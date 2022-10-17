@@ -116,7 +116,7 @@ class TestAutocastCPU(TestCase):
     def test_autocast_nn_fp32(self):
         for op_with_args in self.autocast_lists.nn_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
-            self._run_autocast_outofplace(op, args, torch.float32, module=torch._C._nn, add_kwargs=maybe_kwargs)
+            self._run_autocast_outofplace(op, args, torch.float32, module=torch.ops.aten, add_kwargs=maybe_kwargs)
 
     def test_autocast_torch_need_autocast_promote(self):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
