@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import os
-import unittest
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +10,7 @@ import torch._dynamo.test_case
 import torch.distributed as dist
 from torch import nn
 from torch._dynamo import config
-from torch._dynamo.testing import same
+from torch._dynamo.test_case import same
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -260,6 +259,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()
