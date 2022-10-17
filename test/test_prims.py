@@ -645,6 +645,55 @@ class TestPrims(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float32)
+    def test_silu_backward_no_filled_tensor(self, device, dtype):
+        # This test verifies a workaround for
+        # https://github.com/pytorch/pytorch/issues/86612
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from functorch import functionalize
+        from torch._prims.nvfuser_executor import _remove_empty_like_fill
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+        def func(a):
+            out = torch.nn.functional.silu(a)
+            grad = torch.ones_like(out)
+            return torch.autograd.grad([out], [a], [grad])
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
+        a = make_arg((3, 4))
+        gm = make_fx(func)(a)
+        # functionalize(gm) doesn't work with non-detached inputs
+        gm = make_fx(functionalize(gm))(a.detach())
+
+        # replace aten.sub with nvprims.sub
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(gm)(a)
+
+        # Check that the graph contains empty_like
+        any_aten_empty_like = any(
+            node.target == torch.ops.aten.empty_like.default for node in gm.graph.nodes
+        )
+        self.assertTrue(any_aten_empty_like)
+        any_aten_fill = any(
+            node.target == torch.ops.aten.fill.Scalar for node in gm.graph.nodes
+        )
+        self.assertTrue(any_aten_fill)
+
+        # Now remove the empty_like and fill
+        gm = _remove_empty_like_fill(gm)
+        any_aten_empty_like = any(
+            node.target == torch.ops.aten.empty_like.default for node in gm.graph.nodes
+        )
+        self.assertFalse(any_aten_empty_like)
+        any_aten_fill = any(
+            node.target == torch.ops.aten.fill.Scalar for node in gm.graph.nodes
+        )
+        self.assertFalse(any_aten_fill)
+        self.assertEqual(gm(a), func(a))
+
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
         def _wrapper(a):
@@ -687,6 +736,53 @@ class TestPrims(TestCase):
             for node in call_function_nodes
         )
         self.assertTrue(includes_nvprims_var_mean)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_nvprims_view(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((3, 4, 5))
+
+        def func1(a):
+            return a.view(tuple(reversed(a.shape)))
+
+        def func2(a):
+            return a.reshape(tuple(reversed(a.shape)))
+
+        def func3(a):
+            return torch.view_copy(a, tuple(reversed(a.shape)))
+
+        def func4(a):
+            return torch.reshape(a, tuple(reversed(a.shape)))
+
+        def func5(a):
+            return torch.ops.aten.view.default(a, tuple(reversed(a.shape)))
+
+        def func6(a):
+            return torch.ops.aten._unsafe_view.default(a, tuple(reversed(a.shape)))
+
+        def func7(a):
+            return torch.ops.aten.view_copy.default(a, tuple(reversed(a.shape)))
+
+        for func in (func1, func2, func3, func4, func5, func6, func7):
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(a)
+
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_nvprims_view = any(
+                torch.ops.nvprims.view.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertTrue(includes_nvprims_view)
+
+            # Try executing the graph
+            out = execute(gm, a, executor="strictly_nvfuser")
+            self.assertEqual(out, func(a))
 
     @onlyCUDA
     @skipCUDAIfRocm
