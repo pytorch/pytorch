@@ -24,7 +24,7 @@ env:
 jobs:
   run-torchbench-with-inductor:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: [self-hosted, bm-runner]
+    runs-on: [self-hosted, gcp-a100-runner]
     # Set to 12 hours
     timeout-minutes: 720
     steps:
