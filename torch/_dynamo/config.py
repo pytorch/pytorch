@@ -54,8 +54,6 @@ constant_functions = {
     torch.onnx.is_in_onnx_export: False,
 }
 
-# root folder of the project
-base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
@@ -86,6 +84,9 @@ raise_on_backend_error = True
 # if an exception is encountered
 replay_record_enabled = False
 replay_record_dir_name = "./torchdynamo_error_records"
+
+# Show a warning on every graph break
+print_graph_breaks = False
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.
@@ -151,6 +152,12 @@ dynamo_import = __name__.replace(".config", "")
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = dynamo_import.replace("dynamo", "inductor")
+
+# root folder of the project
+if "torch." in dynamo_import:
+    base_dir = dirname(dirname(dirname(abspath(__file__))))
+else:
+    base_dir = dirname(dirname(abspath(__file__)))
 
 
 class _AccessLimitingConfig(ModuleType):
