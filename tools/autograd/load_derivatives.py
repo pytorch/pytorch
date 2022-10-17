@@ -20,7 +20,6 @@ from torchgen.api.types import (
     Binding,
     boolT,
     CppSignatureGroup,
-    intArrayRefT,
     layoutT,
     longT,
     NamedCType,
@@ -899,7 +898,9 @@ def saved_variables(
             ".sizes() is not supported in derivative formulas. Instead, please use the SymInt version,"
             + f".sym_sizes(), which returned a c10::SymIntArrayRef. formula={formula}"
         )
-    if re.search("\.size\([-]?\d+\)", formula) or re.search("->size\([-]?\d+\)", formula):
+    if re.search(r"\.size\([-]?\d+\)", formula) or re.search(
+        r"->size\([-]?\d+\)", formula
+    ):
         raise RuntimeError(
             ".size(int) is not supported in derivative formulas. Instead, please use the SymInt version,"
             + f".sym_size(int), which returned a c10::SymIntArrayRef. formula={formula}"
