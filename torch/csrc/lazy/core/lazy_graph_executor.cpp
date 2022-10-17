@@ -938,13 +938,13 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
   PostOrderData po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   VLOG(4) << "Parameter sequence graph hash " << HashToString(coll.hash);
-  std::shared_ptr<Async> async = 
+  std::shared_ptr<Async> async =
       TryRunCachedSync(tensors, &coll, &po_data, tensor_data_vec);
   if (async != nullptr) {
     return async;
   }
 
-  CompilationResult compile_result = 
+  CompilationResult compile_result =
       Compile(*tensors, devices, coll, &po_data, ir_values);
   if (GRAPH_DUMP_ENABLED) {
     auto* comp = compile_result.computation.get();
@@ -1047,8 +1047,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         const std::vector<BackendDataPtr>& tensor_data_vec) {
   auto tensors_data = SetTensorData(
         tensors,
-        coll->config, 
-        coll->indices, 
+        coll->config,
+        coll->indices,
         tensor_data_vec);
   return ScheduleSyncTensorsGraph(
       coll,
