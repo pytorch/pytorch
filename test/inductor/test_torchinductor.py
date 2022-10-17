@@ -34,8 +34,7 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import config
-    from torch._inductor import metrics
+    from torch._inductor import config, metrics
     from torch._inductor.compile_fx import compile_fx
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
@@ -3984,6 +3983,7 @@ if HAS_CPU:
                 compiled = compile_fx_inner(traced, ([x1, x2]))
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_simd_vec_kernel_count == 1
+
 
 if HAS_CUDA:
 

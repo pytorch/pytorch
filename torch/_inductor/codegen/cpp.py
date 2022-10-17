@@ -9,14 +9,9 @@ import sympy
 import torch
 from torch._prims_common import is_float_dtype
 
-from .. import (
-    codecache,
-    config,
-    ir,
-    metrics,
-)
+from .. import codecache, config, ir, metrics
 from ..utils import sympy_product, sympy_subs
-from ..virtualized import V, ops
+from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
     DeferredIndentedBuffer,
@@ -222,10 +217,6 @@ class CppSimdVecOverrides(OpOverrides):
     @staticmethod
     def trunc(x):
         return f"{x}.trunc()"
-
-    @staticmethod
-    def add(x, y):
-        return f"{x} + {y}"
 
     @staticmethod
     def fmod(a, b):
@@ -1089,7 +1080,7 @@ class LoopLevelWithTail(LoopLevel):
         self.tail_loop_body = None
 
     def lines(self):
-        assert False
+        raise AssertionError("Not Implemented")
 
 
 @dataclasses.dataclass
