@@ -1,3 +1,4 @@
+import os
 import torch._C
 
 from contextlib import contextmanager
@@ -249,5 +250,6 @@ def onednn_fusion_enabled():
 
 del Any
 
-if not torch._C._jit_init():
-    raise RuntimeError("JIT initialization failed")
+if os.environ.get("PARSH_AUTORELOAD_CONTEXT") != "1":
+    if not torch._C._jit_init():
+        raise RuntimeError("JIT initialization failed")

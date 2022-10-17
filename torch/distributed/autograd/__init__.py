@@ -1,4 +1,5 @@
 
+import os
 import sys
 import torch
 
@@ -7,8 +8,9 @@ def is_available():
     return hasattr(torch._C, "_dist_autograd_init")
 
 
-if is_available() and not torch._C._dist_autograd_init():
-    raise RuntimeError("Failed to initialize torch.distributed.autograd")
+if os.environ.get("PARSH_AUTORELOAD_CONTEXT") != "1":
+    if is_available() and not torch._C._dist_autograd_init():
+        raise RuntimeError("Failed to initialize torch.distributed.autograd")
 
 if is_available():
     from torch._C._distributed_autograd import (

@@ -13,6 +13,7 @@ memory.
 Because of the similarity of APIs we do not document most of this package
 contents, and we recommend referring to very good docs of the original module.
 """
+import os
 import torch
 import sys
 from .reductions import init_reductions
@@ -30,7 +31,8 @@ __all__ += multiprocessing.__all__  # type: ignore[attr-defined]
 
 # This call adds a Linux specific prctl(2) wrapper function to this module.
 # See https://github.com/pytorch/pytorch/pull/14391 for more information.
-torch._C._multiprocessing_init()
+if os.environ.get("PARSH_AUTORELOAD_CONTEXT") != "1":
+    torch._C._multiprocessing_init()
 
 
 """Add helper function to spawn N processes and wait for completion of any of

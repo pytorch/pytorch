@@ -16,8 +16,9 @@ def is_available() -> bool:
     return hasattr(torch._C, "_c10d_init")
 
 
-if is_available() and not torch._C._c10d_init():
-    raise RuntimeError("Failed to initialize torch.distributed")
+if os.environ.get("PARSH_AUTORELOAD_CONTEXT") != "1":
+    if is_available() and not torch._C._c10d_init():
+        raise RuntimeError("Failed to initialize torch.distributed")
 
 
 if is_available():

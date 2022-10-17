@@ -21,8 +21,9 @@ def is_available():
     return hasattr(torch._C, "_rpc_init")
 
 
-if is_available() and not torch._C._rpc_init():
-    raise RuntimeError("Failed to initialize torch.distributed.rpc")
+if os.environ.get("PARSH_AUTORELOAD_CONTEXT") != "1":
+    if is_available() and not torch._C._rpc_init():
+        raise RuntimeError("Failed to initialize torch.distributed.rpc")
 
 
 if is_available():

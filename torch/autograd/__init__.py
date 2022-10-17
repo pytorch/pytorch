@@ -6,6 +6,7 @@ for which gradients should be computed with the ``requires_grad=True`` keyword.
 As of now, we only support autograd for floating point :class:`Tensor` types (
 half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdouble).
 """
+import os
 import torch
 import warnings
 
@@ -328,8 +329,9 @@ def variable(*args, **kwargs):
 # deprecated function - variable(...).
 variable.Variable = Variable  # type: ignore[attr-defined]
 
-if not torch._C._autograd_init():
-    raise RuntimeError("autograd initialization failed")
+if os.environ.get("PARSH_AUTORELOAD_CONTEXT") != "1":
+    if not torch._C._autograd_init():
+        raise RuntimeError("autograd initialization failed")
 
 # Import all native method/classes
 from torch._C._autograd import (
