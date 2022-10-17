@@ -6,7 +6,7 @@ import numpy as np
 import hypothesis
 import hypothesis.extra.numpy
 import hypothesis.strategies
-from numpy.testing import assert_array_equal, assert_array_almost_equal
+from numpy.testing import assert_array_equal, assert_array_almost_equal_nulp
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -41,12 +41,12 @@ class TestConsistentWithNumpy(TestCase):
         np_out = np.matmul(*inputs)
         torch_cpu_out = torch.matmul(*torch_inputs)
         # Make sure we get consistent results between numpy and CPU pytorch
-        assert_array_almost_equal(np_out, torch_cpu_out.numpy())
+        assert_array_almost_equal_nulp(np_out, torch_cpu_out.numpy())
 
         torch_dev_inputs = [arr.to(device) for arr in torch_inputs]
         torch_dev_out = torch.matmul(*torch_dev_inputs)
         # Now make sure every backend also produces identical results to numpy (and thus CPU pytorch)
-        assert_array_almost_equal(np_out, torch_dev_out.cpu().numpy())
+        assert_array_almost_equal_nulp(np_out, torch_dev_out.cpu().numpy())
 
     @given(where_inputs())
     def test_where_consistent(self, device, where_inputs):
