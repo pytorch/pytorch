@@ -9,10 +9,11 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize, TEST_WITH_ASAN
 import torch
 from torch import Tensor
 import functools
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
@@ -40,6 +41,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from functorch._src.eager_transforms import _as_tuple, jvp
+
 aten = torch.ops.aten
 
 
@@ -333,7 +335,9 @@ aliasing_ops_list_return = {
 }
 
 
+@unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
@@ -576,6 +580,7 @@ class TestOperators(TestCase):
                 return op.inplace_variant(inp.clone(), *args, **kwargs)
             test(fn, inplace=True)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapvjpvjp', vjp_fail.union({
         skip("atleast_1d"),  # Takes too long
         skip("atleast_2d"),  # Takes too long
@@ -640,14 +645,13 @@ class TestOperators(TestCase):
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("masked.softmax", device_type='cuda'),  # Mismatch in values!
-        xfail("masked.softmin", device_type='cuda'),  # Mismatch in values!
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -715,6 +719,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -733,7 +738,6 @@ class TestOperators(TestCase):
         skip("native_batch_norm"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('linalg.eig'),  # Uses aten::allclose
-        xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('narrow'),  # .item() call
@@ -761,6 +765,7 @@ class TestOperators(TestCase):
         # ---------------------------------------------------------------------
     })
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjp', (
@@ -768,6 +773,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
@@ -781,7 +788,6 @@ class TestOperators(TestCase):
         if is_inplace(op, op.get_op()):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
-
         for sample in samples:
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
@@ -841,19 +847,19 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
         tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
-        tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=1e-4)}, device_type='cpu'),
+             {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
-    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that coresponds to "batched forward-mode AD" testing in PyTorch core
@@ -1105,6 +1111,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1267,6 +1274,7 @@ class TestOperators(TestCase):
             expected = reference(primals, cotangents, primals_tangents, cotangents_tangents)
             self.assertEqual(result, expected)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
         # Following operatos take too long, hence skipped
         skip('atleast_1d'),
@@ -1292,11 +1300,6 @@ class TestOperators(TestCase):
         xfail('half'),  # required rank 4 tensor to use channels_last format
         xfail('index_reduce'),  # Forward AD not implemented and no decomposition
         xfail('linalg.eig'),  # vmap over torch.allclose isn't supported yet.
-        # AssertionError: Tensor-likes are not close!
-        # Mismatched elements: 2 / 120 (1.7%)
-        # Greatest absolute difference: 0.09438323974609375
-        # Greatest relative difference: 0.00115722746596277
-        xfail('linalg.householder_product', device_type='cuda'),
         xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
         xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
@@ -1356,6 +1359,7 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
+        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1363,7 +1367,7 @@ class TestOperators(TestCase):
         tol1('linalg.svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.householder_product',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+             {torch.float32: tol(atol=5e-03, rtol=5e-03)}),
         tol1('linalg.multi_dot',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol2('linalg.pinv', 'hermitian',
@@ -1571,6 +1575,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input, weight, bias))
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float32, torch.double))
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         xfail('linalg.eig'),  # all close?
@@ -1601,6 +1606,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
+        tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=2e-04, rtol=1e-04)}, device_type='cuda'),
         tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
         tol1('nn.functional.conv3d',
