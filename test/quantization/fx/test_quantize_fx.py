@@ -5156,6 +5156,9 @@ class TestQuantizeFx(QuantizationTestCase):
         Test whether `torch.ao.quantization.qconfig_mapping.get_symmetric_qnnpack_qconfig_mapping`
         works with the QNNPACK BackendConfig.
         """
+        if "qnnpack" not in supported_qengines:
+            return
+
         class MyModel(torch.nn.Module):
             def __init__(self):
                 super(MyModel, self).__init__()

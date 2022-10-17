@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
@@ -604,7 +605,7 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
-class NNModuleTests(torch._dynamo.testing.TestCase):
+class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
@@ -884,6 +885,6 @@ class NNModuleTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()
