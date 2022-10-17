@@ -55,11 +55,9 @@ jobs:
           conda activate pr-ci
           .jenkins/pytorch/build.sh
       - name: Checkout TorchBench
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        uses: actions/checkout@v3
         with:
-          repository: pytorch/benchmark
-          path: torchbenchmark
-          lfs: false
+          path: benchmark
           # Pin to specific version to avoid upstream breakages
           ref: 24b95f2f627bf07a61cefed653419389a7586357
       - name: Install TorchBench
