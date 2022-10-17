@@ -45,12 +45,9 @@ class DDPOptimizer:
         parameters_to_ignore: List[str],
         backend_compile_fn,
         debug=False,
-        # TODO(whc) align this with DDP, a special case to get one small bucket started early
-        first_bucket_cap: int = None,
+        first_bucket_cap: int = torch.distributed._DEFAULT_FIRST_BUCKET_BYTES,
     ):
         self.bucket_bytes_cap = bucket_bytes_cap
-        if first_bucket_cap is None:
-            first_bucket_cap = bucket_bytes_cap
         assert (
             first_bucket_cap <= bucket_bytes_cap
         ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
@@ -63,7 +60,6 @@ class DDPOptimizer:
         """
         TODO:
         - handle params_and_buffers_to_ignore
-        - handle kwargs
         """
 
         # 1: compute the partition map according to DDP bucket logic
