@@ -2433,6 +2433,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             fn(torch.randn(10), torch.randn(10))
             self.assertEqual(cur_len, len(log))
 
+    @patch.object(torch._dynamo.config, "print_graph_breaks", True)
     def test_duplicate_graph_break_warning(self):
         @torch._dynamo.optimize("eager")
         def f1(a, b):
