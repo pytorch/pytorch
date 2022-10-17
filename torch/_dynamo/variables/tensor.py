@@ -42,6 +42,10 @@ from .constant import ConstantVariable
 from .lists import ShapeVariable, SizeVariable
 
 
+class _missing:
+    pass
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -175,6 +179,15 @@ class TensorVariable(VariableTracker):
 
             options.update(specialized_props)
             return cls(proxy, **options)
+        elif (
+            hasattr(proxy.node.target, "__name__")
+            and proxy.node.target.__name__ == "set_state"
+            and isinstance(proxy.node.target.__self__, torch._C.Generator)
+            or proxy.node.target == torch.random.set_rng_state
+        ):
+            from . import TorchVariable
+
+            return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
@@ -189,8 +202,9 @@ class TensorVariable(VariableTracker):
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
             operator.mod,
-            torch.distributed.get_rank,
-            torch.distributed.get_world_size,
+            # some mac builds are missing torch.distributed.get_rank()
+            getattr(torch.distributed, "get_rank", _missing),
+            getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
             return DynamicShapeVariable(proxy, type(example_value), **options)
@@ -265,16 +279,13 @@ class TensorVariable(VariableTracker):
                     need_unwrap=False,
                     **options,
                 )
-        elif proxy.node.target == torch._C._DisableFuncTorch:
+        elif (
+            proxy.node.target == torch._C._DisableFuncTorch
+            or proxy.node.target == torch._C._cuda_isInBadFork
+        ):
             from . import UserDefinedObjectVariable
 
             return UserDefinedObjectVariable(example_value)
-        elif proxy.node.target.__name__ == "set_state" and isinstance(
-            proxy.node.target.__self__, torch._C.Generator
-        ):
-            from . import TorchVariable
-
-            return TorchVariable(proxy.node.target)
         else:
             raise AssertionError(
                 "torch.* op returned non-Tensor "
