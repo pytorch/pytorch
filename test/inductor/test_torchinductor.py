@@ -40,10 +40,10 @@ try:
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import (
+        create_static_inputs,
         has_torchvision_roi_align,
         has_triton,
         timed,
-        create_static_inputs,
     )
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
@@ -4123,7 +4123,9 @@ if HAS_CPU:
                 self.assertNotEqual(src_storage.data_ptr(), dst_storage.data_ptr())
                 src_storage.copy_(
                     torch.arange(
-                        src_storage.size(), dtype=src_storage.dtype, device=src_storage.device
+                        src_storage.size(),
+                        dtype=src_storage.dtype,
+                        device=src_storage.device,
                     ).storage()
                 )
                 dst_storage.copy_(src_storage)
