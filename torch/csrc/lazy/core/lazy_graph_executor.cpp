@@ -679,13 +679,36 @@ std::vector<Value> LazyGraphExecutor::CollectRoots(
   return roots;
 }
 
-std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
+void LazyGraphExecutor::ExtractIRAndPrepareXlaData(
     std::vector<LazyTensorPtr>* tensors,
     const SyncTensorsConfig& config,
-    c10::ArrayRef<size_t> indices) {
+    c10::ArrayRef<size_t> indices,
+    std::vector<Value>& ir_values,
+    std::vector<BackendDataPtr>& tensor_data_vec) {
+  ir_values.reserve(indices.size());
+  tensor_data_vec.reserve(indices.size());
+  for (auto index : indices) {
+    LazyTensorPtr& tensor = (*tensors)[index];
+    Value ir_value = tensor->CurrentIrValue();
+    ir_values.push_back(ir_value);
+    const BackendDevice& tensor_device = tensor->GetDevice();
+    BackendDataPtr handle = getBackend()->CreateDataPlaceholder(
+          tensor_device, std::move(tensor->shape()));
+    tensor_data_vec.push_back(handle);
+    if (tensor->CurrentDataHandle() == nullptr && config.sync_ltc_data) {
+      tensor->AssignIrValue(Value());
+    }
+  }
+}
+
+std::vector<torch::lazy::BackendDataPtr> XLATensor::SetTensorData(
+    std::vector<LazyTensorPtr>* tensors, const SyncTensorsConfig& config,
+    c10::ArrayRef<size_t>indices,
+    const std::vector<BackendDataPtr>& tensor_data_vec) {
   std::vector<BackendDataPtr> tensors_data;
   tensors_data.reserve(indices.size());
-  for (auto index : indices) {
+  for (int i = 0; i < indices.size(); i++) {
+    auto index = indices[i];
     LazyTensorPtr& tensor = (*tensors)[index];
     // If the config.force_ltc_data flag is true, the purpose of this tensor
     // sync operation is to truncate the IR graph and materialize device data in
@@ -698,11 +721,13 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
     // completes.
     BackendDataPtr handle = tensor->CurrentDataHandle();
     if (handle == nullptr && config.force_ltc_data) {
-      const BackendDevice& tensor_device = tensor->GetDevice();
-      handle = getBackend()->CreateDataPlaceholder(
-          tensor_device, std::move(tensor->shape()));
-
-      tensor->SetDataHandle(handle, config.sync_ltc_data);
+      handle = tensor_data_vec[i];
+      // Note: We are not using SetHandleData method here since that method
+      // resets the ir_value. We have already done the resetting as part
+      // of ExtractIRAndPrepareXlaData to overlap with previous execution.
+      tensor->data()->handle = handle;
+      tensor->data()->view = nullptr;
+      tensor->data()->tensor_data = c10::nullopt;
     }
     tensors_data.emplace_back(std::move(handle));
   }
@@ -710,12 +735,11 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
 }
 
 LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
-    const std::vector<LazyTensorPtr>& tensors,
+    const std::vector<Value>& ir_values
     SyncTensorCollection* coll) {
   std::vector<Node*> roots;
-  roots.reserve(coll->indices.size());
-  for (auto index : coll->indices) {
-    Value ir_value = tensors.at(index)->CurrentIrValue();
+  roots.reserve(ir_values.size());
+  for (auto ir_value : ir_values) {
     roots.push_back(ir_value.node.get());
   }
   PostOrderData po_data;
@@ -746,7 +770,8 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
 std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
     std::vector<LazyTensorPtr>* tensors,
     SyncTensorCollection* coll,
-    PostOrderData* po_data) {
+    PostOrderData* po_data,
+    const std::vector<BackendDataPtr>& tensor_data_vec) {
   ComputationCache::TypePtr cached_computation =
       LookupCachedCompile(coll->hash);
   if (cached_computation == nullptr) {
@@ -763,21 +788,22 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
       tensors,
       coll,
       std::move(po_data->parameters_data),
-      std::move(cached_computation));
+      std::move(cached_computation),
+      tensor_data_vec);
 }
 
 LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     const std::vector<LazyTensorPtr>& tensors,
     c10::ArrayRef<std::string> devices,
     const SyncTensorCollection& coll,
-    PostOrderData* po_data) {
+    PostOrderData* po_data,
+    const std::vector<Value>& ir_values) {
   auto lowering_ctx = LoweringContext::Create(
       "SyncTensorsGraph",
       coll.device,
       po_data->post_order,
       std::move(po_data->emission_map));
-  for (auto index : coll.indices) {
-    Value ir_value = tensors[index]->CurrentIrValue();
+  for (auto ir_value : ir_values) {
     lowering_ctx->AddResult(ir_value);
   }
   if (FLAGS_torch_lazy_param_aliasing && coll.config.sync_ltc_data) {
@@ -903,17 +929,23 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
     TensorCollectionBarrier(&coll);
     return nullptr;
   }
-  PostOrderData po_data = RunPostOrder(*tensors, &coll);
   DebugUtil::SaveTensorsGraphInfo(
       "ScheduleSyncTensorsGraph", *tensors, &coll.indices);
+  std::vector<Value> ir_values;
+  std::vector<BackendDataPtr> tensor_data_vec;
+  ExtractIRAndPrepareXlaData(tensors, coll.config, coll.indices, ir_values,
+                             tensor_data_vec);
+  PostOrderData po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   VLOG(4) << "Parameter sequence graph hash " << HashToString(coll.hash);
-  std::shared_ptr<Async> async = TryRunCachedSync(tensors, &coll, &po_data);
+  std::shared_ptr<Async> async = 
+      TryRunCachedSync(tensors, &coll, &po_data, tensor_data_vec);
   if (async != nullptr) {
     return async;
   }
 
-  CompilationResult compile_result = Compile(*tensors, devices, coll, &po_data);
+  CompilationResult compile_result = 
+      Compile(*tensors, devices, coll, &po_data, ir_values);
   if (GRAPH_DUMP_ENABLED) {
     auto* comp = compile_result.computation.get();
     LOG(ERROR) << "Add a cached computation with hash " << coll.hash
@@ -932,7 +964,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       tensors,
       &coll,
       std::move(compile_result.parameters_data),
-      std::move(cached_computation));
+      std::move(cached_computation),
+      tensor_data_vec);
 }
 
 std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
@@ -1010,8 +1043,13 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         std::vector<LazyTensorPtr>* tensors,
         SyncTensorCollection* coll,
         std::vector<BackendDataPtr> parameters_data,
-        ComputationCache::TypePtr cached_computation) {
-  auto tensors_data = FetchTensorData(tensors, coll->config, coll->indices);
+        ComputationCache::TypePtr cached_computation,
+        const std::vector<BackendDataPtr>& tensor_data_vec) {
+  auto tensors_data = SetTensorData(
+        tensors,
+        coll->config, 
+        coll->indices, 
+        tensor_data_vec);
   return ScheduleSyncTensorsGraph(
       coll,
       std::move(parameters_data),
@@ -1131,7 +1169,11 @@ hash_t LazyGraphExecutor::GetGraphHash(
   config.sync_ltc_data = false;
 
   auto coll = CollectSyncTensors(tensors, config);
-  auto po_data = RunPostOrder(tensors, &coll);
+  std::vector<Value> ir_values;
+  std::vector<BackendDataPtr> tensor_data_vec;
+  ExtractIRAndPrepareXlaData(tensors, coll.config, coll.indices, ir_values,
+                             tensor_data_vec);
+  auto po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   return coll.hash;
 }
