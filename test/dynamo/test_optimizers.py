@@ -98,6 +98,7 @@ optimizers = [
 for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
 
+
 class End2EndTests(torch._dynamo.test_case.TestCase):
 
     # https://github.com/pytorch/torchdynamo/issues/1604
@@ -128,11 +129,10 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_training_iter_fn = torch._dynamo.optimize(cnts)(training_iter_fn)
         batch = {"x": input1, "y": input2}
-        opt_training_iter_fn(batch, net, optimizer)
-        self.assertEqual(
-            cnts.frame_count,
-            (0 if sys.version_info < (3, 8) else 4)
-        )
+        for _ in range(2):
+            opt_training_iter_fn(batch, net, optimizer)
+        self.assertEqual(cnts.frame_count, (0 if sys.version_info < (3, 8) else 6))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
