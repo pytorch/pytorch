@@ -4116,8 +4116,8 @@ if HAS_CPU:
                 assert len(set([x.storage().data_ptr() for x in inputs])) == 1
                 assert len(set([x.storage().data_ptr() for x in static_inputs])) == 1
 
-                # Check that if src and dst storages have same new values,
-                # the view tensors have same new values too.
+                # Check that if src and dst storages have equal values,
+                # the view tensors have equal values too.
                 src_storage = inputs[0].storage()
                 dst_storage = static_inputs[0].storage()
                 self.assertNotEqual(src_storage.data_ptr(), dst_storage.data_ptr())
