@@ -19,7 +19,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from torch._dynamo import bytecode_transformation
+from torch._dynamo import bytecode_transformation, graph_break
 from torch._dynamo.testing import (
     CompileCounter,
     requires_static_shapes,
@@ -1171,6 +1171,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertFalse(True)
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn("call torch._dynamo.disable() wrapped function", str(e))
+
+    def test_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts)
+        def fn(x):
+            x = torch.cos(x)
+            x = torch.cos(x)
+            torch._dynamo.graph_break()
+            x = torch.cos(x)
+            x = torch.cos(x)
+            graph_break()
+            x = torch.cos(x)
+            x = torch.cos(x)
+            return x
+
+        fn(torch.randn(4, 5))
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.op_count, 6)
 
     def test_torch_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2414,6 +2433,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             fn(torch.randn(10), torch.randn(10))
             self.assertEqual(cur_len, len(log))
 
+    @patch.object(torch._dynamo.config, "print_graph_breaks", True)
     def test_duplicate_graph_break_warning(self):
         @torch._dynamo.optimize("eager")
         def f1(a, b):
