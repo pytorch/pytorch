@@ -115,6 +115,7 @@ add_executable(test_jit
   ${JIT_TEST_SRCS}
 )
 
+# We also build with UBSAN flag in build_asan.h
 if(USE_ASAN)
   target_compile_options(test_jit PRIVATE "-fsanitize=undefined")
   target_link_libraries(test_jit PRIVATE "-fsanitize=undefined")
