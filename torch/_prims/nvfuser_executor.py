@@ -237,6 +237,10 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
                 )
                 is not None
             )
+        if "getitem" in node.name:
+            # Check if the node unpacks a tuple from a supported node
+            node_to_unpack = node.args[0]
+            return self.is_node_supported(submodules, node_to_unpack)
         return (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is not None
