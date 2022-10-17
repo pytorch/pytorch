@@ -17695,9 +17695,6 @@ python_ref_db = [
         # This function is expected not to work with TorchRefsMode(strict=True)
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-            # There's a discrepancy in returned shape between CPU and other devices
-            # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
         ),
         skips=(
             # https://github.com/pytorch/pytorch/issues/85960
