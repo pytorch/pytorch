@@ -705,6 +705,8 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   test_dynamo_shard 2
   install_filelock
   test_dynamo
+elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
+ test_functorch
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -736,8 +738,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  test_functorch
 else
   install_torchvision
   install_torchdynamo

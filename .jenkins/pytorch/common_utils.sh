@@ -146,7 +146,7 @@ function checkout_install_torchdynamo() {
 }
 
 function test_functorch() {
-  python test/run_test.py --functorch --verbose
+  python test/run_test.py --functorch --verbose --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS"
 }
 
 function print_sccache_stats() {
