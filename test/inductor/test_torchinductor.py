@@ -35,6 +35,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import config
+    from torch._inductor import metrics
     from torch._inductor.compile_fx import compile_fx
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
@@ -3918,6 +3919,71 @@ if HAS_CPU:
         def test_timed_cpu_only(self):
             timed(lambda: torch.randn(10), ())
 
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_vec_kernel_cpu_only(self):
+            def fn(x1, x2):
+                # Current, there are some limitations as follows.
+                #   rsqrt:
+                #     assert [both a fallback and a decomp for same kernel: aten.rsqrt.default]
+                #   round:
+                #     couldn't find symbolic meta function/decomposition
+                #   fmod/logical_and/logic_or:
+                #     vec kernel has not support to_type
+                x = torch.abs(x1)
+                x = torch.sin(x)
+                x = torch.cos(x)
+                x = torch.exp(x)
+                x = torch.sqrt(x)
+                x = torch.add(x, x1)
+                x = torch.sub(x, x2)
+                x = torch.mul(x, x1)
+                x = torch.div(x, x1)
+                x = torch.pow(x, 10)
+                x = torch.log(x)
+                x = torch.floor(x)
+                x = torch.ceil(x)
+                x = torch.trunc(x)
+                x = torch.lgamma(x)
+                x = torch.fmod(x, x2)
+                res = x + x2
+                return (res,)
+
+            @contextlib.contextmanager
+            def set_simd(simd_len):
+                org_cpp_simd_len = config.cpp.simdlen
+                config.cpp.simdlen = simd_len
+                yield
+                config.cpp.simdlen = org_cpp_simd_len
+
+            x1 = torch.randn((10, 20))
+            x2 = torch.randn((10, 20))
+
+            with set_simd(8):
+                metrics.reset()
+                traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
+                compiled = compile_fx_inner(traced, [x1, x2])
+                print("<" * 20)
+                print(fn(x1, x2)[0])
+                print(">" * 20)
+                print(compiled([x1, x2])[0])
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_simd_vec_kernel_count == 1
+
+                metrics.reset()
+                x1 = x1.permute(1, 0)
+                x2 = torch.randn((20, 10))
+                traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
+                compiled = compile_fx_inner(traced, [x1, x2])
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_simd_vec_kernel_count == 0
+
+                metrics.reset()
+                x1 = torch.randn((10, 7))
+                x2 = torch.randn((10, 7))
+                traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
+                compiled = compile_fx_inner(traced, ([x1, x2]))
+                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                assert metrics.generated_simd_vec_kernel_count == 1
 
 if HAS_CUDA:
 
