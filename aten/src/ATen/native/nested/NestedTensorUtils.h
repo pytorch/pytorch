@@ -1,11 +1,22 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/ones_native.h>
+#include <ATen/ops/prod.h>
+#include <ATen/ops/stack_native.h>
+#include <ATen/ops/tensor.h>
+#endif
 
 #include <vector>
 
@@ -125,6 +136,19 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
     const at::Tensor& self) {
   const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
   return NestedTensor_get_strides(self_ptr);
+}
+
+inline void check_numel_equals_buffer_size(const at::Tensor& self) {
+  auto self_impl = get_nested_tensor_impl(self);
+  TORCH_CHECK(
+      self.numel() == self_impl -> get_buffer_size(),
+      "Number of elements in nested tensor must match number of elements in buffer.");
+}
+
+inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
+  TORCH_CHECK(
+      self_ptr-> numel() == self_ptr -> get_buffer_size(),
+      "Number of elements in nested tensor must match number of elements in buffer.");
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Data structures and functions for generically applying a function on a nested tensor.
