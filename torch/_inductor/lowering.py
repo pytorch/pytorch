@@ -1058,8 +1058,6 @@ make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell)
 make_fallback(aten.topk)
-make_fallback(aten.unfold)
-make_fallback(aten.unfold_backward)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
 
