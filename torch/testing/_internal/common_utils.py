@@ -935,14 +935,14 @@ TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
 TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
 
 if TEST_WITH_TORCHDYNAMO:
-    import torchdynamo
+    import torch._dynamo
     import logging
-    torchdynamo.config.log_level = logging.ERROR
+    torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
-    torchdynamo.config.cache_size_limit = 8
+    torch._dynamo.config.cache_size_limit = 8
 
 
-def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
+def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1674,8 +1674,23 @@ def check_if_enable(test: unittest.TestCase):
                         "windows": IS_WINDOWS,
                         "linux": IS_LINUX,
                         "rocm": TEST_WITH_ROCM,
-                        "asan": TEST_WITH_ASAN
+                        "asan": TEST_WITH_ASAN,
+                        "dynamo": TEST_WITH_TORCHDYNAMO,
                     }
+
+                    invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
+                    if len(invalid_platforms) > 0:
+                        invalid_plats_str = ", ".join(invalid_platforms)
+                        valid_plats = ", ".join(platform_to_conditional.keys())
+
+                        print(f"Test {disabled_test} is disabled for some unrecognized ",
+                              f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
+                              "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                              f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
+
+                        # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
+                        platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
+
                     if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
@@ -2016,13 +2031,13 @@ class TestCase(expecttest.TestCase):
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             if TEST_WITH_TORCHINDUCTOR:
-                super_run = torchdynamo.optimize("inductor")(super().run)
+                super_run = torch._dynamo.optimize("inductor")(super().run)
             else:
-                super_run = torchdynamo.optimize("eager")(super().run)
+                super_run = torch._dynamo.optimize("eager")(super().run)
             super_run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.
-            # torchdynamo.reset()
+            # torch._dynamo.reset()
         else:
             super().run(result=result)
 
