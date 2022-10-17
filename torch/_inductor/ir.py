@@ -2865,7 +2865,7 @@ class FallbackKernel(ExternKernelAlloc):
             device = x.get_device()
             arg = torch.empty_strided(
                 size=size, stride=stride, dtype=dtype, device=device
-            )
+            ).zero_()
             example_args.append(arg)
 
         example_output = kernel(
