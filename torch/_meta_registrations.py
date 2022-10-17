@@ -235,6 +235,11 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
+@register_meta(aten.bernoulli_.float, register_dispatcher=False)
+def meta_bernoulli_(self, p=0.5, generator=None):
+    return self
+
+
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
 def meta__fused_moving_avg_obs_fq_helper(
     self,
@@ -257,11 +262,6 @@ def meta__fused_moving_avg_obs_fq_helper(
     )
     mask = self.empty_like(dtype=torch.bool)
     return (self.empty_like(), mask)
-
-
-@register_meta(aten.bernoulli_.float, register_dispatcher=False)
-def meta_bernoulli_(self, p=0.53841497, generator=None):
-    return self
 
 
 def dot_check(self, other):
