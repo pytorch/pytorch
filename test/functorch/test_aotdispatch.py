@@ -757,6 +757,62 @@ class TestPartitioning(AOTTestCase):
         ins, outs = get_ins_outs(fw_graph)
         self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_recomputable_ops(self):
+        def f(x):
+            return x * x * x
+
+        recomputable_ops = []
+        partition_fn = partial(min_cut_rematerialization_partition, recomputable_ops=recomputable_ops)
+
+        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, requires_grad=True)], partition_fn)
+        # Expected forward graph:
+        # opcode         name       target           args                        kwargs
+        # -------------  ---------  ---------------  --------------------------  --------
+        # placeholder    primals_1  primals_1        ()                          {}
+        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)      {}
+        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)            {}
+        # output         output     output           ([mul_1, primals_1, mul],)  {}
+        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
+        # Expected backward graph:
+        # opcode         name        target           args                     kwargs
+        # -------------  ----------  ---------------  -----------------------  --------
+        # placeholder    primals_1   primals_1        ()                       {}
+        # placeholder    mul         mul              ()                       {}
+        # placeholder    tangents_1  tangents_1       ()                       {}
+        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
+        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
+        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
+        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
+        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
+        # output         output      output           ([add_1],)               {}
+        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
+
+        recomputable_ops = [torch.ops.aten.mul]
+        partition_fn = partial(min_cut_rematerialization_partition, recomputable_ops=recomputable_ops)
+        fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, requires_grad=True)], partition_fn)
+        # Expected forward graph:
+        # opcode         name       target           args                    kwargs
+        # -------------  ---------  ---------------  ----------------------  --------
+        # placeholder    primals_1  primals_1        ()                      {}
+        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)  {}
+        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)        {}
+        # output         output     output           ([mul_1, primals_1],)   {}
+        self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
+        # Expected backward graph:
+        # opcode         name        target           args                     kwargs
+        # -------------  ----------  ---------------  -----------------------  --------
+        # placeholder    primals_1   primals_1        ()                       {}
+        # placeholder    tangents_1  tangents_1       ()                       {}
+        # call_function  mul         aten.mul.Tensor  (primals_1, primals_1)   {} # RECOMPUTED
+        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
+        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
+        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
+        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
+        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
+        # output         output      output           ([add_1],)               {}
+        self.assertEqual(get_num_ins_outs(bw_graph), (2, 1))
+
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
@@ -899,13 +955,13 @@ aot_autograd_failures = {
     skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
     skip('nn.functional.margin_ranking_loss'),  # seems flaky
     skip('linalg.lu_solve'),  # flaky
+    skip('linalg.householder_product'),  # flaky
     decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
 }
 
 symbolic_aot_autograd_failures = {
     xfail('__rmatmul__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('addbmm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addcdiv', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('addr', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -961,12 +1017,10 @@ symbolic_aot_autograd_failures = {
     xfail('fmax', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('fmin', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('index_select', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1037,7 +1091,6 @@ symbolic_aot_autograd_failures = {
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('max', 'reduction_no_dim'),  # aten.logical_or_.default - couldn't find symbolic meta function/dec...
     xfail('max', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('mean', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('median', ''),  # could not find kernel
     xfail('meshgrid', 'list_of_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
@@ -1088,8 +1141,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'nearest'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
-    xfail('nn.functional.kl_div', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.l1_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.local_response_norm', ''),  # aten.fill.Scalar - couldn't find symbolic meta functio...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.max_pool2d', ''),  # aten.max_pool2d_with_indices_backward.default - couldn't find s...
@@ -1103,7 +1154,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.mse_loss', ''),  # Unable to cast Python instance to C++ type (#define PYBIND11_DETA...
     xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
-    xfail('nn.functional.multilabel_soft_margin_loss', ''),  # Cannot call sizes() on tensor with symbolic si...
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pad', 'circular'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1113,12 +1163,9 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pdist', ''),  # could not find kernel
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('nn.functional.poisson_nll_loss', ''),  # aten.add_.Tensor - couldn't find symbolic meta function/d...
     xfail('nn.functional.prelu', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
-    xfail('nn.functional.triplet_margin_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.triplet_margin_with_distance_loss', ''),  # Cannot call sizes() on tensor with symbo...
     xfail('nn.functional.unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1147,7 +1194,6 @@ symbolic_aot_autograd_failures = {
     xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decompos...
-    xfail('scatter_add', ''),  # aten.scatter_add.default - couldn't find symbolic meta function/decomposition
     xfail('scatter', ''),  # aten.scatter.src - couldn't find symbolic meta function/decomposition
     xfail('scatter_reduce', 'amax'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decom...
     xfail('scatter_reduce', 'amin'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decom...
@@ -1161,8 +1207,6 @@ symbolic_aot_autograd_failures = {
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('special.xlog1py', ''),  # aten.special_xlog1py.default - couldn't find symbolic meta function/deco...
     xfail('split', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('split', 'list_args'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('split_with_sizes', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1180,8 +1224,6 @@ symbolic_aot_autograd_failures = {
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('unbind', ''),  # tensor_split() received an invalid combination of arguments - got (FakeTensor, torch...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('unfold_copy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('var', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/deco...
