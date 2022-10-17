@@ -31,6 +31,7 @@ from torch.testing._internal.common_quantization import (
     LSTMwithHiddenDynamicModel,
     SparseNNModel,
     skip_if_no_torchvision,
+    TwoLayerLinearModel
 )
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
@@ -2097,6 +2098,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         results = extract_results_n_shadows_model(msq)
         print_comparisons_n_shadows_model(results)
+        return msq
 
     def test_linear_mod(self):
         class M(nn.Module):
@@ -2288,23 +2290,87 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         ]
         self._test_impl(m, example_input, qconfig_mappings)
 
-    def test_qconfig_multi_mapping(self):
-        class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(2, 2)
+    def test_qconfig_multi_mapping_deduplication(self):
+        # check that insertion deduplicates qconfigs
+        qconfig_multi_mapping = QConfigMultiMapping() \
+                .set_global([torch.quantization.default_qconfig, torch.quantization.default_qconfig])
+        self.assertEqual(len(qconfig_multi_mapping.qconfig_mappings_list),1)
 
-            def forward(self, x):
-                x = self.fc1(x)
-                return x
+    def test_qconfig_multi_mapping_insert_padding(self):
+        # test that inserting a higher priority qconfig style with fewer elements than a lower priority qconfig will
+        # result in adding None to the extra QConfigMappings at that same style+key
+        qconfig_multi_mapping = QConfigMultiMapping() \
+                .set_global([torch.quantization.default_qconfig, torch.quantization.default_dynamic_qconfig]) \
+                .set_object_type(torch.nn.Linear, [torch.quantization.default_qconfig]) \
+                .set_module_name_regex("fc", [torch.quantization.default_qconfig]) \
+                .set_module_name("fc2", [torch.quantization.default_qconfig]) \
+                .set_module_name_object_type_order("", nn.Linear, 0, [torch.quantization.default_qconfig])
 
-        m = M().eval()
-        example_input = (torch.randn(2, 2),)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].object_type_qconfigs[torch.nn.Linear], None)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_regex_qconfigs["fc"], None)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"], None)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_object_type_order_qconfigs[("", nn.Linear, 0)], None)
 
-        qconfig_multi_mapping = QConfigMultiMapping(2) \
+    def test_qconfig_multi_mapping_retroactive_padding(self):
+        # test that inserting a lower priority qconfig style with more elements thhan lower priority qconfig styles
+        # will result in the new QConfigMapping having None at all previously existing styles+keys
+        qconfig_multi_mapping = QConfigMultiMapping() \
+                .set_object_type(torch.nn.Linear, [torch.quantization.default_qconfig]) \
+                .set_module_name_regex("fc", [torch.quantization.default_qconfig]) \
+                .set_module_name("fc2", [torch.quantization.default_qconfig]) \
+                .set_module_name_object_type_order("", nn.Linear, 0, [torch.quantization.default_qconfig]) \
                 .set_global([torch.quantization.default_qconfig, torch.quantization.default_dynamic_qconfig])
 
-        self._test_impl(m, example_input, qconfig_multi_mapping)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].object_type_qconfigs[torch.nn.Linear], None)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_regex_qconfigs["fc"], None)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"], None)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_object_type_order_qconfigs[("", nn.Linear, 0)], None)
+
+    def test_qconfig_multi_mapping_end_to_end(self):
+        # test that matching works as expected with QConfigMultiMapping
+
+        m = TwoLayerLinearModel().eval()
+        example_input = m.get_example_inputs()
+
+        qconfig_multi_mapping = QConfigMultiMapping() \
+                .set_global([torch.quantization.default_qconfig, torch.quantization.default_dynamic_qconfig]) \
+                .set_module_name("fc2", [torch.quantization.default_qconfig])
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"], None)
+        msq = self._test_impl(m, example_input, qconfig_multi_mapping)
+
+        self.checkQuantizedLinear(msq.shadow_wrapper_0_1.mod_0)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
+        self.checkQuantizedLinear(msq.shadow_wrapper_1_1.mod_0)
+        self.assertRaisesRegex(
+            AttributeError,
+            ".*",
+            lambda: msq.shadow_wrapper_1_2
+        )
+
+    def test_qconfig_multi_mapping_from_list(self):
+        # test QConfigMultiMapping.from_list_qconfig_mapping works as expected
+        m = TwoLayerLinearModel().eval()
+        example_input = m.get_example_inputs()
+
+        qconfig_mappings_list = [
+            QConfigMapping().set_global(torch.quantization.default_qconfig),
+            QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig) \
+                .set_module_name("fc2", torch.quantization.default_qconfig)
+        ]
+
+        qconfig_multi_mapping = QConfigMultiMapping().from_list_qconfig_mapping(qconfig_mappings_list)
+        self.assertEqual(qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"], None)
+
+        msq = self._test_impl(m, example_input, qconfig_multi_mapping)
+
+        self.checkQuantizedLinear(msq.shadow_wrapper_0_1.mod_0)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
+        self.checkQuantizedLinear(msq.shadow_wrapper_1_1.mod_0)
+        self.assertRaisesRegex(
+            AttributeError,
+            ".*",
+            lambda: msq.shadow_wrapper_1_2
+        )
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
