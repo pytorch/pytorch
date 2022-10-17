@@ -258,13 +258,12 @@ def _single_tensor_nadam(params: List[Tensor],
             exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
             value_grad = 1.0
             value_exp_avg = 1.0
+            param.addcdiv_(grad, denom, value=1.0)
+            param.addcdiv_(exp_avg, denom, value=1.0)
         else:
             denom.add_(eps)
-            value_grad = (-lr * (1. - mu) / (1. - mu_product)).item()
-            value_exp_avg = (-lr * mu_next / (1. - mu_product_next)).item()
-
-        param.addcdiv_(grad, denom, value=value_grad)
-        param.addcdiv_(exp_avg, denom, value=value_exp_avg)
+            param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product.item()))
+            param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next.item()))
 
 
 def _multi_tensor_nadam(params: List[Tensor],
