@@ -430,7 +430,7 @@ class NNModuleVariable(VariableTracker):
                 proxy=tx.output.create_proxy(
                     "call_method",
                     name,
-                    args=tuple([proxy_for_mod, *proxy_args]),
+                    args=(proxy_for_mod, *proxy_args),
                     kwargs=proxy_kwargs,
                     current_tx=tx,
                 ),
