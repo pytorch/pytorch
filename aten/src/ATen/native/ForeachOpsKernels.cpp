@@ -223,8 +223,26 @@ void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors
         input, tensors1, tensors2, scalars);                               \
   }
 
+#define FOREACH_TERNARY_OP(OP)                                                                                           \
+std::vector<Tensor> foreach_tensor_##OP##_ternary_slow(TensorList tensors1, TensorList tensors2, TensorList tensors3) {  \
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
+  std::vector<Tensor> result;                                                                                            \
+  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
+    result.emplace_back(tensors1[i].OP(tensors2[i], tensors3[i]));                                                       \
+  }                                                                                                                      \
+  return result;                                                                                                         \
+}                                                                                                                        \
+                                                                                                                         \
+void foreach_tensor_##OP##_ternary_slow_(TensorList tensors1, TensorList tensors2, TensorList tensors3) {                \
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
+  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
+    tensors1[i].OP##_(tensors2[i], tensors3[i]);                                                                         \
+  }                                                                                                                      \
+}                                                                                                                        \
+
 FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
+FOREACH_BINARY_OP_LIST_ALPHA(lerp);
 
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);
@@ -282,6 +300,8 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 
 FOREACH_POINTWISE_OP_TENSOR(addcdiv);
 FOREACH_POINTWISE_OP_TENSOR(addcmul);
+
+FOREACH_TERNARY_OP(lerp);
 
 void foreach_tensor_zero_slow_(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
