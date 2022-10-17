@@ -2,7 +2,7 @@
 def _named_members(mod, get_members_fn, prefix='', recurse=True, remove_duplicate=True):
     r"""Helper method for yielding various names + members of modules."""
     memo = set()
-    modules = mod.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, mod)]
+    modules = mod.named_modules(prefix=prefix) if recurse else [(prefix, mod)]
     for module_prefix, module in modules:
         members = get_members_fn(module)
         for k, v in members:
