@@ -9,19 +9,26 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C._autograd import (
+from torch._C._profiler import (
     _add_execution_graph_observer,
     _disable_execution_graph_observer,
     _enable_execution_graph_observer,
+    _ExperimentalConfig,
     _remove_execution_graph_observer,
 )
-from torch._C._profiler import _ExperimentalConfig
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler import _memory_profiler
 
 
-__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
-           'ExecutionGraphObserver']
+__all__ = [
+    "supported_activities",
+    "ProfilerAction",
+    "schedule",
+    "tensorboard_trace_handler",
+    "profile",
+    "ExecutionGraphObserver",
+]
+
 
 def supported_activities():
     """
