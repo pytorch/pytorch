@@ -1074,11 +1074,14 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
+    is_cpu = all(
+        input.get_device().type == "cpu" for input in (x, w, bias) if input is not None
+    )
     result = TensorBox.create(
         ir.Convolution.create(
             x,
             weight,
-            None,  # bias handled below
+            bias if inputs_is_cpu else None,  # For cpu path, bias can always be fused
             stride,
             padding,
             dilation,
@@ -1087,7 +1090,7 @@ def convolution(
             groups,
         )
     )
-    if bias is not None:
+    if not is_cpu and bias is not None:
         kernel_dims = len(weight.get_size()) - 2
         out_chan = result.get_size()[-1 - kernel_dims]
         bias = view(bias, [out_chan] + kernel_dims * [1])
