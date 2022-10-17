@@ -123,22 +123,18 @@ function clone_pytorch_xla() {
   fi
 }
 
-function install_torchdynamo() {
-  local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@${commit}"
+function install_filelock() {
+  pip_install filelock
 }
 
-function checkout_install_torchdynamo() {
+function install_triton() {
   local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pushd ..
-  git clone https://github.com/pytorch/torchdynamo
-  pushd torchdynamo
-  git checkout "${commit}"
-  time python setup.py develop
-  popd
-  popd
+  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    echo "skipping triton due to rocm"
+  else
+    commit=$(get_pinned_commit triton)
+    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+  fi
 }
 
 function setup_torchdeploy_deps(){
@@ -152,7 +148,7 @@ function setup_torchdeploy_deps(){
   sudo rm -rf /var/lib/apt/lists/*
   export CC=$(which gcc)
   export CXX=$(which g++)
-  python -m pip install --upgrade pip
+  pip install --upgrade pip
 }
 
 function checkout_install_torchdeploy() {
@@ -165,7 +161,7 @@ function checkout_install_torchdeploy() {
   git checkout 93e516fd66794f4989a45d02aa8865756da56525
   python multipy/runtime/example/generate_examples.py
   git submodule update --init --recursive
-  time python -m pip install -e . --install-option="--abicxx"
+  pip install -e . --install-option="--abicxx"
   popd
   popd
 }
