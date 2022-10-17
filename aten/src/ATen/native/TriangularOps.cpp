@@ -1,13 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
-#include <ATen/native/Resize.h>
 #include <ATen/native/TriangularOpsUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/trace_backward_native.h>
+#include <ATen/ops/tril_native.h>
+#include <ATen/ops/triu_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace meta {

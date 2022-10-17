@@ -1,12 +1,27 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorProperties.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/NamedTensorUtils.h>
-#include <torch/library.h>
-#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorProperties.h>
 
-#include <ATen/Config.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_nested_tensor_size_native.h>
+#include <ATen/ops/contiguous_native.h>
+#include <ATen/ops/cudnn_is_acceptable_native.h>
+#include <ATen/ops/detach_native.h>
+#include <ATen/ops/equal.h>
+#include <ATen/ops/is_same_size_native.h>
+#include <ATen/ops/is_set_to_native.h>
+#include <ATen/ops/size_native.h>
+#include <ATen/ops/stride_native.h>
+#endif
+
 #include <c10/util/irange.h>
+
 namespace at {
 namespace native {
 
