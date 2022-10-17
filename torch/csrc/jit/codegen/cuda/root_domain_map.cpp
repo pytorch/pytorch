@@ -102,8 +102,10 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
     }
 
     // In exact mapping, do not map broadcast domains with
-    // non-broadcast domains
-    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast()) {
+    // non-broadcast domains, except with a broadcast producer and a
+    // consumer trivial reduction
+    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast() &&
+        !(producer_id->isBroadcast() && consumer_id->isTrivialReduction())) {
       itc++;
       itp++;
       continue;
@@ -141,21 +143,23 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
 
   const auto& new2old = top->new2old();
   for (const auto i : c10::irange(consumer_root.size())) {
-    IterDomain* map_key_id = producer_root[new2old[i]];
-    IterDomain* map_value_id = consumer_root[i];
+    IterDomain* producer_id = producer_root[new2old[i]];
+    IterDomain* consumer_id = consumer_root[i];
 
     // In exact mapping, do not map broadcast domains with
-    // non-broadcast domains
-    if (is_exact_ && map_key_id->isBroadcast() != map_value_id->isBroadcast()) {
+    // non-broadcast domains, except with a broadcast producer and a
+    // consumer trivial reduction
+    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast() &&
+        !(producer_id->isBroadcast() && consumer_id->isTrivialReduction())) {
       continue;
     }
 
     if (!producer_to_consumer) {
-      std::swap(map_key_id, map_value_id);
+      std::swap(producer_id, consumer_id);
     }
 
-    if (root_dims_to_map.find(map_key_id) != root_dims_to_map.end()) {
-      dom_map.insert(std::make_pair(map_key_id, map_value_id));
+    if (root_dims_to_map.find(producer_id) != root_dims_to_map.end()) {
+      dom_map.insert(std::make_pair(producer_id, consumer_id));
     }
   }
   return dom_map;

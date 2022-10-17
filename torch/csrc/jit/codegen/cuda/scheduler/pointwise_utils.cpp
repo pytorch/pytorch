@@ -13,7 +13,8 @@ bool DomainMap::areAllInputIdsMappedTo(TensorView* input_tv, TensorView* tv)
   std::unordered_set<IterDomain*> in_concrete_ids;
   for (auto in_id : input_tv->getMaybeRFactorDomain()) {
     auto concrete = ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT);
-    if (!concrete->isBroadcast() && !in_id->isReduction()) {
+    if (!concrete->isBroadcast() && !in_id->isReduction() &&
+        !concrete->isTrivialReduction()) {
       in_concrete_ids.insert(concrete);
     }
   }
