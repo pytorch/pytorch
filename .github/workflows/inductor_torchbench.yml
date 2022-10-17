@@ -53,7 +53,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/miniconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          USE_MKL=0 .jenkins/pytorch/build.sh
+          USE_MKL=0 python setup.py install
       - name: Checkout TorchBench
         uses: actions/checkout@v3
         with:
