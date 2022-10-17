@@ -5131,8 +5131,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // eg. if both are BatchedTensor at different level.
   if (areAnyTensorSubclassLike({input, tau, K})) {
     // k + 1 if input_grads hold a matrix of zeros for inactive parts of input.
-    auto input_grads =
-        std::vector<Tensor>(k < input.size(-1) ? k + 1 : k);
+    auto input_grads = std::vector<Tensor>(k < input.size(-1) ? k + 1 : k);
     auto tau_grads = std::vector<Tensor>(k);
 
     for (const auto i_idx : c10::irange(k)) {
