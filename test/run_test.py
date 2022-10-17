@@ -514,9 +514,6 @@ def test_distributed(test_module, test_directory, options):
     else:
         which_shard = num_shards = 1
     # Round-robin all backends to different shards
-    backend_to_shard = {backend: i % num_shards + 1
-                        for i, backend in enumerate(DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS[test_module])}
-    print_to_stderr(f"Map different backends to different shards for {test_module}: {backend_to_shard}")
 
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
@@ -525,9 +522,6 @@ def test_distributed(test_module, test_directory, options):
         if backend == "mpi" and not mpi_available:
             continue
         # Default to the first shard if seeing an unrecognized backend
-        if which_shard != backend_to_shard.get(backend, 1):
-            print_to_stderr(f"Shard {which_shard}: {backend} should be run in {backend_to_shard.get(backend, 1)}")
-            continue
         for with_init_file in {True, False}:
             if sys.platform == "win32" and not with_init_file:
                 continue
@@ -689,6 +683,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
+    "test_cuda_nvml_based_avail": run_test_with_subprocess,
     "test_cuda_trace": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
@@ -933,8 +928,7 @@ def get_selected_tests(options, test_times: Dict[str, float]) -> List[TestJob]:
 
     if options.distributed_tests:
         selected_tests = list(
-            filter(lambda test_name: (test_name in DISTRIBUTED_TESTS and
-                                      test_name not in DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS),
+            filter(lambda test_name: (test_name in DISTRIBUTED_TESTS),
                    selected_tests)
         )
 
@@ -1026,7 +1020,6 @@ def get_selected_tests(options, test_times: Dict[str, float]) -> List[TestJob]:
 
     if options.distributed_tests:
         # Run distributed tests with multiple backends across all shards, one per backend
-        selected_tests.extend(DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS.keys())
         selected_tests.reverse()
 
     return selected_tests
