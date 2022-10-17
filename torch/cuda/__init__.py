@@ -79,13 +79,24 @@ def _is_compiled() -> bool:
     r"""Returns true if compile with CUDA support."""
     return hasattr(torch._C, '_cuda_getDeviceCount')
 
+def _nvml_based_avail() -> bool:
+    return os.getenv('PYTORCH_NVML_BASED_CUDA_CHECK') == '1'
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
     if not _is_compiled():
         return False
-    # This function never throws and returns 0 if driver is missing or can't
-    # be initialized
-    return torch._C._cuda_getDeviceCount() > 0
+    if _nvml_based_avail():
+        # The user has set an env variable to request this availability check that attempts to avoid fork poisoning by
+        # using NVML at the cost of a weaker CUDA availability assessment. Note that if NVML discovery/initialization
+        # fails, this assessment falls back to the default CUDA Runtime API assessment (`cudaGetDeviceCount`)
+        return device_count() > 0
+    else:
+        # The default availability inspection never throws and returns 0 if the driver is missing or can't
+        # be initialized. This uses the CUDA Runtime API `cudaGetDeviceCount` which in turn initializes the CUDA Driver
+        # API via `cuInit`
+        return torch._C._cuda_getDeviceCount() > 0
+
 
 def is_bf16_supported():
     r"""Returns a bool indicating if the current CUDA/ROCm device supports dtype bfloat16"""
@@ -224,6 +235,8 @@ def _lazy_init():
                 "libcudart functions unavailable. It looks like you have a broken build?")
         # This function throws if there's a driver initialization error, no GPUs
         # are found or any other error occurs
+        if 'CUDA_MODULE_LOADING' not in os.environ:
+            os.environ['CUDA_MODULE_LOADING'] = 'LAZY'
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
