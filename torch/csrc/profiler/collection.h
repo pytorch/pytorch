@@ -75,6 +75,7 @@ using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
 
 struct TORCH_API RawTensorMetadata {
   RawTensorMetadata() = default;
+  RawTensorMetadata(const RawTensorMetadata&) = default;
   explicit RawTensorMetadata(const at::Tensor& t);
   TensorImplAddress impl_;
   StorageImplData data_;
@@ -236,12 +237,18 @@ using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
 using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
 
+struct ParameterInfo {
+  std::string param_name_;
+  TensorMetadata param_;
+  c10::optional<TensorMetadata> grad_;
+};
+
 struct NNModuleInfo {
   PyModuleSelf self_;
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<std::pair<std::string, TensorMetadata>> params_;
+  std::vector<ParameterInfo> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };

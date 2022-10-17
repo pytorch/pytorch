@@ -116,8 +116,8 @@ class HandleTrainingState(Enum):
 class HandleConfig:
     sharding_strategy: HandleShardingStrategy
     offload_params: bool
-    param_dtype: Optional[torch.dtype]
-    reduce_dtype: Optional[torch.dtype]
+    low_prec_param_dtype: Optional[torch.dtype]
+    low_prec_reduce_dtype: Optional[torch.dtype]
     keep_low_precision_grads: Optional[bool] = False
 
 
@@ -773,8 +773,8 @@ class FlatParamHandle:
             # that  `_full_param_padded` is in the low precision
             unsharded_flat_param = flat_param._full_prec_full_param_padded  # type: ignore[attr-defined]
             p_assert(
-                unsharded_flat_param.dtype != self._config.param_dtype,
-                f"Expects full precision but got {self._config.param_dtype}",
+                unsharded_flat_param.dtype != self._config.low_prec_param_dtype,
+                f"Expects full precision but got {self._config.low_prec_param_dtype}",
             )
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
@@ -909,22 +909,26 @@ class FlatParamHandle:
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
                     flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
-                    # If we're using mixed precision with keeping grads
-                    # casted, gradient here might still be of the reduced
-                    # dtype if we didn't clear / set the gradients to None
-                    # after previous backward. In that case, make sure
-                    # p._saved_grad_shard is cast to the full precision type
-                    # so that we can accumulate in full precision in
-                    # _post_backward_hook and assign back in full precision
-                    # in _wait_for_post_backward.
-                    if (
-                        self._config.keep_low_precision_grads
-                        and flat_param._saved_grad_shard.dtype  # type: ignore[attr-defined]
-                        != flat_param._local_shard.dtype  # type: ignore[attr-defined]
-                    ):
-                        flat_param._saved_grad_shard = flat_param._saved_grad_shard.to(  # type: ignore[attr-defined]
-                            flat_param._local_shard.dtype  # type: ignore[attr-defined]
-                        )
+                    sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+                else:
+                    p_assert(
+                        hasattr(flat_param, "_cpu_grad"),
+                        "`_cpu_grad` should be defined if the gradient is on CPU"
+                    )
+                    sharded_grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+                # If user specified to keep the gradient in low precision, then
+                # the gradient may still be of the low precision dtype if the
+                # user did not set the gradient to `None` after the previous
+                # backward, in which case FSDP should cast back to the full
+                # precision dtype so that FSDP can accumulate in that dtype in
+                # the post-backward hook and assign to `.grad` in that dtype in
+                # the post-backward callback.
+                local_shard_dtype = flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                if (
+                    self._config.keep_low_precision_grads
+                    and sharded_grad.dtype != local_shard_dtype
+                ):
+                    sharded_grad.data = sharded_grad.to(local_shard_dtype)
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
@@ -940,6 +944,13 @@ class FlatParamHandle:
         Prepares the gradient for optimizer computation by moving the sharded
         gradient to the ``.grad`` attribute.
         """
+        def cast_grad_to_param_dtype_if_needed(flat_param):
+            if self._config.keep_low_precision_grads:
+                assert flat_param.grad is not None  # mypy
+                # This cast is meaningful when `param_dtype` is a low precision
+                # dtype.
+                flat_param.grad.data = flat_param.grad.to(self._config.low_prec_param_dtype)
+
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
         # the logical intention more directly.
@@ -948,6 +959,7 @@ class FlatParamHandle:
             self._check_sharded(flat_param)
             self._check_on_cpu(flat_param)
             flat_param.grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+            cast_grad_to_param_dtype_if_needed(flat_param)
         elif hasattr(flat_param, "_saved_grad_shard"):
             self._check_sharded(flat_param)
             self._check_on_compute_device(flat_param)
@@ -956,9 +968,7 @@ class FlatParamHandle:
             # no need to forward `_saved_grad_shard` to `grad`
             if flat_param._post_backward_called:  # type: ignore[attr-defined]
                 flat_param.grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-                if self._config.keep_low_precision_grads:
-                    assert flat_param.grad is not None  # mypy
-                    flat_param.grad.data = flat_param.grad.to(self._config.param_dtype)
+                cast_grad_to_param_dtype_if_needed(flat_param)
         else:
             p_assert(
                 not self.uses_sharded_strategy
@@ -1623,7 +1633,7 @@ class FlatParamHandle:
 
     @property
     def _uses_param_mixed_precision(self) -> bool:
-        return self._config.param_dtype is not None
+        return self._config.low_prec_param_dtype is not None
 
     @property
     def _force_full_precision(self) -> bool:

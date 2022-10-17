@@ -4627,9 +4627,9 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
     shapes = ((0, 1, 5, 5), (1, 1, 5, 5), (2, 3, 5, 5))
-    kernel_sizes = (2, (2, 2), (3, 3))
+    kernel_sizes = (2, (2, 2), (3, 3), (2, 3))
     dilations = (1, 2, (1, 2))
-    paddings = (0, 1, (1, 1))
+    paddings = (0, 1, (1, 1), (1, 2))
     strides = (1, 2, (1, 2))
 
     cases = product(shapes, kernel_sizes, dilations, paddings, strides)
@@ -6246,12 +6246,11 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
     for input_shape, output_shape in sample_shapes:
-        input_t = make_arg(input_shape)
-        yield SampleInput(input_t, args=(output_shape,))
+        yield SampleInput(make_arg(input_shape), args=(output_shape,))
         if output_shape == ():
             continue
-        yield SampleInput(input_t, args=(list(output_shape),))
-        yield SampleInput(input_t, args=(*output_shape,))
+        yield SampleInput(make_arg(input_shape), args=(list(output_shape),))
+        yield SampleInput(make_arg(input_shape), args=(*output_shape,))
 
 
 def error_inputs_sum_to_size(op_info, device, **kwargs):
@@ -9035,11 +9034,6 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),
-               # AssertionError: Tensor-likes are not close!
-               # Mismatched elements: 5 / 5 (100.0%)
-               # https://github.com/pytorch/pytorch/issues/85409
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
            )),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
@@ -10244,7 +10238,7 @@ op_db: List[OpInfo] = [
     OpInfo('max',
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=False,
+           supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
