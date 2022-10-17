@@ -848,6 +848,20 @@ def forward(self, a_1):
     detach = torch.ops.aten.detach.default(empty);  empty = None
     return detach""")
 
+    def test_sqrt_size(self):
+        def f(a):
+            return a / a.size(-1) ** 0.5
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
+    div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
+    return div""")
+
+
     def test_symint_to_tensor(self):
         def f(a):
             return a / a.shape[0]
