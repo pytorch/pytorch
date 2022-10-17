@@ -899,6 +899,45 @@ class TestOperators(TestCase):
 
         self._test_reduction_equality(device, dtype, op, layout)
 
+    @ops([op for op in reduction_ops if op.name in ("std", "var")],
+         allowed_dtypes=MASKEDTENSOR_FLOAT_TYPES)  # type: ignore[arg-type]
+    @parametrize("layout", [torch.strided, torch.sparse_coo, torch.sparse_csr])
+    def test_std_var(self, device, dtype, op, layout):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for sample in samples:
+            input = sample.input
+            if input.dim() == 0 or input.numel() == 0:
+                continue
+
+            mask = _make_tensor_mask(input.shape, device)
+
+            if torch.count_nonzero(mask) == 0:
+                continue
+
+            def extract_dim_arg(dim=None, *args, **kwargs):
+                return dim
+            dim = extract_dim_arg(*sample.args, **sample.kwargs)
+
+            zeroed_input = torch.where(mask, input, 0)
+            fill_value = torch.mean(sample.input, dim=dim, keepdim=True)
+            tensor_input = torch.where(mask, input, fill_value)
+
+            if layout == torch.sparse_coo:
+                mask = mask.to_sparse_coo().coalesce()
+                input = input.sparse_mask(mask)
+            elif layout == torch.sparse_csr:
+                if input.ndim != 2 or mask.ndim != 2:
+                    continue
+                mask = mask.to_sparse_csr()
+                input = input.sparse_mask(mask)
+
+            mt = masked_tensor(input, mask)
+            mt_result = op(mt, *sample.args, **sample.kwargs)
+            t_result = op(tensor_input, *sample.args, **sample.kwargs)
+
+            _compare_mt_t(mt_result, t_result)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
