@@ -1,8 +1,12 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <limits>
 #include <algorithm>
-#include <ATen/ATen.h>
+#include <climits>
 #include <ATen/Config.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/util/Exception.h>
+#include <c10/util/complex.h>
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);

@@ -29,13 +29,16 @@ def buffer_reuse_key(node: ir.Buffer):
 
 def make_buffer_reuse(old, new):
     assert old.get_dtype() == new.get_dtype()
+    del_line = ""
+    if old.get_name() not in V.graph.get_output_names():
+        del_line = f"; del {old.get_name()}"
     if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
-        return f"{new.get_name()} = {old.get_name()}; del {old.get_name()}"
+        return f"{new.get_name()} = {old.get_name()}{del_line}"
 
     return (
         f"{new.get_name()} = as_strided({old.get_name()}, "
         f"{V.graph.sizevars.codegen_shape_tuple(new.get_size())}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}); del {old.get_name()}"
+        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}){del_line}"
     )
 
 
@@ -128,10 +131,8 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        if self.reused_as.get_name() in V.graph.removed_buffers:
-            # we hit this case only for inplace buffers
-            return FreeLine(self.node).plan(state)
         assert self.node.get_name() not in V.graph.removed_buffers
+        assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 
     def codegen(self, code: IndentedBuffer):
@@ -179,6 +180,7 @@ class WrapperCodeGen(CodeGen):
                 from {codecache.__name__} import AsyncCompile
 
                 aten = torch.ops.aten
+                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 async_compile = AsyncCompile()
 
             """
@@ -217,15 +219,20 @@ class WrapperCodeGen(CodeGen):
                 )
 
         self.prefix.splice(
-            f"""
+            """
 
             async_compile.wait(globals())
             del async_compile
 
-            def call({', '.join(V.graph.graph_inputs.keys())}):
+            def call(args):
             """
         )
         with self.prefix.indent():
+            inp_len = len(V.graph.graph_inputs.keys())
+            if inp_len != 0:
+                lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
+                self.prefix.writeline(f"{lhs} = args")
+                self.prefix.writeline("args.clear()")
             for name in V.graph.randomness_seeds:
                 self.prefix.writeline(
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
@@ -257,6 +264,12 @@ class WrapperCodeGen(CodeGen):
             return
         self.allocated.add(name)
 
+        if isinstance(
+            buffer,
+            (ir.ExternKernelAlloc, ir.MultiOutput),
+        ):
+            return
+
         layout = buffer.get_layout()
         if isinstance(layout, ir.MutationLayout):
             return
@@ -275,6 +288,12 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
+
+        # can be freed but not reused
+        if isinstance(buffer, ir.InputBuffer):
+            self.writeline(f"del {name}")
+            return
+
         if not self.can_reuse(buffer):
             return
         self.freed.add(name)
@@ -380,7 +399,7 @@ class WrapperCodeGen(CodeGen):
                 )
 
             output.writeline(
-                f"print_performance(lambda: call({', '.join(V.graph.graph_inputs.keys())}))"
+                f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
             )
 
     def define_kernel(self, name: str, kernel: str):
