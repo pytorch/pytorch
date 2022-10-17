@@ -2344,8 +2344,9 @@ class ExternKernel(InputsKernel):
         if config.size_asserts:
             size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
             stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
-            wrapper.writeline(f"assert {self.get_name()}.size() == {size}")
-            wrapper.writeline(f"assert {self.get_name()}.stride() == {stride}")
+            wrapper.writeline(
+                f"assert_size_stride({self.get_name()}, {size}, {stride})"
+            )
 
     def get_group_stride(self):
         """
@@ -2854,14 +2855,19 @@ class FallbackKernel(ExternKernelAlloc):
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
         # TODO(jansel): replace this with dynamic shape formulas
-        example_args = [
-            torch.zeros(
-                [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()],
-                dtype=x.get_dtype(),
-                device=x.get_device(),
-            )
-            for x in tensor_args
-        ]
+        example_args = []
+        for x in tensor_args:
+            size = [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()]
+            stride = [
+                V.graph.sizevars.guard_static_shape(s) for s in x.get_layout().stride
+            ]
+            dtype = x.get_dtype()
+            device = x.get_device()
+            arg = torch.empty_strided(
+                size=size, stride=stride, dtype=dtype, device=device
+            ).zero_()
+            example_args.append(arg)
+
         example_output = kernel(
             *unflatten_args(example_args, non_tensor_args), **kwargs
         )
@@ -3101,10 +3107,18 @@ class Convolution(ExternKernelAlloc):
             # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
             # which align with aten.convolutuion path(cpu only support 2d case now).
             # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
-            # TODO: the gpu channels_last path depend on cudnn version, see
+
+            # CUDA channels_last path depend on cudnn version, see
             # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
+            valid_device = True
             if (
-                x.get_device().type == "cpu"
+                x.get_device() == "cuda"
+                and torch.backends.cudnn.is_available()
+                and torch.backends.cudnn.version() < 8302
+            ):
+                valid_device = False
+            if (
+                valid_device
                 and len(x.get_size()) == 4
                 and (
                     x.get_layout().is_channels_last_stride_ordered()

@@ -103,6 +103,7 @@ Indexing, Slicing, Joining, Mutating Ops
     movedim
     moveaxis
     narrow
+    narrow_copy
     nonzero
     permute
     reshape
