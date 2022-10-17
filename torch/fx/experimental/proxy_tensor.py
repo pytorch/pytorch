@@ -24,7 +24,7 @@ from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
 from torch.fx import Proxy
 
-__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy"]
+__all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy", "py_sym_types"]
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -55,13 +55,13 @@ def decompose(decomposition_table):
 proxy_slot = object()
 no_default = object()
 
-_py_sym_types = (
+py_sym_types = (
     PySymInt,
     PySymFloat,
 )
 def is_sym_node(node):
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
-    return "val" in node.meta and isinstance(node.meta['val'], _py_sym_types)
+    return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
 
 def set_proxy_slot(obj, tracer, proxy):
     d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
@@ -109,8 +109,11 @@ def set_meta(proxy, val):
     if isinstance(val, FakeTensor):
         proxy.node.meta['val'] = val
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
-    elif isinstance(val, _py_sym_types):
+    elif isinstance(val, py_sym_types):
         proxy.node.meta['val'] = val
+    elif isinstance(val, list) or isinstance(val, tuple):
+        if all(isinstance(x, FakeTensor) for x in val):
+            proxy.node.meta['val'] = val
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -128,7 +131,7 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         assert callable(proxy_callable)
         if isinstance(outer_s, SymInt):
             inner_s = outer_s.get_pyobj()
-            assert isinstance(inner_s, _py_sym_types)
+            assert isinstance(inner_s, py_sym_types)
 
             set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
 
@@ -167,6 +170,8 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
     if isinstance(inner_res, tuple) or isinstance(inner_res, list):
+        if isinstance(proxy_res, fx.Proxy):
+            set_meta(proxy_res, inner_res)
         for idx, e in enumerate(inner_res):
             wrap_with_proxy(e, proxy_res[idx], get_constant(idx))
     elif isinstance(inner_res, torch.Tensor):
@@ -499,7 +504,7 @@ class ProxySymDispatchMode(SymDispatchMode):
     def _compute_proxy(self, func, args, out):
         n_args = tuple(
             get_proxy_slot(a, self.tracer)().node if a.constant is None else a.constant
-            if isinstance(a, _py_sym_types) else a
+            if isinstance(a, py_sym_types) else a
             for a in args
         )
 
@@ -526,7 +531,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         # We also assume there are no keyword arguments.
         assert not kwargs
         out = func(*args, **kwargs)
-        assert isinstance(out, _py_sym_types), f"{func}(*{args}, **{kwargs}) = {out}"
+        assert isinstance(out, py_sym_types), f"{func}(*{args}, **{kwargs}) = {out}"
 
         # Delays tracing out the proxies on this op until we actually need it
         p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
@@ -612,7 +617,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         elif tracing_mode == "fake":
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
         elif tracing_mode == "symbolic":
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
+            shape_env = ShapeEnv()
+            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env)
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
@@ -628,15 +634,12 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
             return x
 
-        shape_env = None
-        if tracing_mode == "symbolic":
-            shape_env = ShapeEnv()
         sym_mode = proxy_mode.sym_mode
 
         # todo: Figure out a more informative name for symints
         def wrap_fake_symbolic(x):
             if isinstance(x, torch.Tensor):
-                return fake_tensor_mode.from_tensor(x, shape_env=shape_env)
+                return fake_tensor_mode.from_tensor(x)
             return x
 
         wrap_fn_map = {
