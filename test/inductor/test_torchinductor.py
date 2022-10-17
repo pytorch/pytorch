@@ -107,7 +107,6 @@ binary_list = [
     lambda x, y: torch.add(x, y),
     lambda x, y: torch.add(y, x),
     lambda x, y: torch.sub(x, y),
-    lambda x, y: torch.sub(y, x),  # this case won't be fused
 ]
 
 
@@ -1323,13 +1322,17 @@ class CommonTemplate:
         )
 
     def test_conv2d_unary(self):
+        test_memory_format = [torch.contiguous_format]
+        # TODO: GPU path doesn't support channels_last now.
+        if not HAS_CUDA:
+            test_memory_format.append(torch.channels_last)
         options = itertools.product(
             unary_list,
             [True, False],
             [1, 3],
             [1, 2],
             [1, 4],
-            [torch.contiguous_format, torch.channels_last],
+            test_memory_format,
         )
 
         for (
@@ -1400,13 +1403,17 @@ class CommonTemplate:
                 x2 = self.conv2(x)
                 return self.binary_fn(x1, x2)
 
+        test_memory_format = [torch.contiguous_format]
+        # TODO: GPU path doesn't support channels_last now.
+        if not HAS_CUDA:
+            test_memory_format.append(torch.channels_last)
         options = itertools.product(
             binary_list,
             [True, False],
             [1, 3],
             [1, 2],
             [1, 4],
-            [torch.contiguous_format, torch.channels_last],
+            test_memory_format,
         )
 
         for (
