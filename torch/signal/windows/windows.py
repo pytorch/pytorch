@@ -8,9 +8,13 @@ from torch._prims_common import is_float_dtype
 from torch._torch_docs import factory_common_args, parse_kwargs, merge_dicts
 
 __all__ = [
+    'bartlett',
+    'blackman',
     'cosine',
     'exponential',
     'gaussian',
+    'hamming',
+    'hann',
 ]
 
 window_common_args = merge_dicts(
@@ -296,3 +300,282 @@ def gaussian(
                        requires_grad=requires_grad)
 
     return torch.exp(-k ** 2)
+
+
+@_add_docstr(
+    r"""
+Computes the Hamming window.
+
+The Hamming window is defined as follows:
+
+.. math::
+    w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
+    """,
+    r"""
+    
+{normalization}
+
+Arguments:
+    {M}
+
+Keyword args:
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Examples::
+
+    >>> # Generate a symmetric Hamming window.
+    >>> torch.signal.windows.hamming(10)
+    tensor([0.0800, 0.1876, 0.4601, 0.7700, 0.9723, 0.9723, 0.7700, 0.4601, 0.1876, 0.0800])
+    
+    >>> # Generate a periodic Hamming window.
+    >>> torch.signal.windows.hamming(10,sym=False)
+    tensor([0.0800, 0.1679, 0.3979, 0.6821, 0.9121, 1.0000, 0.9121, 0.6821, 0.3979, 0.1679])
+""".format(
+        **window_common_args
+    ),
+)
+def hamming(M: int,
+            sym: bool = True,
+            alpha: float = 0.54,
+            beta: float = 0.46,
+            *,
+            dtype: torch.dtype = None,
+            layout: torch.layout = torch.strided,
+            device: torch.device = None,
+            requires_grad: bool = False) -> Tensor:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    _window_function_checks('hamming', M, dtype, layout)
+
+    if M == 0:
+        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    if M == 1:
+        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    constant = 2 * torch.pi / (M if not sym else M - 1)
+
+    k = torch.linspace(start=0,
+                       end=(M - 1) * constant,
+                       steps=M,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       requires_grad=requires_grad)
+
+    return alpha - beta * torch.cos(k)
+
+
+@_add_docstr(
+    r"""
+Computes the Hann window.
+
+The Hann window is defined as follows:
+
+.. math::
+    w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
+    \sin^2 \left( \frac{\pi n}{N - 1} \right),
+    """,
+    r"""
+    
+{normalization}
+
+Arguments:
+    {M}
+
+Keyword args:
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Examples::
+
+    >>> # Generate a symmetric Hann window.
+    >>> torch.signal.windows.hann(10)
+    tensor([0.0000, 0.1170, 0.4132, 0.7500, 0.9698, 0.9698, 0.7500, 0.4132, 0.1170, 0.0000])
+
+    >>> # Generate a periodic Hann window.
+    >>> torch.signal.windows.hann(10,sym=False)
+    tensor([0.0000, 0.0955, 0.3455, 0.6545, 0.9045, 1.0000, 0.9045, 0.6545, 0.3455, 0.0955])
+""".format(
+        **window_common_args
+    ),
+)
+def hann(M: int,
+         sym: bool = True,
+         *,
+         dtype: torch.dtype = None,
+         layout: torch.layout = torch.strided,
+         device: torch.device = None,
+         requires_grad: bool = False) -> Tensor:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    _window_function_checks('hann', M, dtype, layout)
+
+    return hamming(M,
+                   sym=sym,
+                   alpha=0.5,
+                   beta=0.5,
+                   dtype=dtype,
+                   layout=layout,
+                   device=device,
+                   requires_grad=requires_grad)
+
+
+@_add_docstr(
+    r"""
+Computes the Blackman window.
+
+The Blackman window is defined as follows:
+
+.. math::
+    w[n] = 0.42 - 0.5 \cos \left( \frac{2 \pi n}{M - 1} \right) + 0.08 \cos \left( \frac{4 \pi n}{M - 1} \right)
+
+where :math:`M` is the full window size.
+    """,
+    r"""
+    
+{normalization}
+
+Arguments:
+    {M}
+
+Keyword args:
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Examples::
+
+    >>> # Generate a symmetric Blackman window.
+    >>> torch.signal.windows.blackman(10)
+    tensor([-1.4901e-08,  5.0870e-02,  2.5800e-01,  6.3000e-01,  9.5113e-01, 9.5113e-01,  6.3000e-01,  2.5800e-01,  5.0870e-02, -1.4901e-08])
+
+    >>> # Generate a periodic Blackman window.
+    >>> torch.signal.windows.blackman(10,sym=False)
+    tensor([-1.4901e-08,  4.0213e-02,  2.0077e-01,  5.0979e-01,  8.4923e-01, 1.0000e+00,  8.4923e-01,  5.0979e-01,  2.0077e-01,  4.0213e-02])
+""".format(
+        **window_common_args
+    ),
+)
+def blackman(M: int,
+             sym: bool = True,
+             *,
+             dtype: torch.dtype = None,
+             layout: torch.layout = torch.strided,
+             device: torch.device = None,
+             requires_grad: bool = False) -> Tensor:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    _window_function_checks('blackman', M, dtype, layout)
+
+    if M == 0:
+        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    if M == 1:
+        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    constant_1 = 2 * torch.pi / (M if not sym and M > 1 else M - 1)
+    constant_2 = 2 * constant_1
+
+    k_1 = torch.linspace(start=0,
+                         end=(M - 1) * constant_1,
+                         steps=M,
+                         dtype=dtype,
+                         layout=layout,
+                         device=device,
+                         requires_grad=requires_grad)
+
+    k_2 = torch.linspace(start=0,
+                         end=(M - 1) * constant_2,
+                         steps=M,
+                         dtype=dtype,
+                         layout=layout,
+                         device=device,
+                         requires_grad=requires_grad)
+
+    return 0.42 - 0.5 * torch.cos(k_1) + 0.08 * torch.cos(k_2)
+
+
+@_add_docstr(
+    r"""
+Computes the Bartlett window.
+
+The Bartlett window is defined as follows:
+
+.. math::
+    w[n] = 1 - \left| \frac{2n}{M - 1} - 1 \right| = \begin{cases}
+        \frac{2n}{M - 1} & \text{if } 0 \leq n \leq \frac{M - 1}{2} \\
+        2 - \frac{2n}{M - 1} & \text{if } \frac{M - 1}{2} < n < M \\
+    \end{cases},
+
+where :math:`M` is the full window size.
+    """,
+    r"""
+    
+{normalization}
+
+Arguments:
+    {M}
+
+Keyword args:
+    {sym}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Examples::
+
+    >>> # Generate a symmetric Bartlett window.
+    >>> torch.signal.windows.bartlett(10)
+    tensor([0.0000, 0.2222, 0.4444, 0.6667, 0.8889, 0.8889, 0.6667, 0.4444, 0.2222, 0.0000])
+
+    >>> # Generate a periodic Bartlett window.
+    >>> torch.signal.windows.bartlett(10,sym=False)
+    tensor([0.0000, 0.2000, 0.4000, 0.6000, 0.8000, 1.0000, 0.8000, 0.6000, 0.4000, 0.2000])
+""".format(
+        **window_common_args
+    ),
+)
+def bartlett(M: int,
+             *,
+             sym: bool = True,
+             dtype: torch.dtype = None,
+             layout: torch.layout = torch.strided,
+             device: torch.device = None,
+             requires_grad: bool = False) -> Tensor:
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    _window_function_checks('bartlett', M, dtype, layout)
+
+    if M == 0:
+        return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    if M == 1:
+        return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
+
+    start = -1
+    constant = 2 / (M if not sym else M - 1)
+
+    k = torch.linspace(start=start,
+                       end=start + (M - 1) * constant,
+                       steps=M,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       requires_grad=requires_grad)
+
+    return 1 - torch.abs(k)

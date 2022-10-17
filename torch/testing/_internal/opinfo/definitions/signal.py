@@ -310,4 +310,38 @@ op_db: List[OpInfo] = [
         reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
     ),
+    make_signal_windows_opinfo(
+        name="signal.windows.hamming",
+        ref=reference_signal_window(scipy.signal.windows.hamming)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.hann",
+        ref=reference_signal_window(scipy.signal.windows.hann) if TEST_SCIPY else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.bartlett",
+        ref=reference_signal_window(scipy.signal.windows.bartlett)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.blackman",
+        ref=reference_signal_window(scipy.signal.windows.blackman)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+    ),
 ]
