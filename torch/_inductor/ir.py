@@ -18,6 +18,7 @@ from sympy import Expr, Integer
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import is_boolean_dtype, is_float_dtype
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -2854,17 +2855,18 @@ class FallbackKernel(ExternKernelAlloc):
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
         # TODO(jansel): replace this with dynamic shape formulas
-        example_args = [
-            torch.zeros(
-                [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()],
-                dtype=x.get_dtype(),
-                device=x.get_device(),
+        with FakeTensorMode():
+            example_args = [
+                torch.zeros(
+                    [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()],
+                    dtype=x.get_dtype(),
+                    device=x.get_device(),
+                )
+                for x in tensor_args
+            ]
+            example_output = kernel(
+                *unflatten_args(example_args, non_tensor_args), **kwargs
             )
-            for x in tensor_args
-        ]
-        example_output = kernel(
-            *unflatten_args(example_args, non_tensor_args), **kwargs
-        )
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
