@@ -1070,7 +1070,7 @@ class FullyShardedDataParallel(nn.Module):
 
         self._check_single_device_module(module, ignored_params)
         device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
-        self._materialize_module(module, param_init_fn, device_from_device_id)
+        self._materialize_module(module, param_init_fn, ignored_params, device_from_device_id)
         self._move_module_to_device(module, ignored_params, device_from_device_id)
         self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
@@ -1351,6 +1351,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         param_init_fn: Optional[Callable[[nn.Module], None]],
+        ignored_params: Set[nn.Parameter],
         device_from_device_id: Optional[torch.device],
     ) -> None:
         """
@@ -1365,11 +1366,11 @@ class FullyShardedDataParallel(nn.Module):
         ``reset_parameters()``, and for torchdistX fake tensors, this calls
         ``deferred_init.materialize_module()``.
         """
-        is_meta_module = any(p.is_meta for p in module.parameters())
+        is_meta_module = any(p.is_meta for p in self._get_orig_params(module, ignored_params))
         is_torchdistX_deferred_init = (
             not is_meta_module
             and _TORCHDISTX_AVAIL
-            and any(fake.is_fake(p) for p in module.parameters())
+            and any(fake.is_fake(p) for p in self._get_orig_params(module, ignored_params))
         )
         if (
             is_meta_module or is_torchdistX_deferred_init
@@ -2110,6 +2111,39 @@ class FullyShardedDataParallel(nn.Module):
         state_dict_type: StateDictType,
         state_dict_config: Optional[StateDictConfig] = None,
     ) -> Tuple[StateDictType, StateDictConfig]:
+        """
+        Set the ``state_dict_type`` and the corresponding (optional)
+        configurations of all the descendant FSDP modules of the target module.
+        The target module does not have to be a FSDP module. If the target
+        module is a FSDP module, its ``state_dict_type`` will also be changed.
+
+        .. note:: This API should be called for only the top-level (root)
+            module.
+
+        .. note:: This API enables users to transparently use the conventional
+            ``state_dict`` API to take model checkpoints in cases where the
+            root FSDP module is wrapped by another ``nn.Module``. For example,
+            the following will ensure ``state_dict`` is called on all non-FSDP
+            instances, while dispatching into `sharded_state_dict` implementation
+            for FSDP:
+
+        Example::
+
+            >>> # xdoctest: +SKIP("undefined variables")
+            >>> model = DDP(FSDP(...))
+            >>> FSDP.set_state_dict_type(
+            >>>     model,
+            >>>     StateDictType.SHARDED_STATE_DICT,
+            >>>     ShardedStateDictConfig(offload_to_cpu=True),
+            >>> )
+            >>> checkpoint = model.state_dict()
+
+        Args:
+            module (torch.nn.Module): Root module.
+            state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
+            state_dict_config (Optional[StateDictConfig]): the configuration for the
+                target ``state_dict_type``.
+        """
         _state_dict_type_to_config = {
             StateDictType.FULL_STATE_DICT: FullStateDictConfig,
             StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
@@ -2153,30 +2187,25 @@ class FullyShardedDataParallel(nn.Module):
     ) -> Generator:
         """
         A context manager to set the ``state_dict_type`` of all the descendant
-        FSDP modules of the target module. The target module does not have to
-        be a FSDP module. If the target module is a FSDP module, its
-        ``state_dict_type`` will also be changed.
-
-        .. note:: This API should be called for only the top-level (root)
-            module.
-
-        .. note:: This API enables users to transparently use the conventional
-            ``state_dict`` API to take model checkpoints in cases where the
-            root FSDP module is wrapped by another ``nn.Module``. For example,
-            the following will ensure ``state_dict``  is called on all non-FSDP
-            instances, while dispatching into `local_state_dict` implementation
-            for FSDP:
+        FSDP modules of the target module. This context manager has the same
+        functions as :meth:`set_state_dict_type`. Read the document of
+        :meth:`set_state_dict_type` for the detail.
 
         Example::
 
             >>> # xdoctest: +SKIP("undefined variables")
             >>> model = DDP(FSDP(...))
-            >>> with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
+            >>> with FSDP.state_dict_type(
+            >>>     model,
+            >>>     StateDictType.SHARDED_STATE_DICT,
+            >>> ):
             >>>     checkpoint = model.state_dict()
 
         Args:
             module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
+            state_dict_config (Optional[StateDictConfig]): the configuration for the
+                target ``state_dict_type``.
         """
         prev_state_dict_type = None
         prev_state_dict_config = None
@@ -2213,7 +2242,16 @@ class FullyShardedDataParallel(nn.Module):
     @property
     def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
         for param_name, module_name in (
-            self._fsdp_wrapped_module.handle.parameter_module_names()
+            self._handles[0].parameter_module_names()
+        ):
+            module_name = self._convert_to_wrapped_module_name(module_name)
+            fqn = f"{module_name}{param_name}"
+            yield fqn, param_name, module_name
+
+    @property
+    def _shared_param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        for param_name, module_name in (
+            self._handles[0].shared_parameter_module_names()
         ):
             module_name = self._convert_to_wrapped_module_name(module_name)
             fqn = f"{module_name}{param_name}"
@@ -2622,11 +2660,12 @@ class FullyShardedDataParallel(nn.Module):
         # gather all the parameters in this layer. This can be achieved by
         # concatenated all the local shards and then append the padding.
         # https://github.com/pytorch/pytorch/issues/77461
-        for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{module_name}{param_name}"
-            param = state_dict.pop(fqn)
-
+        shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
+        for fqn, _, _ in self._param_fqns:
+            full_fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{fqn}"
+            param = state_dict.pop(full_fqn)
+            if fqn in shared_fqns:
+                continue
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
             assert len(shards) < 2, (
@@ -2637,7 +2676,7 @@ class FullyShardedDataParallel(nn.Module):
             chunk_size = (
                 math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
             )
-            if shards:
+            if len(shards) == 1:
                 local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
                 if not local_tensor.is_cuda:
                     local_tensor = local_tensor.cuda()
@@ -2663,7 +2702,7 @@ class FullyShardedDataParallel(nn.Module):
         )
         loaded_flat_param.to(flat_param.device)
         assert flat_param.numel() == loaded_flat_param.numel(), (
-            f"The loaded local chunk has different numel({flat_param.numel()}) "
+            f"The loaded local chunk has different numel({loaded_flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."
         )
         assert flat_param._shard_numel_padded == num_to_pad, (

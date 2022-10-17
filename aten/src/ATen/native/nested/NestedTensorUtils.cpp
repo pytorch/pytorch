@@ -2,6 +2,15 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/util/Optional.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_nested_tensor_size_native.h>
+#include <ATen/ops/_nested_tensor_strides_native.h>
+#include <ATen/ops/_nested_tensor_offsets_native.h>
+#include <ATen/ops/chunk_native.h>
+#endif
+
 namespace at {
 namespace native {
 
@@ -99,6 +108,28 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
     splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, std::move(new_offsets));
   }
   return splits;
+}
+
+std::vector<IntArrayRef> NestedTensor_get_sizes(
+    const NestedTensorImpl* self_ptr) {
+  int64_t ntensors = self_ptr->size(0);
+  std::vector<IntArrayRef> sizes(ntensors);
+  if (ntensors == 0) {
+    return sizes;
+  }
+  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  int64_t orig_dim = sizemat.size(1);
+  // nesting scalars has empty sizes
+  if (orig_dim == 0) {
+    return sizes;
+  }
+  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
+
+  for (const auto i : c10::irange(ntensors)) {
+    sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
+    sizemat_ptr += orig_dim;
+  }
+  return sizes;
 }
 
 } // namespace native
