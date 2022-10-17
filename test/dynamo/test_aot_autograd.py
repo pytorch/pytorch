@@ -6,7 +6,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
-from torch._dynamo.testing import rand_strided
+from torch._dynamo.testing import CompileCounter, rand_strided
 
 
 def compiler_safe_fn(gm, example_inputs, is_safe):
@@ -231,11 +231,12 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Run it through optimize, with our capturing fn
 
         gms = []
+        counter = CompileCounter()
 
         def capturing_fn(gm, inputs):
             nonlocal gms
             gms.append(gm)
-            return gm.forward
+            return counter(gm, inputs)
 
         optimized_mod = torch._dynamo.optimize(capturing_fn)(mod)
 
@@ -245,8 +246,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Uncomment to reproduce commented out graphs below.
         # for gm in gms:
         #     print("GM CODE", gm.code)
-        
-        self.assertTrue(len(gms) == 4)  # 4 graphs made
+
+        self.assertEqual(counter.frame_count, 4)
+        self.assertEqual(counter.op_count, 7)
         # Graph 1
         # def forward(self, x : torch.nn.parameter.Parameter, y : torch.Tensor):
         #     mul = x * y;  x = y = None
