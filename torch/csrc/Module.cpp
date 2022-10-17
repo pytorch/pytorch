@@ -1391,6 +1391,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
+  py_module.def("_is_mps_available", []() { return at::hasMPS(); });
 
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
