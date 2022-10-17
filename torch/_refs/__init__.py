@@ -4758,6 +4758,7 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+import torch._refs._conversions
 import torch._refs.fft
 import torch._refs.linalg
 import torch._refs.nn.functional
