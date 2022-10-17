@@ -785,6 +785,7 @@ def load(
                         return _load(opened_zipfile, map_location, pickle, **pickle_load_args)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         if pickle_module is None:
+            orig_position = opened_file.tell()
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
             except RuntimeError:
@@ -792,7 +793,7 @@ def load(
                 if weight_load_only:
                     raise
                 warnings.warn(UNSAFE_MESSAGE)
-                opened_file.seek(0)
+                opened_file.seek(orig_position)
                 return _legacy_load(opened_file, map_location, pickle, **pickle_load_args)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
