@@ -5111,7 +5111,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   const auto next_i = [flip_order](int64_t i) -> int64_t {
     return !flip_order ? ++i : --i;
   };
-  const auto apply_left = !flip_order ? true : false;
+  const auto apply_left = !flip_order;
 
   // K <- H_0^{-1} @ K
   const auto zero_idx = flip_i(0);
@@ -5132,8 +5132,8 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   if (areAnyTensorSubclassLike({input, tau, K})) {
     // k + 1 if input_grads hold a matrix of zeros for inactive parts of input.
     auto input_grads =
-        std::vector<Tensor>(k < input.size(-1) ? k + 1 : k, Tensor{});
-    auto tau_grads = std::vector<Tensor>(k, Tensor{});
+        std::vector<Tensor>(k < input.size(-1) ? k + 1 : k);
+    auto tau_grads = std::vector<Tensor>(k);
 
     for (const auto i_idx : c10::irange(k)) {
       auto i = flip_i(i_idx);
