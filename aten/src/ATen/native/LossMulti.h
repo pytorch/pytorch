@@ -1,8 +1,8 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
-#include <ATen/AccumulateType.h>
-
 #pragma once
+#include <ATen/core/Tensor.h>
+#include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorUtils.h>
 
 namespace at { namespace native {
 namespace {

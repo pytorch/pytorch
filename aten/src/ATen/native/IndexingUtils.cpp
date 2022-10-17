@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/IndexingUtils.h>
 
 namespace at { namespace native {
