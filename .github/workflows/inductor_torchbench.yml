@@ -52,10 +52,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          printenv CUDA_HOME
-          printenv PATH
-          printenv LD_LIBRARY_PATH
-          CUDA_TOOLKIT_ROOT_DIR="${CUDA_HOME}" /usr/local/cuda-11.6 .jenkins/pytorch/build.sh
+          CUDA_TOOLKIT_ROOT_DIR="${CUDA_HOME}" .jenkins/pytorch/build.sh
       - name: Checkout TorchBench
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
