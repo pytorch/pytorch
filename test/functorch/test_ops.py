@@ -589,6 +589,8 @@ class TestOperators(TestCase):
         xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
         xfail("bfloat16"),  # rank 4 tensor for channels_last
+        xfail("cdouble"),  # rank 4 tensor for channels_last
+        xfail("cfloat"),  # rank 4 tensor for channels_last
         xfail("chalf"),  # rank 4 tensor for channels_last
         xfail("double"),  # rank 4 tensor for channels_last
         xfail("float"),  # rank 4 tensor for channels_last
@@ -751,6 +753,8 @@ class TestOperators(TestCase):
         xfail('double'),
         xfail('float'),
         xfail('half'),
+        xfail('cdouble', ''),
+        xfail('cfloat', ''),
         xfail('chalf', ''),
 
         xfail('scatter_reduce', 'prod'),  # item call
@@ -838,6 +842,7 @@ class TestOperators(TestCase):
         skip('svd_lowrank', ''),  # randomness
 
         xfail('double'),  # required rank 4 tensor to use channels_last format
+        xfail('cdouble'),  # required rank 4 tensor to use channels_last format
 
         # potential silent incorrectness
         skip('nn.functional.max_unpool1d'),  # Flaky, seems to sometimes his max_unpool2d
@@ -891,6 +896,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
         xfail('cumprod'),
@@ -1036,6 +1042,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('linalg.lu', ''),
         xfail('linalg.lu_solve', ''),
+        xfail('cdouble', ''),
+        xfail('cfloat', ''),
         xfail('chalf', ''),
         xfail('index_reduce', ''),
         xfail('linalg.vander', ''),
@@ -1109,6 +1117,8 @@ class TestOperators(TestCase):
         xfail('double'),
         xfail('float'),
         xfail('half'),
+        xfail('cdouble'),
+        xfail('cfloat'),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
@@ -1295,6 +1305,8 @@ class TestOperators(TestCase):
         xfail('bernoulli'),  # calls random op
         xfail('bfloat16'),  # required rank 4 tensor to use channels_last format
         xfail('cdist'),  # Forward AD not implemented and no decomposition
+        xfail('cdouble'),  # required rank 4 tensor to use channels_last format
+        xfail('cfloat'),  # required rank 4 tensor to use channels_last format
         xfail('chalf'),  # required rank 4 tensor to use channels_last format
         xfail('cholesky'),  # Forward AD not implemented and no decomposition
         xfail('double'),  # required rank 4 tensor to use channels_last format
