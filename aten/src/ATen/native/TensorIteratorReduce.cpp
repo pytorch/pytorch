@@ -80,7 +80,16 @@ static int find_split_dim(TensorIteratorBase& iter) {
   // start with the outer-most dimension
   int best_dim = iter.ndim() - 1;
   for (int dim = best_dim; dim >= 0 && !iter.is_dim_reduced(dim); dim--) {
-    if (shape[dim] >= num_threads) {
+    // Consider the case: When parallel dim is the dim with contiguous stride,
+    // make sure the rounded columns of multiples of 128 bytes are enough to be parallelized
+    if (iter.strides(1)[dim] == iter.element_size(1)) {
+      int64_t cols_per_128_bytes = 128 / iter.element_size(1);
+      if (shape[dim] / cols_per_128_bytes >= num_threads) {
+        return dim;
+      } else if (shape[dim] / cols_per_128_bytes > shape[best_dim]) {
+        best_dim = dim;
+      }
+    } else if (shape[dim] >= num_threads) {
       return dim;
     } else if (shape[dim] > shape[best_dim]) {
       best_dim = dim;
