@@ -306,6 +306,7 @@ class StateDictType(Enum):
     LOCAL_STATE_DICT = auto()
     SHARDED_STATE_DICT = auto()
 
+
 @dataclass
 class StateDictConfig:
     """
@@ -314,7 +315,8 @@ class StateDictConfig:
     order to configure settings for the particular type of ``state_dict``
     implementation FSDP will use.
     """
-    pass
+    offload_to_cpu: bool = False
+
 
 @dataclass
 class FullStateDictConfig(StateDictConfig):
@@ -344,22 +346,25 @@ class FullStateDictConfig(StateDictConfig):
         >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
     """
-    offload_to_cpu: bool = False
     rank0_only: bool = False
+
 
 @dataclass
 class LocalStateDictConfig(StateDictConfig):
     pass
 
+
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
     pass
+
 
 _state_dict_type_to_config = {
     StateDictType.FULL_STATE_DICT: FullStateDictConfig,
     StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
     StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
 }
+
 
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
@@ -1071,7 +1076,7 @@ class FullyShardedDataParallel(nn.Module):
 
         self._check_single_device_module(module, ignored_params)
         device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
-        self._materialize_module(module, param_init_fn, device_from_device_id)
+        self._materialize_module(module, param_init_fn, ignored_params, device_from_device_id)
         self._move_module_to_device(module, ignored_params, device_from_device_id)
         self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
@@ -1344,6 +1349,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         param_init_fn: Optional[Callable[[nn.Module], None]],
+        ignored_params: Set[nn.Parameter],
         device_from_device_id: Optional[torch.device],
     ) -> None:
         """
@@ -1358,11 +1364,11 @@ class FullyShardedDataParallel(nn.Module):
         ``reset_parameters()``, and for torchdistX fake tensors, this calls
         ``deferred_init.materialize_module()``.
         """
-        is_meta_module = any(p.is_meta for p in module.parameters())
+        is_meta_module = any(p.is_meta for p in self._get_orig_params(module, ignored_params))
         is_torchdistX_deferred_init = (
             not is_meta_module
             and _TORCHDISTX_AVAIL
-            and any(fake.is_fake(p) for p in module.parameters())
+            and any(fake.is_fake(p) for p in self._get_orig_params(module, ignored_params))
         )
         if (
             is_meta_module or is_torchdistX_deferred_init
@@ -2195,6 +2201,15 @@ class FullyShardedDataParallel(nn.Module):
             fqn = f"{module_name}{param_name}"
             yield fqn, param_name, module_name
 
+    @property
+    def _shared_param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        for param_name, module_name in (
+            self._handles[0].shared_parameter_module_names()
+        ):
+            module_name = self._convert_to_wrapped_module_name(module_name)
+            fqn = f"{module_name}{param_name}"
+            yield fqn, param_name, module_name
+
     def _full_post_state_dict_hook(
         self,
         state_dict: Dict[str, Any],
@@ -2318,10 +2333,12 @@ class FullyShardedDataParallel(nn.Module):
         local_shards = [
             Shard.from_tensor_and_offsets(flat_param, [shard_offset], self.rank)
         ]
-        state_dict[f"{prefix}{FLAT_PARAM}"] = init_from_local_shards(
+        sharded_tensor = init_from_local_shards(
             local_shards, full_numel, process_group=self.process_group
         )  # type: ignore[assignment]
-
+        if self._state_dict_config.offload_to_cpu:
+            sharded_tensor = sharded_tensor.cpu()
+        state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
         return state_dict
 
     @torch.no_grad()
@@ -2346,13 +2363,16 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _ext_chunk_tensor(
+                sharded_tensor = _ext_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
                     num_devices_per_node=torch.cuda.device_count(),
                     pg=self.process_group
-                )  # type: ignore[assignment]
+                )
+                if self._state_dict_config.offload_to_cpu:
+                    sharded_tensor = sharded_tensor.cpu()
+                state_dict[f"{prefix}{fqn}"] = sharded_tensor
         # For `use_orig_params=True`, the `FlatParameter` is not registered, so
         # there is no entry in the state dict for it to pop.
         if not self._use_orig_params:
@@ -2593,11 +2613,12 @@ class FullyShardedDataParallel(nn.Module):
         # gather all the parameters in this layer. This can be achieved by
         # concatenated all the local shards and then append the padding.
         # https://github.com/pytorch/pytorch/issues/77461
-        for (param_name, _, module_name) in self._handles[0].flat_param._param_infos:
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{prefix}{FSDP_PREFIX}{module_name}{param_name}"
-            param = state_dict.pop(fqn)
-
+        shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
+        for fqn, _, _ in self._param_fqns:
+            full_fqn = f"{prefix}{FSDP_PREFIX}{fqn}"
+            param = state_dict.pop(full_fqn)
+            if fqn in shared_fqns:
+                continue
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
             assert len(shards) < 2, (
@@ -2608,7 +2629,7 @@ class FullyShardedDataParallel(nn.Module):
             chunk_size = (
                 math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
             )
-            if shards:
+            if len(shards) == 1:
                 local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
                 if not local_tensor.is_cuda:
                     local_tensor = local_tensor.cuda()
@@ -2634,7 +2655,7 @@ class FullyShardedDataParallel(nn.Module):
         )
         loaded_flat_param.to(flat_param.device)
         assert flat_param.numel() == loaded_flat_param.numel(), (
-            f"The loaded local chunk has different numel({flat_param.numel()}) "
+            f"The loaded local chunk has different numel({loaded_flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."
         )
         assert flat_param._shard_numel_padded == num_to_pad, (
@@ -4590,7 +4611,7 @@ def _get_param_to_unflat_param_names(
     def module_fn(module, prefix, param_to_unflat_param_names):
         for param_name, param in module.named_parameters(recurse=False):
             module_prefixed_param_names = (
-                param._prefixed_param_names if type(param) is FlatParameter
+                param._fqns if type(param) is FlatParameter
                 else [param_name]
             )  # prefixed from `module`
             fully_prefixed_param_names = [
