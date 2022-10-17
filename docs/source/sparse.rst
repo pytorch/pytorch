@@ -24,12 +24,11 @@ matrices, pruned weights or points clouds by Tensors whose *elements are
 mostly zero valued*. We recognize these are important applications and aim
 to provide performance optimizations for these use cases via sparse storage formats.
 
-Various sparse storage formats such as COO, CSR/CSC, LIL, etc.
-have been developed over the years. In a nutshell, they all compress data by
-tracking the positions of non-zero valued elements and perhaps some,
-but *most importantly* not all, zero valued elements. We call the uncompressed
-values *specified*. They *may* be zero. In contrast *unspecified* elements
-*must* be zero.
+Various sparse storage formats such as COO, CSR/CSC, LIL, etc. have been
+developed over the years. While they differ in exact layouts, they all
+compress data through efficient representation of zero valued elements.
+We call the uncompressed values *specified* in contrast to *unspecified*,
+compressed elements.
 
 By compressing repeat zeros sparse storage formats aim to save memory
 and computational resources on various CPUs and GPUs. Especially for high
@@ -38,13 +37,16 @@ performance implications. As such sparse storage formats can be seen as a
 performance optimization.
 
 Like many other performance optimization sparse storage formats are not
-always advantageous. Details such as the distribution of zero valued
-elements, the level of sparsity and the user's device matter.
+always advantageous. When trying sparse formats for your use case
+you might find your execution time to decrease rather than increase.
 
-We aim to make it easy to try these different compression techniques,
-but we do not yet provide a programmatic means of determining the best one
-for your particular application. Of course you are always welcome to
-ask for help in our discussion forum https://dev-discuss.pytorch.org/.
+Please feel encouraged to open a Github issue if you analytically
+expected to see a stark increase in performance but measured a
+degradation instead. This helps us prioritize the implementation
+of efficient kernels and wider performance optimizations.
+
+We make it easy to try different sparsity layouts, and convert between them,
+without being opinionated on what's best for your particular application.
 
 Functionality overview
 ++++++++++++++++++++++
@@ -52,9 +54,9 @@ Functionality overview
 We want it to be straightforward to construct a sparse Tensor from a
 given dense Tensor by providing conversion routines for each layout.
 
-In the next example we convert a 2D Tensor with default strided layout
-to a 2D Tensor backed by the COO memory layout. Only values and indices
-of non-zero elements are stored in this case.
+In the next example we convert a 2D Tensor with default dense (strided)
+layout to a 2D Tensor backed by the COO memory layout. Only values and
+indices of non-zero elements are stored in this case.
 
     >>> a = torch.tensor([[0, 2.], [3, 0]])
     >>> a.to_sparse()
@@ -72,7 +74,9 @@ Note that we provide slight generalizations of these formats.
 Batching: Devices such as GPUs require batching for optimal performance and
 thus we support batch dimensions.
 
-In this example we construct a 3D CSR Tensor from a 3D strided Tensor.
+We currently offer a very simple version of batching where each component of a sparse format
+itself is batched. This also requires the same number of specified elements per batch entry.
+In this example we construct a 3D (batched) CSR Tensor from a 3D dense Tensor.
 
     >>> t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]])
     >>> t.dim()
@@ -86,11 +90,9 @@ In this example we construct a 3D CSR Tensor from a 3D strided Tensor.
                           [4., 5., 6.]]), size=(2, 2, 2), nnz=3,
            layout=torch.sparse_csr)
 
-We currently offer a very simple version of batching where each component of a sparse format
-itself is batched. This also requires the same number of specified elements per batch entry.
 
-On the other hand, some data such as Graph embeddings might be better viewed as sparse
-collections of vectors instead of scalars and thus we provide dense dimensions.
+Dense dimensions: On the other hand, some data such as Graph embeddings might be
+better viewed as sparse collections of vectors instead of scalars.
 
 In this example we create a 3D Hybrid COO Tensor with 2 sparse and 1 dense dimension
 from a 3D strided Tensor. If an entire row in the 3D strided Tensor is zero, it is
@@ -117,24 +119,26 @@ operations on Tensor with strided (or other) storage formats. The particularitie
 storage, that is the physical layout of the data, influences the performance of
 an operation but shhould not influence the semantics.
 
-Not as many operations support sparse Tensors as support dense Tensors. See our
-:ref:`operator<sparse-ops-docs>` documentation for a list.
 
+We are actively increasing operator coverage for sparse tensors. Users should not
+expect support same level of support as for dense Tensors yet.
+See our :ref:`operator<sparse-ops-docs>` documentation for a list.
+
+    >>> b = torch.tensor([[0, 0, 1, 2, 3, 0], [4, 5, 0, 6, 0, 0]])
     >>> b_s = b.to_sparse_csr()
     >>> b_s.cos()
     Traceback (most recent call last):
       File "<stdin>", line 1, in <module>
     RuntimeError: unsupported tensor layout: SparseCsr
     >>> b_s.sin()
-    tensor(crow_indices=tensor([0, 1, 2]),
-           col_indices=tensor([1, 0]),
-           values=tensor([0.9093, 0.1411]), size=(2, 2), nnz=2,
-           layout=torch.sparse_csr)
+    tensor(crow_indices=tensor([0, 3, 6]),
+           col_indices=tensor([2, 3, 4, 0, 1, 3]),
+           values=tensor([ 0.8415,  0.9093,  0.1411, -0.7568, -0.9589, -0.2794]),
+           size=(2, 6), nnz=6, layout=torch.sparse_csr)
 
-As shown in the example above, we don't support non-zero preserving unary operators.
-We view sparse storage formats as a performance optimization and assume our users
-employ them to gain maximum performance. The output of a non-zero preserving unary
-operation will not be able to take advantage of sparse storage formats to the same
+As shown in the example above, we don't support non-zero preserving unary
+operators such as cos. The output of a non-zero preserving unary operation
+will not be able to take advantage of sparse storage formats to the same
 extent as the input and potentially result in a catastrophic increase in memory.
 We instead rely on the user to explicitly convert to a dense Tensor first and
 then run the operation.
