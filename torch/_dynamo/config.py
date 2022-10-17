@@ -30,6 +30,10 @@ log_file_name = None
 # Verbose will print full stack traces on warnings and errors
 verbose = False
 
+# If true, traced graph outputs will be outputted as Python GraphModule code.
+# If false, traced graph outputs will be outputted in tabular form.
+output_graph_code = False
+
 # verify the correctness of optimized backend
 verify_correctness = False
 
