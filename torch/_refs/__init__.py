@@ -166,6 +166,7 @@ __all__ = [
     # Elementwise Ternary References
     #
     "addcdiv",
+    "addcmul",
     "clamp",
     #
     # Conditional references
@@ -228,6 +229,7 @@ __all__ = [
     "meshgrid",
     "movedim",
     "narrow",
+    "narrow_copy",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -911,7 +913,9 @@ def add(
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
-        if not utils.is_weakly_lesser_type(type(alpha), python_type):
+        if python_type != bool and not utils.is_weakly_lesser_type(
+            type(alpha), python_type
+        ):
             msg = (
                 "alpha argument of type {0} cannot be safely cast to type {1}!".format(
                     type(alpha), python_type
@@ -1576,15 +1580,45 @@ def addcdiv(
     if value is not None:
         dtype = self.dtype  # no scalars allowed, see add
         python_type = utils.dtype_to_type(dtype)
-        if not utils.is_weakly_lesser_type(type(value), python_type):
-            msg = (
-                "value argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(value), python_type
-                )
-            )
-            raise ValueError(msg)
+        check(
+            utils.is_weakly_lesser_type(type(value), python_type),
+            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
+                type(value), python_type
+            ),
+            exc_type=ValueError,
+        )
 
     return self + value * tensor1 / tensor2
+
+
+@register_decomposition(torch.ops.aten.addcmul)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "tensor1", "tensor2"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def addcmul(
+    self: TensorLikeType,
+    tensor1: TensorLikeType,
+    tensor2: TensorLikeType,
+    *,
+    value: NumberType = 1,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.addcmul
+    """
+    if value is not None:
+        dtype = self.dtype  # no scalars allowed, see add
+        python_type = utils.dtype_to_type(dtype)
+        check(
+            utils.is_weakly_lesser_type(type(value), python_type),
+            lambda: "value argument of type {0} cannot be safely cast to type {1}!".format(
+                type(value), python_type
+            ),
+            exc_type=ValueError,
+        )
+
+    return self + value * tensor1 * tensor2
 
 
 @register_decomposition(torch.ops.aten.clamp)
@@ -2404,8 +2438,13 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    dim = utils.canonicalize_dim(tensors[0].ndim, dim)
-    utils.validate_idx(tensors[0].ndim, dim)
+    for t in tensors:
+        # match logic in legacy_cat_wrap_dim
+        if t.ndim == 1 and t.size(0) == 0:
+            continue
+        dim = utils.canonicalize_dim(t.ndim, dim)
+        utils.validate_idx(t.ndim, dim)
+        break
 
     # Filters tensors with one dimension of length zero
     filtered = tuple(x for x in tensors if not (x.ndim == 1 and x.numel() == 0))
@@ -2648,6 +2687,16 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     return prims.slice_in_dim(a, start, start + length, axis=dim)
+
+
+@register_decomposition(torch.ops.aten.narrow_copy)
+@out_wrapper()
+def narrow_copy(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+    # TODO: This must return a sparse tensor if the input is sparse, but refs
+    # have no sparse support.  See narrow_copy_sparse in core.
+    if a.is_sparse:
+        raise NotImplementedError("narrow_copy ref doesn't support sparse tensors")
+    return torch.clone(torch.narrow(a=a, dim=dim, start=start, length=length))  # type: ignore[call-overload]
 
 
 def _normalize(
