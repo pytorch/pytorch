@@ -3514,9 +3514,9 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
-    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-               requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
-    return tensors
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       requires_grad=requires_grad, low=-5, high=5)
+    return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
 
 def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
@@ -4531,11 +4531,16 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(shape, device=device, dtype=dtype,
                            requires_grad=requires_grad, **kwargs)
-    yield SampleInput(mt(100), kwargs=dict(n_fft=10))
+
+    yield SampleInput(mt(100), n_fft=10, return_complex=True)
+    yield SampleInput(mt(100), n_fft=10, return_complex=False)
+    if dtype.is_complex:
+        yield SampleInput(mt(100), n_fft=10)
 
     for center in [False, True]:
-        yield SampleInput(mt(10), kwargs=dict(n_fft=7, center=center))
-        yield SampleInput(mt((10, 100)), kwargs=dict(n_fft=16, hop_length=4, center=center))
+        yield SampleInput(mt(10), n_fft=7, center=center, return_complex=True)
+        yield SampleInput(mt((10, 100)), n_fft=16, hop_length=4,
+                          center=center, return_complex=True)
 
     window = mt(16, low=.5, high=2.0)
     yield SampleInput(
@@ -4544,7 +4549,8 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
         mt((3, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True, center=center))
     if not dtype.is_complex:
         yield SampleInput(
-            mt((10, 100)), kwargs=dict(n_fft=16, window=window, onesided=False))
+            mt((10, 100)), n_fft=16, window=window, onesided=False,
+            return_complex=True)
 
 
 def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
@@ -4684,21 +4690,19 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     tensor_1d = partial(make_tensor, (S,), device=device, dtype=dtype,
                         requires_grad=requires_grad)
 
-    return [
-        SampleInput(tensor_nd()),
-        SampleInput(tensor_nd(), dim=1),
-        SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False),
+    yield SampleInput(tensor_nd())
+    yield SampleInput(tensor_nd(), dim=1)
+    yield SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False)
 
-        SampleInput(tensor_nd(), dim=(1,), correction=S // 2),
-        SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True),
+    yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
+    yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
+    yield SampleInput(tensor_nd(), dim=None, correction=None)
 
-        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-        SampleInput(tensor_nd(), True),
-        SampleInput(tensor_nd(), False),
-        SampleInput(tensor_nd(), dim=None, correction=None),
-    ]
+    # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+    yield SampleInput(tensor_nd(), True)
+    yield SampleInput(tensor_nd(), False)
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
@@ -5245,7 +5249,6 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
         (shape, dict(ignore_index=1)),
     ]
 
-    sample_inputs = []
     for (input_shape, kwargs), probabilities_target in itertools.product(input_shape_and_kwargs, (False, True)):
         input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5275,9 +5278,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 # make sure at least one item in target is not ignored
                 target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
 
-        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
-
-    return sample_inputs
+        yield SampleInput(input, target, **kwargs)
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -5383,6 +5384,8 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S)))
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
+                       high=None, requires_grad=requires_grad)
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5397,15 +5400,13 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
-    sample_inputs = []
     for lhs_shape, rhs_shape in test_cases:
-        lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-        rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        lhs = make_arg(lhs_shape)
+        rhs = make_arg(rhs_shape)
         if not is_rmatmul:
-            sample_inputs.append(SampleInput(lhs, args=(rhs,)))
+            yield SampleInput(lhs, rhs)
         else:
-            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
-    return tuple(sample_inputs)
+            yield SampleInput(rhs, lhs)
 
 
 def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
@@ -9953,7 +9954,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
@@ -9961,7 +9966,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
            ref=np.meshgrid,
@@ -12194,16 +12203,16 @@ op_db: List[OpInfo] = [
            supports_forward_ad=False,
            supports_fwgrad_bwgrad=False,
            supports_autograd=False,
+           # https://github.com/pytorch/pytorch/issues/86931
            sample_inputs_func=sample_inputs_narrow_copy,
            skips=(
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # couldn't find symbolic meta function/decomposition
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
-               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_meta', device_type='cuda'),
-               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
-               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
+               # Not implemented
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
@@ -16887,6 +16896,23 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.nn.functional.nll_loss",
+        torch_opinfo_name="nn.functional.nll_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
+        supports_nvfuser=False,
+        # For simpler indexing, we flatten target indices, then reshape the result tensor.
+        # This creates inconsistent view state with reference impl.
+        validate_view_consistency=False,
+        skips=(
+            # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+            ),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.huber_loss",
         torch_opinfo_name="nn.functional.huber_loss",
         # The corresponding PyTorch op doesn't support out.  But the ref is
@@ -17468,6 +17494,11 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.group_norm",
         supports_nvfuser=False,
         validate_view_consistency=False,
+    ),
+        "_refs.narrow_copy",
+        torch_opinfo_name="narrow_copy",
+        supports_out=True,
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.native_layer_norm",
