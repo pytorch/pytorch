@@ -39,7 +39,12 @@ try:
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
+    from torch._inductor.utils import (
+        has_torchvision_roi_align,
+        has_triton,
+        timed,
+        create_static_inputs,
+    )
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -4103,6 +4108,43 @@ if HAS_CPU:
             gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
             self.assertFalse(complex_memory_overlap(gathered))
             self.assertFalse(complex_memory_overlap(gathered.t()))
+
+	def test_create_static_inputs_for_views(self):
+            def run_test(inputs):
+                static_inputs = create_static_inputs(inputs, [])
+                # Check inputs all have shared storage
+                assert len(set([x.storage().data_ptr() for x in inputs])) == 1
+                assert len(set([x.storage().data_ptr() for x in static_inputs])) == 1
+
+                # Check that if src and dst storages have same new values,
+                # the view tensors have same new values too.
+                src_storage = inputs[0].storage()
+                dst_storage = static_inputs[0].storage()
+                self.assertNotEqual(src_storage.data_ptr(), dst_storage.data_ptr())
+                src_storage.copy_(
+                    torch.arange(
+                        src_storage.size(), dtype=src_storage.dtype, device=src_storage.device
+                    ).storage()
+                )
+                dst_storage.copy_(src_storage)
+                self.assertEqual(len(inputs), len(static_inputs))
+                for t1, t2 in zip(inputs, static_inputs):
+                    self.assertEqual(t1, t2)
+
+            dense = torch.zeros(121, 49)
+            run_test([dense])
+
+            strided = dense.split(7, dim=1)
+            run_test(strided)
+
+            unsqueezed = dense.unsqueeze(1)
+            run_test([unsqueezed])
+
+            expanded = unsqueezed.expand(-1, 2, -1)
+            run_test([expanded])
+
+            gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
+            run_test([gathered])
 
 
 if HAS_CUDA:

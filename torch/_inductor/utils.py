@@ -236,6 +236,27 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
+def create_static_inputs(inps, known_static_input_idxs):
+    static_inps = []
+    dst_buffers = {}
+    # Create new shared storage for input tensors that have the same underlying storage.
+    # Use existing tensor as-is for input tensors tracked in `known_static_input_idxs`.
+    for idx, x in enumerate(inps):
+        if idx not in known_static_input_idxs:
+            src_storage = x.storage()
+            # If common buffer is not created for this storage, create it; otherwise retrieve it.
+            if src_storage.data_ptr() not in dst_buffers:
+                dst_buffers[src_storage.data_ptr()] = torch.empty(
+                    src_storage.size(), dtype=src_storage.dtype, device=src_storage.device)
+            dst_buffer = dst_buffers[src_storage.data_ptr()]
+            storage_offset = (x.data_ptr() - x.storage().data_ptr()) // x.element_size()
+            static_inp = torch.as_strided(dst_buffer, x.size(), x.stride(), storage_offset)
+            static_inps.append(static_inp)
+        else:
+            static_inps.append(x)
+    return static_inps
+
+
 instance_descriptor = collections.namedtuple(
     "instance_descriptor", ["divisible_by_16", "equal_to_1"]
 )
