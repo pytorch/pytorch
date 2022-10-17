@@ -44,12 +44,6 @@ class CapabilityBasedPartitioner:
     def __is_node_supported(self, node: Node) -> bool:
         return (
             self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
-            and
-            # reject 'getitem' node since they are special cased in partitioning.
-            (
-                node.op != "call_function" or
-                _get_qualified_name(node.target) != "_operator.getitem"    # type: ignore[arg-type]
-            )
         )
 
     def propose_partitions(self) -> List[Partition]:
@@ -147,26 +141,6 @@ class CapabilityBasedPartitioner:
                     # it doesn't create cyclic depenency in the graph, otherwise,
                     # this is a no-op
                     maybe_merge_partition(self_id, other_id)
-
-        # post processing to re-assign "getitem" nodes into upstream partition
-        logger.debug("Reassigning getitem nodes to its producer node's partition...")
-        nodes_reassignment: Dict[Node, int] = {}
-        for node in self.graph_module.graph.nodes:
-            is_tuple_output = True
-            for user in node.users:
-                if user.op != "call_function" or \
-                   _get_qualified_name(user.target) != "_operator.getitem":     # type: ignore[arg-type]
-                    is_tuple_output = False
-                    break
-
-            # node has tuple outputs, re-assign all following getitem node into node's partition
-            if is_tuple_output:
-                id = assignment.get(node, None)     # type: ignore[arg-type]
-                for user in node.users:
-                    if assignment.get(user, None) != id:    # type: ignore[arg-type]
-                        nodes_reassignment[user] = id  # type: ignore[assignment]
-        for node, id in nodes_reassignment.items():
-            merge_single_node(node, id)
 
         # filter out single node partitions
         if not self.allows_single_node_partition:
