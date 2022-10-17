@@ -13,11 +13,13 @@ from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
 )
-from torch.distributed.fsdp import CPUOffload, FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
+    CPUOffload,
+    FullStateDictConfig,
     LocalStateDictConfig,
     MixedPrecision,
+    ShardedStateDictConfig,
     StateDictType,
 )
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
@@ -186,8 +188,16 @@ class TestFSDPStateDict(FSDPTest):
                 rank0_only=state_dict_rank0_and_offload,
                 offload_to_cpu=state_dict_rank0_and_offload,
             )
+        elif state_dict_type == "local_state_dict":
+            config = LocalStateDictConfig(
+                offload_to_cpu=state_dict_rank0_and_offload,
+            )
+        elif state_dict_type == "sharded_state_dict":
+            config = ShardedStateDictConfig(
+                offload_to_cpu=state_dict_rank0_and_offload,
+            )
         else:
-            config = None
+            raise ValueError("Unsupported state_dict_type")
         return FSDP.state_dict_type(model, _state_dict_type, config)
 
     def _validate_state_dict_contents(
@@ -232,6 +242,32 @@ class TestFSDPStateDict(FSDPTest):
                 # Would fail if checkpoint_wrapper did not correctly implement state_dict pre/post hooks
                 model_new.load_state_dict(state_dict, strict=True)
                 self._compare_models(model, model_new, self.assertEqual)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
+    def test_state_dict_with_shared_parameters(self, state_dict_type):
+        auto_wrap_policy = partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={
+                TransformerEncoderLayer, TransformerDecoderLayer
+            },
+        )
+        model_creator = partial(
+            TransformerWithSharedParams.init,
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            {"auto_wrap_policy": auto_wrap_policy}
+        )
+
+        fsdp_model = model_creator()
+        with self._get_state_dict_mgr(fsdp_model, state_dict_type, False):
+            state_dict = fsdp_model.state_dict()
+
+        new_model = model_creator()
+        _zero_model(new_model, zero_buffers=True)
+        with self._get_state_dict_mgr(new_model, state_dict_type, False):
+            new_model.load_state_dict(state_dict)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_orig_params", [False, True])
