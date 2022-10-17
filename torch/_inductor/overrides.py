@@ -156,6 +156,8 @@ def fuse_conv_unary_eval(conv, unary, op_name, op_info):
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+    if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
+        return
     is_cpu = all(
         example_input.device == torch.device("cpu") for example_input in example_inputs
     )
