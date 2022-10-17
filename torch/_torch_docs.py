@@ -171,8 +171,7 @@ sparse_support_notes = {
 .. warning::
     Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported,
     or may not have autograd support. If you notice missing functionality please
-    open an `issue<https://github.com/pytorch/pytorch/issues>`_
-    """,
+    open a feature request.""",
 }
 
 add_docstr(
