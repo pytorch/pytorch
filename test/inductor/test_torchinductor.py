@@ -1335,6 +1335,84 @@ class CommonTemplate:
                 (v,),
             )
 
+    def test_conv2d_binary(self):
+        def _binary_list():
+            binary_list = [
+                lambda x, y: torch.add(x, y),
+                lambda x, y: torch.add(y, x),
+                lambda x, y: torch.sub(x, y),
+                lambda x, y: torch.sub(y, x),  # this case won't be fused
+            ]
+            return binary_list
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                binary_fn,
+                in_channels,
+                out_channels,
+                dilation,
+                groups,
+                bias,
+                **kwargs,
+            ):
+                super(M, self).__init__()
+                self.conv1 = torch.nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                    **kwargs,
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                    **kwargs,
+                )
+                self.binary_fn = binary_fn
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                return self.binary_fn(x1, x2)
+
+        options = itertools.product(
+            _binary_list(),
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            [torch.contiguous_format, torch.channels_last],
+        )
+
+        for (
+            binary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 112, 112)
+            mod = M(
+                binary_fn, iC, oC, dilation, groups, bias, kernel_size=kernel_size
+            ).eval()
+            mod = mod.to(memory_format=memory_format)
+            # TODO: add bf16 test
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            self.common(
+                mod,
+                (v,),
+            )
+
     def test_gather1(self):
         def fn(a, b):
             return (

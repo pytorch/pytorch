@@ -880,6 +880,25 @@ def convolution_unary(
     )
 
 
+@register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
+def convolution_binary(
+    x: TensorBox,
+    other: TensorBox,
+    weight: TensorBox,
+    bias: TensorBox,
+    padding,
+    stride,
+    dilation,
+    groups,
+    attr,
+):
+    return TensorBox.create(
+        ir.ConvolutionBinary.create(
+            x, other, weight, bias, padding, stride, dilation, groups, attr
+        )
+    )
+
+
 def fallback_handler(kernel):
     fallbacks.add(kernel)
 
