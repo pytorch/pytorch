@@ -2726,7 +2726,7 @@ def native_group_norm(
     batch_size: int,
     num_channels: int,
     flattened_inner_size: int,
-    group: int,
+    num_groups: int,
     eps: float,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     utils.check(
@@ -2735,16 +2735,17 @@ def native_group_norm(
         + str(input.ndim),
     )
     utils.check(
-        num_channels % group == 0,
+        num_channels % num_groups == 0,
         lambda: "Expected number of channels in input to be divisible by num_groups, but got input of shape "
         + str(input.shape)
         + " and num_groups="
-        + str(group),
+        + str(num_groups),
     )
 
     reduction_dims = [-2, -1]
     input_reshaped = torch.reshape(
-        input, [batch_size, group, num_channels // group, flattened_inner_size]
+        input,
+        [batch_size, num_groups, num_channels // num_groups, flattened_inner_size],
     )
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)

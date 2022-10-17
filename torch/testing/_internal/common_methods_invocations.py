@@ -3447,6 +3447,16 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
             args=(normalized_shape, None, None, eps),
         )
 
+def error_inputs_group_norm(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+
+    err_msg1 = "Expected at least 2 dimensions for input tensor but recieved"
+    s1 = SampleInput(make_arg((1)), args=(1,))
+    yield ErrorInput(s1, error_regex=err_msg1)
+
+    err_msg2 = "Expected number of channels in input to be divisible by num_groups, but got input of shape"
+    s2 = SampleInput(make_arg((2, 7, 4)), args=(2,))
+    yield ErrorInput(s2, error_regex=err_msg2)
 
 def error_inputs_native_layer_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
@@ -10759,6 +10769,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_group_norm,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
