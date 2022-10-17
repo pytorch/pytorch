@@ -166,6 +166,29 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return torch.where(torch.le(a, 0), 0, a)
 
 
+def group_norm(
+    input: Tensor,
+    num_groups: int,
+    weight: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    eps: float = 1e-5,
+) -> Tensor:
+    """
+    Reference implementation of :func:`torch.nn.functional.group_norm`.
+    """
+    utils.check(
+        input.ndim >= 2,
+        lambda: "Expected at least 2 dimensions for input tensor but recieved "
+        + str(input.ndim),
+    )
+    N = input.shape[0]
+    C = input.shape[1]
+    HxW = 1
+    for dim_size in input.shape[2:]:
+        HxW *= dim_size
+    return torch.native_group_norm(input, weight, bias, N, C, HxW, num_groups, eps)[0]
+
+
 def layer_norm(
     input: Tensor,
     normalized_shape: ShapeType,

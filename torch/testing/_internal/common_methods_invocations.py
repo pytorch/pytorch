@@ -17440,6 +17440,11 @@ python_ref_db = [
         )
     ),
     PythonRefInfo(
+        "_refs.nn.functional.group_norm",
+        torch_opinfo_name="nn.functional.group_norm",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.native_layer_norm",
         torch_opinfo_name="native_layer_norm",
         skips=(
