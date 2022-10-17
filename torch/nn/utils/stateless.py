@@ -1,5 +1,8 @@
+import itertools
+import warnings
 import contextlib
 from typing import Any, Callable, Dict, Iterator, List, Tuple
+from torch.nn.utils._named_members_polyfill import _named_parameters, _named_buffers
 
 import torch
 from torch import Tensor
@@ -55,11 +58,45 @@ def _remove_swap(module, name: str, full_path: str) -> None:
         delattr(module, "_attr_to_path")
 
 
+def _create_names_grouping(mod: 'torch.nn.Module'):
+    """
+    This function creates a grouping that builds sets of all the tied parameters. Specifically if the
+    members of the module are {'A': A, 'B': B, 'B_tied': B}, this will return {{'A'}, {'B', 'B_tied'}}
+    """
+    tensor_to_mapping = {}
+    all_named_parameters = _named_parameters(mod, remove_duplicate=False)
+    all_named_buffers = _named_buffers(mod, remove_duplicate=False)
+    for key, tensor in itertools.chain(all_named_parameters, all_named_buffers):
+        if tensor not in tensor_to_mapping:
+            tensor_to_mapping[tensor] = {key}
+        else:
+            tensor_to_mapping[tensor].add(key)
+    return tensor_to_mapping.values()
+
+
+def _check_for_unique_tied_params(mod, parameters_and_buffers):
+    """
+    This checks if the parameters and buffers list ever passes multiple values for tied
+    parameters. Specifically if the members of the module are {'A': A, 'B': B, 'B_tied': B}
+    and a user passes different values for 'B' and 'B_tied', this will warn
+    """
+    names_grouping = _create_names_grouping(mod)
+    for grouping in names_grouping:
+        # for every tied set, go through all values passed for versions of the tied value and warn if more than one
+        # distinct value is passed. Will be error in future versions
+        values_passed = [parameters_and_buffers[i] for i in grouping if i in parameters_and_buffers]
+        if len(values_passed) > 1 and any([i is not values_passed[0] for i in values_passed]):
+            warnings.warn("functional_call was passed multiple values for tied weights. "
+                          "This behavior is deprecated and will be an error in future versions")
+            break
+
+
 @contextlib.contextmanager
 def _reparametrize_module(
     module: 'torch.nn.Module',
     parameters_and_buffers: Dict[str, Tensor],
 ) -> Iterator[None]:
+    _check_for_unique_tied_params(module, parameters_and_buffers)
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
             _create_swap_params(parameters_and_buffers),
