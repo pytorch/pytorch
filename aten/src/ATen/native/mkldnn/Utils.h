@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/Config.h>
+#include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
-#include <vector>
 #include <cpuinfo.h>
 #include <vector>
 
@@ -27,13 +27,21 @@ std::vector<int64_t> pool_output_sizes(
     IntArrayRef dilation,
     bool ceil_mode);
 
+void check_mkldnn_binary_fusion_inputs(
+    const Tensor& input,
+    const Tensor& other,
+    const Tensor& weight,
+    const Tensor& bias);
+
 #if AT_MKLDNN_ENABLED()
 
 using AttrFunction = std::function<ideep::attr_t(
-    std::vector<c10::optional<at::Scalar>>,
-    c10::optional<std::string>)>;
+    torch::List<c10::optional<at::Scalar>>,
+    c10::optional<c10::string_view>)>;
 
-const std::map<std::string, AttrFunction>& fx_fusion_attr_map();
+const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map();
+
+const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 };
