@@ -1075,7 +1075,9 @@ def convolution(
     groups: int,
 ):
     is_cpu = all(
-        input.get_device().type == "cpu" for input in (x, weight, bias) if input is not None
+        input.get_device().type == "cpu"
+        for input in (x, weight, bias)
+        if input is not None
     )
     result = TensorBox.create(
         ir.Convolution.create(
