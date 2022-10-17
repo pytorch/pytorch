@@ -1,16 +1,15 @@
 # Owner(s): ["module: dynamo"]
 import os
+import unittest
 from unittest.mock import patch
 
-import pytest
 import torch
-
 import torch._dynamo
 import torch._dynamo.test_case
 import torch.distributed as dist
 from torch import nn
 from torch._dynamo import config
-from torch._dynamo.test_case import same
+from torch._dynamo.utils import same
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -90,8 +89,10 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    # can't run with gloo (no support for _allgather_base) and nccl not available in CI
-    @pytest.mark.xfail
+    # TODO(whc) move these tests to 'distributed' shard to get nccl, or see if it's available already in pytorch CI?
+    @unittest.skip(
+        "can't run with gloo (no support for _allgather_base) and nccl not available in CI"
+    )
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_aot_eager(self):
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -102,8 +103,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    # hangs/crashes with inductor currently
-    @pytest.mark.skip
+    @unittest.skip("hangs/crashes with inductor currently")
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_inductor(self):
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -137,7 +137,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
     # hangs/crashes with inductor currently
-    @pytest.mark.skip
+    @unittest.skip("hangs/crashes with inductor currently")
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
