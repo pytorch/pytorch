@@ -516,6 +516,10 @@ def _nll_loss_nd(
 
 
 @register_decomposition(torch.ops.aten.nll_loss)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 @out_wrapper()
 def nll_loss(
     input: TensorLikeType,
