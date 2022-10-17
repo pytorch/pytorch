@@ -5,11 +5,7 @@ from unittest import TestCase, mock, main
 
 from trymerge import GitHubPR
 from test_trymerge import mocked_gh_graphql
-from check_labels import (
-    get_release_notes_labels,
-    check_labels,
-)
-
+from check_labels import check_labels
 
 release_notes_labels = [
     "release notes: AO frontend",
@@ -61,21 +57,21 @@ class TestCheckLabels(TestCase):
     def test_pr_with_missing_labels(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
         "Test PR with no 'release notes:' label or 'topic: not user facing' label"
         pr = GitHubPR("pytorch", "pytorch", 82169)
-        self.assertFalse(check_labels(pr.get_labels()))
+        self.assertFalse(check_labels(pr))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('check_labels.get_release_notes_labels', return_value=release_notes_labels)
     def test_pr_with_release_notes_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
         "Test PR with 'release notes: nn' label"
         pr = GitHubPR("pytorch", "pytorch", 71759)
-        self.assertTrue(check_labels(pr.get_labels()))
+        self.assertTrue(check_labels(pr))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('check_labels.get_release_notes_labels', return_value=release_notes_labels)
     def test_pr_with_not_user_facing_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
         "Test PR with 'topic: not user facing' label"
         pr = GitHubPR("pytorch", "pytorch", 75095)
-        self.assertTrue(check_labels(pr.get_labels()))
+        self.assertTrue(check_labels(pr))
 
 if __name__ == "__main__":
     main()

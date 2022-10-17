@@ -2,6 +2,7 @@
 """check_labels.py"""
 
 from typing import Any, List
+from datetime import datetime
 
 from export_pytorch_labels import get_pytorch_labels
 from gitutils import (
@@ -15,14 +16,31 @@ from trymerge import (
 )
 
 
+ERR_MSG = ("This PR needs a label. If your changes are user facing and intended to be a "
+           "part of release notes, please use a label starting with `release notes:`. If "
+           "not, please add the `topic: not user facing` label. For more information, see "
+           "https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.") # noqa: E501  pylint: disable=line-too-long
+
+
 def get_release_notes_labels() -> List[str]:
     return [label for label in get_pytorch_labels() if label.lstrip().startswith("release notes:")]
 
 
-def check_labels(pr_labels: List[str]) -> bool:
+def check_labels(pr: GitHubPR) -> bool:
+    pr_labels = pr.get_labels()
+
+    # Check if PR is not user facing
     is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
     if is_not_user_facing_pr:
         return True
+
+    # Check if bot has already posted message within the past hour to include release notes label
+    err_msg_start = ERR_MSG.partition(".")[0]
+    for comment in pr.get_comments():
+        ts = datetime.strptime(comment.created_at, "%Y-%m-%dT%H:%M:%SZ")
+        delta = (datetime.utcnow() - ts).total_seconds()
+        if comment.body_text.startswith(err_msg_start) and delta < 3600:
+            return True
 
     return any(label.strip() in get_release_notes_labels() for label in pr_labels)
 
@@ -42,13 +60,9 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
 
     try:
-        if not check_labels(pr.get_labels()):
-            msg = ("This PR needs a label. If your changes are user facing and intended to be a "
-                   "part of release notes, please use a label starting with `release notes:`. If "
-                   "not, please add the `topic: not user facing` label. For more information, see "
-                   "https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.")
-            print(msg)
-            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg)
+        if not check_labels(pr):
+            print(ERR_MSG)
+            gh_post_pr_comment(pr.org, pr.project, pr.pr_num, ERR_MSG)
             exit(1)
     except Exception as e:
         pass
