@@ -180,7 +180,11 @@ def break_graph_if_unsupported(*, push):
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
-                if not explain and graph_break_dup_warning_checker.add(frame_loc):
+                if (
+                    config.print_graph_breaks
+                    and not explain
+                    and graph_break_dup_warning_checker.add(frame_loc)
+                ):
                     log.warning(
                         f"Graph break: {exc} from user code at {user_stack_formatted}"
                     )
