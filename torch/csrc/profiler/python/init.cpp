@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
+#include <torch/csrc/profiler/standalone/execution_graph_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -235,6 +236,21 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly("duration_time_ns", [](const Result& r) {
         return r.endTimeNS() - r.start_time_ns_;
       });
+
+  // PyTorch profiler execution graph internal interface.
+  m.def(
+      "_add_execution_graph_observer",
+      &torch::profiler::impl::addExecutionGraphObserver,
+      py::arg("output_file_name"));
+  m.def(
+      "_remove_execution_graph_observer",
+      &torch::profiler::impl::removeExecutionGraphObserver);
+  m.def(
+      "_enable_execution_graph_observer",
+      &torch::profiler::impl::enableExecutionGraphObserver);
+  m.def(
+      "_disable_execution_graph_observer",
+      &torch::profiler::impl::disableExecutionGraphObserver);
 }
 
 } // namespace profiler
