@@ -715,9 +715,6 @@ def xfail_inherited_tests(tests):
     "test_inplace_metadata",
     "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
-    "test_make_fx_model_fwd_bwd_wgtupdate",
-    "test_make_fx_model_fwd_bwd",
-    "test_proxy_tensor",
     "test_resnet18_backward_trace",
     "test_trace_subclasses",
 ])

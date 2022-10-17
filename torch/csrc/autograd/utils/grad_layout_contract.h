@@ -63,9 +63,9 @@ inline at::Tensor clone_obey_contract(
     // Does this dicey-looking sequence attach the result to new_grad's
     // history if GradMode::is_enabled()?  Yes, and @alband says it should.
     return std::move(new_grad
-                         .new_empty_strided(
-                             variable.sizes(),
-                             variable.strides(),
+                         .new_empty_strided_symint(
+                             variable.sym_sizes(),
+                             variable.sym_strides(),
                              variable.options().memory_format(c10::nullopt))
                          .copy_(new_grad));
   } else {
