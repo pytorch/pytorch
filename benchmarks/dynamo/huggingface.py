@@ -79,9 +79,7 @@ BATCH_SIZE_KNOWN_MODELS = dict()
 
 
 # Get the list of models and their batch sizes
-MODELS_FILENAME = "huggingface_models_list.txt"
-if os.path.exists("benchmarks"):
-    MODELS_FILENAME = os.path.join("benchmarks", MODELS_FILENAME)
+MODELS_FILENAME = os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt")
 assert os.path.exists(MODELS_FILENAME)
 with open(MODELS_FILENAME, "r") as fh:
     lines = fh.readlines()

@@ -994,7 +994,9 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
         # TODO: exclude_zeros can be removed after https://github.com/pytorch/pytorch/issues/73638 is fixed
         args = tuple(make_arg(arg, exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
-        yield SampleInput(*args, value=3.14).with_metadata(broadcasts_input=broadcasts_input)
+        yield SampleInput(
+            *args, value=3.14 if dtype.is_floating_point or dtype.is_complex else 3
+        ).with_metadata(broadcasts_input=broadcasts_input)
 
 def reference_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_addcmul_addcdiv(
@@ -3495,9 +3497,9 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
-    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-               requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
-    return tensors
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       requires_grad=requires_grad, low=-5, high=5)
+    return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
 
 def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
@@ -4512,11 +4514,16 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(shape, device=device, dtype=dtype,
                            requires_grad=requires_grad, **kwargs)
-    yield SampleInput(mt(100), kwargs=dict(n_fft=10))
+
+    yield SampleInput(mt(100), n_fft=10, return_complex=True)
+    yield SampleInput(mt(100), n_fft=10, return_complex=False)
+    if dtype.is_complex:
+        yield SampleInput(mt(100), n_fft=10)
 
     for center in [False, True]:
-        yield SampleInput(mt(10), kwargs=dict(n_fft=7, center=center))
-        yield SampleInput(mt((10, 100)), kwargs=dict(n_fft=16, hop_length=4, center=center))
+        yield SampleInput(mt(10), n_fft=7, center=center, return_complex=True)
+        yield SampleInput(mt((10, 100)), n_fft=16, hop_length=4,
+                          center=center, return_complex=True)
 
     window = mt(16, low=.5, high=2.0)
     yield SampleInput(
@@ -4525,7 +4532,8 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
         mt((3, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True, center=center))
     if not dtype.is_complex:
         yield SampleInput(
-            mt((10, 100)), kwargs=dict(n_fft=16, window=window, onesided=False))
+            mt((10, 100)), n_fft=16, window=window, onesided=False,
+            return_complex=True)
 
 
 def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
@@ -4665,21 +4673,19 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     tensor_1d = partial(make_tensor, (S,), device=device, dtype=dtype,
                         requires_grad=requires_grad)
 
-    return [
-        SampleInput(tensor_nd()),
-        SampleInput(tensor_nd(), dim=1),
-        SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False),
+    yield SampleInput(tensor_nd())
+    yield SampleInput(tensor_nd(), dim=1)
+    yield SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False)
 
-        SampleInput(tensor_nd(), dim=(1,), correction=S // 2),
-        SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True),
+    yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
+    yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
+    yield SampleInput(tensor_nd(), dim=None, correction=None)
 
-        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-        SampleInput(tensor_nd(), True),
-        SampleInput(tensor_nd(), False),
-        SampleInput(tensor_nd(), dim=None, correction=None),
-    ]
+    # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+    yield SampleInput(tensor_nd(), True)
+    yield SampleInput(tensor_nd(), False)
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
@@ -5226,7 +5232,6 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
         (shape, dict(ignore_index=1)),
     ]
 
-    sample_inputs = []
     for (input_shape, kwargs), probabilities_target in itertools.product(input_shape_and_kwargs, (False, True)):
         input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5256,9 +5261,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 # make sure at least one item in target is not ignored
                 target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
 
-        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
-
-    return sample_inputs
+        yield SampleInput(input, target, **kwargs)
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -5364,6 +5367,8 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S)))
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
+                       high=None, requires_grad=requires_grad)
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5378,15 +5383,13 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
-    sample_inputs = []
     for lhs_shape, rhs_shape in test_cases:
-        lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-        rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        lhs = make_arg(lhs_shape)
+        rhs = make_arg(rhs_shape)
         if not is_rmatmul:
-            sample_inputs.append(SampleInput(lhs, args=(rhs,)))
+            yield SampleInput(lhs, rhs)
         else:
-            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
-    return tuple(sample_inputs)
+            yield SampleInput(rhs, lhs)
 
 
 def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
@@ -8031,6 +8034,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
                # aten.uniform was not decomposed
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
@@ -8300,9 +8304,6 @@ op_db: List[OpInfo] = [
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-               # 76047
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
-                            dtypes=(torch.int8, torch.int16, torch.int32, torch.int64)),
            ),
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
            reference_inputs_func=partial(
@@ -9936,7 +9937,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
@@ -9944,7 +9949,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
            ref=np.meshgrid,
@@ -10341,7 +10350,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
-               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
+               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),
+               DecorateInfo(
+                   unittest.skip("Some stride values write multiple values to the same location e.g. (1,1,1,1)"),
+                   'TestCommon', 'test_compare_cpu'),)),
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
            ref=reference_native_layer_norm,
@@ -10384,6 +10396,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # https://github.com/pytorch/pytorch/issues/85960
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                # AssertionError: Booleans mismatch: True is not False
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
@@ -10556,6 +10570,11 @@ op_db: List[OpInfo] = [
         aten_name="relu",
         ref=lambda a: np.where(a <= 0, 0, a),
         supports_autograd=True,
+        supports_sparse=True,
+        supports_sparse_csr=True,
+        supports_sparse_csc=True,
+        supports_sparse_bsr=True,
+        supports_sparse_bsc=True,
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_nn_activation_relu,
@@ -11163,7 +11182,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'))),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')),
+           skips=(
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),)),
     OpInfo('nn.functional.fractional_max_pool3d',
            supports_autograd=True,
            supports_out=False,
@@ -11184,7 +11205,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),)),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')),
+           skips=(
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),)),
     OpInfo('nn.functional.max_pool1d',
            aten_name='max_pool1d',
            supports_autograd=True,
@@ -11515,7 +11538,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_batch_vs_slicing'),
             DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_contig_vs_every_other'),
             DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_non_contig_expand'),
-            DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_contig_vs_transposed'),)),
+            DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_contig_vs_transposed'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     UnaryUfuncInfo(
         'nn.functional.selu',
         ref=lambda x, inplace=False:
@@ -11574,7 +11598,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
+            DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
@@ -13273,6 +13298,7 @@ op_db: List[OpInfo] = [
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -13299,6 +13325,7 @@ op_db: List[OpInfo] = [
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
@@ -13693,6 +13720,7 @@ op_db: List[OpInfo] = [
                # 76571 - CUDA gets expectedFailure, but this test passes for ROCm
                DecorateInfo(unittest.expectedFailure, 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values',
                             dtypes=(torch.float16, torch.float32, torch.float64), active_if=not TEST_WITH_ROCM),
+               DecorateInfo(unittest.skip('Output order is undefined when sorted=False'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('unique_consecutive',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
@@ -13915,6 +13943,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
                DecorateInfo(unittest.skip("Expected: empty_like is not comparable"), 'TestCompositeCompliance',
                             'test_operator'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('zeros_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -13972,6 +14001,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('rand_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
@@ -13986,6 +14016,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
@@ -13998,6 +14029,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('full_like',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -14096,6 +14128,7 @@ op_db: List[OpInfo] = [
                             'test_operator'),
                DecorateInfo(unittest.skip("Expected: new_empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            ),
            supports_autograd=False),
     OpInfo('new_empty_strided',
@@ -14145,6 +14178,7 @@ op_db: List[OpInfo] = [
                             'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -14184,6 +14218,7 @@ op_db: List[OpInfo] = [
                             'TestLazyOpInfo'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('eye',
            dtypes=all_types_and_complex_and(torch.bool, torch.half),
@@ -14237,7 +14272,8 @@ op_db: List[OpInfo] = [
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning')),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
            supports_autograd=False),
     OpInfo('normal',
            op=lambda inp, *args, **kwargs:
@@ -14257,7 +14293,8 @@ op_db: List[OpInfo] = [
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Computed gradient is incorrect -- would be an exfail but gradgrad somehow passes
-               DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestGradients'),)),
+               DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestGradients'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     OpInfo('normal',
            # This has its own variant b/c OpInfos assume the first arg is a Tensor but it is not here
            variant_test_name='number_mean',
@@ -14276,7 +14313,8 @@ op_db: List[OpInfo] = [
                # NotImplementedError not raised
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # Computed gradient is incorrect -- would be an exfail but gradgrad somehow passes
-               DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestGradients'),)),
+               DecorateInfo(unittest.skip("Gradients are incorrect!"), 'TestGradients'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     OpInfo('bernoulli',
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
@@ -14302,7 +14340,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'))),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
@@ -15382,7 +15421,8 @@ op_db: List[OpInfo] = [
             # inplace variant dispatches to dropout kernel, while on CUDA
             # the op dispatches to _fused_dropout (with a few more conditions)
             # hence, different values and this skip here
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # https://github.com/pytorch/pytorch/issues/66357
@@ -15400,7 +15440,8 @@ op_db: List[OpInfo] = [
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -15418,7 +15459,8 @@ op_db: List[OpInfo] = [
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -15444,7 +15486,8 @@ op_db: List[OpInfo] = [
             # vmap: We do not yet support calling random operations inside of vmap.
             # Please perform random operations outside of vmap as a workaround
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -15494,6 +15537,8 @@ op_db: List[OpInfo] = [
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            # Fails on CI https://github.com/pytorch/pytorch/issues/85377
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
             # Reference: https://github.com/pytorch/pytorch/issues/67084
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
@@ -16752,6 +16797,7 @@ python_ref_db = [
                          'test_neg_view'),
             # dropout is not comparable
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -16851,6 +16897,23 @@ python_ref_db = [
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.nll_loss",
+        torch_opinfo_name="nn.functional.nll_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
+        supports_nvfuser=False,
+        # For simpler indexing, we flatten target indices, then reshape the result tensor.
+        # This creates inconsistent view state with reference impl.
+        validate_view_consistency=False,
+        skips=(
+            # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.huber_loss",
@@ -17228,6 +17291,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.addcdiv",
         torch_opinfo_name="addcdiv",
+    ),
+    PythonRefInfo(
+        "_refs.addcmul",
+        torch_opinfo_name="addcmul",
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
@@ -17645,6 +17712,10 @@ python_ref_db = [
             # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
         ),
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/85960
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+        ),
     ),
     PythonRefInfo(
         "ops.nvprims.view",
@@ -17716,6 +17787,7 @@ python_ref_db = [
                          'test_neg_view'),
             # FIXME: shouldn't check empty results
             DecorateInfo(unittest.skip("Can't check result for empty"), 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     PythonRefInfo(
@@ -17746,6 +17818,7 @@ python_ref_db = [
                          'test_neg_view'),
             # FIXME: should not compare results of empty_like
             DecorateInfo(unittest.skip("Can't check result for empty_like"), 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     PythonRefInfo(
@@ -17804,6 +17877,7 @@ python_ref_db = [
                          'test_neg_view'),
             # FIXME: should not compare results of empty_like
             DecorateInfo(unittest.skip("Can't check result for new_empty"), 'TestCommon', 'test_python_ref_executor'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     PythonRefInfo(
@@ -17828,6 +17902,8 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
                          'TestCommon',
                          'test_python_ref_executor'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+
         ),
     ),
     PythonRefInfo(
