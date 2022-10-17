@@ -10,8 +10,8 @@ import logging
 import itertools
 from copy import copy
 
-logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
 class Partition:
     def __init__(self, id: int = None, nodes: Iterable[Node] = None):
@@ -42,8 +42,15 @@ class CapabilityBasedPartitioner:
         self.allows_single_node_partition = allows_single_node_partition
 
     def __is_node_supported(self, node: Node) -> bool:
-        # TODO: reject 'getitem' node since they are special cased in partitioning.
-        return self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
+        return (
+            self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
+            and
+            # reject 'getitem' node since they are special cased in partitioning.
+            (
+                node.op != "call_function" or
+                _get_qualified_name(node.target) != "_operator.getitem"    # type: ignore[arg-type]
+            )
+        )
 
     def propose_partitions(self) -> List[Partition]:
         # assumptions: nodes in candidate list is sorted in topological order
@@ -112,7 +119,7 @@ class CapabilityBasedPartitioner:
             else:
                 partitions_by_id[id].add_node(node)
 
-        logging.debug("Proposing partitions...")
+        logger.debug("Proposing partitions...")
 
         for node in reversed(self.graph_module.graph.nodes):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
@@ -132,8 +139,6 @@ class CapabilityBasedPartitioner:
                 if user_node in assignment:
                     merge_candidates[assignment[user_node]] = None
 
-            # Filter out all the partitions that has dependency on other users
-            # TODO: find a better way to do this, rather than pair-wise comparision
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
@@ -179,14 +184,14 @@ class CapabilityBasedPartitioner:
             for id in partitions_to_remove:
                 del partitions_by_id[id]
 
-        logging.debug("Partitions proposed:")
+        logger.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logging.debug(f"partition #{id}", [node.name for node in partition.nodes])
+            logger.debug(f"partition #{id}", [node.name for node in partition.nodes])
 
         return list(partitions_by_id.values())
 
     def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
-        logging.debug("Fusing partitions...")
+        logger.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
         return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])
 
