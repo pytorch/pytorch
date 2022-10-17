@@ -1181,9 +1181,8 @@ class TestFFT(TestCase):
     @skipCPUIfNoFFT
     def test_stft_requires_complex(self, device):
         x = torch.rand(100)
-        y = x.stft(10, pad_mode='constant')
-        # with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
-        #     y = x.stft(10, pad_mode='constant')
+        with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
+            y = x.stft(10, pad_mode='constant')
 
     @skipCPUIfNoFFT
     def test_fft_input_modification(self, device):
