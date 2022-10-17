@@ -8,6 +8,7 @@
 
 from collections import OrderedDict
 from pickle import (
+    APPEND,
     APPENDS,
     BINGET,
     BININT,
@@ -81,10 +82,27 @@ class Unpickler:
                 full_path = f"{module}.{name}"
                 ALLOWED_GLOBALS = {
                     "collections.OrderedDict": OrderedDict,
+                    "torch.CharTensor": torch.CharTensor,
+                    "torch.CharStorage": torch.CharStorage,
+                    "torch.ShortTensor": torch.ShortTensor,
+                    "torch.ShortStorage": torch.ShortStorage,
+                    "torch.ByteTensor": torch.ByteTensor,
+                    "torch.ByteStorage": torch.ByteStorage,
+                    "torch.BoolTensor": torch.BoolTensor,
+                    "torch.BoolStorage": torch.BoolStorage,
+                    "torch.BFloat16Storage": torch.BFloat16Storage,
+                    "torch.HalfStorage": torch.HalfStorage,
+                    "torch.HalfTensor": torch.HalfTensor,
+                    "torch.ComplexFloatStorage": torch.ComplexFloatStorage,
+                    "torch.ComplexDoubleStorage": torch.ComplexDoubleStorage,
                     "torch.FloatTensor": torch.FloatTensor,
                     "torch.FloatStorage": torch.FloatStorage,
+                    "torch.DoubleTensor": torch.DoubleTensor,
+                    "torch.DoubleStorage": torch.DoubleStorage,
+                    "torch.IntTensor": torch.IntTensor,
+                    "torch.IntStorage": torch.IntStorage,
                     "torch.LongTensor": torch.LongTensor,
-                    "torch.LongStorage": torch.FloatStorage,
+                    "torch.LongStorage": torch.LongStorage,
                     "torch.nn.parameter.Parameter": torch.nn.Parameter,
                     "torch._utils._rebuild_parameter": torch._utils._rebuild_parameter,
                     "torch._utils._rebuild_tensor_v2": torch._utils._rebuild_tensor_v2,
@@ -97,14 +115,14 @@ class Unpickler:
                 args = self.stack.pop()
                 cls = self.stack.pop()
                 if cls is not torch.nn.Parameter:
-                    raise RuntimeError("Trying to instantiate unsupported class")
+                    raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
                 self.append(cls.__new__(cls, *args))
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
                 if func not in ALLOWED_GLOBALS.values():
                     raise RuntimeError(
-                        "Trying to call reduce for unrecognized function"
+                        f"Trying to call reduce for unrecognized function {func}"
                     )
                 self.stack[-1] = func(*args)
             elif key[0] == BUILD[0]:
@@ -115,13 +133,19 @@ class Unpickler:
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
                 else:
-                    raise RuntimeError("Can only build parameter and dict objects")
+                    raise RuntimeError("Can only build parameter and dict objects, but got {type(inst)}")
             # Stack manipulation
+            elif key[0] == APPEND[0]:
+                item = self.stack.pop()
+                list_obj = self.stack[-1]
+                if type(list_obj) is not list:
+                    raise RuntimeError(f"Can only append to lists, but got {type(list_obj)}")
+                list_obj.append(item)
             elif key[0] == APPENDS[0]:
                 items = self.pop_mark()
                 list_obj = self.stack[-1]
-                if type(list_obj) is not list or not hasattr(list_obj, "extend"):
-                    raise RuntimeError("Can only extend lists")
+                if type(list_obj) is not list:
+                    raise RuntimeError(f"Can only extend lists, but got {type(list_obj)}")
                 list_obj.extend(items)
             elif key[0] == SETITEM[0]:
                 (v, k) = (self.stack.pop(), self.stack.pop())
@@ -193,7 +217,7 @@ class Unpickler:
                 rc = self.stack.pop()
                 return rc
             else:
-                raise RuntimeError(f"Unsupported operatnd {key[0]}")
+                raise RuntimeError(f"Unsupported operand {key[0]}")
 
     # Return a list of items pushed in the stack after last MARK instruction.
     def pop_mark(self):
