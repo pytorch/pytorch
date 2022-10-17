@@ -268,6 +268,8 @@ __all__ = [
     "unsafe_split_with_sizes",
     "unsafe_split",
     "unsqueeze",
+    "unsupported_complex_operators",
+    "noop_complex_operators",
     "unused",
     "var_mean",
     "var",
@@ -6660,3 +6662,35 @@ def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
     env = g.env
 
     return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
+
+
+@_onnx_symbolic("aten::resolve_conj")
+@_onnx_symbolic("aten::resolve_neg")
+@_beartype.beartype
+def noop_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
+    # ONNX does not have operators to *directly* manipulate real/imaginary components
+    # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
+    # which results in failures due to missing operators for complex numbers
+
+    # `aten::resolve_conj` and `aten::resolve_neg` can safely be implemented as no-op
+    return input
+
+
+@_onnx_symbolic("aten::_conj")
+@_onnx_symbolic("aten::conj_physical")
+@_beartype.beartype
+def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
+    # ONNX does not have operators to *directly* manipulate real/imaginary components
+    # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
+    # which results in failures due to missing operators for complex numbers
+
+    # While `aten::_conj` and `aten::conj_phisical` raise exception when input is complex
+    if symbolic_helper.is_complex_value(input):
+        # FIXME(justinchuby): report correct name for symbolic being executed
+        return symbolic_helper._onnx_unsupported(
+            "aten::_conj, aten::conj_physical",
+            input,
+        )
+
+    # they can safely be implemented as no-op for real numbers only
+    return noop_complex_operators(g, input)
