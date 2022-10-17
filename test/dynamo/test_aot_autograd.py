@@ -4,6 +4,7 @@ import functools
 import torch
 
 import torch._dynamo
+import torch._dynamo.test_case
 from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
 from torch._dynamo.testing import rand_strided
 
@@ -13,7 +14,7 @@ def compiler_safe_fn(gm, example_inputs, is_safe):
     return gm.forward
 
 
-class AotAutogradFallbackTests(torch._dynamo.testing.TestCase):
+class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
@@ -60,6 +61,65 @@ class AotAutogradFallbackTests(torch._dynamo.testing.TestCase):
         aot_fn(x, y)
         self.assertTrue(not is_safe[0])
 
+    def test_mutation1(self):
+        def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
+            getitem = diagonal_chunked_attention_scores[
+                (
+                    slice(None, None, None),
+                    slice(None, None, None),
+                    slice(None, 256, None),
+                    slice(None, 257, None),
+                )
+            ]
+            _stack0[
+                (
+                    slice(None, None, None),
+                    slice(None, -1, None),
+                    slice(None, None, None),
+                    slice(256, None, None),
+                )
+            ] = getitem
+            view = _stack0.view(1, 12, 1024, 513)
+            return (view,)
+
+        x = torch.randn(torch.Size([12, 4, 256, 513]))
+        y = torch.randn(torch.Size([12, 3, 512, 513]))
+        is_safe = [True]
+        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
+        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
+        aot_fn(x, y)
+        self.assertTrue(not is_safe[0])
+
+    def test_negative_testing_mutation(self):
+        def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
+            getitem = diagonal_chunked_attention_scores[
+                (
+                    slice(None, None, None),
+                    slice(None, None, None),
+                    slice(None, 256, None),
+                    slice(None, 257, None),
+                )
+            ]
+            _stack0 = torch.sin(_stack0)
+            _stack0[
+                (
+                    slice(None, None, None),
+                    slice(None, -1, None),
+                    slice(None, None, None),
+                    slice(256, None, None),
+                )
+            ] = getitem
+            view = _stack0.view(1, 12, 1024, 513)
+            return (view,)
+
+        x = torch.randn(torch.Size([12, 4, 256, 513]))
+        y = torch.randn(torch.Size([12, 3, 512, 513]))
+        is_safe = [True]
+        compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
+        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
+        aot_fn(x, y)
+        self.assertTrue(is_safe[0])
+
     def test_negative_testing(self):
         def fn(x, y):
             return torch.sin(x).add_(y)
@@ -74,6 +134,6 @@ class AotAutogradFallbackTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

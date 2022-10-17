@@ -924,6 +924,12 @@ class TestMeta(TestCase):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
 
+    def test_huber_loss_backward(self):
+        inps = [torch.rand(2**52, device='meta') for _ in range(3)]
+        r = torch.ops.aten.huber_loss_backward(*inps, 0, 1.0)
+        self.assertEqual(r.device.type, 'meta')
+        self.assertEqual(r.shape, inps[0].shape)
+
     def test_map_location_deserialize(self):
         import io
 
