@@ -36,7 +36,6 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     skip_if_lt_x_gpu,
     simple_sparse_reduce_tests,
-    skip_if_win32,
     create_device,
     verify_ddp_error_logged,
 )
@@ -1414,57 +1413,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
-
-    @skip_if_win32()
-    @requires_gloo()
-    def test_round_robin(self):
-        num_process_groups = 2
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d._round_robin_process_groups(
-            [
-                c10d.ProcessGroupGloo(
-                    c10d.PrefixStore(str(i), store),
-                    self.rank,
-                    self.world_size,
-                    self.opts(),
-                )
-                for i in range(num_process_groups)
-            ]
-        )
-
-        # Run a few collectives so that we have called each process group
-        for _ in range(num_process_groups + 1):
-            tensor = torch.full([100, 100], float(self.rank))
-            pg.broadcast(tensor, root=0).wait()
-            self.assertEqual(torch.full([100, 100], 0.0), tensor)
-
-    @skip_if_win32()
-    @requires_gloo()
-    def test_round_robin_create_destroy(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-
-        def create(num, prefix):
-            return c10d._round_robin_process_groups(
-                [
-                    c10d.ProcessGroupGloo(
-                        c10d.PrefixStore("%s/%d" % (prefix, i), store),
-                        self.rank,
-                        self.world_size,
-                        self.opts(),
-                    )
-                    for i in range(num)
-                ]
-            )
-
-        # Run create/use/destroy twice
-        for i in range(2):
-            num_process_groups = 2
-            pg = create(num=num_process_groups, prefix=i)
-            for _ in range(3):
-                tensor = torch.ones([10, 10])
-                pg.allreduce(tensor).wait()
-                self.assertEqual(torch.full([10, 10], float(self.world_size)), tensor)
-            del pg
 
 
 class DistributedDataParallelTest(

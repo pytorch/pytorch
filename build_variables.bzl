@@ -510,7 +510,6 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.cpp",
     "torch/csrc/distributed/c10d/HashStore.cpp",
-    "torch/csrc/distributed/c10d/ProcessGroupRoundRobin.cpp",
     "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/profiler/remote_profiler_manager.cpp",

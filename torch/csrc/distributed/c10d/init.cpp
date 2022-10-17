@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
@@ -1443,22 +1442,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
           .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
-
-#ifndef _WIN32
-  module.def(
-      "_round_robin_process_groups",
-      [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
-          -> c10::intrusive_ptr<::c10d::ProcessGroup> {
-        if (processGroups.size() == 0) {
-          throw std::invalid_argument("Specify at least 1 process group");
-        }
-        const auto& first = processGroups.front();
-        return c10::make_intrusive<::c10d::ProcessGroupRoundRobin>(
-            first->getRank(), first->getSize(), std::move(processGroups));
-      },
-      py::arg("process_groups"),
-      py::call_guard<py::gil_scoped_release>());
-#endif
 
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
