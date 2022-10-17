@@ -670,6 +670,21 @@ def sanitize_pytest_xml(xml_file: str):
         testcase.set("file", f"{file}.py")
     tree.write(xml_file)
 
+def count_pytest_test_cases(file: str) -> List[str]:
+    class TestCollectorPlugin:
+        def __init__(self):
+            self.tests = []
+
+        def pytest_collection_modifyitems(self, items):
+            for item in items:
+                self.tests.append(item.nodeid)
+
+
+    test_collector_plugin = TestCollectorPlugin()
+    import pytest
+    pytest.main(['--collect-only', file], plugins=[test_collector_plugin])
+    return test_collector_plugin.tests
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if SLOW_TESTS_FILE:
@@ -702,6 +717,10 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
         failed_tests = []
         test_cases = discover_test_cases_recursively(suite)
+        print(f"there are {len(test_cases)} unitest tests in {argv[0]}")
+        a = count_pytest_test_cases(argv[0])
+        if USE_PYTEST:
+            print(f"there are {len(a)} pytest tests in {argv[0]}")
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
             other_args = []
@@ -713,6 +732,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 other_args.append('--use-pytest')
                 test_case_full_name = f"-k={test_case_full_name.split('.')[1]}"
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
+            print(cmd)
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
             if exitcode != 0:
