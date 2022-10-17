@@ -153,7 +153,7 @@ class NNModuleVariable(VariableTracker):
         @contextmanager
         def record_nn_module_stack():
             try:
-                tx.nn_module_stack[self.module_key] = mod.__class__.__name__
+                tx.nn_module_stack[self.module_key] = type(mod)
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
