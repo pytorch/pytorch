@@ -8013,7 +8013,9 @@ Example::
 
         :func:`torch.narrow` for a non copy variant
 
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
