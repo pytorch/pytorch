@@ -725,14 +725,6 @@ provides mechanisms for model pruning, which can help reduce memory usage while 
 `Pruning tutorial <https://pytorch.org/tutorials/intermediate/pruning_tutorial.html>`_ describes how to utilize
 the pruning techniques PyTorch provides or define custom pruning techniques as necessary.
 
-Deploying with TorchScript
-**************************
-
-When deploying a model for use in production, the overhead of Python can be unacceptable due to its poor
-performance characteristics. For cases like this,
-`TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_ provides a way to load
-and run an optimized model program from outside of Python, such as within a C++ program.
-
 Parametrizations
 ****************
 
