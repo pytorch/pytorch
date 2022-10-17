@@ -1083,7 +1083,7 @@ def convolution(
         ir.Convolution.create(
             x,
             weight,
-            bias if inputs_is_cpu else None,  # For cpu path, bias can always be fused
+            bias if is_cpu else None,  # For cpu path, bias can always be fused
             stride,
             padding,
             dilation,
