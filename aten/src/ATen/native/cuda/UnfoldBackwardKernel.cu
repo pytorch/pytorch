@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnfoldBackward.h>
 
+#include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/cuda/CUDAContext.h>
