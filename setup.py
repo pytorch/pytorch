@@ -1115,7 +1115,6 @@ def main():
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
-        'include/torch/csrc/profiler/standalone/*.h',
         'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
         'include/torch/csrc/tensor/*.h',
