@@ -118,7 +118,7 @@ class OutputGraph(fx.Tracer):
         self._current_tx.append(tx)
 
     def pop_tx(self):
-        self._current_tx.pop()
+        return self._current_tx.pop()
 
     @property
     def current_tx(self):

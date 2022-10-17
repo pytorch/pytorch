@@ -442,20 +442,19 @@ class TensorVariable(VariableTracker):
 
         return result
 
-    def unpack_var_sequence_range(self, tx, range):
+    def unpack_var_sequence(self, tx, idxes=None):
+        if idxes is None:
+            if self.size:
+                idxes = range(self.size[0])
+            else:
+                return super(TensorVariable, self).unpack_var_sequence(tx)
         options = VariableTracker.propagate(self)
         return [
             variables.BuiltinVariable(operator.getitem, **options).call_function(
                 tx, [self, variables.ConstantVariable(i)], {}
             )
-            for i in range
+            for i in idxes
         ]
-
-    def unpack_var_sequence(self, tx):
-        if self.size:
-            return self.unpack_var_sequence_range(tx, range(self.size[0]))
-
-        return super(TensorVariable, self).unpack_var_sequence(tx)
 
     def call_method(
         self,

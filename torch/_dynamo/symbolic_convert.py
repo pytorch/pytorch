@@ -1007,10 +1007,10 @@ class InstructionTranslatorBase(object):
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
             val = seq.unpack_var_sequence(self)
         elif isinstance(seq, TensorVariable):
-            val = seq.unpack_var_sequence_range(self, range(inst.argval))
+            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
-            val = seq.obj.unpack_var_sequence_range(self, range(inst.argval))
+            val = seq.obj.unpack_var_sequence(self, idxes=range(inst.argval))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         assert len(val) == inst.argval
