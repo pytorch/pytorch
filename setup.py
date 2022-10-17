@@ -1008,7 +1008,7 @@ def main():
         '_C_flatbuffer/*.pyi',
         'cuda/*.pyi',
         'optim/*.pyi',
-        'autograd/*.pyi'        
+        'autograd/*.pyi',
         'nn/*.pyi',
         'nn/modules/*.pyi',
         'nn/parallel/*.pyi',
