@@ -1679,6 +1679,7 @@ split_dim = _make_prim(
 # Note: allows dimensions to be specified redundantly
 def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     assert isinstance(a, TensorLike)
+    dimensions = utils.canonicalize_dims(a.ndim, dimensions)
 
     for idx in dimensions:
         utils.validate_idx(a.ndim, idx)
@@ -1697,6 +1698,7 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
 
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
+    dimensions = utils.canonicalize_dims(a.ndim, dimensions)
     for idx in reversed(sorted(dimensions)):
         a = torch.squeeze(a, dim=idx)
 

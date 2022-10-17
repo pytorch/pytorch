@@ -2706,6 +2706,7 @@ def _normalize(
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
     """
+    norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
     assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
@@ -2740,19 +2741,18 @@ def native_group_norm(
         + " and num_groups="
         + str(group),
     )
-    reduction_dims = list(dim for dim in range(2, input.ndim))
-    broadcast_dims = [0] + reduction_dims
 
+    reduction_dims = [-2, -1]
     input_reshaped = torch.reshape(
         input, [batch_size, group, num_channels // group, flattened_inner_size]
     )
     out, mean, rstd = _normalize(input_reshaped, reduction_dims, eps)
     out = out.view(input.shape)
 
+    broadcast_dims = [0] + list(dim for dim in range(2, input.ndim))
     unsqueeze_bias = None
     if bias is not None:
         unsqueeze_bias = prims.expand_dims(bias, broadcast_dims, input.ndim)
-
     unsqueeze_weight = None
     if weight is not None:
         unsqueeze_weight = prims.expand_dims(weight, broadcast_dims, input.ndim)
@@ -2764,10 +2764,8 @@ def native_group_norm(
 
     if out.dtype != input.dtype:
         out = prims.convert_element_type(out, input.dtype)
-
     if mean.dtype != input.dtype:
         mean = prims.convert_element_type(mean, input.dtype)
-
     if rstd.dtype != input.dtype:
         rstd = prims.convert_element_type(rstd, input.dtype)
 
