@@ -1,10 +1,38 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/Distance.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cdist_backward_native.h>
+#include <ATen/ops/_cdist_forward.h>
+#include <ATen/ops/_cdist_forward_native.h>
+#include <ATen/ops/_euclidean_dist.h>
+#include <ATen/ops/_euclidean_dist_native.h>
+#include <ATen/ops/_pdist_backward_native.h>
+#include <ATen/ops/_pdist_forward.h>
+#include <ATen/ops/_pdist_forward_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cdist_native.h>
+#include <ATen/ops/cosine_similarity_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/norm.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/pairwise_distance_native.h>
+#include <ATen/ops/pdist_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at { namespace native {
 

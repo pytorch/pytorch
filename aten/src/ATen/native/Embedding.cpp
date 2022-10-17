@@ -1,13 +1,33 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/BinaryOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#include <ATen/ops/embedding_backward_native.h>
+#include <ATen/ops/embedding_dense_backward.h>
+#include <ATen/ops/embedding_dense_backward_native.h>
+#include <ATen/ops/embedding_native.h>
+#include <ATen/ops/embedding_renorm_native.h>
+#include <ATen/ops/embedding_sparse_backward.h>
+#include <ATen/ops/embedding_sparse_backward_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/util/irange.h>
 
 #include <cstring>
 #include <memory>
-#include <sstream>
 #include <vector>
 
 
@@ -64,7 +84,7 @@ Tensor embedding_sparse_backward(
   Tensor indices = indices_;
   Tensor grad = grad_;
   if (padding_idx != -1) {
-    torch::List<c10::optional<Tensor>> c({indices != padding_idx});
+    c10::List<c10::optional<Tensor>> c({indices != padding_idx});
     indices = indices.index(c);
     grad = grad.index(c);
   }

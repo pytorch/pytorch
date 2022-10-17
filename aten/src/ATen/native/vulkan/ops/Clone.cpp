@@ -1,6 +1,13 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#endif
+
 namespace at {
 namespace native {
 namespace vulkan {

@@ -1,5 +1,7 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <c10/util/irange.h>
+
+#include <bitset>
 #include <iomanip>
 #include <sstream>
 

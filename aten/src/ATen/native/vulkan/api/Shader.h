@@ -4,7 +4,10 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
+
+#include <mutex>
 
 namespace at {
 namespace native {

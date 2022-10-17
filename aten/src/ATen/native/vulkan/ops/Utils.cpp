@@ -1,5 +1,14 @@
 #include <ATen/native/vulkan/ops/Common.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/cat.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/narrow.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 namespace at {
 namespace native {
 namespace vulkan {

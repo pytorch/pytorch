@@ -1,5 +1,7 @@
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/Utils.h>
+
+#include <ATen/Context.h>
 #include <c10/util/irange.h>
 
 namespace at {

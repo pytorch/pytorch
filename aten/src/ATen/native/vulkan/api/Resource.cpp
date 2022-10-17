@@ -1,6 +1,8 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Resource.h>
 
+#include <c10/core/ScalarTypeToTypeMeta.h>
+
 namespace at {
 namespace native {
 namespace vulkan {
