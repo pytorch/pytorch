@@ -52,12 +52,12 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          # .jenkins/pytorch/build.sh
+          .jenkins/pytorch/build.sh
       - name: Checkout TorchBench
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           repository: pytorch/benchmark
-          path: benchmark
+          path: torchbenchmark
           lfs: false
           # Pin to specific version to avoid upstream breakages
           ref: 24b95f2f627bf07a61cefed653419389a7586357
@@ -66,7 +66,7 @@ jobs:
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          pushd "${GITHUB_WORKSPACE}"/benchmark
+          pushd "${GITHUB_WORKSPACE}"/torchbenchmark
           pip3 install --pre torch torchtext torchvision -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           python install.py
           pip install gym==0.25.2  # workaround issue in 0.26.0
