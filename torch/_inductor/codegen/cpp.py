@@ -491,13 +491,14 @@ class CppKernel(Kernel):
     def size_hint(self):
         return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
-    def num_threads(self):
+    def parallel_num_threads(self):
         threads = config.cpp.threads
         if threads < 1:
             threads = torch.get_num_threads()
+        return threads
 
     def codegen_loops(self, code, worksharing):
-        threads = self.num_threads
+        threads = self.parallel_num_threads()
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
@@ -746,7 +747,7 @@ class CppVecKernelChecker(CppVecKernel):
 
 class CppKernelProxy(CppKernel):
     def __init__(self, args=None, num_threads=None):
-        super().__init__(args, num_threads)
+        super(CppKernelProxy, self).__init__(args, num_threads)
         self.simd_vec_kernel = None
         self.simd_omp_kernel = None
 
@@ -767,7 +768,7 @@ class CppKernelProxy(CppKernel):
         return loop_nest
 
     def codegen_loops(self, code, worksharing):
-        threads = self.num_threads()
+        threads = self.parallel_num_threads()
 
         if self.simd_vec_kernel is None:
             assert self.simd_omp_kernel
@@ -1034,6 +1035,7 @@ class LoopLevel:
     var: sympy.Expr = None
     size: sympy.Expr = None
     offset: sympy.Expr = sympy.Integer(0)
+    steps: sympy.Expr = sympy.Integer(1)
     parallel: int = 0
     simd_omp: bool = False
     simd_len: int = config.cpp.simdlen
@@ -1065,7 +1067,7 @@ class LoopLevel:
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        line2 = f"for({INDEX_TYPE} {self.var}={cexpr(self.offset)}; {self.var}<{cexpr(self.size)}; ++{self.var})"
+        line2 = f"for({INDEX_TYPE} {self.var}={cexpr(self.offset)}; {self.var}<{cexpr(self.size)}; {self.var}+={cexpr(self.steps)})"
         if self.collapsed or not line1:
             return [line2]
         return [line1, line2]

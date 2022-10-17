@@ -3962,7 +3962,7 @@ if HAS_CPU:
                 traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_simd_vec_kernel_count == 1
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
                 metrics.reset()
                 x1 = x1.permute(1, 0)
@@ -3970,7 +3970,7 @@ if HAS_CPU:
                 traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_simd_vec_kernel_count == 0
+                assert metrics.generated_cpp_vec_kernel_count == 0
 
                 metrics.reset()
                 x1 = torch.randn((10, 7))
@@ -3978,7 +3978,7 @@ if HAS_CPU:
                 traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
                 compiled = compile_fx_inner(traced, ([x1, x2]))
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_simd_vec_kernel_count == 1
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if HAS_CUDA:
