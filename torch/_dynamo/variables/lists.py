@@ -30,9 +30,11 @@ class BaseListVariable(VariableTracker):
         self.items: List[VariableTracker] = items
 
     def _as_proxy(self):
+
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):
+
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
@@ -58,6 +60,7 @@ class BaseListVariable(VariableTracker):
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
+
         return [x.add_options(self) for x in self.items]
 
     def call_method(
@@ -67,6 +70,7 @@ class BaseListVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
@@ -210,6 +214,7 @@ class ListVariable(BaseListVariable):
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
+
         return tuple
 
     def reconstruct(self, codegen):
@@ -223,6 +228,7 @@ class TupleVariable(BaseListVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+
         options = VariableTracker.propagate(self, args, kwargs.values())
         if (
             name in ("__add__", "__iadd__")
@@ -241,6 +247,23 @@ class TupleVariable(BaseListVariable):
                 self.items + list(args[0].unpack_var_sequence(self)), **options
             )
         return super().call_method(tx, name, args, kwargs)
+
+
+class NNSequentialVariable(TupleVariable):
+    def __init__(self, module, items: List[VariableTracker], **kwargs):
+        super(NNSequentialVariable, self).__init__(items, **kwargs)
+        from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+
+        assert isinstance(module, (NNModuleVariable, UnspecializedNNModuleVariable))
+        self.module = module
+
+    def python_type(self):
+        return torch.nn.Sequential
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        return self.module.call_function(tx, args, kwargs)
 
 
 class SizeVariable(TupleVariable):

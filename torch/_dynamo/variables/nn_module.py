@@ -30,6 +30,10 @@ class NNModuleVariable(VariableTracker):
         self.module_key = module_key
         assert self.source
 
+    # def as_python_constant(self):
+    #     if self.python_type()
+    #     raise NotImplementedError(f"{self} is not a constant")
+
     def python_type(self):
         return self.module_type
 
@@ -220,7 +224,12 @@ class NNModuleVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
-        from . import ConstantVariable, ListIteratorVariable, TupleVariable
+        from . import (
+            ConstantVariable,
+            ListIteratorVariable,
+            NNSequentialVariable,
+            TupleVariable,
+        )
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
@@ -340,6 +349,7 @@ class NNModuleVariable(VariableTracker):
                 args[0].as_python_constant() in module._modules, **options
             )
         elif name == "__getitem__":
+
             assert not kwargs and len(args) == 1
             assert type(module).__getitem__ in (
                 torch.nn.ModuleDict.__getitem__,
@@ -352,6 +362,7 @@ class NNModuleVariable(VariableTracker):
             if isinstance(args[0], SliceVariable):
                 # Build a TupleVariable of NNModules
                 result = []
+                submods = []
 
                 # Turn the slice into the list of integers
                 keys = list(range(len(module)))[args[0].as_python_constant()]
@@ -366,7 +377,19 @@ class NNModuleVariable(VariableTracker):
                             **options,
                         )
                     )
-                return TupleVariable(result, **options)
+                    submods.append(submod)
+
+                new_module = torch.nn.Sequential(*submods)
+                new_module_variable = tx.output.register_attr_or_module(
+                    new_module,
+                    f"{self}.__getitem__(slice)",
+                    source=NNModuleSource(
+                        GetItemSource(self.source, args[0].as_python_constant())
+                    ),
+                    force_static=True,
+                    **options,
+                )
+                return NNSequentialVariable(new_module_variable, result, **options)
 
             key = args[0].as_python_constant()
             submod = module[key]

@@ -2290,7 +2290,7 @@ def matmul(tensor1, tensor2):
         return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
         # if tensor1.shape[1] != tensor2.shape[0]:
-        #     breakpoint()
+        #
         return torch.mm(tensor1, tensor2)
     elif should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1):
         # NB: Much of this was written with Copilot! (although still had to fix a bunch of issues)
