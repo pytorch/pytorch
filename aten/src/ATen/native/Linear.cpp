@@ -542,11 +542,11 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   // Sum out contraction dims
   if (perm_index - out_num_dim > 0) {
     if (num_ops > 1) {
-      auto sizes = ops[0].sizes().vec();
+      auto sizes = ops[0].sym_sizes().vec();
       for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {
         sizes.erase(sizes.begin() + dim);
       }
-      return ops[0].view(sizes);
+      return ops[0].view_symint(sizes);
     } else {
       std::vector<int64_t> sum_dims(perm_index - out_num_dim);
       std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
