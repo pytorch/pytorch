@@ -12,6 +12,8 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 import numpy as np
 
+import sympy
+
 import torch
 
 from . import config, convert_frame, mutation_guard
@@ -27,6 +29,7 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -176,6 +179,7 @@ class GuardBuilder:
         # Code is python expression strings generated for each guard
         self.code: List[str] = []
         self.tensor_check_names = []
+        self.tensor_check_ids = {}
         self.tensor_check_examples = []
         self.guarded_code = guarded_code
 
@@ -414,8 +418,12 @@ class GuardBuilder:
             self.ID_MATCH(guard)
         else:
             value = self.get(guard.name)
-            self.tensor_check_names.append(self.arg_ref(guard))
+            tensor_name = self.arg_ref(guard)
+            self.tensor_check_names.append(tensor_name)
             self.tensor_check_examples.append(value)
+
+            # STOP - DO NOT USE id_ref FOR TENSORS - TENSOR INVALIDATION RULES DIFFER
+            self.tensor_check_ids[tensor_name] = id(value)
 
             # Note: Guard code produced for tensor_match is a little different.
             # We accumulate tensor names, then do a single install of `___check_tensors`.
@@ -482,6 +490,7 @@ class GuardedCode:
 class CheckFunctionManager:
     def __init__(
         self,
+        shape_env=None,
         guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict] = None,
         f_globals: Optional[Dict] = None,
@@ -489,6 +498,7 @@ class CheckFunctionManager:
         self.valid = True
         self._weakrefs = []
         self._seen_ids = set()
+        self.shape_env = shape_env
 
         # Note: right overrides left
         def combine_scopes(left, right):
@@ -511,6 +521,8 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 
+    # def _expression_parser(self, expr, name_to_size, name_to_stride):
+
     def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -530,9 +542,56 @@ class CheckFunctionManager:
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
         )
+
+        tensor_check_ids = local_builder.tensor_check_ids.copy()
+        tensor_check_ids.update(global_builder.tensor_check_ids)
+
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
+            id_to_name_map = {}
+            size_parts = []
+            stride_parts = []
+            if config.dynamic_shapes:
+                for name in tensor_check_names:
+                    tensor_id = tensor_check_ids[name]
+                    id_to_name_map[tensor_id] = name
+                    if tensor_id in self.shape_env.expr_to_id:
+                        values_and_kind_list = self.shape_env.expr_to_id[tensor_id]
+                        for (val, kind, idx) in values_and_kind_list:
+                            val = str(val)
+                            if val in ("0", "1"):
+                                continue
+                            if kind == "size":
+                                size_parts.append((val, tensor_id, idx))
+                            if kind == "stride":
+                                stride_parts.append((val, tensor_id, idx))
+
+                expression_and_evaluation = [(guard[0], guard[1]) for guard in self.shape_env.guards]
+                finished_expressions = []
+                for expression, evaluation in expression_and_evaluation:
+                    expr_as_str = str(expression)
+                    for key, tensor_id, idx in size_parts:
+                        expr_as_str = expr_as_str.replace(
+                            key, f"{id_to_name_map[tensor_id]}.size()[{idx}]"
+                        )
+
+                    for key, tensor_id, idx in stride_parts:
+                        expr_as_str = expr_as_str.replace(
+                            key, f"{id_to_name_map[tensor_id]}.stride()[{idx}]"
+                        )
+
+                    for key in self.shape_env.replacements.keys():
+                        assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
+                            
+                    # breakpoint()
+                    if not evaluation:
+                        expr_as_str = f"not {expr_as_str}"
+                    
+                    print(expr_as_str)
+                    code_parts.append(expr_as_str)
+                    verbose_code_parts.append(expr_as_str)
+
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
@@ -549,13 +608,15 @@ class CheckFunctionManager:
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
         code = " and ".join(unique(code_parts))
-
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
+                ("Eq", sympy.Eq),
+                ("Mod", sympy.Mod),
+                ("FloorDiv", FloorDiv)
             ]
         )
         closure_vars.update(CLOSURE_VARS)
@@ -567,6 +628,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
+        # print("RUNNING PY CODE", py_code)
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
@@ -589,6 +651,8 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+    # def finalize(self):
 
 
 def guard_fail_hook(

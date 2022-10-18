@@ -514,6 +514,7 @@ class FakeTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # need to handle here to avoid infinite recursion
         # see [in_kernel_invocation]
+        # breakpoint()
         if func == torch.ops.prim.device.default:
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
             if args[0].fake_mode.in_kernel_invocation:
@@ -645,8 +646,10 @@ class FakeTensorMode(TorchDispatchMode):
         self.in_kernel_invocation = False
 
         self.shape_env = shape_env
+        # breakpoint()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        # breakpoint()
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
@@ -922,6 +925,7 @@ class FakeTensorMode(TorchDispatchMode):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
     def from_tensor(self, tensor, static_shapes=False):
+        # breakpoint()
         if static_shapes:
             return self.fake_tensor_converter(self, tensor)
         return self.fake_tensor_converter(self, tensor, shape_env=self.shape_env)
@@ -991,6 +995,7 @@ class FakeCopyMode(TorchFunctionMode):
         self.fake_mode = fake_mode
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
+        # breakpoint()
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
