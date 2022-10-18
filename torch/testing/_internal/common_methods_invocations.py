@@ -1233,6 +1233,24 @@ def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, 
 def get_independent_tensor(tensor):
     return tensor.clone().requires_grad_(tensor.requires_grad)
 
+def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
+    samples = []
+    low = 2
+    high = 10
+
+    for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
+        # With high
+        samples.append(SampleInput(
+            high,
+            args=(sample.input.shape,) + sample.args,
+            kwargs=sample.kwargs))
+        # With low and high
+        samples.append(SampleInput(
+            low,
+            args=(high, sample.input.shape) + sample.args,
+            kwargs=sample.kwargs))
+    return tuple(samples)
+
 def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
     low = 2
     high = 10
@@ -14035,6 +14053,35 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+           )),
+    OpInfo('randint',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           op=lambda *args, **kwargs:
+               wrapper_set_seed(torch.randint, *args, **kwargs),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_randint,
+           supports_autograd=False,
+           skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               # Reference doesn't support the pin_memory parameter
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
+               # CPU randint generates different values based on the strides of out tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
+               # randint fails to warn when resizing its out tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
