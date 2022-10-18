@@ -7,7 +7,6 @@ import hypothesis
 import hypothesis.extra.numpy
 import hypothesis.strategies
 from numpy.testing import assert_array_equal
-from hypothesis import reproduce_failure
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TestCase, run_tests
