@@ -128,7 +128,7 @@ def gen_fallback_code(
         or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
         if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
-            return at::native::call_fallback_fn<&ltc_eager_fallback, {aten_op_str}>::call(
+            return at::native::call_fallback_fn_symint<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
         }}
@@ -540,7 +540,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 dispatch_ns = "meta"
             aten_name = schema.aten_name
             # TODO: this is trolling
-            if func.func.has_symint():
+            if func.func.has_symint() and metadata.supports_symint():
                 aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}

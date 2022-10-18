@@ -293,7 +293,7 @@ auto handle_torch_function_no_python_arg_parser(
       torch_function_name == TorchFunctionName::TorchFunction;
   auto get_mode = [&]() {
     return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
-                             : c10::impl::TorchDispatchModeTLS::get_state();
+                             : c10::impl::TorchDispatchModeTLS::get_mode();
   };
 
   const auto& maybe_mode = get_mode();
@@ -741,13 +741,15 @@ auto FunctionParameter::check(
         return true;
       }
       if (allow_numbers_as_tensors) {
-        return THPUtils_checkScalar(obj) ||
-            torch::is_symint_node(py::handle(obj)) ||
-            torch::is_symfloat_node(py::handle(obj));
+        return THPUtils_checkScalar(obj);
       }
       return false;
     }
     case ParameterType::SCALAR:
+      if (THPUtils_checkScalar(obj)) {
+        return true;
+      }
+      // fallthrough
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
@@ -1498,6 +1500,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
+    // NB: we DO NOT put symbolic ints/floats into the Scalar itself,
+    // because although Scalar supports SymInt/SymFloat, the subsequent
+    // conversion to Tensor does not.  Instead, do it out of band.
   } else if (torch::is_symint_node(py::handle(obj))) {
     save_symint = true;
     // This scalar value doesn't matter, it shouldn't ever actually
@@ -1560,6 +1565,15 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
   if (PyComplex_Check(arg)) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
+
+  if (torch::is_symint_node(arg)) {
+    return at::Scalar(py::cast<c10::SymInt>(arg));
+  }
+
+  if (torch::is_symfloat_node(arg)) {
+    return at::Scalar(py::cast<c10::SymFloat>(arg));
+  }
+
   return at::Scalar(THPUtils_unpackDouble(arg));
 }
 

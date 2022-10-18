@@ -4,7 +4,6 @@ from enum import Enum
 
 import torch
 
-
 def is_available() -> bool:
     """
     Returns ``True`` if the distributed package is available. Otherwise,
@@ -76,3 +75,11 @@ if is_available():
     from .remote_device import _remote_device
 
     set_debug_level_from_env()
+
+else:
+    # This stub is sufficient to get
+    #   python test/test_public_bindings.py -k test_correct_module_names
+    # working even when USE_DISTRIBUTED=0.  Feel free to add more
+    # stubs as necessary.
+    class ProcessGroup:  # type: ignore[no-redef]
+        pass

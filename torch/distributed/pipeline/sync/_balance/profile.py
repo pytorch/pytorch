@@ -99,7 +99,6 @@ def profile_sizes(
         detach(batch)
 
         # Detect memory usage at forward.
-        # avoid counting cuBLAS workspace allocations
         torch._C._cuda_clearCublasWorkspaces()
         memory_before = torch.cuda.memory_allocated(device)
         batch = batch.call(layer)
