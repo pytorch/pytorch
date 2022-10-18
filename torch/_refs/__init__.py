@@ -1546,11 +1546,18 @@ true_divide = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
-    assert isinstance(a, TensorLike) or isinstance(b, TensorLike)
-    if isinstance(a, TensorLike) and isinstance(b, Number):
-        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
-    elif isinstance(b, TensorLike) and isinstance(a, Number):
+    utils.check(
+        isinstance(a, TensorLike) or isinstance(b, TensorLike),
+        lambda: 'Expected either argument a or b to be a Tensor"',
+    )
+
+    # Operations like eq and log do not handle scalar values, so we convert them to scalar_tensors.
+    if isinstance(b, TensorLike) and isinstance(a, Number):
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
+    elif isinstance(a, TensorLike) and isinstance(b, Number):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+
+    # mypy: expected "Tensor"
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
     rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, torch.log(b)))
