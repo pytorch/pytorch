@@ -270,12 +270,6 @@ class NvfuserGraphModule(torch.nn.Module):
 
 # A set of operators that are supported by nvFuser
 # but should not form a fusion group solely on their own
-# _non_compute_ops = {
-#     "torch.ops.nvprims.transpose.default",
-#     "torch.ops.nvprims.view_of.default",
-#     "torch.ops.nvprims.broadcast_in_dim.default",
-#     "torch.ops.nvprims.squeeze.default",
-# }
 _non_compute_ops = [
     "torch.ops." + str(getattr(torch.ops.nvprims, prim).default)
     for prim in dir(torch.ops.nvprims)
