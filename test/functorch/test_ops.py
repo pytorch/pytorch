@@ -585,6 +585,7 @@ class TestOperators(TestCase):
         skip("atleast_1d"),  # Takes too long
         skip("atleast_2d"),  # Takes too long
         skip("atleast_3d"),  # Takes too long
+        skip("ormqr"),  # Takes too long
         xfail("as_strided"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
@@ -993,6 +994,7 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
+        xfail('ormqr'),
         xfail('put'),
         xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
@@ -1094,6 +1096,7 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
+        skip('ormqr', ''),  # takes too long
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -1206,6 +1209,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('renorm', ''),  # NYI: forward AD for renorm
+        xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('symeig', ''),  # NYI: forward AD for symeig
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
@@ -1298,6 +1302,7 @@ class TestOperators(TestCase):
         skip('linalg.lstsq'),
         skip('nn.functional.bilinear'),
         skip('native_layer_norm'),
+        skip('ormqr'),
 
         # Potential bugs/errors
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
@@ -1309,6 +1314,7 @@ class TestOperators(TestCase):
         xfail('cfloat'),  # required rank 4 tensor to use channels_last format
         xfail('chalf'),  # required rank 4 tensor to use channels_last format
         xfail('cholesky'),  # Forward AD not implemented and no decomposition
+        xfail('ormqr'),  # Forward AD not implemented and no decomposition
         xfail('double'),  # required rank 4 tensor to use channels_last format
         xfail('float'),  # required rank 4 tensor to use channels_last format
         xfail('half'),  # required rank 4 tensor to use channels_last format
