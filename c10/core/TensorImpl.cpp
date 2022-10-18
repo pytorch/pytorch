@@ -990,6 +990,12 @@ void TensorImpl::set_sizes_and_strides(
   refresh_contiguous();
 }
 
+void TensorImpl::set_storage_offset(c10::SymInt storage_offset) {
+  if (!extra_meta_) {
+    extra_meta_ = std::make_unique<ExtraMeta>();
+  }
+  extra_meta_->storage_offset_ = storage_offset.clone();
+}
 namespace impl {
 
 namespace {

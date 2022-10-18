@@ -4513,12 +4513,12 @@
     CPU, CUDA: rsqrt_out
     MPS: rsqrt_out_mps
 
-- func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
+- func: select.Dimname(Tensor(a) self, Dimname dim, SymInt index) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
 
-- func: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
+- func: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4527,7 +4527,7 @@
     SparseCsrCPU, SparseCsrCUDA: select_sparse_csr
     NestedTensorCPU, NestedTensorCUDA: select_nested
 
-- func: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, int index) -> Tensor
+- func: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
@@ -4535,7 +4535,7 @@
     CompositeExplicitAutogradNonFunctional: select_backward
   autogen: select_backward.out
 
-- func: _nested_select_backward(Tensor grad_output, Tensor self, int dim, int index) -> Tensor
+- func: _nested_select_backward(Tensor grad_output, Tensor self, int dim, SymInt index) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
@@ -4779,7 +4779,7 @@
   autogen: slice_scatter.out
   tags: canonical
 
-- func: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
+- func: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -9003,7 +9003,7 @@
   variants: method
   structured_delegate: renorm.out
 
-- func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
+- func: unfold(Tensor(a) self, int dimension, SymInt size, int step) -> Tensor(a)
   variants: method
   device_check: NoCheck
   device_guard: False
@@ -9011,7 +9011,7 @@
     CPU, CUDA, Meta: unfold
     QuantizedCPU, QuantizedCUDA: unfold
 
-- func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
+- func: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, SymInt size, int step) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: unfold_backward
@@ -12911,7 +12911,7 @@
     CompositeExplicitAutogradNonFunctional: _reshape_alias_copy
   tags: view_copy
 
-- func: select_copy.int(Tensor self, int dim, int index) -> Tensor
+- func: select_copy.int(Tensor self, int dim, SymInt index) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: select_copy_int
@@ -13039,7 +13039,7 @@
     CompositeExplicitAutogradNonFunctional: view_copy_dtype
   tags: view_copy
 
-- func: unfold_copy(Tensor self, int dimension, int size, int step) -> Tensor
+- func: unfold_copy(Tensor self, int dimension, SymInt size, int step) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: unfold_copy
@@ -13123,7 +13123,7 @@
     CompositeExplicitAutograd: _reshape_alias_copy_out
 
 
-- func: select_copy.int_out(Tensor self, int dim, int index, *, Tensor(a!) out) -> Tensor(a!)
+- func: select_copy.int_out(Tensor self, int dim, SymInt index, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: select_copy_int_out
@@ -13237,7 +13237,7 @@
     CompositeExplicitAutograd: view_copy_dtype_out
 
 
-- func: unfold_copy.out(Tensor self, int dimension, int size, int step, *, Tensor(a!) out) -> Tensor(a!)
+- func: unfold_copy.out(Tensor self, int dimension, SymInt size, int step, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: unfold_copy_out

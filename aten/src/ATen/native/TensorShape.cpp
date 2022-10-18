@@ -1566,7 +1566,7 @@ Tensor select(const Tensor& self, Dimname dim, int64_t index) {
 
 Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
   auto grad_input = at::zeros(input_sizes, grad.options());
-  grad_input.select(dim, index).copy_(grad);
+  grad_input.select_symint(dim, index).copy_(grad);
   return grad_input;
 }
 
@@ -3374,10 +3374,10 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   auto ndim = self.dim();
   d = at::maybe_wrap_dim(d, ndim, /*wrap_scalar=*/true);
 
-  auto sizes = self.sizes().vec();
-  auto strides = self.strides().vec();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
-  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
+  auto sizes = self.sym_sizes().vec();
+  auto strides = self.sym_strides().vec();
+  auto max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(max_size >= size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
   sizes.push_back(size);
@@ -3387,7 +3387,7 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
     sizes[d] = (sizes[d] - size) / step + 1;
     strides[d] *= step;
   }
-  return self.as_strided(sizes, strides);
+  return self.as_strided_symint(sizes, strides);
 }
 
 template <typename scalar_t>
@@ -3618,7 +3618,7 @@ at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t 
 }
 at::Tensor select_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, int64_t index) {
     auto output = self.clone();
-    auto slice = output.select(dim, index);
+    auto slice = output.select_symint(dim, index);
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;

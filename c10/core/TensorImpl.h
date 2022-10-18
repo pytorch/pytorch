@@ -1579,6 +1579,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       c10::SymIntArrayRef strides,
       c10::optional<c10::SymInt> storage_offset = c10::nullopt);
 
+  void set_storage_offset(c10::SymInt storage_offset);
+
   /**
    * Change the size at some dimension.  This DOES NOT update strides;
    * thus, most changes to size will not preserve contiguity.  You probably

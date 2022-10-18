@@ -1383,16 +1383,16 @@
   src: grad.gather(dim, index)
   result: scatter_add(self_t, dim, index, src_t)
 
-- name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
+- name: select.int(Tensor(a) self, int dim, SymInt index) -> Tensor(a)
   dispatch:
     Default:
       self: select_backward_symint(grad, self.sym_sizes(), dim, index)
       result: auto_linear
     AutogradNestedTensor:
-      self: _nested_select_backward(grad, self, dim, index)
+      self: _nested_select_backward_symint(grad, self, dim, index)
 
-- name: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, int index) -> Tensor
-  grad_output: grad.select(dim, index)
+- name: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt index) -> Tensor
+  grad_output: grad.select_symint(dim, index)
   result: auto_linear
 
 - name: sigmoid(Tensor self) -> Tensor
@@ -1439,9 +1439,9 @@
   src: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
-- name: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
-  self: select_scatter(grad, zeros_like(src), dim, index)
-  src: grad.select(dim, index)
+- name: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
+  self: select_scatter_symint(grad, zeros_like(src), dim, index)
+  src: grad.select_symint(dim, index)
   result: auto_linear
 
 - name: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
@@ -1667,12 +1667,12 @@
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_mkldnn_backward(grad, self)
 
-- name: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
+- name: unfold(Tensor(a) self, int dimension, SymInt size, int step) -> Tensor(a)
   self: unfold_backward_symint(grad, self.sym_sizes(), dimension, size, step)
   result: auto_linear
 
-- name: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, int size, int step) -> Tensor
-  grad_in: grad.unfold(dim, size, step)
+- name: unfold_backward(Tensor grad_in, SymInt[] input_sizes, int dim, SymInt size, int step) -> Tensor
+  grad_in: grad.unfold_symint(dim, size, step)
   result: auto_linear
 
 - name: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)

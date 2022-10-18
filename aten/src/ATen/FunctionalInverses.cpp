@@ -159,9 +159,9 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
     }
 }
 
-Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, int64_t index) {
+Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, SymInt index) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.select_scatter(mutated_view, dim, index);
+    return base.select_scatter_symint(mutated_view, dim, index);
 }
 Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
     // the functionalization pass doesn't care about autograd metadata - as a view, I think detach() is just an identity function
@@ -309,12 +309,12 @@ Tensor FunctionalInverses::view_copy_dtype_inverse(const Tensor& base, const Ten
     }
 }
 
-Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dimension, int64_t size, int64_t step) {
+Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dimension, SymInt size, int64_t step) {
     // I think autograd and the functionalization pass want the exact same thing here, but need to test to confirm.
     // unfold_backward() is safe to use here because it is NOT a view op.
     // (note: technically, "reapply_views" won't do anything here and we'll have an extra memory copy.
     // We'd need to add an aliasing version of unfold_backward to fix that though).
-    return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
+    return unfold_backward_symint(mutated_view, base.sym_sizes(), dimension, size, step);
 }
 
 Tensor FunctionalInverses::alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
