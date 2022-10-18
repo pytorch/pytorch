@@ -39,14 +39,14 @@ __global__ void expected_uniforms(float* x, uint64_t counter_offset) {
 void assert_with_expected_uniforms(uint64_t counter_offset) {
   // allocate 4 float on host memory
   float *x;
-  cudaMallocManaged(&x, 4*sizeof(float));
+  C10_CUDA_CHECK(cudaMallocManaged(&x, 4*sizeof(float)));
 
   // launch kernel to get expected randoms
   expected_uniforms<<<1, 1>>>(x, counter_offset);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Wait for GPU to finish before accessing on host
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   // get 4 new float from uniform_()
   auto self = at::empty({4}, at::TensorOptions(at::kCUDA));
@@ -59,7 +59,7 @@ void assert_with_expected_uniforms(uint64_t counter_offset) {
   }
 
   // Free memory
-  cudaFree(x);
+  C10_CUDA_CHECK(cudaFree(x));
 }
 
 TEST(DistributionsTest, TestPhiloxIncrementSmallUniformTensor) {
@@ -173,10 +173,10 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
   bool shuffled1 = false;
   bool shuffled2 = false;
   for (int i = 0; i < 100; i++) {
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     c10::optional<at::Generator> gen = c10::nullopt;
     randperm_handle_duplicate_keys(keys, values, 8, 5, gen);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     std::vector<int> slice1 = {values[0], values[1], values[2]};
     std::vector<int> slice2 = {values[3], values[4]};
     if (slice1 != valid_perms1[0]) {

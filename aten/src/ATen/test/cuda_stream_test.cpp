@@ -224,7 +224,7 @@ TEST(TestStream, CUDAEventSyncTest) {
   event.block(wait_stream0);
   event.block(wait_stream1);
 
-  cudaStreamSynchronize(wait_stream0);
+  C10_CUDA_CHECK(cudaStreamSynchronize(wait_stream0));
   ASSERT_TRUE(event.query());
 }
 
@@ -250,7 +250,7 @@ TEST(TestStream, CrossDeviceTest) {
 
   event0.block(stream0);
 
-  cudaStreamSynchronize(stream0);
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream0));
   ASSERT_TRUE(event0.query());
 }
 
@@ -270,7 +270,7 @@ TEST(TestStream, GenericInlineCUDAEventTest) {
   event.block(wait_stream1);
 
   const at::cuda::CUDAStream cuda_stream{wait_stream0};
-  cudaStreamSynchronize(cuda_stream);
+  C10_CUDA_CHECK(cudaStreamSynchronize(cuda_stream));
 
   ASSERT_TRUE(event.query());
 }
@@ -290,7 +290,7 @@ TEST(TestStream, GenericVirtualCUDAEventTest) {
   wait_stream1.wait(event);
 
   const at::cuda::CUDAStream cuda_stream{wait_stream0};
-  cudaStreamSynchronize(cuda_stream);
+  C10_CUDA_CHECK(cudaStreamSynchronize(cuda_stream));
 
   ASSERT_TRUE(event.query());
   ASSERT_TRUE(event.flag() == c10::EventFlag::PYTORCH_DEFAULT);
@@ -303,7 +303,7 @@ TEST(TestStream, ExternalTest) {
   at::cuda::CUDAGuard device_guard(0);
 
   cudaStream_t cuda_stream;
-  cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, -1);
+  C10_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream, cudaStreamNonBlocking, -1));
 
   at::cuda::CUDAStream myStream =
       at::cuda::getStreamFromExternal(cuda_stream, 0);
@@ -314,7 +314,7 @@ TEST(TestStream, ExternalTest) {
   ASSERT_EQ_CUDA(curStream, myStream);
   ASSERT_EQ_CUDA(curStream.stream(), cuda_stream);
 
-  cudaStreamDestroy(cuda_stream);
+  C10_CUDA_CHECK(cudaStreamDestroy(cuda_stream));
 }
 
 // Verifies different external streams can be used for different devices at the
@@ -328,11 +328,11 @@ TEST(TestStream, ExternalMultiDeviceTest) {
   cudaStream_t cuda_stream_1;
   {
     at::cuda::CUDAGuard device_guard(0);
-    cudaStreamCreateWithPriority(&cuda_stream_0, cudaStreamNonBlocking, -1);
+    C10_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream_0, cudaStreamNonBlocking, -1));
   }
   {
     at::cuda::CUDAGuard device_guard(1);
-    cudaStreamCreateWithPriority(&cuda_stream_1, cudaStreamNonBlocking, -1);
+    C10_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream_1, cudaStreamNonBlocking, -1));
   }
   at::cuda::CUDAStream myStream0 =
       at::cuda::getStreamFromExternal(cuda_stream_0, 0);
@@ -345,8 +345,8 @@ TEST(TestStream, ExternalMultiDeviceTest) {
   ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(0), myStream0);
   ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(1), myStream1);
 
-  cudaStreamDestroy(cuda_stream_0);
-  cudaStreamDestroy(cuda_stream_1);
+  C10_CUDA_CHECK(cudaStreamDestroy(cuda_stream_0));
+  C10_CUDA_CHECK(cudaStreamDestroy(cuda_stream_1));
 }
 
 // Verifies external streams work with guards, even nested ones
@@ -357,8 +357,8 @@ TEST(TestStream, ExternalGuardTest) {
 
   cudaStream_t a_cuda_stream;
   cudaStream_t another_cuda_stream;
-  cudaStreamCreateWithPriority(&a_cuda_stream, cudaStreamNonBlocking, -1);
-  cudaStreamCreateWithPriority(&another_cuda_stream, cudaStreamNonBlocking, -1);
+  C10_CUDA_CHECK(cudaStreamCreateWithPriority(&a_cuda_stream, cudaStreamNonBlocking, -1));
+  C10_CUDA_CHECK(cudaStreamCreateWithPriority(&another_cuda_stream, cudaStreamNonBlocking, -1));
   at::cuda::CUDAStream myFirstStream =
       at::cuda::getStreamFromExternal(a_cuda_stream, 0);
   at::cuda::CUDAStream mySecondStream =
@@ -386,8 +386,8 @@ TEST(TestStream, ExternalGuardTest) {
   }
   ASSERT_EQ_CUDA(at::cuda::getCurrentCUDAStream(), originalStream);
 
-  cudaStreamDestroy(a_cuda_stream);
-  cudaStreamDestroy(another_cuda_stream);
+  C10_CUDA_CHECK(cudaStreamDestroy(a_cuda_stream));
+  C10_CUDA_CHECK(cudaStreamDestroy(another_cuda_stream));
 }
 
 // Verifies that different threads stage their external streams to different
@@ -399,8 +399,8 @@ TEST(TestStream, ExternalMultiThreadTest) {
 
   cudaStream_t cuda_stream_a;
   cudaStream_t cuda_stream_b;
-  cudaStreamCreateWithPriority(&cuda_stream_a, cudaStreamNonBlocking, -1);
-  cudaStreamCreateWithPriority(&cuda_stream_b, cudaStreamNonBlocking, -1);
+  C10_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream_a, cudaStreamNonBlocking, -1));
+  C10_CUDA_CHECK(cudaStreamCreateWithPriority(&cuda_stream_b, cudaStreamNonBlocking, -1));
   at::cuda::CUDAStream myStreamA =
       at::cuda::getStreamFromExternal(cuda_stream_a, 0);
   at::cuda::CUDAStream myStreamB =
@@ -430,6 +430,6 @@ TEST(TestStream, ExternalMultiThreadTest) {
 
   ASSERT_EQ_CUDA(*foundStream, myStreamA);
 
-  cudaStreamDestroy(cuda_stream_a);
-  cudaStreamDestroy(cuda_stream_b);
+  C10_CUDA_CHECK(cudaStreamDestroy(cuda_stream_a));
+  C10_CUDA_CHECK(cudaStreamDestroy(cuda_stream_b));
 }

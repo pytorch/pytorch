@@ -39,9 +39,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineReproducibility) {
   //   should be aligned and have the same sequence.
   if (!at::cuda::is_available()) return;
   test_engine_reproducibility();
-  cudaError_t err = cudaDeviceSynchronize();
-  bool isEQ = err == cudaSuccess;
-  ASSERT_TRUE(isEQ);
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void testEngineOffset1(){
@@ -74,9 +72,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset1) {
   //   of engine2 and the 9th call of engine1 are equal.
   if (!at::cuda::is_available()) return;
   test_engine_offset1();
-  cudaError_t err = cudaDeviceSynchronize();
-  bool isEQ = err == cudaSuccess;
-  ASSERT_TRUE(isEQ);
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void testEngineOffset2(){
@@ -103,9 +99,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset2) {
   //   Assert that engine2 should be increment_val+1 steps behind engine1.
   if (!at::cuda::is_available()) return;
   test_engine_offset2();
-  cudaDeviceSynchronize();
-  bool isEQ = cudaGetLastError() == cudaSuccess;
-  ASSERT_TRUE(isEQ);
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void testEngineOffset3(){
@@ -130,9 +124,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset3) {
   //   Assert that engine1 is 1 step behind engine2.
   if (!at::cuda::is_available()) return;
   test_engine_offset3();
-  cudaDeviceSynchronize();
-  bool isEQ = cudaGetLastError() == cudaSuccess;
-  ASSERT_TRUE(isEQ);
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __global__ void testEngineThreadIndex(){
@@ -154,9 +146,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineIndex) {
   //   Assert that the engines have different sequences.
   if (!at::cuda::is_available()) return;
   test_engine_thread_index();
-  cudaDeviceSynchronize();
-  bool isEQ = cudaGetLastError() == cudaSuccess;
-  ASSERT_TRUE(isEQ);
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 /*
@@ -254,7 +244,7 @@ TEST(CUDAGeneratorImpl, TestRNGForking) {
 }
 
 void makeRandomNumber() {
-  cudaSetDevice(std::rand() % 2);
+  C10_CUDA_CHECK(cudaSetDevice(std::rand() % 2));
   auto x = at::randn({1000});
 }
 
