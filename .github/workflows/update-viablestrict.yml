@@ -40,7 +40,7 @@ jobs:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           output=$(python3 .github/scripts/fetch_latest_green_commit.py)
-          echo "::set-output name=latest_viable_sha::$output"
+          echo "latest_viable_sha=$output" >> "${GITHUB_OUTPUT}"
         id: get-latest-commit
 
       - name: Push SHA to viable/strict branch

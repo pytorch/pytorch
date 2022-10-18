@@ -28,4 +28,4 @@ runs:
           set -eux
           python3 -m pip install requests==2.26.0
           GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-          echo "::set-output name=job-id::${GHA_WORKFLOW_JOB_ID}"
+          echo "job-id=${GHA_WORKFLOW_JOB_ID}" >> "${GITHUB_OUTPUT}"
