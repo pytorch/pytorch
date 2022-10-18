@@ -158,7 +158,6 @@ function checkout_install_torchdeploy() {
   git clone https://github.com/pytorch/multipy
   pushd multipy
   # with ABI flag change
-  git checkout 93e516fd66794f4989a45d02aa8865756da56525
   python multipy/runtime/example/generate_examples.py
   git submodule update --init --recursive
   pip install -e . --install-option="--abicxx"

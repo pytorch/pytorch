@@ -18,7 +18,7 @@ from typing import Any, Dict
 import torch
 from torch.utils import cpp_extension
 
-from . import config, exc
+from . import config, cuda_properties, exc
 
 LOCK_TIMEOUT = 600
 
@@ -235,7 +235,8 @@ class TritonCodeCache:
         return getattr(mod, cls.get_name(mod))
 
 
-def _worker_compile(source_code, cc):
+def _worker_compile(source_code, cc, device):
+    cuda_properties.set_compiler_worker_current_device(device)
     kernel = TritonCodeCache.load(source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
@@ -274,6 +275,9 @@ class AsyncCompile:
     @staticmethod
     @functools.lru_cache(1)
     def process_pool():
+        # ensure properties have been calculated before processes
+        # are forked
+        cuda_properties._properties()
         assert config.compile_threads > 1
         return ProcessPoolExecutor(config.compile_threads)
 
@@ -326,8 +330,11 @@ class AsyncCompile:
 
         if config.compile_threads > 1:
             major, minor = torch.cuda.get_device_capability()
+            device = torch.cuda.current_device()
             cc = major * 10 + minor
-            future = self.process_pool().submit(_worker_compile, source_code, cc)
+            future = self.process_pool().submit(
+                _worker_compile, source_code, cc, device
+            )
             return TritonFuture(source_code, future)
         else:
             return _load_kernel(source_code)
