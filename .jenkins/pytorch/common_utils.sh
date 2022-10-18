@@ -85,15 +85,6 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
-function install_triton {
-  TRITON_VERSION=af76c989eb4799b015f8b288ccd8421558772e56
-  pip_install -U "git+https://github.com/openai/triton@${TRITON_VERSION}#subdirectory=python"
-}
-
-function install_jinja2 {
-  pip_install jinja2
-}
-
 function install_monkeytype {
   # Install MonkeyType
   pip_install MonkeyType
@@ -136,22 +127,14 @@ function install_filelock() {
   pip_install filelock
 }
 
-function install_torchdynamo() {
+function install_triton() {
   local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@${commit}"
-}
-
-function checkout_install_torchdynamo() {
-  local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pushd ..
-  git clone https://github.com/pytorch/torchdynamo
-  pushd torchdynamo
-  git checkout "${commit}"
-  time python setup.py develop
-  popd
-  popd
+  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    echo "skipping triton due to rocm"
+  else
+    commit=$(get_pinned_commit triton)
+    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+  fi
 }
 
 function test_functorch() {
