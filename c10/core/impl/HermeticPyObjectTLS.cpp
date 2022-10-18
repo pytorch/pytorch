@@ -3,10 +3,6 @@
 namespace c10 {
 namespace impl {
 
-// If this TLS access is a bottleneck, you can optimize it by introducing
-// a global variable that is tested first, before we check TLS.  That global
-// variable would be set to true when we launch a multipy/torchdeploy
-// interpreter.
 thread_local bool hermeticPyObjectState = false;
 
 bool HermeticPyObjectTLS::haveState_{false};
