@@ -152,6 +152,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
     storage_ = storage;
   }
 
+  void AssignIrValue(Value ir_value) const;
+
  private:
   LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
   LazyTensor(Value ir_value, const BackendDevice& device);
@@ -166,8 +168,6 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   std::shared_ptr<Data> data_ptr() const {
     return data_;
   }
-
-  void AssignIrValue(Value ir_value) const;
 
   void SetTensorData(at::Tensor tensor_data);
 

@@ -701,7 +701,7 @@ void LazyGraphExecutor::ExtractIRAndPrepareXlaData(
   }
 }
 
-std::vector<torch::lazy::BackendDataPtr> XLATensor::SetTensorData(
+std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
     std::vector<LazyTensorPtr>* tensors, const SyncTensorsConfig& config,
     c10::ArrayRef<size_t>indices,
     const std::vector<BackendDataPtr>& tensor_data_vec) {
@@ -735,7 +735,7 @@ std::vector<torch::lazy::BackendDataPtr> XLATensor::SetTensorData(
 }
 
 LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
-    const std::vector<Value>& ir_values
+    const std::vector<Value>& ir_values,
     SyncTensorCollection* coll) {
   std::vector<Node*> roots;
   roots.reserve(ir_values.size());
@@ -1170,9 +1170,10 @@ hash_t LazyGraphExecutor::GetGraphHash(
 
   auto coll = CollectSyncTensors(tensors, config);
   std::vector<Value> ir_values;
-  std::vector<BackendDataPtr> tensor_data_vec;
-  ExtractIRAndPrepareXlaData(tensors, coll.config, coll.indices, ir_values,
-                             tensor_data_vec);
+  for (auto index : coll.indices) {
+    Value ir_value = tensors[index]->CurrentIrValue();
+    ir_values.push_back(ir_value);
+  }
   auto po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   return coll.hash;
