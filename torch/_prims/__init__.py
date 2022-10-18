@@ -524,16 +524,16 @@ bessel_i0 = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-bessel_i1 = _make_elementwise_unary_prim(
-    "bessel_i1",
-    impl_aten=torch.special.i1,
+bessel_i0e = _make_elementwise_unary_prim(
+    "bessel_i0e",
+    impl_aten=torch.special.i0e,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
-bessel_i0e = _make_elementwise_unary_prim(
-    "bessel_i0e",
-    impl_aten=torch.special.i0e,
+bessel_i1 = _make_elementwise_unary_prim(
+    "bessel_i1",
+    impl_aten=torch.special.i1,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
