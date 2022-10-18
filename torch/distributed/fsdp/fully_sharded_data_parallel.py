@@ -1852,8 +1852,8 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root is not None:
             return  # no-op: already initialized
         if not torch.cuda.is_available():
-            # Allow the FSDP constructor to run even with CUDA but check this
-            # once we start real execution
+            # Allow the FSDP constructor to run even without CUDA but check 
+            # this once we start real execution
             raise RuntimeError("FSDP does not support CPU only execution")
         # The following logic is only run on the root FSDP instance since it
         # will set `_is_root=False` for the non-root instances
