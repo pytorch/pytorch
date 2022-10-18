@@ -1018,7 +1018,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value())
                                               : at::Scalar(atof(str.c_str()));
     }
-  } else if (type_ == ParameterType::INT_LIST || type_ == ParameterType::SYM_INT_LIST) {
+  } else if (
+      type_ == ParameterType::INT_LIST ||
+      type_ == ParameterType::SYM_INT_LIST) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
     }
