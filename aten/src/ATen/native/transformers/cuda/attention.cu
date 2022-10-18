@@ -19,13 +19,13 @@
 
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/native/transformers/cuda/sdp_utils.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #endif
-
-#include <ATen/native/transformers/cuda/sdp_utils.h>
 
 namespace at {
 
@@ -586,7 +586,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
     }
 }
 
-std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
+Tensor flash_scaled_dot_product_attention(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -595,7 +595,6 @@ std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
     const int64_t max_seqlen_batch_q,
     const int64_t max_seqlen_batch_k,
     double dropout_p,
-    bool need_attn_weights,
     bool is_causal) {
 #if defined(USE_FLASH_ATTENTION)
   auto softmax_scale = std::pow(query.size(-1), -0.5);
@@ -611,12 +610,12 @@ std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
       softmax_scale,
       false,
       is_causal,
-      need_attn_weights,
+      false,
       c10::nullopt);
-  return need_attn_weights? std::make_tuple(output[0], output[2]): std::make_tuple(output[0], Tensor{});
+  return output[0];
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor{}, Tensor{});
+  return Tensor();
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
