@@ -5,7 +5,8 @@ import sys
 import csv
 import random
 
-
+import warnings
+warnings.filterwarnings("ignore")
 class CompositeMHA(torch.nn.Module):
     def __init__(self, num_heads, in_proj_weight, in_proj_bias, out_proj):
         super().__init__()
@@ -90,26 +91,27 @@ def benchmark_torch_function(iters, f, *args, **kwargs):
 
 
 def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, pad_percentage, writer):
-    dropout_p = 0.0
-    mask = None
-
-    pt = torch.nn.MultiheadAttention(
-        embed_dim=embed_dimension, num_heads=num_heads, batch_first=True, dropout=dropout_p
-    )
-    npt = pt.eval().half().cuda()
-    cpt = build_composite_mha_from_nn_mha(npt)
-    x = generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage)
-    pt_output, _ = pt(x, x, x, mask)
-    cpt_output, _ = cpt(x, x, x, mask)
-
-    # First order sanity check. Not a replacement for rigorous tests.
-    if pt_output.is_nested and cpt_output.is_nested:
-        for a, b in zip(pt_output.unbind(), cpt_output.unbind()):
-            assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
-    else:
-        assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
     with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True):
         with torch.inference_mode():
+            dropout_p = 0.0
+            mask = None
+
+            pt = torch.nn.MultiheadAttention(
+                embed_dim=embed_dimension, num_heads=num_heads, batch_first=True, dropout=dropout_p
+            )
+            npt = pt.eval().half().cuda()
+            cpt = build_composite_mha_from_nn_mha(npt)
+            x = generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage)
+            pt_output, _ = pt(x, x, x, mask)
+            cpt_output, _ = cpt(x, x, x, mask)
+
+            # First order sanity check. Not a replacement for rigorous tests.
+            if pt_output.is_nested and cpt_output.is_nested:
+                for a, b in zip(pt_output.unbind(), cpt_output.unbind()):
+                    assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
+            else:
+                assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
+
             pt_time = benchmark_torch_function(iters, npt, x, x, x, mask) * 1e3
             cp_time = benchmark_torch_function(iters, cpt, x, x, x, mask) * 1e3
             results = {}
