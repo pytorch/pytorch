@@ -5214,6 +5214,8 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m,
             expected_node_occurrence=expected_occurrence)
+        # make sure it runs
+        m(*example_inputs)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

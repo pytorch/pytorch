@@ -17,6 +17,7 @@ from torch.ao.quantization.utils import (
     activation_is_statically_quantized,
     is_per_tensor,
     is_per_channel,
+    to_underlying_dtype,
 )
 from torch.ao.quantization.quantize import is_activation_post_process
 
@@ -195,10 +196,14 @@ def get_quantize_node_info(
         else:
             scale = float(scale)
             zero_point = int(zero_point)
-            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             if is_decomposed_qtensor:
+                quant_min = activation_post_process.quant_min
+                quant_max = activation_post_process.quant_max
+                dtype = to_underlying_dtype(dtype)
+                qparams = {"_scale_": scale, "_zero_point_": zero_point, "_quant_min": quant_max, "_quant_max": quant_max, "_dtype_": dtype}
                 quantize_op = torch.decomposed_quantize_per_tensor
             else:
+                qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
                 quantize_op = torch.quantize_per_tensor
     elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
         # TODO(future PR): switch compute_dtype to is_dynamic
