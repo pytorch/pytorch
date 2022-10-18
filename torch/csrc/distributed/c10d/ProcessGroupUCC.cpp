@@ -761,9 +761,10 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     std::vector<at::Tensor>& inputTensors,
     std::vector<at::Tensor>& outputTensors,
     const char* prof_title) {
+  seq_++;
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
-      opType, prof_title, inputTensors, logger);
+      opType, seq_, prof_title, inputTensors, logger);
 
   if (opType == OpType::RECV) {
     work->sourceRank_ = coll.root;
@@ -1570,6 +1571,12 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
       tensors,
       tensors,
       "ucc:recv");
+}
+
+void ProcessGroupUCC::setSequenceNumberForGroup() {}
+
+uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
+  return seq_;
 }
 
 c10::intrusive_ptr<ProcessGroup> ProcessGroupUCC::createProcessGroupUCC(
