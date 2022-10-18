@@ -1068,6 +1068,15 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
+    def run_n_iterations(self, mod, inputs, n=2):
+        for _ in range(n - 1):
+            self.model_iter_fn(mod, inputs, collect_outputs=False)
+        return self.model_iter_fn(mod, inputs, collect_outputs=True)
+
+    def optimizer_zero_grad(self):
+        if self.optimizer is not None:
+            self.optimizer.zero_grad(True)
+
     def optimizer_step(self):
         if self.optimizer is not None:
             self.optimizer.step()
@@ -1113,7 +1122,7 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            fp64_outputs = self.model_iter_fn(
+            fp64_outputs = self.run_n_iterations(
                 *cast_to_fp64(
                     copy.deepcopy(model),
                     clone_inputs(example_inputs),
@@ -1133,13 +1142,13 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
-            correct_result = self.model_iter_fn(
+            correct_result = self.run_n_iterations(
                 copy.deepcopy(model), clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
-            correct_rerun_result = self.model_iter_fn(
+            correct_rerun_result = self.run_n_iterations(
                 copy.deepcopy(model), clone_inputs(example_inputs)
             )
             if not same(
@@ -1156,7 +1165,7 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
                 accuracy_status = "fail_to_run"

@@ -815,6 +815,7 @@ class DashboardUpdater:
                 self.args.dashboard_gh_cli_path,
                 "issue",
                 "comment",
+                "--repo=https://github.com/pytorch/torchdynamo.git",
                 "681",
                 "-b",
                 comment,
