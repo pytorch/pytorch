@@ -4010,41 +4010,18 @@ def linspace(
         "requires_grad": requires_grad,
     }
     if steps == 0:
-        ret = torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+        return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
     elif steps == 1:
-        ret = torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
     elif start == end:
-        ret = torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
     else:
-        if prims.utils.is_integer_dtype(dtype):
-            # We need to cast to int, so to avoid off-by-one issues
-            # do the entire computation with ints when we can
-            assert isinstance(start, int) and isinstance(end, int)
-            step_size_x_denom = end - start
-            eps = 1 if end > start else -1
-            denom = steps - 1
-            ret = prims.to_dtype(
-                torch.arange(
-                    start * denom,
-                    end * denom + eps,
-                    step_size_x_denom,
-                    dtype=torch.int64,
-                    **factory_kwargs,  # type: ignore[arg-type]
-                )
-                / denom,
-                dtype,
-            )
-        else:
-            step_size = (end - start) / (steps - 1)
-            eps = step_size / 2
-            ret = prims.to_dtype(
-                torch.arange(  # type: ignore[call-overload]
-                    start, end + eps, step_size, dtype=torch.float64, **factory_kwargs
-                ),
-                dtype,
-            )
-
-    return ret
+        step_size = (end - start) / (steps - 1)
+        eps = step_size / 2
+        ret_double = torch.arange(  # type: ignore[call-overload]
+            start, end + eps, step_size, dtype=torch.float64, **factory_kwargs
+        )
+        return _maybe_convert_to_dtype(ret_double, dtype)
 
 
 @register_decomposition(torch.ops.aten.logspace)
