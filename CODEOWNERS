@@ -108,9 +108,9 @@ torch/csrc/profiler/ @robieta
 torch/profiler/ @robieta
 
 # TorchDynamo
-benchmarks/dynamo @jansel
-test/dynamo @jansel
-test/inductor @jansel
-torch/csrc/dynamo @jansel
-torch/_dynamo @jansel
-torch/_inductor @jansel
+benchmarks/dynamo @jansel @voznesenskym
+test/dynamo @jansel @voznesenskym
+test/inductor @jansel @voznesenskym
+torch/csrc/dynamo @jansel @voznesenskym
+torch/_dynamo @jansel @voznesenskym
+torch/_inductor @jansel @voznesenskym
