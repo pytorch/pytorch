@@ -666,7 +666,11 @@ test_vec256() {
 test_inductor() {
   # TODO: enable inductor on core tests
   # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
-  pytest test/inductor -v
+
+  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
+  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
+  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
+  PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
 }
 
 test_docs_test() {
