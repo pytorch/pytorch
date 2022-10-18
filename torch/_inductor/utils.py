@@ -197,6 +197,10 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
+def sympy_symbol(name):
+    return sympy.Symbol(name, integer=True, positive=True)
+
+
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
     """
     xreplace is faster than subs, but is way more picky
@@ -204,7 +208,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
 
     def promote_strings(key):
         if isinstance(key, str):
-            return sympy.Symbol(key)
+            return sympy_symbol(key)
         return key
 
     return expr.xreplace(
