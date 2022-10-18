@@ -540,11 +540,10 @@ def conv_heuristics():
 def mm_heuristics():
     from triton import heuristics
 
-    mm_heuristic = heuristics(
-        {
-            "EVEN_K": lambda args: args["K"] % (args["BLOCK_K"] * args["SPLIT_K"]) == 0,
-        }
-    )
+    def foo(args):
+        return args["K"] % (args["BLOCK_K"] * args["SPLIT_K"]) == 0
+
+    mm_heuristic = heuristics({"EVEN_K": lambda args: foo(args)})
     return mm_heuristic
 
 

@@ -1917,25 +1917,20 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-@register_lowering(aten.upsample_nearest2d)
-def upsample_nearest2d(x, output_size=None, scale_factors=None):
+def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
-
-    *batch, ih, iw = x.get_size()
-    ih = V.graph.sizevars.guard_static_shape(ih)
-    iw = V.graph.sizevars.guard_static_shape(iw)
+    i_sizes = x.get_size()[-n:]
+    batch = x.get_size()[:-n]
+    i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
 
     if scale_factors:
         assert not output_size
-        sh, sw = scale_factors
-        oh = int(ih * sh)
-        ow = int(iw * sw)
+        o_sizes = [int(i * s) for i, s in zip(i_sizes, scale_factors)]
     else:
-        oh, ow = output_size
+        o_sizes = output_size
 
-    scale_h = ih / oh
-    scale_w = iw / ow
+    scales = [i / o for i, o in zip(i_sizes, o_sizes)]
 
     def scale(x, scale):
         x = ops.index_expr(x, torch.float32)
@@ -1944,15 +1939,21 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
         return ops.indirect_indexing(x)
 
     def fn(idx):
-        *b, x, y = idx
-        return x_loader([*b, scale(x, scale_h), scale(y, scale_w)])
+        x = idx[-n:]
+        b = idx[:-n]
+        return x_loader([*b, *[scale(i, s) for i, s in zip(x, scales)]])
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.Integer(oh), sympy.Integer(ow)],
+        ranges=[*batch, *o_sizes],
     )
+
+
+register_lowering(aten.upsample_nearest1d)(functools.partial(upsample_nearestnd, n=1))
+register_lowering(aten.upsample_nearest2d)(functools.partial(upsample_nearestnd, n=2))
+register_lowering(aten.upsample_nearest3d)(functools.partial(upsample_nearestnd, n=3))
 
 
 @register_lowering(aten.upsample_bicubic2d.default)
