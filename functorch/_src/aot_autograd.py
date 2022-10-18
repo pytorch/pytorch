@@ -243,22 +243,28 @@ def make_boxed_compiler(compiler):
     return f
 
 
-def call_func_with_args(f, args, steal_args=False):
+def call_func_with_args(f, args, steal_args=False, disable_amp=False):
     if not steal_args:
         args = list(args)
     assert isinstance(args, list)
 
-    if hasattr(f, "_boxed_call"):
-        out = normalize_as_list(f(args))
-    else:
-        # TODO: Please remove soon
-        # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
-        warnings.warn(
-            "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
-            "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
-            "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
-        )
-        out = normalize_as_list(f(*args))
+    if disable_amp:
+        guard = torch._C._DisableAutocast()
+    try:
+        if hasattr(f, "_boxed_call"):
+            out = normalize_as_list(f(args))
+        else:
+            # TODO: Please remove soon
+            # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
+            warnings.warn(
+                "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
+                "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
+                "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
+            )
+            out = normalize_as_list(f(*args))
+    finally:
+        if disable_amp:
+            del guard
     return out
 
 
@@ -272,6 +278,7 @@ class AOTConfig:
     bw_compiler: Callable
     partition_fn: Callable
     decompositions: Dict[Callable, Callable]
+    num_params_buffers: int
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
@@ -279,15 +286,29 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
-    with track_graph_compiling("inference"):
+
+
+    disable_amp = torch._C._is_any_autocast_enabled()
+    context = disable_autocast_manager if disable_amp else nullcontext
+
+    with context(), track_graph_compiling("inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
     @wraps(compiled_fw)
     def new_fn(args):
-        fw_outs = call_func_with_args(compiled_fw, args)
+        fw_outs = call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
         return fw_outs
 
     return new_fn
+
+
+@contextmanager
+def disable_autocast_manager():
+    guard = torch._C._DisableAutocast()
+    try:
+        yield
+    finally:
+        del guard
 
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
@@ -360,11 +381,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     joint_inputs = (deduped_flat_args, out)
 
+    disable_amp = torch._C._is_any_autocast_enabled()
+
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
         # NB: tracing_mode is real, as it's assumed the calling context setup
         # fake tensor mode / symbolic shapes if that is needed
         fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
+        context = disable_autocast_manager if disable_amp else nullcontext
 
         def fake_fn(primals, tangents):
             with torch.fx.traceback.override_stack_trace():
@@ -375,7 +400,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # view and inplace ops that come from primtorch.
         # Eventually, functionalization should support primtorch view/inplace ops,
         # which will make it ok to run decompositions before functionalization.
-        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+        with context():
+            fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
@@ -414,7 +440,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
             fw_outs = call_func_with_args(
-                CompiledFunction.compiled_fw, deduped_flat_tensor_args
+                CompiledFunction.compiled_fw, deduped_flat_tensor_args, disable_amp=disable_amp
             )
             num_outs = CompiledFunction.num_outs
             num_symints = CompiledFunction.num_symints
@@ -433,15 +459,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             contiguous_args = [t.contiguous() if torch.is_tensor(t) else t for t in flat_args]
             all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             if CompiledFunction.compiled_bw is None:
-                with track_graph_compiling("backward", True):
+                context = disable_autocast_manager if disable_amp else nullcontext
+                with context(), track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
                         bw_module, all_args
                     )
             ctx.maybe_clear_saved_tensors()
             out = call_func_with_args(
-                CompiledFunction.compiled_bw, all_args, steal_args=True
+                CompiledFunction.compiled_bw, all_args, steal_args=True, disable_amp=disable_amp
             )
-
             return tuple(out)
 
     @wraps(CompiledFunction.apply)
@@ -466,6 +492,11 @@ def create_aot_dispatcher_function(
 
     The resulting compiled forward and backward graphs are then wrapped up in a
     ``torch.autograd.Function`` object.
+
+    The calling convention here is that the first aot_config.num_params_buffers
+    inputs in flat_args are parameters and buffers, and the rest are inputs.
+
+    We use this to assume that parameters/buffer's shapes don't change.
     """
 
     # This is the main entry point.
@@ -489,19 +520,26 @@ def create_aot_dispatcher_function(
         # coordinate flags
         config.use_fake_tensor = False
 
-    fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext()
+    if config.use_dynamic_shapes:
+        assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
+
+    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+    fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
     with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:
-                def convert(x):
-                    return fake_mode.from_tensor(x, shape_env=shape_env)
+                def convert(idx, x):
+                    if not isinstance(x, torch.Tensor):
+                        return x
+                    if idx < aot_config.num_params_buffers and config.static_weight_shapes:
+                        return fake_mode.from_tensor(x, static_shapes=True)
+                    return fake_mode.from_tensor(x, static_shapes=False)
 
-                return pytree.tree_map_only(Tensor, convert, flat_args)
+                return [convert(idx, x) for idx, x in enumerate(flat_args)]
             else:
                 return flat_args
 
@@ -562,6 +600,7 @@ def aot_function(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
+    num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
 ) -> Callable:
@@ -625,6 +664,7 @@ def aot_function(
         bw_compiler=bw_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
+        num_params_buffers=num_params_buffers,
     )
     cached_res = None
 
@@ -709,7 +749,10 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         params_and_buffers = {**named_params, **named_buffers}
         return stateless.functional_call(mod, params_and_buffers, args, kwargs)
 
-    compiled_f = aot_function(functional_call, *args, **kwargs)
+    named_params = dict(_named_parameters(mod, remove_duplicate=False))
+    named_buffers = dict(_named_buffers(mod, remove_duplicate=False))
+    num_params_buffers = len(named_params) + len(named_buffers)
+    compiled_f = aot_function(functional_call, num_params_buffers=num_params_buffers, *args, **kwargs)
 
     class AOTModule(nn.Module):
         def __init__(self):
@@ -718,8 +761,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                dict(_named_parameters(mod, remove_duplicate=False)),
-                dict(_named_buffers(mod, remove_duplicate=False)),
+                named_params,
+                named_buffers,
                 *args,
                 **kwargs,
             )
@@ -787,6 +830,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             bw_compiler=bw_compiler,
             partition_fn=partition_fn,
             decompositions=decompositions,
+            num_params_buffers=params_len,
         )
 
         compiled_fn = None

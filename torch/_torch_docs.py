@@ -166,6 +166,14 @@ a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
 See :doc:`/notes/randomness` for more information.""",
 }
 
+sparse_support_notes = {
+    "sparse_beta_warning": """
+.. warning::
+    Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported,
+    or may not have autograd support. If you notice missing functionality please
+    open a feature request.""",
+}
+
 add_docstr(
     torch.abs,
     r"""
@@ -534,6 +542,12 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. If
+:attr:`input` is sparse the result will have the same layout and if :attr:`out`
+is provided it must have the same layout as :attr:`input`.
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -557,7 +571,7 @@ Example::
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -5141,7 +5155,9 @@ Example::
            bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
                       tensor([0.0000, 0.5000, 1.0000])))
 
-""",
+""".format(
+        **common_args
+    ),
 )
 # TODO: Fix via https://github.com/pytorch/pytorch/issues/75798
 torch.histogramdd.__module__ = "torch"
@@ -5742,7 +5758,7 @@ add_docstr(
     r"""
 ldexp(input, other, *, out=None) -> Tensor
 
-Multiplies :attr:`input` by 2**:attr:`other`.
+Multiplies :attr:`input` by 2 ** :attr:`other`.
 
 .. math::
     \text{{out}}_i = \text{{input}}_i * 2^\text{{other}}_i
@@ -7460,6 +7476,12 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`.
+If :attr:`out` is provided it's layout will be used. Otherwise, the result
+layout will be deduced from that of :attr:`input`.
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7479,7 +7501,7 @@ Example::
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -7536,6 +7558,12 @@ The behavior depends on the dimensionality of the tensors as follows:
   tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
   matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. In particular the
+matrix-matrix (both arguments 2-dimensional) supports sparse arguments with the same restrictions
+as :func:`torch.mm`
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7580,7 +7608,7 @@ Example::
     torch.Size([10, 3, 5])
 
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -8011,7 +8039,9 @@ Example::
 
         :func:`torch.narrow` for a non copy variant
 
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
@@ -8460,9 +8490,13 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
 .. seealso::
-
         :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
         from the QR decomposition.
+
+.. note::
+        This function supports backward but it is only fast when ``(input, tau)`` do not require gradients
+        and/or ``tau.size(-1)`` is very small.
+        ``
 
 Args:
     input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions
@@ -13635,7 +13669,7 @@ formally, the returned index satisfies the following rules:
 
 Args:
     input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
-    boundaries (Tensor): 1-D tensor, must contain a monotonically increasing sequence.
+    boundaries (Tensor): 1-D tensor, must contain a strictly increasing sequence, or the return value is undefined.
 
 Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
