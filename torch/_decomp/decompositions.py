@@ -1753,8 +1753,10 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
+    # Treat scalars as elements of \R^1
+    x1 = x.unsqueeze(0) if x.ndim == 0 else x
     idx = (None,) * dim + (index,)
-    torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
+    torch.ops.aten.index_put_(x1, idx, tensor, accumulate=True)
     return x
 
 
