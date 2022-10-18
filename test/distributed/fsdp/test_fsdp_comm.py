@@ -221,7 +221,7 @@ class TestCommunication(FSDPTest):
         # outside `no_sync()`
         num_iters = 3
         with patch("torch.distributed._all_gather_base") as mock_all_gather, \
-                patch("torch.distributed._reduce_scatter_base") as mock_reduce_scatter:
+                patch("torch.distributed.reduce_scatter_tensor") as mock_reduce_scatter:
             def reset_mocks():
                 mock_all_gather.reset_mock()
                 mock_reduce_scatter.reset_mock()
