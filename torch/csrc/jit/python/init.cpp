@@ -1514,6 +1514,9 @@ void initJITBindings(PyObject* module) {
               "__ceil__",
               [](c10::SymIntNode a) -> c10::SymIntNode { return a->ceil(); })
           .def(
+              "__neg__",
+              [](c10::SymIntNode a) -> c10::SymIntNode { return a->neg(); })
+          .def(
               "__min__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 auto snb = toSymIntNode(a, b);

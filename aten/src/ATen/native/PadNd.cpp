@@ -115,7 +115,7 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
   // Put original array into the padded array
   Tensor out_slice = out;
   Tensor in_slice = self;
-  constexpr int64_t zero = 0;
+  const SymInt zero = 0;
   for (const auto i : c10::irange(ndim)) {
     const auto dim = ndim - i + 1;
     const auto pad_l = padding[2*i + 0];
