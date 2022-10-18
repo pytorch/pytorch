@@ -36,11 +36,12 @@ def check_labels(pr: GitHubPR) -> bool:
 
     # Check if bot has already posted message within the past hour to include release notes label
     err_msg_start = ERR_MSG.partition(".")[0]
+    bot_authors = ["github-actions", "pytorchmergebot", "pytorch-bot"]
     for comment in pr.get_comments():
-        ts = datetime.strptime(comment.created_at, "%Y-%m-%dT%H:%M:%SZ")
-        delta = (datetime.utcnow() - ts).total_seconds()
-        if comment.body_text.startswith(err_msg_start) and delta < 3600:
-            return True
+        if comment.body_text.startswith(err_msg_start) and comment.author_login in bot_authors:
+            ts = datetime.strptime(comment.created_at, "%Y-%m-%dT%H:%M:%SZ")
+            if (datetime.utcnow() - ts).total_seconds() < 3600:
+                return True
 
     return any(label.strip() in get_release_notes_labels() for label in pr_labels)
 
