@@ -26,11 +26,13 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Tensor", ParameterType::TENSOR},
     {"Scalar", ParameterType::SCALAR},
     {"int64_t", ParameterType::INT64},
+    {"SymInt", ParameterType::INT64},
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
     {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
+    {"SymIntArrayRef", ParameterType::INT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
     {"Generator", ParameterType::GENERATOR},
     {"bool", ParameterType::BOOL},
@@ -44,9 +46,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
-    {"SymInt", ParameterType::SYM_INT},
     {"Dimname", ParameterType::DIMNAME},
-    {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
 };
@@ -828,6 +828,8 @@ auto FunctionParameter::check(
     case ParameterType::SYM_INT_LIST: {
       return is_int_or_symint_list(obj, size);
     }
+    default:
+      throw std::runtime_error("unknown parameter type");
   }
 }
 

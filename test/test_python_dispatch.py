@@ -20,7 +20,6 @@ class TestPythonRegistration(TestCase):
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
         my_lib1 = Library("aten", "IMPL")
-        my_lib2 = Library("aten", "IMPL")
 
         # Example 1
         def my_neg(*args, **kwargs):
@@ -28,6 +27,7 @@ class TestPythonRegistration(TestCase):
 
         # Now we are secretly making the operator a view op so autograd needs to know how
         # to handle it
+        my_lib1.impl('neg', my_neg, "AutogradCPU")
         my_lib1.impl('neg', my_neg, "AutogradCPU")
 
         self.assertTrue(torch.neg(x).is_neg())
