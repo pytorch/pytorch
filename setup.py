@@ -968,6 +968,8 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
+        'sympy',
+        'networkx',
     ]
 
     extras_require = {
@@ -1007,11 +1009,11 @@ def main():
         'cuda/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
-        'utils/data/*.pyi',
         'nn/*.pyi',
         'nn/modules/*.pyi',
         'nn/parallel/*.pyi',
         'utils/data/*.pyi',
+        'utils/data/datapipes/*.pyi',
         'lib/*.so*',
         'lib/*.dylib*',
         'lib/*.dll',
@@ -1062,8 +1064,6 @@ def main():
         'include/c10/cuda/impl/*.h',
         'include/c10/hip/*.h',
         'include/c10/hip/impl/*.h',
-        'include/c10d/*.h',
-        'include/c10d/*.hpp',
         'include/caffe2/**/*.h',
         'include/torch/*.h',
         'include/torch/csrc/*.h',
@@ -1091,9 +1091,6 @@ def main():
         'include/torch/csrc/autograd/generated/*.h',
         'include/torch/csrc/autograd/utils/*.h',
         'include/torch/csrc/cuda/*.h',
-        'include/torch/csrc/deploy/*.h',
-        'include/torch/csrc/deploy/interpreter/*.h',
-        'include/torch/csrc/deploy/interpreter/*.hpp',
         'include/torch/csrc/distributed/c10d/exception.h',
         'include/torch/csrc/distributed/rpc/*.h',
         'include/torch/csrc/jit/*.h',
@@ -1118,6 +1115,7 @@ def main():
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
+        'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
         'include/torch/csrc/tensor/*.h',
         'include/torch/csrc/lazy/backend/*.h',
@@ -1135,6 +1133,8 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        "_inductor/codegen/*.h",
+        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',

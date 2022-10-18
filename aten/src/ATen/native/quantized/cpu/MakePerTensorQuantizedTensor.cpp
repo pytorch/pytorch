@@ -1,7 +1,14 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#endif
 
 namespace at {
 namespace native {
