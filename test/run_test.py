@@ -1081,10 +1081,10 @@ def main():
     try:
         for test, shard_id, shard_num, expected_time in selected_tests:
             options_clone = copy.deepcopy(options)
-            print(f"expected time: {expected_time}")
             if shard_id != 0 or shard_num != 1:
                 options_clone.additional_unittest_args.extend([f"--shard-id={shard_id}", f"--num-shards={shard_num}"])
             err_message = run_test_module(test, test_directory, options_clone)
+            print(f"expected time: {expected_time}")
             if err_message is None:
                 continue
             failure_messages.append(err_message)

@@ -682,7 +682,7 @@ def count_pytest_test_cases(file: str) -> List[str]:
 
     test_collector_plugin = TestCollectorPlugin()
     import pytest
-    pytest.main(['--collect-only', file], plugins=[test_collector_plugin])
+    pytest.main([file, '--collect-only', '-qq'], plugins=[test_collector_plugin])
     return test_collector_plugin.tests
 
 def run_tests(argv=UNITTEST_ARGS):
