@@ -12,7 +12,12 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import NumberType, TensorLike, TensorSequenceType
-from torch._prims_common.wrappers import _maybe_resize_out, _maybe_convert_to_dtype, _safe_copy_out, out_wrapper
+from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
+    _maybe_resize_out,
+    _safe_copy_out,
+    out_wrapper,
+)
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -1026,7 +1031,14 @@ def embedding(
 ) -> Tensor:
     assert weight.dim() == 2, "'weight' must be 2-D"
     # Nb. scale_grad_by_freq is not used in the forward
-    return weight[indices]
+    if indices.ndim <= 1:
+        # We need this one as weight[indices] calls item() in these cases
+        out = weight.index_select(0, indices)
+        if indices.ndim == 0:
+            out = out.squeeze(0)
+        return out
+    else:
+        return weight[indices]
 
 
 @register_decomposition(aten.embedding_dense_backward)
@@ -1038,7 +1050,7 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
-    indices = _maybe_convert_to_dtype(indices, torch.long)
+    indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
@@ -1046,8 +1058,11 @@ def embedding_dense_backward(
         grad_weights_scale = counts[indices]
         grad_output = grad_output / grad_weights_scale.unsqueeze(1)
 
-    grad = grad_output.masked_fill(indices == padding_idx, 0)
-    grad_weight = grad_output.new_zeros((num_weights,) + grad_output.shape[indices.ndim:])
+    mask = _unsqueeze_to_dim(indices == padding_idx, grad_output.ndim)
+    grad = grad_output.masked_fill(mask, 0)
+    grad_weight = grad_output.new_zeros(
+        (num_weights,) + grad_output.shape[indices.ndim :]
+    )
     return grad_weight.index_put([indices], grad, accumulate=True)
 
 
