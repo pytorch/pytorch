@@ -2707,6 +2707,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
+    def test_nn_sequential_invocation_reposition_indices(self):
+        with freeze_rng_state():
+
+            class TestModel(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linears = torch.nn.Sequential(
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                    )
+
+                def forward(self, x):
+                    all_but_last = self.linears[1:3]
+                    return all_but_last(x)
+
+            m = TestModel()
+            x = torch.rand((2, 2))
+            real = m(x)
+            graph, _ = torch._dynamo.export(m, x)
+            dynamo_result = graph(x)
+            self.assertTrue(same(real, dynamo_result))
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod
