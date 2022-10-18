@@ -875,18 +875,30 @@ class QConfigMultiMapping:
             set_method(*args, qconfig)
 
     def set_global(self, global_qconfig_list: List[QConfigAny]) -> QConfigMultiMapping:
+        """
+        Set global QConfigs
+        see :func:`~torch.ao.quantization.QConfigMapping.set_global()` for more info
+        """
         self._insert_qconfig_list("global_qconfig", [], global_qconfig_list)
         return self
 
     def set_object_type(
         self, object_type: Union[Callable, str], qconfig_list: List[QConfigAny]
     ) -> QConfigMultiMapping:
+        """
+        Set object type QConfigs
+        see :func:`~torch.ao.quantization.QConfigMapping.set_object_type()` for more info
+        """
         self._insert_qconfig_list("object_type_qconfigs", [object_type], qconfig_list)
         return self
 
     def set_module_name_regex(
         self, module_name_regex: str, qconfig_list: List[QConfigAny]
     ) -> QConfigMultiMapping:
+        """
+        Set module_name_regex QConfigs
+        see :func:`~torch.ao.quantization.QConfigMapping.set_module_name_regex()` for more info
+        """
         self._insert_qconfig_list(
             "module_name_regex_qconfigs", [module_name_regex], qconfig_list
         )
@@ -895,6 +907,10 @@ class QConfigMultiMapping:
     def set_module_name(
         self, module_name: str, qconfig_list: List[QConfigAny]
     ) -> QConfigMultiMapping:
+        """
+        Set module_name QConfigs
+        see :func:`~torch.ao.quantization.QConfigMapping.set_module_name()` for more info
+        """
         self._insert_qconfig_list("module_name_qconfigs", [module_name], qconfig_list)
         return self
 
@@ -905,6 +921,10 @@ class QConfigMultiMapping:
         index: int,
         qconfig_list: List[QConfigAny],
     ) -> QConfigMultiMapping:
+        """
+        Set module_name QConfigs
+        see :func:`~torch.ao.quantization.QConfigMapping.set_module_name_object_type_order()` for more info
+        """
         self._insert_qconfig_list(
             "module_name_object_type_order_qconfigs",
             [module_name, object_type, index],
