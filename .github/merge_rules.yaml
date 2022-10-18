@@ -22,7 +22,7 @@
   - BowenBao
   - abock
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -38,7 +38,7 @@
   - jjsjann123
   - ptrblck
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -54,7 +54,7 @@
   - dagitses
   - pytorch/pytorch-dev-infra
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -65,7 +65,7 @@
   approved_by:
   - pytorchbot
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -75,7 +75,7 @@
   approved_by:
   - pytorchbot
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull / linux-bionic-py3_7-clang8-xla / build
   - pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)
@@ -87,7 +87,7 @@
   approved_by:
   - svekars
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -102,7 +102,7 @@
   - dreiss
   - raziel
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -120,10 +120,10 @@
   - test/test_linalg.py
   approved_by:
   - mruberry
-  - Lezcano
+  - lezcano
   - IvanYashchuk
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -143,7 +143,7 @@
   - mruberry
   - peterbell10
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -170,7 +170,7 @@
   - pearu
   - IvanYashchuk
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -186,7 +186,7 @@
   - malfet
   - razarmehr
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 - name: Distributions
@@ -198,7 +198,7 @@
   - neerajprad
   - alicanb
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -232,7 +232,7 @@
   - aazzolini
   - kwen2501
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -245,7 +245,7 @@
   - XiaobingSuper
   - yanbing-j
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -257,7 +257,7 @@
   - sanchitintel
   - chunyuan-w
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -272,7 +272,7 @@
   - mingfeima
   - XiaobingSuper
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -285,7 +285,7 @@
   - leslie-fang-intel
   - CaoE
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -299,7 +299,7 @@
   - leslie-fang-intel
   - CaoE
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -317,7 +317,7 @@
   - alanwaketan
   - JackCaoG
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -326,9 +326,19 @@
   - '*'
   approved_by:
   - pytorch/metamates
-  - mruberry
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Core Reviewers
+  patterns:
+  - '*'
+  approved_by:
+  - mruberry
+  - lezcano
+  mandatory_checks_name:
+  - EasyCLA
   - Lint
   - pull
 
@@ -341,6 +351,6 @@
   - ezyang
   - dzhulgakov
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull

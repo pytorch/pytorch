@@ -6,7 +6,12 @@ from warnings import warn
 
 import torch
 import torch.overrides
-from torch._prims_common import getnvFuserDtype, Number, number_type
+from torch._prims_common import (
+    _torch_dtype_to_nvfuser_dtype_map,
+    getnvFuserDtype,
+    Number,
+    number_type,
+)
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -131,6 +136,18 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     args = [args[0], original_shape, args[1]]
                     return self.call_function(node.target, args, node.kwargs)
+
+                if node.target in [
+                    torch.ops.nvprims.native_batch_norm,
+                    torch.ops.nvprims.native_batch_norm.default,
+                ]:
+                    args, kwargs = self.fetch_args_kwargs_from_env(node)
+                    assert len(args) == 8
+                    training = args[5]
+                    args6_end = tuple(map(_to_nvfuser_constant, args[6:]))
+                    args = args[:5] + (training,) + args6_end
+                    return node.target.impl_nvfuser(fd, *args, **kwargs)
+
                 return super().run_node(node)
 
             def call_function(self, target, args, kwargs):
@@ -208,6 +225,18 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
 
 class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+        # special case to stop lowering to nvprim when converting to an unsupported type
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.nvprims.convert_element_type.default
+        ):
+            return (
+                _torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None
+                and _torch_dtype_to_nvfuser_dtype_map.get(
+                    node.args[0].meta["tensor_meta"].dtype  # type: ignore[union-attr]
+                )
+                is not None
+            )
         return (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is not None
@@ -239,11 +268,39 @@ class NvfuserGraphModule(torch.nn.Module):
         )
 
 
+def _remove_empty_like_fill(gm: GraphModule):
+    # Remove empty_like + fill nodes that prevent lowering to nvprims
+    # This is a workaround for nonoptimal traces of C++ code `(1 - tensor)`
+    # https://github.com/pytorch/pytorch/issues/86612
+
+    # Here when we see a `sub` node, we check if the first input is a result of
+    # filling a tensor with a scalar
+    # If so, we replace the first argument of the `sub` node with a scalar
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if node.target == torch.ops.nvprims.sub.default:
+                # check if the first argument is a fill
+                if (
+                    isinstance(node.args[0], torch.fx.Node)
+                    and node.args[0].op == "call_function"
+                    and node.args[0].target == torch.ops.aten.fill.Scalar
+                ):
+                    # Replace the first argument with the second argument of fill
+                    # aten.fill.Scalar(tensor, scalar)
+                    fill_node = node.args[0]
+                    scalar = fill_node.args[1]
+                    node.args = (scalar, *node.args[1:])
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return gm
+
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def maybe_partition_graph(
     gm: GraphModule, allow_single_op_fusion: bool, use_python_fusion_cache: bool
 ):
+    gm = _remove_empty_like_fill(gm)
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = list(
         filter(lambda n: n.op == "call_function", gm.graph.nodes)

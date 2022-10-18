@@ -150,11 +150,11 @@ class Transformer(Module):
         return output
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int) -> Tensor:
+    def generate_square_subsequent_mask(sz: int, device='cpu') -> Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
-        return torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+        return torch.triu(torch.full((sz, sz), float('-inf'), device=device), diagonal=1)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
@@ -275,7 +275,7 @@ class TransformerEncoder(Module):
             output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
-            output = torch.nested.to_padded_tensor(output, 0.)
+            output = output.to_padded_tensor(0.)
 
         if self.norm is not None:
             output = self.norm(output)

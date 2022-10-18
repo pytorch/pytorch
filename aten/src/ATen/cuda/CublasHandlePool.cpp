@@ -7,13 +7,12 @@
 
 namespace at { namespace cuda {
 
-static std::map<std::tuple<void *, void *>, at::DataPtr> cublas_handle_stream_to_workspace;
-
-void clearCublasWorkspaces() {
-  cublas_handle_stream_to_workspace.clear();
-}
-
 namespace {
+
+std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
+  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
+  return instance;
+}
 
 void createCublasHandle(cublasHandle_t *handle) {
   TORCH_CUDABLAS_CHECK(cublasCreate(handle));
@@ -35,6 +34,10 @@ void destroyCublasHandle(cublasHandle_t handle) {
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
 
 } // namespace
+
+void clearCublasWorkspaces() {
+  cublas_handle_stream_to_workspace().clear();
+}
 
 size_t parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
@@ -96,11 +99,11 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   // cublasSetWorkspace not available on CUDA 10.2
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  if (cublas_handle_stream_to_workspace.find(key) == cublas_handle_stream_to_workspace.end()) {
-      auto workspace_ptr = getNewWorkspace();
-      cublas_handle_stream_to_workspace[key] = std::move(workspace_ptr);
+  auto workspace_it = cublas_handle_stream_to_workspace().find(key);
+  if (workspace_it == cublas_handle_stream_to_workspace().end()) {
+    workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, getNewWorkspace()});
   }
-  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, cublas_handle_stream_to_workspace[key].get(), getChosenWorkspaceSize()));
+  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
 #endif
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup

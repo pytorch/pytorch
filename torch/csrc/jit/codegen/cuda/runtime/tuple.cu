@@ -606,6 +606,179 @@ using PtrTuple = PtrTupleBase<false, Types...>;
 template <typename... Types>
 using VolatilePtrTuple = PtrTupleBase<true, Types...>;
 
+// Define a LocalTuple of NumVals values of type Type
+template <int NumVals, typename Type>
+struct MakeLocalTuple;
+
+template <typename Type>
+struct MakeLocalTuple<1, Type> {
+  using type = LocalTuple<Type>;
+};
+
+template <typename Type>
+struct MakeLocalTuple<2, Type> {
+  using type = LocalTuple<Type, Type>;
+};
+
+template <typename Type>
+struct MakeLocalTuple<3, Type> {
+  using type = LocalTuple<Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeLocalTuple<4, Type> {
+  using type = LocalTuple<Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeLocalTuple<5, Type> {
+  using type = LocalTuple<Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeLocalTuple<6, Type> {
+  using type = LocalTuple<Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeLocalTuple<7, Type> {
+  using type = LocalTuple<Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeLocalTuple<8, Type> {
+  using type = LocalTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <int NumVals, typename Type>
+struct MakeRefTuple;
+
+template <typename Type>
+struct MakeRefTuple<1, Type> {
+  using type = RefTuple<Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<2, Type> {
+  using type = RefTuple<Type, Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<3, Type> {
+  using type = RefTuple<Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<4, Type> {
+  using type = RefTuple<Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<5, Type> {
+  using type = RefTuple<Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<6, Type> {
+  using type = RefTuple<Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<7, Type> {
+  using type = RefTuple<Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeRefTuple<8, Type> {
+  using type = RefTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <int NumVals, typename Type>
+struct MakeConstRefTuple;
+
+template <typename Type>
+struct MakeConstRefTuple<1, Type> {
+  using type = ConstRefTuple<Type>;
+};
+
+template <typename Type>
+struct MakeConstRefTuple<2, Type> {
+  using type = ConstRefTuple<Type, Type>;
+};
+
+template <typename Type>
+struct MakeConstRefTuple<3, Type> {
+  using type = ConstRefTuple<Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeConstRefTuple<4, Type> {
+  using type = ConstRefTuple<Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeConstRefTuple<5, Type> {
+  using type = ConstRefTuple<Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeConstRefTuple<6, Type> {
+  using type = ConstRefTuple<Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeConstRefTuple<7, Type> {
+  using type = ConstRefTuple<Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeConstRefTuple<8, Type> {
+  using type = ConstRefTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <int NumVals, typename Type>
+struct MakeVolatilePtrTuple;
+
+template <typename Type>
+struct MakeVolatilePtrTuple<1, Type> {
+  using type = VolatilePtrTuple<Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<2, Type> {
+  using type = VolatilePtrTuple<Type, Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<3, Type> {
+  using type = VolatilePtrTuple<Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<4, Type> {
+  using type = VolatilePtrTuple<Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<5, Type> {
+  using type = VolatilePtrTuple<Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<6, Type> {
+  using type = VolatilePtrTuple<Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<7, Type> {
+  using type = VolatilePtrTuple<Type, Type, Type, Type, Type, Type, Type>;
+};
+
+template <typename Type>
+struct MakeVolatilePtrTuple<8, Type> {
+  using type = VolatilePtrTuple<Type, Type, Type, Type, Type, Type, Type, Type>;
+};
+
 // Utility definitions. Currently only used with LocalTuple
 
 template <int idx, typename BinaryFunc, typename... DataTypes>

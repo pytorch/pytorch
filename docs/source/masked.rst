@@ -51,11 +51,11 @@ There are already a number of existing tutorials that we've written to help user
 
 1. `Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html>`__. The place to start for new users:
 this tutorial discusses how to use :class:`MaskedTensor`s and why they're useful.
-2. `Sparsity <https://pytorch.org/tutorials/prototype/maskedtensor_sparsity.html>`. 
+2. `Sparsity <https://pytorch.org/tutorials/prototype/maskedtensor_sparsity.html>`__.
 :class:`MaskedTensor` also supports sparse COO and CSR data and mask Tensors!
-3. `Adagrad sparse semantics <https://pytorch.org/tutorials/prototype/maskedtensor_adagrad_semantics.html>`__. 
+3. `Adagrad sparse semantics <https://pytorch.org/tutorials/prototype/maskedtensor_adagrad_semantics.html>`__.
 A practical example of how :class:`MaskedTensor` can simply sparse semantics and implementations
-4. `Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`.
+4. `Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`__.
 Discusses why certain decisions were made (e.g. requiring masks to match for binary/reduction operations),
 differences with NumPy's :class:`MaskedArray`, and reduction semantics.
 
@@ -154,7 +154,7 @@ Binary Operators
 
 As you may have seen in the tutorial, :class:`MaskedTensor` also has binary operations implemented with the caveat
 that the masks in the two MaskedTensors must match or else an error will be raised. As noted in the error, if you
-need support for a particular operator or have proposed semantics for how they should be behave instead, please open
+need support for a particular operator or have proposed semantics for how they should behave instead, please open
 an issue on Github. For now, we have decided to go with the most conservative implementation to ensure that users
 know exactly what is going on and are being intentional about their decisions with masked semantics.
 
@@ -217,7 +217,11 @@ The available inplace binary operators are all of the above **except**:
 Reductions
 ----------
 
-The following reductions are available (with autograd support):
+The following reductions are available (with autograd support). For more information, the
+`Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html>`__ tutorial
+details some examples of reductions, while the
+`Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`__ tutorial
+has some further in-depth discussions about how we decided on certain reduction semantics.
 
 .. autosummary::
     :toctree: generated

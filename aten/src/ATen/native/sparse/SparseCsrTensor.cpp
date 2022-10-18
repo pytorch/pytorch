@@ -632,25 +632,24 @@ int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->dense_dim();
 }
 
-bool _is_same_size_as_sparse_csr(
+bool _is_same_size_as_sparse_compressed(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
   return self.sizes().equals(src.sizes());
 }
 
-const SparseCsrTensor& resize_as_sparse_csr_(
+const SparseCsrTensor& resize_as_sparse_compressed_(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
-  TORCH_CHECK(
-      src.is_sparse_csr() && self.is_sparse_csr(),
-      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got ",
-      self.layout(),
-      " for self, and ",
-      src.layout(),
-      " for src");
-  if (!_is_same_size_as_sparse_csr(self, src)) {
-    get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
-  }
+  auto src_layout = src.layout();
+  auto self_layout = self.layout();
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      src_layout, "resize_as_sparse_compressed_: src ", []() {});
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      self_layout, "resize_as_sparse_compressed_: self ", []() {});
+  // Note: The impl method does all required checking to see if resize/data copy
+  // on member tensors is required.
+  get_sparse_csr_impl(self)->resize_as_sparse_compressed_tensor_(src);
   return self;
 }
 

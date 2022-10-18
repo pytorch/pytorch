@@ -58,6 +58,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     steps:
+      - name: Enable git symlinks on Windows
+        shell: bash
+        run: |
+          git config --global core.symlinks true
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -70,7 +75,7 @@ jobs:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -81,7 +86,7 @@ jobs:
           python3 -m pip install psutil==5.9.1
           python3 -m pip install pynvml==11.4.1
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "::set-output name=monitor-script-pid::${!}"
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
         uses: seemethere/download-artifact-s3@v4
