@@ -258,6 +258,10 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return dispatch_common_(__FUNCTION__);
   }
 
+  virtual SymIntNode floor() override {
+    return dispatch_common_(__FUNCTION__);
+  }
+
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
   }
@@ -331,6 +335,8 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   }
 
   SymIntNode ceil() override;
+  SymIntNode floor() override;
+
   SymIntNode floor() override;
 
   py::handle getPyObj() {
