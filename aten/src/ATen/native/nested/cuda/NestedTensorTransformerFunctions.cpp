@@ -310,16 +310,16 @@ bool is_safe_to_get_storage_as_tensor(
       value_offset_differences.begin());
 
   // The first adjacent differences is offsets[0], so skip for comparision
-  bool same_offsets = std::equal(
-                          query_offset_differences.cbegin() + 1,
-                          query_offset_differences.cend(),
-                          key_offset_differences.cbegin() + 1) &&
-      std::equal(key_offset_differences.cbegin() + 1,
-                 key_offset_differences.cend(),
-                 value_offset_differences.cbegin() + 1);
-  if (!same_offsets) {
-    return false;
-  }
+  // bool same_offsets = std::equal(
+  //                         query_offset_differences.cbegin() + 1,
+  //                         query_offset_differences.cend(),
+  //                         key_offset_differences.cbegin() + 1) &&
+  //     std::equal(key_offset_differences.cbegin() + 1,
+  //                key_offset_differences.cend(),
+  //                value_offset_differences.cbegin() + 1);
+  // if (!same_offsets) {
+  //   return false;
+  // }
   const Tensor& query_strides = query->get_nested_stride_tensor();
   const Tensor& key_strides = key->get_nested_stride_tensor();
   const Tensor& value_strides = value->get_nested_stride_tensor();
@@ -327,15 +327,9 @@ bool is_safe_to_get_storage_as_tensor(
   const int64_t n_tensors = query_strides.size(0);
   const int64_t n_dims = query_strides.size(1);
 
-  std::vector<int64_t> previous_q_stride(
-      query_strides.data_ptr<int64_t>(),
-      query_strides.data_ptr<int64_t>() + n_dims);
-  std::vector<int64_t> previous_k_stride(
-      key_strides.data_ptr<int64_t>(),
-      key_strides.data_ptr<int64_t>() + n_dims);
-  std::vector<int64_t> previous_v_stride(
-      value_strides.data_ptr<int64_t>(),
-      value_strides.data_ptr<int64_t>() + n_dims);
+  int64_t* previous_q_stride = query_strides.data_ptr<int64_t>();
+  int64_t* previous_k_stride = key_strides.data_ptr<int64_t>();
+  int64_t* previous_v_stride = value_strides.data_ptr<int64_t>();
 
   // Check initially that they are in strictly descending order
   for (int i{1}; i < n_dims; i++) {
@@ -346,15 +340,79 @@ bool is_safe_to_get_storage_as_tensor(
     }
   }
 
+  auto q_stride_0 = query_strides.stride(0);
+  auto k_stride_0 = key_strides.stride(0);
+  auto v_stride_0 = value_strides.stride(0);
+
   for (int i{1}; i < n_tensors; i++) {
     for (const int64_t j : c10::irange(n_dims)) {
-      if (previous_q_stride[j] != query_strides[i][j].item<int64_t>() ||
-          previous_k_stride[j] != key_strides[i][j].item<int64_t>() ||
-          previous_v_stride[j] != value_strides[i][j].item<int64_t>()) {
+      if (previous_q_stride[j] != previous_q_stride[i * q_stride_0 + j] ||
+          previous_k_stride[j] != previous_k_stride[i * k_stride_0 + j] ||
+          previous_v_stride[j] != previous_v_stride[i * v_stride_0 + j]) {
         return false;
       }
     }
   }
+  return true;
+}
+
+/**
+ * This function checks if the input query, key, value tensors are valid for
+ * use with the flash-attention and efficient_attention kernels without
+ * needing to call contiguous on the nested tensor input.
+ * It checks that the storage offsets' adjacent_difference constant over each of the
+ * tensor in the nested tensor and that the strides are monitonically decreasing.
+ * This check is done after calling transpose on the nested tensor.
+ *
+ * @return A boolean indicating of contiguous needs to be called for input
+ */
+bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
+  const auto& tensor_offsets = tensor->get_storage_offsets();
+  const Tensor& tensor_sizes = tensor->get_nested_size_tensor();
+  const Tensor& tensor_strides = tensor->get_nested_stride_tensor();
+
+  const int64_t n_tensors = tensor_strides.size(0);
+  const int64_t n_dims = tensor_strides.size(1);
+
+  if (n_tensors <= 1) {
+    return true;
+  }
+
+  int64_t* previous_tensor_stride = tensor_strides.data_ptr<int64_t>();
+  // Check initially that they are in strictly descending order
+  for (int i{1}; i < n_dims; i++) {
+    if (previous_tensor_stride[i - 1] <= previous_tensor_stride[i]) {
+      return false;
+    }
+  }
+
+  auto tensor_stride_0 = tensor_strides.stride(0);
+
+  for (int i{1}; i < n_tensors; i++) {
+    for (const int64_t j : c10::irange(n_dims)) {
+      if (previous_tensor_stride[j] !=
+          previous_tensor_stride[i * tensor_stride_0 + j]) {
+        return false;
+      }
+    }
+  }
+  // Check the offsets are a constant multiple from the previous numels
+  const int64_t* tensor_size_ptr = tensor_sizes.data_ptr<int64_t>();
+  const int64_t* tensor_stride_ptr = tensor_strides.data_ptr<int64_t>();
+
+  int64_t offset_constant = (tensor_offsets[1] - tensor_offsets[0]) /
+      tensor_size_ptr[0] * tensor_stride_ptr[0];
+
+  for (int64_t i = 2; i < n_tensors; i++) {
+    int64_t current_offset_constant =
+        (tensor_offsets[i] - tensor_offsets[i - 1]) /
+        tensor_size_ptr[(i - 1) * tensor_stride_0] *
+        tensor_stride_ptr[(i - 1) * tensor_stride_0];
+    if (current_offset_constant != offset_constant) {
+      return false;
+    }
+  }
+  // Congrats you made it!
   return true;
 }
 
@@ -419,14 +477,19 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
 
   auto query_stride_tensor = query_impl->get_nested_stride_tensor();
   auto key_stride_tensor = key_impl->get_nested_stride_tensor();
+  auto value_stride_tensor = value_impl->get_nested_stride_tensor();
 
   const int64_t nnz_q_stride = query_stride_tensor[0][0].item<int64_t>();
   const int64_t head_q_stride = query_stride_tensor[0][1].item<int64_t>();
   const int64_t head_dim_stride = query_stride_tensor[0][2].item<int64_t>();
 
-  const int64_t nnz_kv_stride = key_stride_tensor[0][0].item<int64_t>();
-  const int64_t head_kv_stride = key_stride_tensor[0][1].item<int64_t>();
-  const int64_t head_dim_kv_stride = key_stride_tensor[0][2].item<int64_t>();
+  const int64_t nnz_k_stride = key_stride_tensor[0][0].item<int64_t>();
+  const int64_t head_k_stride = key_stride_tensor[0][1].item<int64_t>();
+  const int64_t head_dim_k_stride = key_stride_tensor[0][2].item<int64_t>();
+
+  const int64_t nnz_v_stride = value_stride_tensor[0][0].item<int64_t>();
+  const int64_t head_v_stride = value_stride_tensor[0][1].item<int64_t>();
+  const int64_t head_dim_v_stride = value_stride_tensor[0][2].item<int64_t>();
 
   query_buffer_reshaped = q_storage_as_tensor.as_strided(
       {Nnz_q, num_heads, head_dim},
@@ -434,11 +497,11 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
       query_impl->get_storage_offsets()[0]);
   key_buffer_reshaped = k_storage_as_tensor.as_strided(
       {Nnz_kv, num_heads, head_dim},
-      {nnz_kv_stride, head_kv_stride, head_dim_kv_stride},
+      {nnz_k_stride, head_k_stride, head_dim_k_stride},
       key_impl->get_storage_offsets()[0]);
   value_buffer_reshaped = v_storage_as_tensor.as_strided(
       {Nnz_kv, num_heads, head_dim},
-      {nnz_kv_stride, head_kv_stride, head_dim_kv_stride},
+      {nnz_v_stride, head_v_stride, head_dim_v_stride},
       value_impl->get_storage_offsets()[0]);
 
   std::tuple<Tensor, Tensor> attention_and_weights =
