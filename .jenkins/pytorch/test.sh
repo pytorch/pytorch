@@ -700,7 +700,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
   if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-  vvinstall_triton
+    install_triton
   fi
   test_python_shard 1
   test_aten
