@@ -7,6 +7,7 @@ from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.meta_utils import MetaConverter
 import torch.utils._python_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -313,6 +314,7 @@ def run_meta_crossref(
     *,
     dtype,
     device_type,
+    run_symbolic_meta: bool
 ):
     to_meta = MetaConverter()
     do_meta = test_expect is not TestExpect.SKIP
@@ -371,7 +373,15 @@ def run_meta_crossref(
             # errors
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                meta_rs = func(*meta_args, **meta_kwargs)
+                if run_symbolic_meta:
+                    # Run the decomps and meta kernels registered
+                    # to the python dispatcher instead of the regular dispatcher.
+                    # This should be the same set of kernels
+                    # that fake tensor runs in dynamic shapes mode.
+                    with enable_python_dispatcher():
+                        meta_rs = func(*meta_args, **meta_kwargs)
+                else:
+                    meta_rs = func(*meta_args, **meta_kwargs)
         except Exception as e:
             if test_expect is TestExpect.XFAILURE:
                 return rs
@@ -649,7 +659,7 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 
         return run_meta_crossref(
             self.test_case, test_expect, func, args,
-            kwargs, dtype=self.dtype, device_type=self.device_type
+            kwargs, dtype=self.dtype, device_type=self.device_type, run_symbolic_meta=False
         )
 
 aten = torch.ops.aten
@@ -677,7 +687,6 @@ meta_dispatch_expected_failures = {
     aten.linalg_solve_triangular.out : {c64, c128, f64, f32},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.native_group_norm.default : {bf16},
     aten.nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten.nonzero.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten.ormqr.default : {c64, c128, f64, f32},
@@ -749,7 +758,6 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
-    aten.narrow_copy.out: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::narrow_copy.out
     aten.native_batch_norm.default: {bf16},
     aten.native_layer_norm.default: {bf16},
 }
@@ -783,7 +791,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
     aten.multinomial.default: {f16},  # aten::multinomial
     aten.multinomial.out: {f16},  # aten::multinomial.out
-    aten.native_group_norm.default: {bf16, f16},
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
@@ -819,13 +826,14 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     device: torch.device
     dtype: torch.dtype
 
-    def __init__(self, test_case, *, device, dtype):
+    def __init__(self, test_case, *, device, dtype, symbolic_meta: bool):
         self.test_case = test_case
         # save TLS
         self.precision = test_case.precision
         self.rel_tol = test_case.rel_tol
         self.device_type = torch.device(device).type
         self.dtype = dtype
+        self.symbolic_meta = symbolic_meta
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
@@ -852,6 +860,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             kwargs,
             dtype=self.dtype,
             device_type=self.device_type,
+            run_symbolic_meta=self.symbolic_meta,
         )
 
 # NB: we're running these tests only on CUDA because there are some
@@ -889,7 +898,23 @@ class TestMeta(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device):
+            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=False):
+                expected = func(*args, **kwargs)
+                if isinstance(expected, torch.Tensor) and op.supports_out:
+                    func(*args, **kwargs, out=expected)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    @ops(op_db)
+    def test_dispatch_symbolic_meta(self, device, dtype, op):
+        func = op.get_op()
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in samples:
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+
+            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=True):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
@@ -897,6 +922,12 @@ class TestMeta(TestCase):
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
+
+    def test_huber_loss_backward(self):
+        inps = [torch.rand(2**52, device='meta') for _ in range(3)]
+        r = torch.ops.aten.huber_loss_backward(*inps, 0, 1.0)
+        self.assertEqual(r.device.type, 'meta')
+        self.assertEqual(r.shape, inps[0].shape)
 
     def test_map_location_deserialize(self):
         import io

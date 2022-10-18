@@ -236,7 +236,7 @@ at::Tensor fused_moving_avg_obs_fake_quant(
     const int64_t ch_axis,
     bool per_row_fake_quant,
     bool symmetric_quant) {
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     return self.clone();
   }
   const auto res = at::_fused_moving_avg_obs_fq_helper(
