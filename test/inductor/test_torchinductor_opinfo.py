@@ -73,6 +73,9 @@ if START is not None or END is not None:
 else:
     START = 0
     END = len(op_db)
+    END = min(END, len(op_db))
+
+print(f"RUNNING FROM {START} TO {END}")
 
 seen_succeeded = defaultdict(dict)
 seen_failed = defaultdict(dict)
@@ -99,11 +102,16 @@ def print_seen():
                     f'   "{op}": {fmt_dtypes(expected_failures_dtypes)},{reasons}'
                 )
 
+        name = (
+            "inductor_expected_failures_all_sample"
+            if ALL_SAMPLES
+            else "inductor_expected_failures_single_sample"
+        )
         expected_failures[device_type].sort()
         nl = "\n"
         print(
             f"""
-inductor_expected_failures_single_sample[\"{device_type}\"] = {{
+{{{name}}}[\"{device_type}\"] = {{
 {nl.join(expected_failures[device_type])}
 }}
 """
@@ -115,6 +123,25 @@ inductor_expected_failures_single_sample[\"{device_type}\"] = {{
 
 if COLLECT_EXPECT:
     atexit.register(print_seen)
+
+
+inductor_all_skips = defaultdict(dict)
+
+inductor_all_skips["cpu"] = {
+    "nn.functional.pad.constant": {b8, f16, f32, f64, i32, i64},  # segfault,
+    "nn.functional.embedding_bag": {b8, f16, f32, f64, i32, i64},  # segfault,
+    "linalg.solve_ex": {b8, f16, f32, f64, i32, i64},  # segfault,
+    "nn.functional.pad.reflect": {b8, f16, f32, f64, i32, i64},  # segfault,
+    "linalg.solve_triangular": {b8, f16, f32, f64, i32, i64},  # segfault
+    "linalg.svdvals": {b8, f16, f32, f64, i32, i64},  # segfault
+    "nn.functional.relu": {b8, f16, f32, f64, i32, i64},  # segfault
+}
+inductor_all_skips["cuda"] = {
+    "inner": {b8, f16, f32, f64, i32, i64},  # segfault
+    "erfinv": {b8, f16, f32, f64, i32, i64},  # segfault
+    "erfc": {b8, f16, f32, f64, i32, i64},  # segfault
+    "erf": {b8, f16, f32, f64, i32, i64},  # segfault
+}
 
 inductor_skips = defaultdict(dict)
 
@@ -401,6 +428,82 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "tanh": {f16},
 }
 
+inductor_expected_failures_all_sample = defaultdict(dict)
+
+inductor_expected_failures_all_sample["cpu"] = {
+    "nn.functional.relu": {b8, f16, f32, f64, i32, i64},
+    "baddbmm": {i32, i64},
+    "cdist": {f32, f64},
+    "cholesky_inverse": {f32, f64},
+    "diff": {b8, f16, f32, f64, i32, i64},
+    "div.floor_rounding": {i32, i64},
+    "div.trunc_rounding": {i32, i64},
+    "floor_divide": {i32, i64},
+    "sub": {f16},
+    "sum_to_size": {f16},
+    "symeig": {f32, f64},
+    "__rmatmul__": {f32, f64, i32, i64},
+    "__rpow__": {f16, i32, i64},
+    "dist": {f16},
+    "narrow": {b8, f16, f32, f64, i32, i64},
+    "nn.functional._scaled_dot_product_attention": {f32, f64},
+    "nn.functional.avg_pool2d": {f32, f64},
+    "nn.functional.fractional_max_pool2d": {f32, f64},
+    "nn.functional.fractional_max_pool3d": {f32, f64},
+    "nn.functional.max_pool2d": {f32, f64},
+    "pow": {f16},
+    "rsub": {f16, f32, f64, i32, i64},
+    "bfloat16": {b8, f16, f32, f64, i32, i64},
+    "bool": {b8, f16, f32, f64, i32, i64},
+    "byte": {b8, f16, f32, f64, i32, i64},
+    "char": {b8, f16, f32, f64, i32, i64},
+    "double": {b8, f16, f32, f64, i32, i64},
+    "empty": {b8, f16, f32, f64, i32, i64},
+    "empty_like": {b8, f16, f32, f64, i32, i64},
+    "float": {b8, f16, f32, f64, i32, i64},
+    "gather": {b8, f16, f32, f64, i32, i64},
+    "half": {b8, f16, f32, f64, i32, i64},
+    "histogram": {f32, f64},
+    "histogramdd": {f32, f64},
+    "int": {b8, f16, f32, f64, i32, i64},
+    "long": {b8, f16, f32, f64, i32, i64},
+    "new_empty": {b8, f16, f32, f64, i32, i64},
+    "new_empty_strided": {f16},
+    "scatter": {b8, i64},
+    "searchsorted": {f16, f32, f64, i32, i64},
+    "short": {b8, f16, f32, f64, i32, i64},
+    "sort": {b8, f16, f32, f64, i32, i64},
+    "unflatten": {b8, f16, f32, f64, i32, i64},
+    "all": {b8, f16, f32, f64, i32, i64},
+    "amax": {b8, f16, f32, f64, i32, i64},
+    "amin": {b8, f16, f32, f64, i32, i64},
+    "any": {b8, f16, f32, f64, i32, i64},
+    "argmax": {f16, f32, f64, i32, i64},
+    "argmin": {f16, f32, f64, i32, i64},
+    "mean": {f16, f32, f64},
+    "nanmean": {f16, f32, f64},
+    "nn.functional.cosine_embedding_loss": {b8},
+    "nn.functional.dropout": {f32, f64},
+    "nn.functional.dropout2d": {f32, f64},
+    "nn.functional.dropout3d": {f32, f64},
+    "nn.functional.feature_alpha_dropout.with_train": {f32, f64},
+    "nn.functional.huber_loss": {f16},
+    "nn.functional.pdist": {f32, f64},
+    "norm": {f16},
+    "renorm": {f16, f32, f64},
+    "repeat": {b8, f16, f32, f64, i32, i64},
+    "scatter_reduce.mean": {f16, f32, f64},
+    "std": {f16, f32, f64},
+    "sum": {b8, f16, f32, f64, i32, i64},
+    "tile": {b8, f16, f32, f64, i32, i64},
+    "trapezoid": {f16},
+    "trapz": {f16},
+    "triu": {b8},
+    "var": {f32, f64},
+}
+
+inductor_expected_failures_all_sample["cuda"] = {}
+
 inductor_should_fail_with_exception = defaultdict(dict)
 
 inductor_should_fail_with_exception["cpu"] = {}
@@ -493,12 +596,23 @@ class TestInductorOpInfo(TestCase):
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
             self.skipTest(f"{op_name} in {dtype} not supported")
+        elif (
+            dtype in inductor_all_skips[device_type].get(op_name, set()) and ALL_SAMPLES
+        ):
+            test_expect = TestExpect.SKIP
+            self.skipTest(f"{op_name} in {dtype} not supported for ALL_SAMPLES")
         elif dtype in inductor_expected_failures_single_sample[device_type].get(
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(
             op_name, set()
+        ):
+            test_expect = TestExpect.XFAILURE
+        elif (
+            dtype
+            in inductor_expected_failures_all_sample[device_type].get(op_name, set())
+            and ALL_SAMPLES
         ):
             test_expect = TestExpect.XFAILURE
         else:
@@ -610,6 +724,63 @@ class TestInductorOpInfo(TestCase):
 
 
 instantiate_device_type_tests(TestInductorOpInfo, globals())
+
+def report_percent_passing_ops():
+    from itertools import chain
+
+    total = len(op_db)
+    all_skips = [
+        inductor_skips,
+        inductor_expected_failures_single_sample,
+        inductor_should_fail_with_exception,
+    ]
+    excluded_cuda_keys = list(
+        set(chain.from_iterable(skips["cuda"].keys() for skips in all_skips))
+    )
+    excluded_cpu_keys = list(
+        set(chain.from_iterable(skips["cpu"].keys() for skips in all_skips))
+    )
+    excluded_both = set(excluded_cuda_keys + excluded_cpu_keys)
+
+    pass_percentage_cuda = ((total - len(excluded_cuda_keys)) / total) * 100
+    pass_percentage_cpu = ((total - len(excluded_cpu_keys)) / total) * 100
+    pass_percentage_total = ((total - len(excluded_both)) / total) * 100
+
+    total_by_dtype = total * len([f16, f32, f64, i32, i64, b8])
+
+    excluded_cuda_keys_by_dtype = sum(
+        [
+            len(x)
+            for x in list(
+                chain.from_iterable(skips["cuda"].values() for skips in all_skips)
+            )
+        ]
+    )
+    excluded_cpu_keys_by_dtype = sum(
+        [
+            len(x)
+            for x in list(
+                chain.from_iterable(skips["cpu"].values() for skips in all_skips)
+            )
+        ]
+    )
+
+    pass_percentage_cuda_by_dtype = (
+        (total_by_dtype - excluded_cuda_keys_by_dtype) / total_by_dtype
+    ) * 100
+    pass_percentage_cpu_by_dtype = (
+        (total_by_dtype - excluded_cpu_keys_by_dtype) / total_by_dtype
+    ) * 100
+
+    return {
+        "pass_percentage_cuda": pass_percentage_cuda,
+        "pass_percentage_cpu": pass_percentage_cpu,
+        "pass_percentage_total": pass_percentage_total,
+        "pass_percentage_cuda_by_dtype": pass_percentage_cuda_by_dtype,
+        "pass_percentage_cpu_by_dtype": pass_percentage_cpu_by_dtype,
+    }
+
+print(report_percent_passing_ops())
 
 if __name__ == "__main__":
     if has_triton() and not TEST_WITH_ROCM:
