@@ -5,7 +5,6 @@ import sys
 import csv
 import random
 
-from torch.testing._internal.common_utils import assert_equal
 
 
 class CompositeMHA(torch.nn.Module):
@@ -29,15 +28,14 @@ class CompositeMHA(torch.nn.Module):
         )
 
         batch_size = query_projected.size(0)
-        seq_len = query_projected.size(1) if not query_projected.is_nested else -1
         embed_dim = query_projected.size(2)
         head_dim = embed_dim // (self.num_heads * 3)
 
         query, key, value = query_projected.chunk(3, -1)
 
-        query = query.view(batch_size, seq_len, self.num_heads, head_dim).transpose(1, 2)
-        key = key.view(batch_size, seq_len, self.num_heads, head_dim).transpose(1, 2)
-        value = value.view(batch_size, seq_len, self.num_heads, head_dim).transpose(1, 2)
+        query = query.view(batch_size, -1, self.num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, self.num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, self.num_heads, head_dim).transpose(1, 2)
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         attn, _ = torch.nn.functional._scaled_dot_product_attention(
@@ -71,7 +69,7 @@ def generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_perce
     seq_len_list = [int(max_sequence_len * (1-random.gauss(pad_percentage, 0.01))) for _ in range(batch_size)]
     # Make random ele max length
     seq_len_list[random.randint(0, batch_size - 1)] = max_sequence_len
-    print(f"Theoretical padding: {pad_percentage} actual: {1 - (sum(seq_len_list) / (batch_size * max_sequence_len))}")
+    # print(f"Theoretical padding: {pad_percentage} actual: {1 - (sum(seq_len_list) / (batch_size * max_sequence_len))}")
     return torch.nested.nested_tensor([torch.randn(seq_len, embed_dimension, dtype=dtype, device=device) for seq_len in seq_len_list]), seq_len_list
 
 def benchmark_torch_function(iters, f, *args, **kwargs):
@@ -103,11 +101,11 @@ def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, 
     cpt_output, _ = cpt(x, x, x, mask)
 
     # First order sanity check. Not a replacement for rigorous tests.
-    # assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
-    pt_output = pt_output.unbind()
-    cpt_output = cpt_output.unbind()
-    assert assert_equal(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
-
+    if pt_output.is_nested and cpt_output.is_nested:
+        for a,b in zip(pt_output.unbind(), cpt_output.unbind()):
+             assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
+    else:
+        assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
     # with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True):
     #     with torch.inference_mode():
     pt_time = benchmark_torch_function(iters, npt, x, x, x, mask) * 1e3
@@ -135,7 +133,7 @@ def main():
     writer.writeheader()
 
     batch_size = 64
-    pad_percentage = 0.1
+    pad_percentage = 0.5
 
     for num_heads, max_seq_len in itertools.product([2, 4, 8, 16, 32], [64, 128, 256]):
         run_timing(iters, batch_size, 1024, num_heads, max_seq_len, pad_percentage, writer)
