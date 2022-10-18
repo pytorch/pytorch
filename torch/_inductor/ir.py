@@ -21,6 +21,7 @@ from torch._prims_common import is_boolean_dtype, is_float_dtype
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
+from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
 from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs
 from .virtualized import ops, V
@@ -450,7 +451,7 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
-        num_sm = torch.cuda.get_device_properties(device).multi_processor_count
+        num_sm = get_device_properties(device).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -2855,14 +2856,19 @@ class FallbackKernel(ExternKernelAlloc):
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
         # TODO(jansel): replace this with dynamic shape formulas
-        example_args = [
-            torch.zeros(
-                [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()],
-                dtype=x.get_dtype(),
-                device=x.get_device(),
-            )
-            for x in tensor_args
-        ]
+        example_args = []
+        for x in tensor_args:
+            size = [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()]
+            stride = [
+                V.graph.sizevars.guard_static_shape(s) for s in x.get_layout().stride
+            ]
+            dtype = x.get_dtype()
+            device = x.get_device()
+            arg = torch.empty_strided(
+                size=size, stride=stride, dtype=dtype, device=device
+            ).zero_()
+            example_args.append(arg)
+
         example_output = kernel(
             *unflatten_args(example_args, non_tensor_args), **kwargs
         )
@@ -3102,10 +3108,18 @@ class Convolution(ExternKernelAlloc):
             # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
             # which align with aten.convolutuion path(cpu only support 2d case now).
             # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
-            # TODO: the gpu channels_last path depend on cudnn version, see
+
+            # CUDA channels_last path depend on cudnn version, see
             # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
+            valid_device = True
             if (
-                x.get_device().type == "cpu"
+                x.get_device() == "cuda"
+                and torch.backends.cudnn.is_available()
+                and torch.backends.cudnn.version() < 8302
+            ):
+                valid_device = False
+            if (
+                valid_device
                 and len(x.get_size()) == 4
                 and (
                     x.get_layout().is_channels_last_stride_ordered()
