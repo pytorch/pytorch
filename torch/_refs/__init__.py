@@ -3442,7 +3442,9 @@ def diag(
     offset: int = 0,
 ) -> TensorLikeType:
     ndim = self.dim()
-    utils.check(ndim in (1, 2), lambda: f"diag(): Supports 1D or 2D tensors. Got {ndim}D")
+    utils.check(
+        ndim in (1, 2), lambda: f"diag(): Supports 1D or 2D tensors. Got {ndim}D"
+    )
     if ndim == 1:
         return torch.diag_embed(self, offset)
     else:
