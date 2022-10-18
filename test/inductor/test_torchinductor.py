@@ -1470,7 +1470,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -1480,16 +1479,47 @@ class CommonTemplate:
         self.common(
             m.to(memory_format=torch.channels_last),
             (torch.randn([2, 3, 16, 16]),),
+            check_lowp=False,
         )
         # only activation is channels_last
         self.common(
             m,
             (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+            check_lowp=False,
         )
         # activation and weight are all channels_last
         self.common(
             m.to(memory_format=torch.channels_last),
             (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+            check_lowp=False,
+        )
+
+    def test_conv2d_backward_channels_last(self):
+        def fn(grad_output, inp, weight):
+            convolution_backward_8 = torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [320],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            return convolution_backward_8
+
+        # only weight is channels_last
+        self.common(
+            fn,
+            (
+                torch.randn([2, 320, 8, 8]),
+                torch.randn([2, 2048, 8, 8]),
+                torch.randn([320, 2048, 1, 1]).to(memory_format=torch.channels_last),
+            ),
+            check_lowp=False,
         )
 
     @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
@@ -4019,6 +4049,42 @@ if HAS_CUDA:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_inplace_updates_cudagraphs(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super(Repro, self).__init__()
+                    self.weight1 = torch.nn.Parameter(
+                        torch.randn(10, 20, requires_grad=True)
+                    )
+
+                def forward(self, x):
+                    x = torch.matmul(x, self.weight1)
+                    return x
+
+            from copy import deepcopy
+
+            model = Repro().cuda()
+            model_ref = deepcopy(model)
+            model_opt = torch._dynamo.optimize("inductor")(model)
+
+            input = torch.randn(10, 10, device="cuda", requires_grad=True)
+
+            for i in range(2):
+                output_ref = model_ref(input)
+                output_res = model_opt(input)
+                output_ref.sum().backward()
+                output_res.sum().backward()
+                for (p_ref, p_res) in zip(
+                    model_ref.parameters(), model_opt.parameters()
+                ):
+                    self.assertEqual(p_ref.grad, p_res.grad)
+                with torch.no_grad():
+                    for param in model_ref.parameters():
+                        param.add_(1.0)
+                    for param in model_opt.parameters():
+                        param.add_(1.0)
 
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
