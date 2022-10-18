@@ -1067,12 +1067,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
       // throw std::runtime_error("ParameterType::TENSOR_LIST");
     } else if (type_ == ParameterType::GENERATOR) {
       // throw std::runtime_error("ParameterType::GENERATOR");
-    } else if (type_ == ParameterType::BOOL) {
-      // throw std::runtime_error("ParameterType::BOOL");
     } else if (type_ == ParameterType::PYOBJECT) {
       // throw std::runtime_error("ParameterType::PYOBJECT");
-    } else if (type_ == ParameterType::SCALARTYPE) {
-      // throw std::runtime_error("ParameterType::SCALARTYPE");
     } else if (type_ == ParameterType::MEMORY_FORMAT) {
       // throw std::runtime_error("ParameterType::MEMORY_FORMAT");
     } else if (type_ == ParameterType::DIMNAME) {
