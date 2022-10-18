@@ -1902,13 +1902,21 @@ def upsample_bilinear2d_vec(
     y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
 
     x_view = x.unsqueeze(1)
-    x_floor_view = x_floor.unsqueeze(1)
-    x_ceil_view = x_ceil.unsqueeze(1)
+    x_floor_view = x_floor.view(1, -1, 1)
+    x_ceil_view = x_ceil.view(1, -1, 1)
+    y_floor_view = y_floor.view(1, 1, -1)
+    y_ceil_view = y_ceil.view(1, 1, -1)
 
-    v1 = input[:, :, x_floor_view, y_floor]
-    v2 = input[:, :, x_ceil_view, y_floor]
-    v3 = input[:, :, x_floor_view, y_ceil]
-    v4 = input[:, :, x_ceil_view, y_ceil]
+    x_indices = torch.cat([x_floor_view, x_ceil_view, x_floor_view, x_ceil_view], dim=0)
+    y_indices = torch.cat([y_floor_view, y_floor_view, y_ceil_view, y_ceil_view], dim=0)
+    v_indices = torch.arange(4, dtype=torch.int64, device=input.device).view(4, 1, 1)
+
+    input = input.unsqueeze(2).expand(n_batch, n_channels, 4, in_h, in_w)
+    v = input[:, :, v_indices, x_indices, y_indices]
+    v1 = v[:, :, 0, :, :]
+    v2 = v[:, :, 1, :, :]
+    v3 = v[:, :, 2, :, :]
+    v4 = v[:, :, 3, :, :]
 
     xscale2 = x_view - x_floor_view
     xscale1 = 1.0 - xscale2
