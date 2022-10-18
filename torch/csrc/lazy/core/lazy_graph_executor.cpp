@@ -393,9 +393,10 @@ bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
 } // namespace
 
 LazyGraphExecutor* LazyGraphExecutor::Get() {
-  static LazyGraphExecutor* executor = new LazyGraphExecutor();
-  return executor;
+  return getBackend()->GetLazyGraphExecutor();
 }
+
+LazyGraphExecutor::~LazyGraphExecutor() = default;
 
 void LazyGraphExecutor::RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
   DeviceContextArena::Get()->RegisterTensor(data);
@@ -604,6 +605,11 @@ void LazyGraphExecutor::Async::Wait() {
   }
 }
 
+bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+  return tensor->GetIrValue()->op() != ltc_not_supported;
+}
+
+
 LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     const std::vector<LazyTensorPtr>& tensors,
     const SyncTensorsConfig& config) {
@@ -635,7 +641,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         tensors[i]->CurrentDataHandle() == nullptr) {
       Value ir_value = tensors[i]->CurrentIrValue();
       if (ir_value) {
-        if (getBackend()->ShouldSyncTensor(tensors[i])) {
+        if (ShouldSyncTensor(tensors[i])) {
           // Add only tensors which need to be synced.
           coll.hash = HashCombine(coll.hash, ir_value.hash());
           coll.indices.push_back(i);

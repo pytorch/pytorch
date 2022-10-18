@@ -18,9 +18,9 @@ const BackendImplInterface* getBackend() {
   return interface;
 }
 
-// default implementation
-bool BackendImplInterface::ShouldSyncTensor(const LazyTensorPtr tensor) const {
-  return tensor->GetIrValue()->op() != ltc_not_supported;
+LazyGraphExecutor* BackendImplInterface::GetLazyGraphExecutor() const {
+  static LazyGraphExecutor* executor = new LazyGraphExecutor();
+  return executor;
 }
 
 BackendRegistrar::BackendRegistrar(

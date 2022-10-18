@@ -23,8 +23,10 @@ class TORCH_API LazyGraphExecutor {
 
   static LazyGraphExecutor* Get();
 
-  void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
-  void UnregisterTensor(LazyTensor::Data* data);
+  virtual ~LazyGraphExecutor();
+
+  virtual void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
+  virtual void UnregisterTensor(LazyTensor::Data* data);
 
   // Seed for random generator
   Value GetRngSeed(const BackendDevice& device);
@@ -180,6 +182,8 @@ class TORCH_API LazyGraphExecutor {
     ComputationCache::TypePtr cached_computation;
     std::vector<BackendDataPtr> tensors_data;
   };
+
+  virtual bool ShouldSyncTensor(const LazyTensorPtr tensor) const;
 
   SyncTensorCollection CollectSyncTensors(
       const std::vector<LazyTensorPtr>& tensors,
