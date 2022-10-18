@@ -405,7 +405,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   std::vector<int64_t> label_size(TOTAL_LABELS, 1);
   std::vector<int64_t> ell_sizes(ell_num_dim, 1);
   std::vector<uint64_t> dim_counts(perm_index, 0);
-  std::vector<Tensor> ops;
+  std::deque<Tensor> ops;
   for (const auto i : irange(num_ops)) {
     auto op = operands[i];
     std::vector<int64_t> permutation(perm_index, -1);
@@ -536,7 +536,11 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
       b = b.sum(b_dims_to_sum, true);
     }
 
-    ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    if (path.has_value()) {
+      ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    } else {
+      ops.emplace_front(sumproduct_pair(a, b, sum_dims, true));
+    }
   }
 
   // Sum out contraction dims
