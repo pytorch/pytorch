@@ -8013,7 +8013,9 @@ Example::
 
         :func:`torch.narrow` for a non copy variant
 
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
@@ -8462,9 +8464,13 @@ Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batched inputs, and, if the input is batched, the output is batched with the same dimensions.
 
 .. seealso::
-
         :func:`torch.geqrf` can be used to form the Householder representation `(input, tau)` of matrix `Q`
         from the QR decomposition.
+
+.. note::
+        This function supports backward but it is only fast when ``(input, tau)`` do not require gradients
+        and/or ``tau.size(-1)`` is very small.
+        ``
 
 Args:
     input (Tensor): tensor of shape `(*, mn, k)` where `*` is zero or more batch dimensions

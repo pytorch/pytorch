@@ -258,6 +258,10 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return dispatch_common_(__FUNCTION__);
   }
 
+  virtual SymIntNode neg() override {
+    return dispatch_common_(__FUNCTION__);
+  }
+
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
   }

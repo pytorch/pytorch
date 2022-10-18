@@ -120,8 +120,8 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
     const auto dim = ndim - i + 1;
     const auto pad_l = padding[2*i + 0];
     const auto pad_r = padding[2*i + 1];
-    out_slice = out_slice.slice_symint(dim, pad_l.max(zero), out_shape[dim] - pad_r.max(zero));
-    in_slice = in_slice.slice_symint(dim, (pad_l * -1).max(zero), in_shape[dim] - (pad_r * -1).max(zero));
+    out_slice = out_slice.slice_symint(dim, std::max(pad_l, zero), out_shape[dim] - std::max(pad_r, zero));
+    in_slice = in_slice.slice_symint(dim, std::max(-pad_l, zero), in_shape[dim] - std::max(-pad_r, zero));
   }
   out_slice.copy_(in_slice);
 
@@ -139,14 +139,14 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
     if (pad_l > 0) {
       out_slice = out.slice_symint(dim, 0, pad_l);
       in_slice = out.slice_symint(dim,
-                           out_shape[dim] - pad_l - pad_r.max(zero),
-                           out_shape[dim] - pad_r.max(zero));
+                           out_shape[dim] - pad_l - std::max(pad_l, zero),
+                           out_shape[dim] - std::max(pad_r, zero));
       out_slice.copy_(in_slice);
     }
 
     if (pad_r > 0) {
       out_slice = out.slice_symint(dim, out_shape[dim] - pad_r, out_shape[dim]);
-      in_slice = out.slice_symint(dim, pad_l.max(zero), pad_l.max(zero) + pad_r);
+      in_slice = out.slice_symint(dim, std::max(pad_l, zero), std::max(pad_l, zero) + pad_r);
       out_slice.copy_(in_slice);
     }
   }
