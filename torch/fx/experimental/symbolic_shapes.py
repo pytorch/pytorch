@@ -271,7 +271,7 @@ def _make_magic(method, func, py_type):
         expr = self.shape_env.replace(self.expr)
         out = func(expr)
         out = sympy.expand(out)
-        if method in ["ceil"]:
+        if method in ["ceil", "floor"]:
             return PySymInt(out, self.shape_env)
         else:
             return py_type(out, self.shape_env)

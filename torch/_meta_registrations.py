@@ -240,6 +240,45 @@ def meta_pad2d_backward(grad_output, self, padding):
     return self.new_empty(self.shape)
 
 
+# From aten/src/ATen/native/ReflectionPad.cpp
+@register_meta(
+    [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
+)
+def meta_pad2d_backward(grad_output, self, padding):
+    dim_w = 2
+    dim_h = 1
+    dim_plane = 0
+    nbatch = 1
+
+    self_shape = self.shape
+    if self.dim() == 4:
+        nbatch = self_shape[0]
+        dim_w += 1
+        dim_h += 1
+        dim_plane += 1
+
+    pad_l = padding[0]
+    pad_r = padding[1]
+    pad_t = padding[2]
+    pad_b = padding[3]
+
+    nplane = self_shape[dim_plane]
+    input_h = self_shape[dim_h]
+    input_w = self_shape[dim_w]
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    check(
+        output_w == grad_output.shape[dim_w],
+        lambda: f"gradOutput width unexpected. Expected: {output_w}, Got: {grad_output.shape[dim_w]}",
+    )
+    check(
+        output_h == grad_output.shape[dim_h],
+        lambda: f"gradOutput height unexpected. Expected: {output_h}, Got: {grad_output.shape[dim_h]}",
+    )
+    return self.new_empty(self.shape)
+
+
 @register_meta(aten.reflection_pad2d.default)
 def meta_pad2d(self, padding):
     valid_dims = self.size(1) != 0 and self.size(2) != 0
@@ -290,6 +329,30 @@ def meta__fused_moving_avg_obs_fq_helper(
 @register_meta(aten.bernoulli_.float, register_dispatcher=False)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
+
+
+@register_meta(aten._fused_moving_avg_obs_fq_helper.default)
+def meta__fused_moving_avg_obs_fq_helper(
+    self,
+    observer_on,
+    fake_quant_on,
+    running_min,
+    running_max,
+    scale,
+    zero_point,
+    averaging_const,
+    quant_min,
+    quant_max,
+    ch_axis,
+    per_row_fake_quant,
+    symmetric_quant,
+):
+    check(
+        ch_axis < self.dim(),
+        lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
+    )
+    mask = self.empty_like(dtype=torch.bool)
+    return (self.empty_like(), mask)
 
 
 def dot_check(self, other):
@@ -835,6 +898,77 @@ def avg_pool2d_backward_shape_check(
     check_dim_size(gradOutput, ndim, ndim - 1, outputWidth)
 
 
+# Don't override the C++ registration.
+@register_meta(aten.avg_pool2d_backward.default, register_dispatcher=False)
+def meta_avg_pool2d_backward(
+    gradOutput_,
+    input,
+    kernel_size,
+    stride,
+    padding,
+    ceil_mode,
+    count_include_pad,
+    divisor_override,
+):
+    # From aten/src/ATen/native/AveragePool2d.cpp structured kernel meta func.
+    check(
+        len(kernel_size) == 1 or len(kernel_size) == 2,
+        lambda: "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints",
+    )
+    kH = kernel_size[0]
+    kW = kH if len(kernel_size) == 1 else kernel_size[1]
+    check(
+        len(stride) == 0 or len(stride) == 1 or len(stride) == 2,
+        lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
+    )
+    dH = kH if len(stride) == 0 else stride[0]
+    dW = kW if len(stride) == 0 else dH if len(stride) == 1 else stride[1]
+    check(
+        len(padding) == 1 or len(padding) == 2,
+        lambda: "avg_pool2d: padding must either be a single int, or a tuple of two ints",
+    )
+    padH = padding[0]
+    padW = padH if len(padding) == 1 else padding[1]
+
+    check(
+        divisor_override is None or divisor_override != 0,
+        lambda: "divisor must be not zero",
+    )
+
+    input_size = input.shape
+    nbatch = input_size[-4] if input.dim() == 4 else 1
+    nInputPlane = input_size[-3]
+    inputHeight = input_size[-2]
+    inputWidth = input_size[-1]
+
+    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
+    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
+
+    mem_format = utils.suggest_memory_format(input)
+
+    avg_pool2d_backward_shape_check(
+        input,
+        gradOutput_,
+        nbatch,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        mem_format,
+    )
+
+    return torch.empty(
+        input_size, dtype=input.dtype, device=input.device, memory_format=mem_format
+    )
+
+
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
@@ -1048,19 +1182,18 @@ def meta_convolution_backward(
     groups,
     output_mask,
 ):
-    # TODO: THIS IS SUPER WRONG AND WOULD WORK FOR SOME MODELS!!!!
+    # High level logic taken from slow_conv3d_backward_cpu which should
+    # be representative of all convolution_backward impls
     backend_grad_input = None
     backend_grad_weight = None
     backend_grad_bias = None
 
     if output_mask[0]:
-        backend_grad_input = aten.empty_like.default(input_)
+        backend_grad_input = grad_output_.new_empty(input_.size())
     if output_mask[1]:
-        backend_grad_weight = aten.empty_like.default(weight_)
+        backend_grad_weight = grad_output_.new_empty(weight_.size())
     if output_mask[2]:
-        backend_grad_bias = aten.new_empty.default(
-            input_, bias_sizes_opt, dtype=weight_.dtype, layout=weight_.layout
-        )
+        backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
@@ -1832,6 +1965,15 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
 
+@register_meta(aten._to_copy.default)
+def _to_copy(x, *, dtype=None, layout=None, device=None, pin_memory=False,
+                non_blocking=False, memory_format=None):
+    assert device is not None or dtype is not None or memory_format is not None
+    dtype = x.dtype if dtype is None else dtype
+    device = x.device if device is None else device
+    return torch.empty(x.size(), dtype=dtype, layout=layout, device=device, memory_format=memory_format)
+
+
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
         assert wrap_scalar
@@ -1990,32 +2132,28 @@ def meta_scatter_add(self, dim, index, src):
 @register_meta(aten.upsample_nearest2d.vec)
 def upsample_nearest2d_vec(input, output_size, scale_factors):
     mem_format = utils.suggest_memory_format(input)
+    spatial_dimensions = input.dim() - 2
+
+    input_shape = input.shape
     if output_size is not None:
         assert scale_factors is None
-        return input.new_empty(input.size()).to(memory_format=mem_format)
+        out_size = output_size
+    elif scale_factors is not None:
+        assert output_size is None
+        out_size = []
+        for i in range(spatial_dimensions):
+            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
+            assert sym_float >= 0
+            out_size.append(math.floor(sym_float))
 
-    assert output_size is None
-    out_size = list(input.size())
+    output_height = out_size[0]
+    output_width = out_size[1]
+    nbatch = input_shape[0]
+    channels = input_shape[1]
+    return input.new_empty((nbatch, channels, output_height, output_width)).to(
+        memory_format=mem_format
+    )
 
-    for i in range(len(out_size) - 2):
-        sym_float = (out_size[i + 2] / 1) * scale_factors[i]
-        assert sym_float >= 0
-        out_size[i + 2] = math.floor(sym_float)
-    return input.new_empty(out_size).to(memory_format=mem_format)
-
-
-@register_meta(aten.upsample_nearest2d_backward.vec)
-def upsample_nearest2d_backward_vec(grad_output, output_size, input_size, scale_factors):
-    mem_format = utils.suggest_memory_format(grad_output)
-    return grad_output.new_empty(input_size).to(memory_format=mem_format)
-
-@register_meta(aten._to_copy.default)
-def _to_copy(x, *, dtype=None, layout=None, device=None, pin_memory=False,
-                non_blocking=False, memory_format=None):
-    assert device is not None or dtype is not None or memory_format is not None
-    dtype = x.dtype if dtype is None else dtype
-    device = x.device if device is None else device
-    return torch.empty(x.size(), dtype=dtype, layout=layout, device=device, memory_format=memory_format)
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions

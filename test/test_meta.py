@@ -762,7 +762,6 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
-    aten.narrow_copy.out: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::narrow_copy.out
     aten.native_batch_norm.default: {bf16},
     aten.native_layer_norm.default: {bf16},
 }
