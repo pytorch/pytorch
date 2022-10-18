@@ -433,7 +433,6 @@ class NNModuleVariable(VariableTracker):
                     kwargs=proxy_kwargs,
                     current_tx=tx,
                 ),
-                nnmodule=module,
                 **options,
             )
         else:
