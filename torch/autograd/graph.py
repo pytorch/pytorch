@@ -3,6 +3,7 @@ import contextlib
 from typing import Callable, Any, Dict, Tuple, Optional, Sequence, List
 from torch.utils.hooks import RemovableHandle
 
+__all__ = ["saved_tensors_hooks", "save_on_cpu"]
 
 __all__ = [
     "saved_tensors_hooks",
