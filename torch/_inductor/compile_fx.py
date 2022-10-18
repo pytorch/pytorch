@@ -326,6 +326,12 @@ _graph_counter = itertools.count(0)
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
     """Main entrypoint to a compile given FX graph"""
 
+    for node in model_.graph.nodes:
+        if node.op == "output":
+            if len(node.args) == 0 or (len(node.args) == 1 and len(node.args[0]) == 0):
+                # To work around the segfault from torch._C.default_generator.set_state()
+                return model_
+
     if not is_aot_autograd_safe_to_run(model_, example_inputs_):
         log.warning("Aot Autograd is not safe to run, so falling back to eager")
         return model_
