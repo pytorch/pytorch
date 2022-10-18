@@ -3,6 +3,7 @@ import contextlib
 from typing import Callable, Any, Dict, Tuple, Optional, Sequence, List, Set
 from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
+from collections import defaultdict
 import weakref
 
 __all__ = [
@@ -10,7 +11,8 @@ __all__ = [
     "save_on_cpu",
     "disable_saved_tensors_hooks",
     "register_multi_grad_hook",
-    "allow_mutation_on_saved_tensors"
+    "allow_mutation_on_saved_tensors",
+    "AllowMutationOnSavedContext"
 ]
 
 class saved_tensors_hooks():
@@ -286,13 +288,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
 #      - delete the reference to the original
 # 3. during backward
 #    - if the clone exists, the tensor must've been modified in-place
-
-_cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-_original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-_tid_to_weakhandle: Dict[Tuple[int, int, int], weakref.ReferenceType] = dict()
-_sid_to_tid: Dict[Tuple[int, int], Set[Tuple[int, int, int]]] = dict()
-_ctx_id = 0
-_inside_ctx = False
+_allow_mutation_on_saved_tensors_enabled = False
 
 def _get_tid(t) -> Tuple[int, int, int]:
     return (id(t), t.data_ptr(), t._version)
@@ -304,7 +300,7 @@ class _Handle():
     pass
 
 class _swap_with_cloned(saved_tensors_hooks):
-    def __init__(self):
+    def __init__(self, ctx):
         def pack_hook(t):
             tid = _get_tid(t)
             sid = _get_sid(t)
@@ -312,66 +308,82 @@ class _swap_with_cloned(saved_tensors_hooks):
             handle: Optional[_Handle] = None
 
             # Save aliasing information
-            if sid not in _sid_to_tid:
-                _sid_to_tid[sid] = set()
-            _sid_to_tid[sid].add(tid)
+            ctx.sid_to_tid[sid].add(tid)
 
             # NB: The same tensor (of the same version) can be saved multiple times
-            if tid not in _tid_to_weakhandle or _tid_to_weakhandle[tid]() is None:
+            if tid not in ctx.tid_to_weakhandle:
                 handle = _Handle()
-                _tid_to_weakhandle[tid] = weakref.ref(handle)
-                _original[handle] = t
+                ctx.tid_to_weakhandle[tid] = handle
+                ctx.original[handle] = t
             else:
-                # Store an additional handle
-                handle = _tid_to_weakhandle[tid]()
-            return _ctx_id, handle
+                # Store an additional strong reference to the handle
+                handle = ctx.tid_to_weakhandle[tid]
+            return handle
 
         def unpack_hook(tup):
-            ctx_id, handle = tup
-            assert ctx_id == _ctx_id, (
+            handle = tup
+            error_msg = (
                 "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
                 "in which the graph was originally recorded.")
-            if handle in _cloned:
-                res = _cloned[handle]
+            assert _allow_mutation_on_saved_tensors_enabled, error_msg
+            if handle in ctx.cloned:
+                res = ctx.cloned[handle]
             else:
-                res = _original[handle]
+                assert handle in ctx.original, error_msg
+                res = ctx.original[handle]
             return res
 
         super().__init__(pack_hook, unpack_hook)
 
 class _CloneArgBeforeMutateMode(TorchDispatchMode):
+    def __init__(self, ctx):
+        self.ctx = ctx
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
+        kwargs = kwargs or {}
 
-        # Bug? Maybe something to do with wrapped number + dispatcher, not sure why yet
-        # We don't really need this unless we try to print though, but keeping for now
-        if type(args[0]) is int:
-            args = [torch.tensor(args[0]), *args[1:]]
+        for idx, arg in enumerate(func._schema.arguments):
+            if arg.alias_info is not None and arg.alias_info.is_write:
+                t = kwargs["out"] if arg.is_out else args[idx]
+                tid = _get_tid(t)
+                sid = _get_sid(t)
+                ctx = self.ctx
+                if sid in ctx.sid_to_tid:
+                    for tid in ctx.sid_to_tid[sid]:
+                        if tid not in ctx.tid_to_weakhandle:
+                            # We know that if tid is in sid_to_tid, then it must also be in
+                            # tid_to_weakhandle. However, it is possible for the tensor to be
+                            # saved at one point, but cleared by backward before it is modified
+                            # in-place. Consider the following example:
+                            #
+                            # >>> a = torch.randn(2, 3, requires_grad=True).clone()
+                            # >>> out = (a**2).sum()
+                            # >>> out.backward()
+                            # >>> a.sin_()
+                            continue
+                        handle = ctx.tid_to_weakhandle[tid]
+                        if handle in ctx.cloned:
+                            # The same exact tensor has been cloned already
+                            continue
+                        ctx.cloned[handle] = ctx.original[handle].clone()
+                        del ctx.original[handle]
 
-        # (only for in-place ops now, we may want to handle out= later)
-        if func.__name__.split('.')[0][-1] == "_":
-            # The first argument is assumed to be modified in-place
-            tid = _get_tid(args[0])
-            sid = _get_sid(args[0])
-            if sid in _sid_to_tid:
-                for tid in _sid_to_tid[sid]:
-                    if tid not in _tid_to_weakhandle:
-                        # It's never been saved
-                        continue
-                    handle = _tid_to_weakhandle[tid]()
-                    if handle is None or handle in _cloned:
-                        # It's been saved, but backward was run OR
-                        # The same exactly tensor has been cloned already
-                        continue
-                    _cloned[handle] = _original[handle].clone()
-                    del _original[handle]
-            else:
-                # this can happen with math views, I'm not sure why yet
-                assert not args[0]._is_view()
 
         rs = func(*args, **kwargs)
         return rs
+
+class AllowMutationOnSavedContext():
+    def __init__(self):
+        self.cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self.original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self.tid_to_weakhandle: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+        self.sid_to_tid: Dict[Tuple[int, int], Set[Tuple[int, int, int]]] = defaultdict(set)
+
+    def clear(self):
+        self.cloned.clear()
+        self.original.clear()
+        self.tid_to_weakhandle.clear()
+        self.sid_to_tid.clear()
 
 @contextlib.contextmanager
 def allow_mutation_on_saved_tensors():
@@ -380,16 +392,21 @@ def allow_mutation_on_saved_tensors():
     Under this context manager, tensors saved for backward are cloned on mutation,
     so the original version can still be used during backward. Normally, mutating a tensor
     saved for backward will result in an error raised when it's used during backward.
+
+    returns:
+        An AllowMutationOnSavedContext object storeing the state managed by this
+        context manager useful for debugging purposes. It is cleared upon exit.
     """
-    global _inside_ctx, _ctx_id
-    with _swap_with_cloned(), _CloneArgBeforeMutateMode():
+    global _allow_mutation_on_saved_tensors_enabled
+
+    ctx = AllowMutationOnSavedContext()
+
+    with _swap_with_cloned(ctx), _CloneArgBeforeMutateMode(ctx):
         try:
-            _ctx_id += 1
-            if _inside_ctx:
+            if _allow_mutation_on_saved_tensors_enabled:
                 raise RuntimeError("allow_mutation_on_saved_tensors contexts cannot be nested")
-            _inside_ctx = True
-            yield
+            _allow_mutation_on_saved_tensors_enabled = True
+            yield ctx
         finally:
-            _cloned.clear()
-            _ctx_id += 1
-            _inside_ctx = False
+            ctx.clear()
+            _allow_mutation_on_saved_tensors_enabled = False
