@@ -30,10 +30,6 @@ class NNModuleVariable(VariableTracker):
         self.module_key = module_key
         assert self.source
 
-    # def as_python_constant(self):
-    #     if self.python_type()
-    #     raise NotImplementedError(f"{self} is not a constant")
-
     def python_type(self):
         return self.module_type
 
@@ -349,7 +345,6 @@ class NNModuleVariable(VariableTracker):
                 args[0].as_python_constant() in module._modules, **options
             )
         elif name == "__getitem__":
-
             assert not kwargs and len(args) == 1
             assert type(module).__getitem__ in (
                 torch.nn.ModuleDict.__getitem__,
@@ -386,7 +381,6 @@ class NNModuleVariable(VariableTracker):
                     source=NNModuleSource(
                         GetItemSource(self.source, args[0].as_python_constant())
                     ),
-                    force_static=True,
                     **options,
                 )
                 return NNSequentialVariable(new_module_variable, result, **options)

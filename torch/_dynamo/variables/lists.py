@@ -30,11 +30,9 @@ class BaseListVariable(VariableTracker):
         self.items: List[VariableTracker] = items
 
     def _as_proxy(self):
-
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):
-
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
@@ -60,7 +58,6 @@ class BaseListVariable(VariableTracker):
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
-
         return [x.add_options(self) for x in self.items]
 
     def call_method(
@@ -70,7 +67,6 @@ class BaseListVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
@@ -214,7 +210,6 @@ class ListVariable(BaseListVariable):
 
 class TupleVariable(BaseListVariable):
     def python_type(self):
-
         return tuple
 
     def reconstruct(self, codegen):
@@ -228,7 +223,6 @@ class TupleVariable(BaseListVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-
         options = VariableTracker.propagate(self, args, kwargs.values())
         if (
             name in ("__add__", "__iadd__")

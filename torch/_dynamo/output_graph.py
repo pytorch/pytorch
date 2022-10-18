@@ -188,10 +188,8 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def register_attr_or_module(
-        self, mod: torch.nn.Module, *names, force_static=False, **options
-    ):
-        if not force_static and is_dynamic_nn_module(mod):
+    def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
+        if is_dynamic_nn_module(mod):
             return variables.UnspecializedNNModuleVariable(mod, **options)
 
         options = dict(options)
