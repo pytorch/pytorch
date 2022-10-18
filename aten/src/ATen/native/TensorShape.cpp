@@ -3397,7 +3397,7 @@ Tensor diag(const Tensor& self, int64_t offset) {
     return at::diag_embed(self, offset);
   } else {
     // We return a copy of the diagonal
-    return at::diagonal(self, offset).clone();
+    return at::diagonal_copy(self, offset);
   }
 }
 
