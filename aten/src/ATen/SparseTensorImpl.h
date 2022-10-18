@@ -52,6 +52,10 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   int64_t nnz() const {
     return values_.size(0);
   }
+
+  c10::SymInt sym_nnz() const {
+    return values_.sym_size(0);
+  }
   int64_t sparse_dim() const {
     return sparse_dim_;
   }
