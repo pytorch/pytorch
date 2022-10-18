@@ -6588,6 +6588,104 @@ TEST_F(NVFuserTest, FusionVectorizeRepro1843_CUDA) {
   testValidate(fusion, cg_outputs, {t1, t0}, {ref}, __LINE__, __FILE__);
 }
 
+// https://github.com/csarofeen/pytorch/issues/2068
+TEST_F(NVFuserTest, FusionIssue2068_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int w = 32, x = 56, y = 56, z = 128;
+
+  auto tv0 = makeContigTensor(3);
+  auto tv1 = makeContigTensor(1);
+  auto tv2 = makeContigTensor(3);
+  auto tv3 = makeContigTensor(1);
+  auto tv4 = makeContigTensor(4);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+  fusion.addInput(tv3);
+  fusion.addInput(tv4);
+
+  auto tv5 = broadcast(tv0, {false, false, false, true});
+  auto tv6 = broadcast(tv1, {true, true, true, false});
+  auto tv7 = expand(
+      tv6,
+      {IrBuilder::create<Int>(w),
+       IrBuilder::create<Int>(x),
+       IrBuilder::create<Int>(y),
+       tv6->axis(3)->extent()});
+  auto tv8 = broadcast(tv2, {false, false, false, true});
+  auto tv9 = broadcast(tv3, {true, true, true, false});
+  auto tv10 = expand(
+      tv9,
+      {IrBuilder::create<Int>(w),
+       IrBuilder::create<Int>(x),
+       IrBuilder::create<Int>(y),
+       tv9->axis(3)->extent()});
+  auto tv11 = set(tv5);
+  auto tv12 = expand(
+      tv11,
+      {tv11->axis(0)->extent(),
+       tv11->axis(1)->extent(),
+       tv11->axis(2)->extent(),
+       IrBuilder::create<Int>(z)});
+
+  auto tv13 = add(tv8, IrBuilder::create<Double>(1.e-6));
+  auto tv14 = sub(tv4, tv12);
+  auto tv15 = rsqrt(abs(tv13));
+  auto tv16 = set(tv15);
+  auto tv17 = expand(
+      tv16,
+      {tv16->axis(0)->extent(),
+       tv16->axis(1)->extent(),
+       tv16->axis(2)->extent(),
+       IrBuilder::create<Int>(z)});
+  auto tv18 = mul(tv14, tv17);
+  auto tv19 = mul(tv18, tv7);
+  auto tv20 = add(tv19, tv10);
+  auto tv21 = set(tv20);
+
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv15);
+  fusion.addOutput(tv21);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({w, x, y}, options);
+  auto t1 = at::randn({z}, options);
+  auto t2 = at::randn({w, x, y}, options);
+  auto t3 = at::randn({z}, options);
+  auto t4 = at::randn({w, x, y, z}, options);
+
+  auto t5 = t0.unsqueeze(-1);
+  auto t12 = t5.expand({-1, -1, -1, z});
+  auto t7 = t1.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand({w, x, y, -1});
+  auto t8 = t2.unsqueeze(-1);
+  auto t10 = t3.unsqueeze(0).unsqueeze(0).unsqueeze(0).expand({w, x, y, -1});
+  auto t9 = t4;
+
+  auto t13 = t8 + 1.e-6;
+  auto t14 = t4 - t12;
+  auto t15 = t13.abs().rsqrt();
+  auto t17 = t15.expand({-1, -1, -1, z});
+  auto t18 = mul(t14, t17);
+  auto t19 = mul(t18, t7);
+  auto t21 = add(t19, t10);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1, t2, t3, t4});
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {t0, t1, t2, t3, t4},
+      {t5, t15, t21},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
 // HuggingFace repro:
 // https://github.com/csarofeen/pytorch/issues/2064
 TEST_F(NVFuserTest, FusionHuggingFaceRepro2064_CUDA) {

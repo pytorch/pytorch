@@ -197,14 +197,27 @@ namespace {
 // Returns a pair of mapped IDs
 c10::optional<std::pair<IterDomain*, IterDomain*>> detectMappablePair(
     const std::vector<IterDomain*>& ids,
-    const IterDomainGraph& id_graph) {
+    const IterDomainGraph& id_graph,
+    IdMappingMode mode) {
   for (auto id1 : ids) {
     for (auto id2 : ids) {
       if (id1 == id2) {
         continue;
       }
-      if (id_graph.permissiveNodes().disjointSetMap().at(id1)->has(id2)) {
-        return std::make_pair(id1, id2);
+      if (mode == IdMappingMode::EXACT) {
+        if (id_graph.exactNodes().disjointSetMap().at(id1)->has(id2)) {
+          return std::make_pair(id1, id2);
+        }
+      } else if (mode == IdMappingMode::PERMISSIVE) {
+        if (id_graph.permissiveNodes().disjointSetMap().at(id1)->has(id2)) {
+          return std::make_pair(id1, id2);
+        }
+      } else if (mode == IdMappingMode::LOOP) {
+        if (id_graph.loopNodes().disjointSetMap().at(id1)->has(id2)) {
+          return std::make_pair(id1, id2);
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Unrecognized IdMappingMode mode.");
       }
     }
   }
@@ -226,7 +239,7 @@ findFirstSelfMapping(Fusion* fusion, const IterDomainGraph& id_graph) {
 
     // Root domains
     auto self_mappped_root_pair =
-        detectMappablePair(tv->getRootDomain(), id_graph);
+        detectMappablePair(tv->getRootDomain(), id_graph, IdMappingMode::EXACT);
     if (self_mappped_root_pair.has_value()) {
       return std::make_tuple(
           tv,
@@ -237,8 +250,8 @@ findFirstSelfMapping(Fusion* fusion, const IterDomainGraph& id_graph) {
 
     // Rfactor domains
     if (tv->hasRFactor()) {
-      auto self_mappped_rf_pair =
-          detectMappablePair(tv->getRFactorDomain(), id_graph);
+      auto self_mappped_rf_pair = detectMappablePair(
+          tv->getRFactorDomain(), id_graph, IdMappingMode::EXACT);
       if (self_mappped_rf_pair.has_value()) {
         return std::make_tuple(
             tv,
@@ -249,8 +262,8 @@ findFirstSelfMapping(Fusion* fusion, const IterDomainGraph& id_graph) {
     }
 
     // Leaf domains
-    auto self_mappped_leaf_pair =
-        detectMappablePair(tv->domain()->domain(), id_graph);
+    auto self_mappped_leaf_pair = detectMappablePair(
+        tv->domain()->domain(), id_graph, IdMappingMode::LOOP);
     if (self_mappped_leaf_pair.has_value()) {
       return std::make_tuple(
           tv,
