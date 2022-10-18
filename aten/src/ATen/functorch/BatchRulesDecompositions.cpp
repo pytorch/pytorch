@@ -44,7 +44,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
   OP_DECOMPOSE(adaptive_avg_pool1d);
-  OP_DECOMPOSE(adaptive_avg_pool2d);
+  m.impl("adaptive_avg_pool2d", native::adaptive_avg_pool2d_symint);
   OP_DECOMPOSE(adaptive_avg_pool3d);
   OP_DECOMPOSE(adjoint);
   OP_DECOMPOSE(arccos);
@@ -81,11 +81,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(dsplit, int);
   OP_DECOMPOSE2(dsplit, array);
   OP_DECOMPOSE(det);
-  OP_DECOMPOSE(diag_backward);
+  m.impl("diag_backward", native::diag_backward_symint);
   OP_DECOMPOSE(diff);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
-  OP_DECOMPOSE(embedding_backward);
+  m.impl("embedding_backward", native::embedding_backward_symint);
   OP_DECOMPOSE(expand_as);
   OP_DECOMPOSE(fft_fft);
   OP_DECOMPOSE(fft_fftshift);
@@ -126,7 +126,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(hsplit, int);
   OP_DECOMPOSE2(hsplit, array);
   OP_DECOMPOSE(hstack);
-  OP_DECOMPOSE(index_select_backward);
+  m.impl("index_select_backward", native::index_select_backward_symint);
   OP_DECOMPOSE(inner);
   OP_DECOMPOSE(inverse);
   OP_DECOMPOSE(instance_norm);
@@ -168,7 +168,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(movedim, int);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
-  OP_DECOMPOSE(narrow);
+  m.impl("narrow", native::narrow_symint);
   OP_DECOMPOSE(negative);
   OP_DECOMPOSE2(frobenius_norm, dim);
   OP_DECOMPOSE2(nuclear_norm, dim);
@@ -186,7 +186,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(ravel);
   OP_DECOMPOSE2(repeat_interleave, self_int);
   OP_DECOMPOSE2(repeat_interleave, self_Tensor);
-  OP_DECOMPOSE(reshape);
+  m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
   OP_DECOMPOSE(row_stack);
@@ -200,10 +200,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(special_multigammaln);
   OP_DECOMPOSE(special_polygamma);
   OP_DECOMPOSE(special_softmax);
-  OP_DECOMPOSE2(split, sizes);
+  m.impl("split.sizes", native::split_symint);
   OP_DECOMPOSE(square);
   OP_DECOMPOSE(numpy_T);
   OP_DECOMPOSE(reshape_as);
+  OP_DECOMPOSE(slogdet);
   OP_DECOMPOSE(t);
   OP_DECOMPOSE2(result_type, Tensor);
   OP_DECOMPOSE2(result_type, Scalar);
@@ -229,7 +230,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
-  OP_DECOMPOSE(value_selecting_reduction_backward);
+  m.impl("value_selecting_reduction_backward", native::value_selecting_reduction_backward_symint);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
   OP_DECOMPOSE(var_mean);
@@ -260,6 +261,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(t_);
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
+  OP_DECOMPOSE(unfold_copy);
 
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);

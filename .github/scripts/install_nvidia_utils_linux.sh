@@ -23,6 +23,9 @@ install_nvidia_driver_amzn2() {
     (
         set -x
 
+        # Purge any nvidia driver installed from RHEL repo
+        sudo yum remove -y nvidia-driver-latest-dkms
+
         HAS_NVIDIA_DRIVER=0
         # Check if NVIDIA driver has already been installed
         if [ -x "$(command -v nvidia-smi)" ]; then
@@ -30,7 +33,7 @@ install_nvidia_driver_amzn2() {
             INSTALLED_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
 
             if [ "$INSTALLED_DRIVER_VERSION" != "$DRIVER_VERSION" ]; then
-                echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has been installed, but we expect to have $DRIVER_VERSION instead. Continuing with NVIDIA driver installation"
+                echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has been installed, but we expect to have $DRIVER_VERSION instead. Continuing"
             else
                 HAS_NVIDIA_DRIVER=1
                 echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has already been installed. Skipping NVIDIA driver installation"

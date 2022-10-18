@@ -3710,3 +3710,17 @@ TEST(StaticRuntime, PrepackWeights) {
   testStaticRuntime(src, args1);
   testStaticRuntime(src, args2);
 }
+
+TEST(StaticRuntime, IfReturningTuple) {
+  const auto src = R"JIT(
+    def forward(self, x, y, cond: bool, idx: int):
+        if cond:
+            tup = (x, y)
+        else:
+            tup = (x, x)
+        return tup[idx]
+  )JIT";
+
+  std::vector<IValue> args{at::randn({3}), at::randn({3}), true, 0};
+  testStaticRuntime(src, args);
+}

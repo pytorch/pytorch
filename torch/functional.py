@@ -4,6 +4,7 @@ from typing import (
 
 import torch
 from torch._C import _add_docstr
+import torch.backends.opt_einsum as opt_einsum
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
@@ -238,9 +239,19 @@ def einsum(*args: Any) -> Tensor:
 
     .. note::
 
-        This function does not optimize the given expression, so a different formula for the same computation may
-        run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-        can optimize the formula for you.
+        This function uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up computation or to
+        consume less memory by optimizing contraction order. This optimization occurs when there are at least three
+        inputs, since the order does not matter otherwise. Note that finding _the_ optimal path is an NP-hard problem,
+        thus, opt_einsum relies on different heuristics to achieve near-optimal results. If opt_einsum is not available,
+        the default order is to contract from left to right.
+
+        To bypass this default behavior, add the following line to disable the usage of opt_einsum and skip path
+        calculation: `torch.backends.opt_einsum.enabled = False`
+
+        To specify which strategy you'd like for opt_einsum to compute the contraction path, add the following line:
+        `torch.backends.opt_einsum.strategy = 'auto'`. The default strategy is 'auto', and we also support 'greedy' and
+        'optimal'. Disclaimer that the runtime of 'optimal' is factorial in the number of inputs! See more details in
+        the opt_einsum documentation (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
     .. note::
 
@@ -361,7 +372,18 @@ def einsum(*args: Any) -> Tensor:
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
-    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+    if len(operands) <= 2 or not opt_einsum.enabled:
+        # the path for contracting 0 or 1 time(s) is already optimized
+        # or the user has disabled using opt_einsum
+        return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+
+    path = None
+    if opt_einsum.is_available():
+        _opt_einsum = opt_einsum.get_opt_einsum()
+        tupled_path = _opt_einsum.contract_path(equation, *operands, optimize=opt_einsum.strategy)[0]
+        # flatten path for dispatching to C++
+        path = [item for pair in tupled_path for item in pair]
+    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.
@@ -589,6 +611,15 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         return_complex (bool, optional): whether to return a complex tensor, or
             a real tensor with an extra last dimension for the real and
             imaginary components.
+
+            .. versionchanged:: 1.14.0
+               ``return_complex`` is now a required argument for real inputs,
+               as the default is being transitioned to ``True``.
+
+            .. deprecated:: 1.14.0
+               ``return_complex=False`` is deprecated, instead use ``return_complex=True``
+               Note that calling :func:`torch.view_as_real` on the output will
+               recover the deprecated output format.
 
     Returns:
         Tensor: A tensor containing the STFT result with shape described above

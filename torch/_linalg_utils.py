@@ -111,6 +111,13 @@ def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     )
 
 
+def lstsq(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed.",
+        "Please use the `torch.linalg.lstsq` function instead.",
+    )
+
+
 def eig(
     self: Tensor, eigenvectors: bool = False, *, e=None, v=None
 ) -> Tuple[Tensor, Tensor]:

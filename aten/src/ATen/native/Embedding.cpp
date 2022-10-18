@@ -1,13 +1,33 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/BinaryOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#include <ATen/ops/embedding_backward_native.h>
+#include <ATen/ops/embedding_dense_backward.h>
+#include <ATen/ops/embedding_dense_backward_native.h>
+#include <ATen/ops/embedding_native.h>
+#include <ATen/ops/embedding_renorm_native.h>
+#include <ATen/ops/embedding_sparse_backward.h>
+#include <ATen/ops/embedding_sparse_backward_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/util/irange.h>
 
 #include <cstring>
 #include <memory>
-#include <sstream>
 #include <vector>
 
 
@@ -24,22 +44,26 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     return weight.index_select(0, indices);
   }
 
-  auto size = indices.sizes().vec();
-  for (auto d : weight.sizes().slice(1)) {
+  auto size = indices.sym_sizes().vec();
+  for (auto d : weight.sym_sizes().slice(1)) {
     size.push_back(d);
   }
 
-  return weight.index_select(0, indices.reshape(-1)).view(size);
+  return weight.index_select(0, indices.reshape(-1)).view_symint(size);
 }
 
-Tensor embedding_backward(
-    const Tensor & grad, const Tensor & indices, int64_t num_weights,
+Tensor embedding_backward_symint(
+    const Tensor & grad, const Tensor & indices, SymInt num_weights,
     int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (sparse) {
+    // TODO: if we teach sparse tensor how to propagate symints, the guard
+    // here is not strictly necessary.  However, we think it is fine as is
+    // because num weights is derived from a parameter and therefore
+    // typically not varying.
     return at::embedding_sparse_backward(
-        grad, indices, num_weights, padding_idx, scale_grad_by_freq);
+    grad, indices, num_weights.guard_int(__FILE__, __LINE__), padding_idx, scale_grad_by_freq);
   } else {
-    return at::embedding_dense_backward(
+    return at::embedding_dense_backward_symint(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);
   }
 }
@@ -60,7 +84,7 @@ Tensor embedding_sparse_backward(
   Tensor indices = indices_;
   Tensor grad = grad_;
   if (padding_idx != -1) {
-    torch::List<c10::optional<Tensor>> c({indices != padding_idx});
+    c10::List<c10::optional<Tensor>> c({indices != padding_idx});
     indices = indices.index(c);
     grad = grad.index(c);
   }

@@ -58,7 +58,7 @@ jobs:
         uses: ./.github/actions/setup-rocm
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.docker-image }}
 
@@ -96,6 +96,7 @@ jobs:
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+          PYTORCH_JIT_ENABLE_NVFUSER: 1
         timeout-minutes: 270
         run: |
           set -x

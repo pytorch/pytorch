@@ -8,6 +8,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
 
@@ -455,6 +456,15 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
+  }
+  if (at::sparse_csr::is_sparse_compressed(input_)) {
+    // TODO: implement sparse_compressed_mask
+    switch(input_.layout()) {
+    case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
+    case kSparseCsc: return grad.sparse_mask(input_.to_sparse()).to_sparse_csc();
+      // BSR and BSC should be handled via implement sparse_compressed_mask
+    default: ; // fall back to unsupported input layout error
+    }
   }
   if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn(input_.scalar_type());
@@ -1697,11 +1707,11 @@ c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
   return c10::nullopt;
 }
 
-std::vector<Tensor> to_meta(const at::TensorList& t_list) {
+std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   std::vector<Tensor> outs;
   outs.reserve(t_list.size());
-  for (const auto& i : c10::irange(t_list.size())) {
-    outs.push_back(to_meta(t_list[i]));
+  for (const auto& tensor : t_list) {
+    outs.push_back(to_meta(tensor));
   }
   return outs;
 }

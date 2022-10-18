@@ -142,7 +142,7 @@ only:
 Sparse hybrid COO tensors
 -------------------------
 
-Pytorch implements an extension of sparse tensors with scalar values
+PyTorch implements an extension of sparse tensors with scalar values
 to sparse tensors with (contiguous) tensor values. Such tensors are
 called hybrid tensors.
 
@@ -470,7 +470,7 @@ ncols, *densesize)`` where ``len(batchsize) == B`` and
 
    The batches of sparse CSR tensors are dependent: the number of
    specified elements in all batches must be the same. This somewhat
-   artifical constraint allows efficient storage of the indices of
+   artificial constraint allows efficient storage of the indices of
    different CSR batches.
 
 .. note::
