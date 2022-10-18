@@ -1357,7 +1357,7 @@ class CommonTemplate:
                 unary_fn,
             ).eval()
 
-            # TODO: add bf16 test
+            # TODO: add bf16 test for cpu path?
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )

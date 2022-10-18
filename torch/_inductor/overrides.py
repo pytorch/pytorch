@@ -47,60 +47,51 @@ def replace_fx(gm: torch.fx.GraphModule):
     return gm
 
 
-class UnaryFusionOp:
-    def __init__(self, post_op, scalars=None, algorithm=None):
-        self.post_op = post_op
-        self.scalars = scalars if scalars else []
-        self.algorithm = algorithm if algorithm else ""
+class UnaryAttr(object):
+    def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+        self.op_name = op_name
+        self.scalars_attr = scalars_attr if scalars_attr else []
+        self.algorithm_attr = algorithm_attr if algorithm_attr else ""
+        super(UnaryAttr, self).__init__()
+
+    def __call__(self, unary_module: nn.Module):
+        assert all(hasattr(unary_module, item) for item in self.scalars_attr)
+        scalars = [getattr(unary_module, item) for item in self.scalars_attr]
+
+        algorithm = ""
+        if self.algorithm_attr:
+            assert hasattr(unary_module, self.algorithm_attr)
+            algorithm = getattr(unary_module, self.algorithm_attr)
+
+        return self.op_name, scalars, algorithm
 
 
 class ConvUnary2d(nn.Conv2d):
     def __init__(
         self,
-        conv,
-        unary,
-        op_name,
-        op_info,
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride,
-        padding,
-        dilation,
-        groups,
-        bias,
-        padding_mode,
-        device,
-        dtype,
+        conv: nn.Module,
+        unary: nn.Module,
     ):
         super(ConvUnary2d, self).__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            device,
-            dtype,
+            conv.in_channels,
+            conv.out_channels,
+            conv.kernel_size,
+            conv.stride,
+            conv.padding,
+            conv.dilation,
+            conv.groups,
+            conv.bias is not None,
+            conv.padding_mode,
+            conv.weight.device,
+            conv.weight.dtype,
         )
-        self._update_module_params(conv, unary, op_name, op_info)
+        self._update_module_params(conv, unary)
 
-    def _update_module_params(self, conv, unary, op_name, op_info):
+    def _update_module_params(self, conv, unary):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-
-        self.attr = op_name
-
-        assert all(hasattr(unary, item) for item in op_info.scalars)
-        self.scalars = [getattr(unary, item) for item in op_info.scalars]
-
-        algorithm = ""
-        if op_info.algorithm:
-            assert hasattr(unary, op_info.algorithm)
-            algorithm = getattr(unary, op_info.algorithm)
-        self.algorithm = algorithm
+        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
+            unary
+        )
 
     def _conv_forward(self, input, weight, bias):
         if self.padding_mode != "zeros":
@@ -138,38 +129,27 @@ class ConvUnary2d(nn.Conv2d):
 class ConvBinary2d(nn.Conv2d):
     def __init__(
         self,
-        conv,
-        op_name,
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride,
-        padding,
-        dilation,
-        groups,
-        bias,
-        padding_mode,
-        device,
-        dtype,
+        conv: nn.Module,
+        binary_op_name: str,
     ):
         super(ConvBinary2d, self).__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            device,
-            dtype,
+            conv.in_channels,
+            conv.out_channels,
+            conv.kernel_size,
+            conv.stride,
+            conv.padding,
+            conv.dilation,
+            conv.groups,
+            conv.bias is not None,
+            conv.padding_mode,
+            conv.weight.device,
+            conv.weight.dtype,
         )
-        self._update_module_params(conv, op_name)
+        self._update_module_params(conv, binary_op_name)
 
-    def _update_module_params(self, conv, op_name):
+    def _update_module_params(self, conv, binary_op_name):
         self.__dict__ = copy.deepcopy(conv.__dict__)
-        self.attr = op_name
+        self.attr = binary_op_name
 
     def _conv_forward(self, input, other, weight, bias):
         if self.padding_mode != "zeros":
@@ -205,34 +185,23 @@ class ConvBinary2d(nn.Conv2d):
 class LinearUnary(nn.Linear):
     def __init__(
         self,
-        linear,
-        eltwise,
-        op_name,
-        op_info,
-        in_features,
-        out_features,
-        bias,
-        device,
-        dtype,
+        linear: nn.Module,
+        unary: nn.Module,
     ):
         super(LinearUnary, self).__init__(
-            in_features, out_features, bias=bias, device=device, dtype=dtype
+            linear.in_features,
+            linear.out_features,
+            linear.bias is not None,
+            linear.weight.device,
+            linear.weight.dtype,
         )
-        self._update_module_params(linear, eltwise, op_name, op_info)
+        self._update_module_params(linear, unary)
 
-    def _update_module_params(self, linear, eltwise, op_name, op_info):
+    def _update_module_params(self, linear, unary):
         self.__dict__ = copy.deepcopy(linear.__dict__)
-
-        self.attr = op_name
-
-        assert all(hasattr(eltwise, item) for item in op_info.scalars)
-        self.scalars = [getattr(eltwise, item) for item in op_info.scalars]
-
-        algorithm = ""
-        if op_info.algorithm:
-            assert hasattr(eltwise, op_info.algorithm)
-            algorithm = getattr(eltwise, op_info.algorithm)
-        self.algorithm = algorithm
+        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
+            unary
+        )
 
     def forward(self, input):
         y = torch.ops.mkldnn._linear_pointwise(
@@ -242,16 +211,20 @@ class LinearUnary(nn.Linear):
 
 
 class LinearBinary(nn.Linear):
-    def __init__(self, linear, in_features, out_features, bias, device, dtype, attr):
+    def __init__(self, linear: nn.Module, binary_op_name: str):
         super(LinearBinary, self).__init__(
-            in_features, out_features, bias=bias, device=device, dtype=dtype
+            linear.in_features,
+            linear.out_features,
+            linear.bias is not None,
+            linear.weight.device,
+            linear.weight.dtype,
         )
-        self._update_module_params(linear, attr)
+        self._update_module_params(linear, binary_op_name)
 
-    def _update_module_params(self, linear, attr):
+    def _update_module_params(self, linear, binary_op_name):
         self.__dict__ = copy.deepcopy(linear.__dict__)
 
-        self.attr = attr
+        self.attr = binary_op_name
 
     def forward(self, input, other):
         y = torch.ops.mkldnn._linear_pointwise(
@@ -260,43 +233,19 @@ class LinearBinary(nn.Linear):
         return y
 
 
-def fuse_conv_unary_eval(conv, unary, op_name, op_info):
+def fuse_conv_unary_eval(conv: nn.Module, unary: nn.Module):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
         unary,
-        op_name,
-        op_info,
-        conv.in_channels,
-        conv.out_channels,
-        conv.kernel_size,
-        conv.stride,
-        conv.padding,
-        conv.dilation,
-        conv.groups,
-        conv.bias is not None,
-        conv.padding_mode,
-        conv.weight.device,
-        conv.weight.dtype,
     )
 
 
-def fuse_conv_binary_eval(conv, op_name):
+def fuse_conv_binary_eval(conv: nn.Module, binary_op_name: str):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinary2d(
         conv,
-        op_name,
-        conv.in_channels,
-        conv.out_channels,
-        conv.kernel_size,
-        conv.stride,
-        conv.padding,
-        conv.dilation,
-        conv.groups,
-        conv.bias is not None,
-        conv.padding_mode,
-        conv.weight.device,
-        conv.weight.dtype,
+        binary_op_name,
     )
 
 
@@ -313,29 +262,17 @@ def bf16_only_node(m):
         return False
 
 
-def fuse_linear_unary_eval(linear, eltwise, op_name, op_info):
+def fuse_linear_unary_eval(linear: nn.Module, unary: nn.Module):
     return LinearUnary(
         linear,
-        eltwise,
-        op_name,
-        op_info,
-        linear.in_features,
-        linear.out_features,
-        linear.bias is not None,
-        linear.weight.device,
-        linear.weight.dtype,
+        unary,
     )
 
 
-def fuse_linear_binary_eval(linear, attr):
+def fuse_linear_binary_eval(linear: nn.Module, attr: str):
     assert not (linear.training), "Fusion only for eval!"
     linear_binary = LinearBinary(
         linear,
-        linear.in_features,
-        linear.out_features,
-        linear.bias is not None,
-        linear.weight.device,
-        linear.weight.dtype,
         attr,
     )
     return linear_binary
@@ -385,11 +322,11 @@ def fuse_unary(gm: torch.fx.GraphModule, example_inputs):
         return gm
     modules = dict(gm.named_modules())
 
-    for (pointwise_name, pointwise_info), (
-        computation_name,
+    for (unary_module, _), (
+        computation_module,
         fuse_func,
-    ) in itertools.product(pointwise_op_map.items(), computation_op_map.items()):
-        pattern = (computation_name, pointwise_info.post_op)
+    ) in itertools.product(unary_modules_map.items(), computation_modules_map.items()):
+        pattern = (computation_module, unary_module)
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if (
@@ -401,15 +338,15 @@ def fuse_unary(gm: torch.fx.GraphModule, example_inputs):
                 eval_mode = all(not n.training for n in [computation_node, unary])
                 if not eval_mode:
                     continue
+
                 # only fuse for linear when the dtype is bf16
                 if bf16_only_node(computation_node) and not is_bfloat16_module(
                     computation_node
                 ):
                     continue
-                fused_module = fuse_func(
-                    computation_node, unary, pointwise_name, pointwise_info
-                )
+                fused_module = fuse_func(computation_node, unary)
                 replace_node_module(node.args[0], modules, fused_module)
+
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
                 gm.graph.lint()
@@ -610,20 +547,20 @@ def rand_like(x, **kwargs):
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
 
 
-computation_op_map = {
+computation_modules_map = {
     nn.Conv2d: fuse_conv_unary_eval,
     nn.Linear: fuse_linear_unary_eval,
 }
 
 
-pointwise_op_map = {
-    "relu": UnaryFusionOp(nn.ReLU),
-    "sigmoid": UnaryFusionOp(nn.Sigmoid),
-    "tanh": UnaryFusionOp(nn.Tanh),
-    "hardswish": UnaryFusionOp(nn.Hardswish),
-    "leaky_relu": UnaryFusionOp(nn.LeakyReLU, scalars=["negative_slope"]),
-    "hardtanh": UnaryFusionOp(nn.Hardtanh, scalars=["min_val", "max_val"]),
-    "gelu": UnaryFusionOp(nn.GELU, algorithm="approximate"),
+unary_modules_map = {
+    nn.ReLU: UnaryAttr("relu"),
+    nn.Sigmoid: UnaryAttr("sigmoid"),
+    nn.Tanh: UnaryAttr("tanh"),
+    nn.Hardswish: UnaryAttr("hardswish"),
+    nn.LeakyReLU: UnaryAttr("leaky_relu", scalars_attr=["negative_slope"]),
+    nn.Hardtanh: UnaryAttr("hardtanh", scalars_attr=["min_val", "max_val"]),
+    nn.GELU: UnaryAttr("gelu", algorithm_attr="approximate"),
 }
 
 
