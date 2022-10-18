@@ -1468,9 +1468,10 @@ class TestQuantizedTensor(TestCase):
         qdtype = torch.quint8
         dtype = torch.uint8
         scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
+        quant_min, quant_max = 0, 255
 
         quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
-        decomposed_quantized_X = torch.decomposed_quantize_per_tensor(X, scale, zero_point, dtype)
+        decomposed_quantized_X = torch.decomposed_quantize_per_tensor(X, scale, zero_point, quant_min, quant_max, dtype)
         self.assertEqual(decomposed_quantized_X.dtype, dtype)
         self.assertEqual(quantized_X.int_repr(), decomposed_quantized_X)
 
@@ -1479,12 +1480,13 @@ class TestQuantizedTensor(TestCase):
         dtype = torch.uint8
         qdtype = torch.quint8
         scale, zero_point = _calculate_dynamic_qparams(X, qdtype)
+        quant_min, quant_max = 0, 255
 
         quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
         dequantized_X = torch.dequantize(quantized_X)
 
-        decomposed_quantized_X = torch.decomposed_quantize_per_tensor(X, scale, zero_point, dtype)
-        decomposed_dequantized_X = torch.decomposed_dequantize_per_tensor(decomposed_quantized_X, scale, zero_point, dtype)
+        decomposed_quantized_X = torch.decomposed_quantize_per_tensor(X, scale, zero_point, quant_min, quant_max, dtype)
+        decomposed_dequantized_X = torch.decomposed_dequantize_per_tensor(decomposed_quantized_X, scale, zero_point, quant_min, quant_max, dtype)
         self.assertEqual(quantized_X.int_repr(), decomposed_quantized_X)
         self.assertEqual(dequantized_X, decomposed_dequantized_X)
 
