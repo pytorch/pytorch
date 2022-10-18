@@ -648,7 +648,7 @@ TEST(InferenceModeTest, TestCustomFunction) {
 }
 
 TEST(InferenceModeTest, TestLegacyAutoNonVariableTypeModeWarning) {
-  c10::Warning::WarnAlways warn_always(true);
+  c10::WarningUtils::WarnAlways warn_always(true);
   WarningCapture warnings;
   at::AutoNonVariableTypeMode guard;
   ASSERT_TRUE(

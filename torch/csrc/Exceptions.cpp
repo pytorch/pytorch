@@ -210,22 +210,33 @@ LinAlgError::LinAlgError(const char* format, ...) {
   va_end(fmt_args);
 }
 
-void PyWarningHandler::InternalHandler::process(
-    const c10::SourceLocation& source_location,
-    const std::string& msg,
-    const bool verbatim) {
-  warning_buffer_.push_back({source_location, msg, verbatim});
-};
+void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {
+  warning_buffer_.push_back(warning);
+}
 
 PyWarningHandler::PyWarningHandler() noexcept(true)
-    : prev_handler_(c10::Warning::get_warning_handler()), in_exception_(false) {
-  c10::Warning::set_warning_handler(&internal_handler_);
+    : prev_handler_(c10::WarningUtils::get_warning_handler()),
+      in_exception_(false) {
+  c10::WarningUtils::set_warning_handler(&internal_handler_);
+}
+
+// Get the Python warning type for a warning
+PyObject* map_warning_to_python_type(const c10::Warning& warning) {
+  struct Visitor {
+    PyObject* operator()(const c10::UserWarning&) const {
+      return PyExc_UserWarning;
+    }
+    PyObject* operator()(const c10::DeprecationWarning&) const {
+      return PyExc_DeprecationWarning;
+    }
+  };
+  return c10::visit(Visitor(), warning.type());
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
 /// NOLINTNEXTLINE(bugprone-exception-escape)
 PyWarningHandler::~PyWarningHandler() noexcept(false) {
-  c10::Warning::set_warning_handler(prev_handler_);
+  c10::WarningUtils::set_warning_handler(prev_handler_);
   auto& warning_buffer = internal_handler_.warning_buffer_;
 
   if (warning_buffer.size() > 0) {
@@ -238,19 +249,20 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       // error has been set yet
       PyErr_Fetch(&type, &value, &traceback);
     }
-    for (auto& warning : warning_buffer) {
-      auto source_location = warning.source_location_;
-      auto& msg = warning.msg_;
+    for (const auto& warning : warning_buffer) {
+      auto source_location = warning.source_location();
+      auto msg = warning.msg();
       processErrorMsgInplace(msg);
       if (source_location.file == nullptr) {
-        result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
-      } else if (warning.verbatim_) {
+        result =
+            PyErr_WarnEx(map_warning_to_python_type(warning), msg.c_str(), 1);
+      } else if (warning.verbatim()) {
         // Sets the source location from the warning
         // Note: PyErr_WarnExplicit will disregard Python's warning filter
         // and always appear. This is in contrast to PyErr_WarnEx,
         // which respects the warning filter.
         result = PyErr_WarnExplicit(
-            /*category=*/PyExc_UserWarning,
+            /*category=*/map_warning_to_python_type(warning),
             /*message=*/msg.c_str(),
             /*filename=*/source_location.file,
             /*lineno=*/source_location.line,
@@ -267,7 +279,8 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
             source_location.file,
             source_location.line);
         buf.push_back('\0');
-        result = PyErr_WarnEx(PyExc_UserWarning, buf.data(), 1);
+        result =
+            PyErr_WarnEx(map_warning_to_python_type(warning), buf.data(), 1);
       }
       if (result < 0) {
         if (in_exception_) {

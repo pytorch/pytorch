@@ -116,7 +116,7 @@ void torchInternalAssertFail(
 
 } // namespace detail
 
-namespace Warning {
+namespace WarningUtils {
 
 namespace {
 WarningHandler* getBaseHandler() {
@@ -147,27 +147,6 @@ thread_local WarningHandler* ThreadWarningHandler::warning_handler_ = nullptr;
 
 } // namespace
 
-void warn(
-    const SourceLocation& source_location,
-    const std::string& msg,
-    const bool verbatim) {
-  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
-}
-
-void warn(
-    SourceLocation source_location,
-    detail::CompileTimeEmptyString msg,
-    const bool verbatim) {
-  warn(source_location, "", verbatim);
-}
-
-void warn(
-    SourceLocation source_location,
-    const char* msg,
-    const bool verbatim) {
-  ThreadWarningHandler::get_handler()->process(source_location, msg, verbatim);
-}
-
 void set_warning_handler(WarningHandler* handler) noexcept(true) {
   ThreadWarningHandler::set_handler(handler);
 }
@@ -195,14 +174,60 @@ WarnAlways::~WarnAlways() {
   set_warnAlways(prev_setting);
 }
 
-} // namespace Warning
+} // namespace WarningUtils
 
-void WarningHandler::process(
+void warn(const Warning& warning) {
+  WarningUtils::ThreadWarningHandler::get_handler()->process(warning);
+}
+
+Warning::Warning(
+    warning_variant_t type,
     const SourceLocation& source_location,
     const std::string& msg,
-    const bool /*verbatim*/) {
-  LOG_AT_FILE_LINE(WARNING, source_location.file, source_location.line)
-      << "Warning: " << msg << " (function " << source_location.function << ")";
+    const bool verbatim)
+    : type_(type),
+      source_location_(source_location),
+      msg_(msg),
+      verbatim_(verbatim) {}
+
+Warning::Warning(
+    warning_variant_t type,
+    SourceLocation source_location,
+    detail::CompileTimeEmptyString msg,
+    const bool verbatim)
+    : Warning(type, std::move(source_location), "", verbatim) {}
+
+Warning::Warning(
+    warning_variant_t type,
+    SourceLocation source_location,
+    const char* msg,
+    const bool verbatim)
+    : type_(type),
+      source_location_(std::move(source_location)),
+      msg_(std::string(msg)),
+      verbatim_(verbatim) {}
+
+Warning::warning_variant_t Warning::type() const {
+  return type_;
+}
+
+const SourceLocation& Warning::source_location() const {
+  return source_location_;
+}
+
+const std::string& Warning::msg() const {
+  return msg_;
+}
+
+bool Warning::verbatim() const {
+  return verbatim_;
+}
+
+void WarningHandler::process(const Warning& warning) {
+  LOG_AT_FILE_LINE(
+      WARNING, warning.source_location().file, warning.source_location().line)
+      << "Warning: " << warning.msg() << " (function "
+      << warning.source_location().function << ")";
 }
 
 std::string GetExceptionString(const std::exception& e) {
