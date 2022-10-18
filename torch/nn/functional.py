@@ -6,7 +6,7 @@ import warnings
 import torch
 from torch import _VF
 from torch._C import _infer_size, _add_docstr
-from torch._torch_docs import reproducibility_notes, tf32_notes
+from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -1997,6 +1997,10 @@ linear(input, weight, bias=None) -> Tensor
 
 Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
+This opperation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
+
+{sparse_beta_warning}
+
 This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
 Shape:
@@ -2006,7 +2010,7 @@ Shape:
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
-""")
+""".format(**sparse_support_notes))
 
 
 bilinear = _add_docstr(
