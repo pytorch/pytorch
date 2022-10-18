@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -34,12 +36,13 @@ jobs:
       - name: Build Triton wheel
         run: |
           set -x
-          mkdir -p artifacts/
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
           container_name=$(docker run \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
-            -w /pytorch/artifacts/ \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
             "${DOCKER_IMAGE}"      \
           )
 
@@ -51,14 +54,18 @@ jobs:
           3.9)
             PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
             ;;
+          3.10)
+            PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
+            ;;
           *)
             echo "Unsupported python version ${PY_VERS}"
+            exit -1
             ;;
           esac
 
           docker exec -t "${container_name}" yum install -y zlib-devel
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py
-          docker exec -t "${container_name}" chown -R 1000.1000 /pytorch/artifacts
+          docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3
         with:
