@@ -145,7 +145,10 @@ class NNModuleVariable(VariableTracker):
         return variables.GetAttrVariable(self, name, **options)
 
     def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self,
+        tx,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
@@ -196,6 +199,7 @@ class NNModuleVariable(VariableTracker):
                     ),
                     **options,
                 )
+
             else:
                 # for lazy modules, run the pre-hooks which will update the type
                 # TODO mlazos: we don't fully support all of the hooks that exist,
@@ -252,12 +256,14 @@ class NNModuleVariable(VariableTracker):
             name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, name, options, args, kwargs)
 
-        if not all(
-            x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-        ):
-            raise unimplemented(f"non-const NNModule method {name}")
+        def assert_all_args_kwargs_const():
+            if not all(
+                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+            ):
+                raise unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
+            assert_all_args_kwargs_const()
             fn = getattr(module, name)
             bound_args = inspect.signature(fn).bind(
                 *([x.as_python_constant() for x in args]),
@@ -383,6 +389,51 @@ class NNModuleVariable(VariableTracker):
                 variables.UserFunctionVariable(fn, **options),
                 [self] + args,
                 kwargs,
+            )
+        # A loose heuristic, but seems to be generally good before we drop into the
+        # manual handling of inputs
+        elif (
+            name in module.__class__.__dict__
+            and callable(module.__class__.__dict__[name])
+            and all(
+                isinstance(x, variables.TensorVariable)
+                for x in itertools.chain(args, kwargs.values())
+            )
+        ):
+            # TODO(voz): Refactor this into a generic as_proxy() for nn module
+            # We use variations of this pattern in a few places now.
+            def make_attr(name):
+                node = tx.output.create_proxy(
+                    "get_attr",
+                    name,
+                    tuple(),
+                    {},
+                )
+                return node
+
+            # Bind in self
+            tx.output.register_attr_or_module(
+                module,
+                self.module_key,
+                self.module_key,
+                source=NNModuleSource(GetItemSource(self.source, self.module_key)),
+                **options,
+            )
+            proxy_for_mod = make_attr(self.module_key)
+            proxy_for_mod.node.meta["example_value"] = module
+
+            proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+
+            return variables.TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    args=(proxy_for_mod, *proxy_args),
+                    kwargs=proxy_kwargs,
+                    current_tx=tx,
+                ),
+                **options,
             )
         else:
             return super().call_method(tx, name, args, kwargs)

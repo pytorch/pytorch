@@ -45,7 +45,7 @@ class _missing:
     pass
 
 
-def _run_node(node, args, kwargs, nnmodule):
+def _run_node(output_graph, node, args, kwargs, nnmodule):
     op = node.op
     if op == "call_function":
         return node.target(*args, **kwargs)
@@ -54,6 +54,8 @@ def _run_node(node, args, kwargs, nnmodule):
     elif op == "call_module":
         assert nnmodule is not None
         return nnmodule(*args, **kwargs)
+    elif op == "get_attr":
+        return output_graph.get_submodule(node.target)
     raise AssertionError(op)
 
 
@@ -84,7 +86,7 @@ def _get_real_value(node, output_graph):
         nn_module = None
 
     try:
-        real_value = _run_node(node, args, kwargs, nn_module)
+        real_value = _run_node(output_graph, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
         raise TorchRuntimeError() from e
@@ -126,7 +128,9 @@ def _get_fake_value(node, tx):
         nnmodule(*args, **kwargs)
     try:
         with context():
-            return wrap_fake_exception(lambda: _run_node(node, args, kwargs, nnmodule))
+            return wrap_fake_exception(
+                lambda: _run_node(tx.output, node, args, kwargs, nnmodule)
+            )
     except Unsupported:
         raise
     except RuntimeError as e:
