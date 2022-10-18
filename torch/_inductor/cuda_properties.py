@@ -33,6 +33,9 @@ def current_device():
 
 def _device(device):
     if device is not None:
+        if isinstance(device, torch.device):
+            assert device.type == "cuda"
+            device = device.index
         return device
     return current_device()
 

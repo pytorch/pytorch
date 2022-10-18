@@ -7,3 +7,7 @@
 "module: inductor":
 - torch/_inductor/**
 - test/inductor/**
+
+"ciflow/inductor":
+- torch/_dynamo/**
+- torch/_inductor/**

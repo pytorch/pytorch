@@ -253,6 +253,37 @@ test_dynamo_shard() {
   assert_git_not_dirty
 }
 
+
+test_inductor() {
+  # TODO: enable inductor on core tests
+  # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
+
+  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
+  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
+  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
+  PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
+}
+
+test_inductor_huggingface_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  python benchmarks/huggingface.py --ci --training --accuracy -d cuda --inductor --float32 \
+    --total-partitions 2 --partition-id "$1" --output=inductor_huggingface_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f inductor_huggingface_"$1".csv
+}
+
+test_inductor_timm_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  python benchmarks/timm_models.py --ci --training --accuracy -d cuda --inductor --float32 \
+    --total-partitions 3 --partition-id "$1" --output=inductor_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f inductor_timm_"$1".csv
+}
+
 test_python_gloo_with_tls() {
   source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
   assert_git_not_dirty
@@ -663,16 +694,6 @@ test_vec256() {
   fi
 }
 
-test_inductor() {
-  # TODO: enable inductor on core tests
-  # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
-
-  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
-  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
-  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
-  PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
@@ -710,20 +731,54 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   test_inductor
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface_shard 1
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 4 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  test_inductor_timm_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 5 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  test_inductor_timm_shard 1
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 6 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  test_inductor_timm_shard 2
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -732,7 +787,9 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -750,7 +807,9 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   install_monkeytype
   test_python
   test_aten
