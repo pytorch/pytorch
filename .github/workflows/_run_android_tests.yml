@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          conda install -y \
+          conda install -c conda-forge -y \
             cffi \
             cmake \
             mkl \
