@@ -6,6 +6,7 @@
 # buf = io.BytesIO(data)
 # weights = torch.load(buf, pickle_module=WeightsUnpickler)
 
+import functools as _functools
 from collections import OrderedDict
 from pickle import (
     APPEND,
@@ -37,6 +38,7 @@ from pickle import (
     REDUCE,
     SETITEM,
     SETITEMS,
+    SHORT_BINSTRING,
     STOP,
     TUPLE,
     TUPLE1,
@@ -52,10 +54,68 @@ import torch
 
 
 # Unpickling machinery
+@_functools.lru_cache(maxsize=1)
+def _get_allowed_globals():
+    rc: Dict[str, Any] = {
+        "collections.OrderedDict": OrderedDict,
+        "torch.Tensor": torch.Tensor,
+        "torch.CharTensor": torch.CharTensor,
+        "torch.CharStorage": torch.CharStorage,
+        "torch.ShortTensor": torch.ShortTensor,
+        "torch.ShortStorage": torch.ShortStorage,
+        "torch.ByteTensor": torch.ByteTensor,
+        "torch.ByteStorage": torch.ByteStorage,
+        "torch.BoolTensor": torch.BoolTensor,
+        "torch.BoolStorage": torch.BoolStorage,
+        "torch.BFloat16Storage": torch.BFloat16Storage,
+        "torch.HalfStorage": torch.HalfStorage,
+        "torch.HalfTensor": torch.HalfTensor,
+        "torch.ComplexFloatStorage": torch.ComplexFloatStorage,
+        "torch.ComplexDoubleStorage": torch.ComplexDoubleStorage,
+        "torch.FloatStorage": torch.FloatStorage,
+        "torch.DoubleStorage": torch.DoubleStorage,
+        "torch.IntStorage": torch.IntStorage,
+        "torch.LongStorage": torch.LongStorage,
+        "torch.nn.parameter.Parameter": torch.nn.Parameter,
+        "torch._tensor._rebuild_from_type_v2": torch._tensor._rebuild_from_type_v2,
+        "torch.serialization._get_layout": torch.serialization._get_layout,
+        "torch.Size": torch.Size,
+    }
+    # dtype
+    for t in [
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    ]:
+        rc[str(t)] = t
+    # Typed tensors
+    for tt in [
+        torch.FloatTensor,
+        torch.DoubleTensor,
+        torch.IntTensor,
+        torch.LongTensor,
+    ]:
+        rc[f"torch.{tt.__name__}"] = tt
+    # Rebuild functions
+    for f in [
+        torch._utils._rebuild_parameter,
+        torch._utils._rebuild_tensor,
+        torch._utils._rebuild_tensor_v2,
+        torch._utils._rebuild_sparse_tensor,
+        torch._utils._rebuild_meta_tensor_no_storage,
+        torch._utils._rebuild_sparse_csr_tensor,
+    ]:
+        rc[f"torch._utils.{f.__name__}"] = f
+    return rc
 
 
 class Unpickler:
-    def __init__(self, file, *, encoding: str = "UNUSED"):
+    def __init__(self, file, *, encoding: str = "bytes"):
+        self.encoding = encoding
         self.readline = file.readline
         self.read = file.read
         self.memo: Dict[int, Any] = {}
@@ -80,33 +140,7 @@ class Unpickler:
                 module = readline()[:-1].decode("utf-8")
                 name = readline()[:-1].decode("utf-8")
                 full_path = f"{module}.{name}"
-                ALLOWED_GLOBALS = {
-                    "collections.OrderedDict": OrderedDict,
-                    "torch.CharTensor": torch.CharTensor,
-                    "torch.CharStorage": torch.CharStorage,
-                    "torch.ShortTensor": torch.ShortTensor,
-                    "torch.ShortStorage": torch.ShortStorage,
-                    "torch.ByteTensor": torch.ByteTensor,
-                    "torch.ByteStorage": torch.ByteStorage,
-                    "torch.BoolTensor": torch.BoolTensor,
-                    "torch.BoolStorage": torch.BoolStorage,
-                    "torch.BFloat16Storage": torch.BFloat16Storage,
-                    "torch.HalfStorage": torch.HalfStorage,
-                    "torch.HalfTensor": torch.HalfTensor,
-                    "torch.ComplexFloatStorage": torch.ComplexFloatStorage,
-                    "torch.ComplexDoubleStorage": torch.ComplexDoubleStorage,
-                    "torch.FloatTensor": torch.FloatTensor,
-                    "torch.FloatStorage": torch.FloatStorage,
-                    "torch.DoubleTensor": torch.DoubleTensor,
-                    "torch.DoubleStorage": torch.DoubleStorage,
-                    "torch.IntTensor": torch.IntTensor,
-                    "torch.IntStorage": torch.IntStorage,
-                    "torch.LongTensor": torch.LongTensor,
-                    "torch.LongStorage": torch.LongStorage,
-                    "torch.nn.parameter.Parameter": torch.nn.Parameter,
-                    "torch._utils._rebuild_parameter": torch._utils._rebuild_parameter,
-                    "torch._utils._rebuild_tensor_v2": torch._utils._rebuild_tensor_v2,
-                }
+                ALLOWED_GLOBALS = _get_allowed_globals()
                 if full_path in ALLOWED_GLOBALS:
                     self.append(ALLOWED_GLOBALS[full_path])
                 else:
@@ -128,24 +162,30 @@ class Unpickler:
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
-                if type(inst) is torch.nn.Parameter:
+                if type(inst) is torch.nn.Parameter or type(inst) is torch.Tensor:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
                 else:
-                    raise RuntimeError("Can only build parameter and dict objects, but got {type(inst)}")
+                    raise RuntimeError(
+                        f"Can only build Tensor, parameter or dict objects, but got {type(inst)}"
+                    )
             # Stack manipulation
             elif key[0] == APPEND[0]:
                 item = self.stack.pop()
                 list_obj = self.stack[-1]
                 if type(list_obj) is not list:
-                    raise RuntimeError(f"Can only append to lists, but got {type(list_obj)}")
+                    raise RuntimeError(
+                        f"Can only append to lists, but got {type(list_obj)}"
+                    )
                 list_obj.append(item)
             elif key[0] == APPENDS[0]:
                 items = self.pop_mark()
                 list_obj = self.stack[-1]
                 if type(list_obj) is not list:
-                    raise RuntimeError(f"Can only extend lists, but got {type(list_obj)}")
+                    raise RuntimeError(
+                        f"Can only extend lists, but got {type(list_obj)}"
+                    )
                 list_obj.extend(items)
             elif key[0] == SETITEM[0]:
                 (v, k) = (self.stack.pop(), self.stack.pop())
@@ -194,6 +234,12 @@ class Unpickler:
                     raise RuntimeError("String is too long")
                 strval = str(read(strlen), "utf-8", "surrogatepass")
                 self.append(strval)
+            elif key[0] == SHORT_BINSTRING[0]:
+                strlen = read(1)[0]
+                strdata = read(strlen)
+                if self.encoding != "bytes":
+                    strdata = strdata.decode(self.encoding, "strict")
+                self.append(strdata)
             elif key[0] == BINPERSID[0]:
                 pid = self.stack.pop()
                 self.append(self.persistent_load(pid))
@@ -230,5 +276,5 @@ class Unpickler:
         raise UnpicklingError("unsupported persistent id encountered")
 
 
-def load(file, *, encoding: str = "UNUSED"):
-    return Unpickler(file).load()
+def load(file, *, encoding: str = "ASCII"):
+    return Unpickler(file, encoding=encoding).load()

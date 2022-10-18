@@ -654,7 +654,7 @@ def load(
     f: FILE_LIKE,
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
-    weight_load_only: bool = False,
+    weights_only: bool = False,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -702,8 +702,8 @@ def load(
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
-        weights_load_only: Indicates whether unpickler should be restricted to
-            loading only tensor, primitive types and dictionaries
+        weights_only: Indicates whether unpickler should be restricted to
+            loading only tensors, primitive types and dictionaries
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
@@ -749,9 +749,9 @@ def load(
     UNSAFE_MESSAGE = (
         "*WARNING* Safe load failed, defaulting to standard Python pickle module, "
         " which can result in arbitrary code execution. To avoid this please ivoke load"
-        " method with weight_load_only argument set to True"
+        " method with weights_only argument set to True"
     )
-    if weight_load_only:
+    if weights_only:
         if pickle_module is not None:
             raise RuntimeError("Can not safely load weights when expiclit picke_module is specified")
         picke_module = _weights_only_unpickler
@@ -778,7 +778,7 @@ def load(
                         return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
                     except RuntimeError:
                         # Rethrow the exception if only safe unpickler is allowed
-                        if weight_load_only:
+                        if weights_only:
                             raise
                         warnings.warn(UNSAFE_MESSAGE)
                         opened_file.seek(orig_position)
@@ -790,7 +790,7 @@ def load(
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
             except RuntimeError:
                 # Rethrow the exception if only safe unpickler is allowed
-                if weight_load_only:
+                if weights_only:
                     raise
                 warnings.warn(UNSAFE_MESSAGE)
                 opened_file.seek(orig_position)
