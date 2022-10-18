@@ -379,15 +379,15 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
   // If the physical layout of the NestedTensor's storage
   // is not: batch, {seq_len}, num_heads, head_dim then we need
   // to call contiguous
-  if (!q_t.is_contiguous() and !is_safe_to_get_storage_as_tensor(query_impl)) {
+  if (!q_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(query_impl)) {
     q_t = q_t.contiguous();
     query_impl = get_nested_tensor_impl(q_t);
   }
-  if (!k_t.is_contiguous() and !is_safe_to_get_storage_as_tensor(key_impl)) {
+  if (!k_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(key_impl)) {
     k_t = k_t.contiguous();
     key_impl = get_nested_tensor_impl(k_t);
   }
-  if (!v_t.is_contiguous() and !is_safe_to_get_storage_as_tensor(value_impl)) {
+  if (!v_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(value_impl)) {
     v_t = v_t.contiguous();
     value_impl = get_nested_tensor_impl(v_t);
   }
