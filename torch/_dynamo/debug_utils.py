@@ -719,6 +719,17 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
     if config.repro_level == 4:
         minifier_backend = "dynamo_accuracy_minifier_backend"
 
+    custom_compiler_error = textwrap.dedent(
+        f"""
+        raise RuntimeError(
+            'Compiler name is None - this likely means that a custom compiler '
+            'was called by torchdynamo. Please remove this error, import your '
+            'custom compiler function, and replace the compiler_name="None" '
+            'line below to compiler_name=<my_imported_custom_function>'
+        )
+        """
+    ) if compiler_name is None else ""
+
     contents = textwrap.dedent(
         f"""
 import os
@@ -742,6 +753,7 @@ mod = Repro().cuda()
 
 # Setup debug minifier compiler
 compiler_fn = BACKENDS["{minifier_backend}"]
+{custom_compiler_error}
 dynamo_minifier_backend = functools.partial(
     compiler_fn,
     compiler_name="{compiler_name}",
