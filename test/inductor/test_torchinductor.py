@@ -1470,7 +1470,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -1480,16 +1479,47 @@ class CommonTemplate:
         self.common(
             m.to(memory_format=torch.channels_last),
             (torch.randn([2, 3, 16, 16]),),
+            check_lowp=False,
         )
         # only activation is channels_last
         self.common(
             m,
             (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+            check_lowp=False,
         )
         # activation and weight are all channels_last
         self.common(
             m.to(memory_format=torch.channels_last),
             (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+            check_lowp=False,
+        )
+
+    def test_conv2d_backward_channels_last(self):
+        def fn(grad_output, inp, weight):
+            convolution_backward_8 = torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [320],
+                [1, 1],
+                [0, 0],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            return convolution_backward_8
+
+        # only weight is channels_last
+        self.common(
+            fn,
+            (
+                torch.randn([2, 320, 8, 8]),
+                torch.randn([2, 2048, 8, 8]),
+                torch.randn([320, 2048, 1, 1]).to(memory_format=torch.channels_last),
+            ),
+            check_lowp=False,
         )
 
     @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
@@ -3920,6 +3950,8 @@ if HAS_CPU:
 
 
 if HAS_CUDA:
+    import triton
+    import triton.language as tl
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cuda")
@@ -4018,6 +4050,42 @@ if HAS_CUDA:
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
+        @patch.object(config.triton, "cudagraphs", True)
+        def test_inplace_updates_cudagraphs(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super(Repro, self).__init__()
+                    self.weight1 = torch.nn.Parameter(
+                        torch.randn(10, 20, requires_grad=True)
+                    )
+
+                def forward(self, x):
+                    x = torch.matmul(x, self.weight1)
+                    return x
+
+            from copy import deepcopy
+
+            model = Repro().cuda()
+            model_ref = deepcopy(model)
+            model_opt = torch._dynamo.optimize("inductor")(model)
+
+            input = torch.randn(10, 10, device="cuda", requires_grad=True)
+
+            for i in range(2):
+                output_ref = model_ref(input)
+                output_res = model_opt(input)
+                output_ref.sum().backward()
+                output_res.sum().backward()
+                for (p_ref, p_res) in zip(
+                    model_ref.parameters(), model_opt.parameters()
+                ):
+                    self.assertEqual(p_ref.grad, p_res.grad)
+                with torch.no_grad():
+                    for param in model_ref.parameters():
+                        param.add_(1.0)
+                    for param in model_opt.parameters():
+                        param.add_(1.0)
+
         def test_accuracy_issue1(self):
             class Repro(torch.nn.Module):
                 def __init__(self):
@@ -4052,6 +4120,67 @@ if HAS_CUDA:
             ]
             with torch.cuda.amp.autocast(enabled=False):
                 assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+
+        def test_autotune_inplace_kernel(self):
+            """
+            This UT tests autotune on an inplace kernel. The autotune should not contaminate
+            the input buffers when tuning with multiple configs. For more details, refer to
+            https://github.com/openai/triton/issues/781
+            https://github.com/pytorch/torchdynamo/issues/1670
+            """
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            from torch._inductor.triton_ops.autotune import CachingAutotuner, grid
+            from torch._inductor.utils import instance_descriptor
+
+            def autotune(configs, meta):
+                def decorator(fn):
+                    return CachingAutotuner(
+                        # force autotune by setting save_cache_hook to False
+                        fn,
+                        meta=meta,
+                        configs=configs,
+                        save_cache_hook=False,
+                    )
+
+                return decorator
+
+            @autotune(
+                configs=[
+                    triton.Config({"XBLOCK": 1}),
+                    triton.Config({"XBLOCK": 2}),
+                ],
+                meta={
+                    "signature": {0: "*fp32", 1: "*fp32", 2: "i32"},
+                    "device": 0,
+                    "configs": [
+                        instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())
+                    ],
+                    "constants": {},
+                },
+            )
+            @triton.jit
+            def kernel(in_out_ptr0, in_ptr0, xnumel, XBLOCK: tl.constexpr):
+                pid = tl.program_id(0)
+                block_start = pid * XBLOCK
+                offsets = block_start + tl.arange(0, XBLOCK)
+                mask = offsets < xnumel
+                x = tl.load(in_out_ptr0 + offsets, mask=mask)
+                y = tl.load(in_ptr0 + offsets, mask=mask)
+                output = x + y
+                tl.store(in_out_ptr0 + offsets, output, mask=mask)
+
+            xnumel = 384
+            in0 = rand_strided((xnumel,), (1,), device="cuda", dtype=torch.float32)
+            inout1 = rand_strided((xnumel,), (1,), device="cuda", dtype=torch.float32)
+            inout2 = inout1.clone()
+
+            stream0 = get_cuda_stream(0)
+            kernel.run(inout1, in0, xnumel, grid=grid(xnumel), stream=stream0)
+            kernel.run(inout2, in0, xnumel, grid=grid(xnumel), stream=stream0)
+
+            assert same(
+                inout1, inout2, tol=0.001, equal_nan=True
+            ), "failed autotune with inplace kernel"
 
         @requires_cuda()
         def test_sort_stride_issue(self):

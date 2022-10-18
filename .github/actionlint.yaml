@@ -5,9 +5,12 @@ self-hosted-runner:
     - linux.large
     - linux.2xlarge
     - linux.4xlarge
+    - linux.12xlarge
+    - linux.24xlarge
     - linux.4xlarge.nvidia.gpu
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
+    - linux.g5.4xlarge.nvidia.gpu
     - windows.4xlarge
     - windows.8xlarge.nvidia.gpu
     - bm-runner
