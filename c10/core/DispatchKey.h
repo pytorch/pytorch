@@ -39,6 +39,9 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(Meta, extra)                                \
+  /* change */                                  \
+  _(NMPU, extra)                                \
+  /* change */                                  \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)

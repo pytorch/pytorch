@@ -27,6 +27,9 @@ namespace c10 {
   _(VE, extra)                                    \
   _(Lazy, extra)                                  \
   _(Meta, extra)                                  \
+  /* change */                                    \
+  _(NMPU, extra)                                  \
+  /* change */                                    \
   _(PrivateUse1, extra)
 
 enum class DeviceType : int8_t {
@@ -54,7 +57,10 @@ enum class DeviceType : int8_t {
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 20,
+/* change */
+  NMPU = 20,
+/* change */
+  COMPILE_TIME_MAX_DEVICE_TYPES = 21,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
@@ -72,6 +78,9 @@ constexpr DeviceType kHPU = DeviceType::HPU;
 constexpr DeviceType kVE = DeviceType::VE;
 constexpr DeviceType kLazy = DeviceType::Lazy;
 constexpr DeviceType kIPU = DeviceType::IPU;
+/* change */
+constexpr DeviceType kNMPU = DeviceType::NMPU;
+/* change */
 constexpr DeviceType kPrivateUse1 = DeviceType::PrivateUse1;
 
 // define explicit int constant
@@ -79,7 +88,7 @@ constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
     static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
 
 static_assert(
-    COMPILE_TIME_MAX_DEVICE_TYPES <= 20,
+    COMPILE_TIME_MAX_DEVICE_TYPES <= 21,
     "Hey!  You seem to be adding a lot of new DeviceTypes.  The intent was "
     "for this constant to reflect the actual number of DeviceTypes we support "
     "in PyTorch; it's important that this number is not too large as we "

@@ -37,6 +37,10 @@ const char* toString(BackendComponent t) {
       return "PrivateUse3Bit";
     case BackendComponent::InvalidBit:
       return "InvalidBit";
+    /* change */
+    case BackendComponent::NMPUBit:
+      return "NMPUBit";
+    /* change */
     default:
       return "UNKNOWN_BACKEND_BIT";
   }
@@ -307,6 +311,9 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
       {"PrivateUse2", c10::DispatchKey::PrivateUse2},
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
+      /* change */
+      {"NMPU", c10::DispatchKey::CPU},
+      /* change */
 
       {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
       {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},

@@ -55,7 +55,10 @@ enum class Backend {
   HPU,
   Lazy,
   PrivateUse1,
-  NumOptions
+  NumOptions,
+  /* change */
+  NMPU
+  /* change */
 };
 
 static inline Backend dispatchKeyToBackend(DispatchKey t) {
@@ -115,7 +118,12 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::PrivateUse1;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
-  } else {
+  /* change */
+  } else if (t == DispatchKey::NMPU) {
+    return Backend::NMPU;
+  } 
+  /* change */
+  else {
     TORCH_CHECK(false, "Unrecognized tensor type ID: ", t);
   }
 }
@@ -174,6 +182,10 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MPS;
     case Backend::HPU:
       return DispatchKey::HPU;
+    /* change */
+    case Backend::NMPU:
+      return DispatchKey::NMPU;
+    /* change */
     case Backend::PrivateUse1:
       return DispatchKey::PrivateUse1;
     default:
@@ -234,6 +246,10 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::HPU;
     case Backend::PrivateUse1:
       return DeviceType::PrivateUse1;
+    /* change */
+    case Backend::NMPU:
+      return DeviceType::NMPU;
+    /* change */
     case Backend::Undefined:
       TORCH_CHECK(false, "Undefined backend is not a valid device type");
     default:
@@ -296,6 +312,10 @@ static inline const char* toString(Backend b) {
       return "QuantizedXPU";
     case Backend::HPU:
       return "HPU";
+    /* change */
+    case Backend::NMPU:
+      return "NMPU";
+    /* change */
     case Backend::PrivateUse1:
       return "PrivateUseOne";
     default:
