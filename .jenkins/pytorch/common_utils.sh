@@ -171,7 +171,7 @@ function checkout_install_torchdeploy() {
 function test_torch_deploy(){
  pushd ..
  pushd multipy
- ./multipy/runtime/build3/test_deploy
+ ./multipy/runtime/build/test_deploy
  popd
  popd
 }

@@ -450,7 +450,10 @@ class CodeGen(object):
                             line = lines[idx].strip()
                             if line.startswith('File '):
                                 break
-                            context_lines.append(line)
+
+                            # Skip printing module stack
+                            if not line.startswith("Module stack"):
+                                context_lines.append(line)
                             idx += 1
 
                         summary_lines = []
