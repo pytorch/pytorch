@@ -3939,6 +3939,7 @@ if HAS_CPU:
             self.assertFalse(complex_memory_overlap(gathered))
             self.assertFalse(complex_memory_overlap(gathered.t()))
 
+
 if HAS_CUDA:
 
     class SweepInputsCudaTest(SweepInputs2, TestCase):
