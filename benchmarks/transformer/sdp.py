@@ -72,7 +72,7 @@ def generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_perce
     seq_len_list[random.randint(0, batch_size - 1)] = max_sequence_len
     # print(f"Theoretical padding: {pad_percentage} actual: {1 - (sum(seq_len_list) / (batch_size * max_sequence_len))}")
     return torch.nested.nested_tensor([
-        torch.randn(seq_len, embed_dimension, dtype=dtype, device=device) for seq_len in seq_len_list])
+        torch.randn(seq_len, embed_dimension, dtype=dtype, device=device) for seq_len in seq_len_list]), seq_len_list
 
 
 def benchmark_torch_function(iters, f, *args, **kwargs):
@@ -101,7 +101,7 @@ def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, 
             )
             npt = pt.eval().half().cuda()
             cpt = build_composite_mha_from_nn_mha(npt)
-            x = generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage)
+            x, lengths = generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage)
             pt_output, _ = pt(x, x, x, mask)
             cpt_output, _ = cpt(x, x, x, mask)
 
