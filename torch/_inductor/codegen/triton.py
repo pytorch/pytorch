@@ -114,15 +114,27 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def abs(x):
-        return f"tl.libdevice.abs({x}) if ({x}).dtype is tl.float64 else tl.abs({x})"
+        return f"tl.abs({x})"
+
+    @staticmethod
+    def libdevice_abs(x):
+        return f"tl.libdevice.abs({x})"
 
     @staticmethod
     def exp(x):
-        return f"tl.libdevice.exp({x}) if ({x}).dtype is tl.float64 else tl.exp({x})"
+        return f"tl.exp({x})"
+
+    @staticmethod
+    def libdevice_exp(x):
+        return f"tl.libdevice.exp({x})"
 
     @staticmethod
     def sqrt(x):
-        return f"tl.libdevice.sqrt({x}) if ({x}).dtype is tl.float64 else tl.sqrt({x})"
+        return f"tl.sqrt({x})"
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return f"tl.libdevice.sqrt({x})"
 
     @staticmethod
     def relu(x):
@@ -154,11 +166,19 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def cos(x):
-        return f"tl.libdevice.cos({x}) if ({x}).dtype is tl.float64 else tl.cos({x})"
+        return f"tl.cos({x})"
+
+    @staticmethod
+    def libdevice_cos(x):
+        return f"tl.libdevice.cos({x})"
 
     @staticmethod
     def sin(x):
-        return f"tl.libdevice.sin({x}) if ({x}).dtype is tl.float64 else tl.sin({x})"
+        return f"tl.sin({x})"
+
+    @staticmethod
+    def libdevice_sin(x):
+        return f"tl.libdevice.sin({x})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -197,6 +217,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
+    def sigmoid(x):
+        return f"tl.sigmoid({x})"
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        return f"1/(1 + tl.libdevice.exp(-({x})))"
+
+    @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
         return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
@@ -211,7 +239,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.libdevice.log({x}) if ({x}).dtype is tl.float64 else tl.log({x})"
+        return f"tl.log({x})"
+
+    @staticmethod
+    def libdevice_log(x):
+        return f"tl.libdevice.log({x})"
 
     @staticmethod
     def isinf(x):
@@ -654,6 +686,7 @@ class TritonKernel(Kernel):
     def indexing(
         self,
         index: sympy.Expr,
+        *,
         copy_shape=None,
         dense_indexing=False,
     ):
@@ -686,9 +719,11 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or index == 0:
+        if (need_dense and not have_dense) or isinstance(
+            index, sympy.core.numbers.Integer
+        ):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            if index == 0:
+            if isinstance(index, sympy.core.numbers.Integer):
                 return index_str, "None"
             else:
                 mask = dense_mask
@@ -779,7 +814,7 @@ class TritonKernel(Kernel):
 
     def store(self, name, index, value, mode=None):
         var = self.args.output(name)
-        index, mask = self.indexing(index, value, dense_indexing=True)
+        index, mask = self.indexing(index, dense_indexing=True)
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -861,7 +896,7 @@ class TritonKernel(Kernel):
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
         self.inside_reduction = False
-        index, mask = self.indexing(index, result_var)
+        index, mask = self.indexing(index)
         assert "rmask" not in index
         self.inside_reduction = True
         self.outside_loop_vars.add(result_var)
@@ -1174,10 +1209,6 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        for node in node_schedule:
-            if node not in (EnableReduction, DisableReduction):
-                node.mark_run()
-
         log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
@@ -1211,6 +1242,9 @@ class TritonScheduling:
             reduction_hint_val = ReductionHint.DEFAULT
         with TritonKernel(*tiled_groups, reduction_hint=reduction_hint_val) as kernel:
             stack = contextlib.ExitStack()
+            for node in node_schedule:
+                if node not in (EnableReduction, DisableReduction):
+                    node.mark_run()
             for node in node_schedule:
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())

@@ -935,14 +935,14 @@ TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
 TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
 
 if TEST_WITH_TORCHDYNAMO:
-    import torchdynamo
+    import torch._dynamo
     import logging
-    torchdynamo.config.log_level = logging.ERROR
+    torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
-    torchdynamo.config.cache_size_limit = 8
+    torch._dynamo.config.cache_size_limit = 8
 
 
-def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
+def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -2031,13 +2031,13 @@ class TestCase(expecttest.TestCase):
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             if TEST_WITH_TORCHINDUCTOR:
-                super_run = torchdynamo.optimize("inductor")(super().run)
+                super_run = torch._dynamo.optimize("inductor")(super().run)
             else:
-                super_run = torchdynamo.optimize("eager")(super().run)
+                super_run = torch._dynamo.optimize("eager")(super().run)
             super_run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.
-            # torchdynamo.reset()
+            # torch._dynamo.reset()
         else:
             super().run(result=result)
 
@@ -2505,7 +2505,7 @@ class TestCase(expecttest.TestCase):
             # This emulates unittest.TestCase's behavior if a custom message passed and
             # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
             # is True (default)
-            msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
+            msg=(lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
