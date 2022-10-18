@@ -18,6 +18,7 @@ from torch._prims_common import (
 )
 
 from . import config, ir, overrides
+from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -118,7 +119,7 @@ def decode_device(device):
     if isinstance(device, str):
         device = torch.device(device)
     if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=torch.cuda.current_device())
+        return torch.device("cuda", index=current_device())
     return device
 
 
