@@ -7,6 +7,7 @@ from torch.fx.node import Node, _get_qualified_name
 from torch.fx.passes.operator_support import OperatorSupportBase
 
 import logging
+import operator
 import itertools
 from copy import copy
 
@@ -43,7 +44,18 @@ class CapabilityBasedPartitioner:
 
     def __is_node_supported(self, node: Node) -> bool:
         return (
-            self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
+            self.operator_support.is_node_supported(
+                dict(self.graph_module.named_modules()), node
+            )
+            or
+            # accept 'getitem' node only if its producer is supported
+            (
+                node.op == "call_function"
+                and node.target == operator.getitem
+                and self.operator_support.is_node_supported(
+                    dict(self.graph_module.named_modules()), node.args[0]  # type: ignore[arg-type]
+                )
+            )
         )
 
     def propose_partitions(self) -> List[Partition]:
