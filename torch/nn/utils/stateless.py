@@ -1,8 +1,6 @@
-import itertools
 import warnings
 import contextlib
 from typing import Any, Callable, Dict, Iterator, List, Tuple
-from torch.nn.utils._named_members_polyfill import _named_parameters, _named_buffers
 
 import torch
 from torch import Tensor
@@ -75,7 +73,7 @@ def _reparametrize_module(
     module: 'torch.nn.Module',
     parameters_and_buffers: Dict[str, Tensor],
 ) -> Iterator[None]:
-    orig_tensors_to_replacements = {}
+    orig_tensors_to_replacements: Dict[Tensor, Tensor] = {}
     for name, tensor in parameters_and_buffers.items():
         _apply_func_submodules(
             _create_swap_params(parameters_and_buffers, orig_tensors_to_replacements),
