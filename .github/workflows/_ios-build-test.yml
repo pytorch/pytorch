@@ -75,7 +75,7 @@ jobs:
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
-          conda install -c conda-forge -y \
+          conda install -y \
             cffi \
             cmake \
             mkl \
