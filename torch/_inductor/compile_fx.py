@@ -2,6 +2,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import sys
 from typing import List
 
 import functorch
@@ -88,6 +89,10 @@ def compile_fx_inner(
 ):
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
+
+    # lift the maximum depth of the Python interpreter stack
+    # to adapt large/deep models
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
 
     _step_logger()(
         logging.INFO,
@@ -231,7 +236,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
 
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x
+        static_input(x) if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
