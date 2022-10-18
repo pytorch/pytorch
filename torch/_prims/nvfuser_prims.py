@@ -15,6 +15,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
     make_contiguous_strides_for,
+    NumberType,
     ShapeType,
     TensorLikeType,
 )
@@ -341,6 +342,14 @@ def _clone_nvfuser(fd: Any, input: TensorLikeType, *, memory_format=None):
     return fd.ops.set(input)
 
 
+def _full_nvfuser(
+    fd: Any, shape: ShapeType, fill_value: NumberType, *, dtype: torch.dtype
+):
+    constant = fd.define_constant(fill_value)
+    nvfuser_dtype = getnvFuserDtype(dtype)
+    return fd.full(shape, constant, nvfuser_dtype)
+
+
 _nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
@@ -355,6 +364,72 @@ _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
+_nvfuser_impls["full"] = _full_nvfuser
+
+
+def register_full():
+    name = "full"
+
+    nvprim.define(
+        "full.names(int[] size, Scalar fill_value, *, Dimname[]? names, "
+        + "ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"
+    )
+    nvprim.define(
+        "full(SymInt[] size, Scalar fill_value, *, "
+        + "ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"
+    )
+
+    def _meta_impl(
+        self,
+        size,
+        fill_value,
+        *,
+        out=None,
+        dtype=None,
+        layout=None,
+        device=None,
+        requires_grad=False,
+    ):
+        strides = make_contiguous_strides_for(size)
+        return torch._prims.TensorMeta(
+            self,
+            shape=size,
+            strides=strides,
+            dtype=dtype,
+            device=device,
+        )
+
+    def _prim_impl(
+        self,
+        size,
+        fill_value,
+        *,
+        out=None,
+        dtype=None,
+        layout=None,
+        device=None,
+        requires_grad=False,
+    ):
+        return torch.full(
+            size,
+            fill_value,
+            out=out,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            requires_grad=requires_grad,
+        )
+
+    nvprim_impl.impl(name, _prim_impl)
+    nvprim_meta_impl.impl(name, _meta_impl)
+
+    prim_packet = getattr(torch.ops.nvprims, name)
+    prim = prim_packet.default
+    nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
+    for p in (prim_packet, prim):
+        p.__doc__ = "Create a tensor with given size and filled with value"
+        p.impl_nvfuser = _nvfuser_impls["full"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 # functorch.compile.min_cut_rematerialization_partition accepts a list of
 # operators that can be recomputed in the backward pass. This list is used to
@@ -715,6 +790,7 @@ def register_nvprims():
     register_view()
     register_native_batch_norm()
     register_rand_like()
+    register_full()
 
     for name in nvprim_names:
         main_prim = getattr(torch.ops.prims, name)
