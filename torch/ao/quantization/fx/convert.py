@@ -498,13 +498,21 @@ def convert(
        is stored in observed_node_names, we can decide whether we need to swap the
        module based on this set
 
-    standalone_module means it a submodule that is not inlined in
-    parent module, and will be quantized separately as one unit.
+    Args:
+       * `is_standalone_module`: when this flag is True, it means we are quantizing
+       a submodule that is not inlined in parent module, and will be quantized
+       separately as one unit.
 
-    Returns a quantized standalone module, whether input/output is quantized is
-    specified by prepare_custom_config, with
-    input_quantized_idxs, output_quantized_idxs, please
-    see docs for prepare_fx for details
+       * `is_decomposed_qtensor`: a boolean flag to indicate whether we want to use the
+        quantize operator for decomposed quantized tensor
+        (torch.decomposed_quantize_per_tensor) or default/standalone
+        quantized tensor (torch.quantize_per_tensor)
+
+    Returns:
+         a quantized standalone module, whether input/output is quantized is
+         specified by prepare_custom_config, with
+         input_quantized_idxs, output_quantized_idxs, please
+         see docs for :func:`~torch.ao.quantization.prepare_fx` for details
     """
     if convert_custom_config is None:
         convert_custom_config = ConvertCustomConfig()
@@ -644,7 +652,7 @@ def convert(
                 quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
                 if is_decomposed_qtensor:
                     # use the same qparams from quantize op
-                    dq_inputs = [quantized_node, *quantize_op_inputs[1:]]
+                    dq_inputs = [quantized_node] + quantize_op_inputs[1:]
                     dequantized_node = graph.call_function(torch.decomposed_dequantize_per_tensor, tuple(dq_inputs), {})
                 else:
                     dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
