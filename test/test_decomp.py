@@ -201,7 +201,9 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
         # The decomposition is TOO correct. It computes everything in int64, so sometimes
-        # there's an off-by-one error.
+        # there's an off-by-one error. See
+        # https://github.com/pytorch/pytorch/issues/81996
+        # https://github.com/pytorch/pytorch/issues/82230
         (torch.int8, torch.ops.aten.linspace.default) : (0, 1),
         (torch.uint8, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
