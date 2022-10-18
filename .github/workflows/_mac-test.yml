@@ -107,7 +107,7 @@ jobs:
           ${CONDA_RUN} python3 -m pip install psutil==5.9.1
           ${CONDA_RUN} python3 -m pip install pynvml==11.4.1
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
+          echo "::set-output name=monitor-script-pid::${!}"
 
       - name: Install macOS homebrew dependencies
         run: |
