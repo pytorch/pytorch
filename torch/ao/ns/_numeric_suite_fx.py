@@ -864,7 +864,7 @@ class QConfigMultiMapping:
 
     # this function applies the insertion method across each QConfigMapping
     def _insert_qconfig_list(
-        self, style: str, args: List[str, int, Callable], qconfig_list: List[QConfigAny]
+        self, style: str, args: List[Union[str, int, Callable]], qconfig_list: List[QConfigAny]
     ) -> None:
         self._remove_duplicates(qconfig_list)
         self._handle_list_size_mismatch(qconfig_list, style)
