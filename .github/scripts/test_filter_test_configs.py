@@ -27,6 +27,8 @@ class TestConfigFilter(TestCase):
 
     def setUp(self) -> None:
         os.environ["GITHUB_TOKEN"] = "GITHUB_TOKEN"
+        if os.getenv("GITHUB_OUTPUT"):
+            del os.environ["GITHUB_OUTPUT"]
 
     @mock.patch("filter_test_configs.requests.get", side_effect=mocked_gh_get_labels)
     def test_get_labels(self, mocked_gh: Any) -> None:
