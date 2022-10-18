@@ -166,6 +166,8 @@
             # shellcheck disable=SC1091
             source "${WORKSPACE_DIR}"/miniconda3/bin/activate
 
+            brew link --force libomp
+
             echo "export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${BASH_ENV}"
             .jenkins/pytorch/macos-build.sh
 
@@ -575,7 +577,7 @@
                 $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
             }
 
-            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
+            retry conda install -c conda-forge numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
 
             # sync submodules
             cd ${PROJ_ROOT}
