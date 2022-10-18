@@ -231,7 +231,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
 
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x
+        static_input(x) if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
