@@ -4,7 +4,7 @@
 
 namespace at {
 namespace native {
-Tensor decomposed_dequantize_per_tensor(const Tensor& input, double scale, int64_t zero_point, ScalarType dtype) {
+Tensor decomposed_dequantize_per_tensor(const Tensor& input, double scale, int64_t zero_point, int64_t quant_min, int64_t quant_max, ScalarType dtype) {
   TORCH_CHECK(input.dtype() == dtype, "Expecting input to have dtype:", dtype)
   if (dtype == at::kByte || dtype == at::kChar) {
     return (input.to(at::kFloat) - zero_point) * scale;
