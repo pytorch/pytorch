@@ -153,6 +153,10 @@ class MaskedTensor(torch.Tensor):
         kwargs["requires_grad"] = requires_grad
         kwargs["dispatch_sizes_strides_policy"] = "strides"
         kwargs["dispatch_layout"] = True
+        warnings.warn(("The PyTorch API of MaskedTensors is in prototype stage "
+                       "and will change in the near future. Please open a Github issue "
+                       "for features requests and see our documentation on the torch.masked "
+                       "module for further information about the project."), UserWarning)
         if data.requires_grad:
             warnings.warn("It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
                           "To avoid this, you can use data.clone().detach()", UserWarning)
