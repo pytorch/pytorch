@@ -254,9 +254,9 @@ class TestLayerNormOp(serial.SerializedTestCase):
         actual_mean = self.ws.fetch_blob('mean')
         actual_std = self.ws.fetch_blob('std')
 
-        torch.testing.assert_close(torch.from_numpy(expected_norm), actual_norm, rtol=1e-4, atol=1e-4)
-        torch.testing.assert_close(torch.from_numpy(expected_mean), actual_mean)
-        torch.testing.assert_close(torch.from_numpy(expected_std), actual_std)
+        torch.testing.assert_close(expected_norm, actual_norm, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(expected_mean, actual_mean)
+        torch.testing.assert_close(expected_std, actual_std)
 
     @given(X=hu.tensor(min_dim=2),
            eps=st.floats(1e-5, 1e-3),
