@@ -3216,7 +3216,9 @@ def index_fill_(
             f"Got a tensor with {value.ndim} dimensions.",
         )  # type: ignore[arg-type]
     else:
-        value = torch.scalar_tensor(value, dtype=x.dtype, layout=x.layout, device=x.device)
+        value = torch.scalar_tensor(
+            value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
+        )
 
     # index_copy does not broadcast on value so we have to do it manually
     shape = list(x.shape)
