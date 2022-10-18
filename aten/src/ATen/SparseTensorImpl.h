@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/resize.h>
 #endif
 
 namespace at {
@@ -85,11 +86,24 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
         "raw_resize_ called on tensor with symbolic shape")
-    sizes_and_strides_.set_sizes(size);
+    set_sizes_and_strides(size, std::vector<int64_t>(size.size()));
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
     refresh_numel();
   }
+
+  // TODO: move this to TensorImpl.h
+
+  // From https://stackoverflow.com/a/3057522/23845
+  // TODO: does C++14 have a stdlib template for this?
+  template<typename T>
+  struct identity { typedef T type; };
+
+  template <typename T>
+  ArrayRef<T> impl_sizes() { return _impl_sizes(identity<T>()); }
+
+  ArrayRef<int64_t> _impl_sizes(identity<int64_t>) { return sizes(); }
+  ArrayRef<c10::SymInt> _impl_sizes(identity<c10::SymInt>) { return sym_sizes(); }
 
   // NOTE: This function preserves invariants of sparse_dim/dense_dim with
   // respect to indices and values.
@@ -116,7 +130,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   // 4. When we attempt to shrink the size of any of the sparse dimensions on a
   // non-empty sparse tensor (this could make some of the stored indices
   // out-of-bound and thus unsafe).
-  void resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
+  template <typename T>
+  void _resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<T> size) {
     TORCH_CHECK(
         allow_tensor_metadata_change(),
         "resize_ ",
@@ -160,7 +175,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
 
       bool shrinking_sparse_dims = false;
       bool shrinking_dense_dim = false;
-      auto sparse_size_original = sizes().slice(0, sparse_dim);
+      auto sparse_size_original = impl_sizes<T>().slice(0, sparse_dim);
       auto sparse_size_new = size.slice(0, sparse_dim);
       for (const auto i : c10::irange(sparse_dim)) {
         if (sparse_size_new[i] < sparse_size_original[i]) {
@@ -168,7 +183,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
           break;
         }
       }
-      auto dense_size_original = sizes().slice(sparse_dim);
+      auto dense_size_original = impl_sizes<T>().slice(sparse_dim);
       auto dense_size_new = size.slice(sparse_dim);
       for (const auto i : c10::irange(dense_dim)) {
         if (dense_size_new[i] < dense_size_original[i]) {
@@ -196,7 +211,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
           alt_options_msg);
     }
 
-    IntArrayRef sizes_and_strides = sizes_and_strides_.sizes_arrayref();
+    auto sizes_and_strides = impl_sizes<T>();
     const bool size_equals_sizes = std::equal(
         size.begin(),
         size.end(),
@@ -204,21 +219,29 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         sizes_and_strides.end());
     if ((!size_equals_sizes) || (sparse_dim != sparse_dim_) ||
         (dense_dim != dense_dim_)) {
-      auto nnz = values().size(0);
-      std::vector<int64_t> values_size = {nnz};
+      auto nnz = at::symint::sizes<T>(values())[0];
+      std::vector<T> values_size = {nnz};
       auto dense_size = size.slice(sparse_dim);
       values_size.insert(
           values_size.end(), dense_size.begin(), dense_size.end());
-      values_.resize_(values_size);
-      indices_.resize_({sparse_dim, nnz});
+      at::symint::resize_<T>(values_, values_size);
+      at::symint::resize_<T>(indices_, {T(sparse_dim), nnz});
     }
 
     if (!size_equals_sizes) {
-      sizes_and_strides_.set_sizes(size);
+      set_sizes_and_strides(size, std::vector<T>(size.size()));
     }
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
     refresh_numel();
+  }
+
+  void resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size) {
+    return _resize_(sparse_dim, dense_dim, size);
+  }
+
+  void resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<c10::SymInt> size) {
+    return _resize_(sparse_dim, dense_dim, size);
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices`
@@ -243,7 +266,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
         "), but got ",
         size.size());
 
-    sizes_and_strides_.set_sizes(size);
+    set_sizes_and_strides(size, std::vector<int64_t>(size.size()));
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
 
