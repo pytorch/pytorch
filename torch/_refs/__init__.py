@@ -3452,7 +3452,7 @@ def diag(
     if ndim == 1:
         return torch.diag_embed(self, offset)
     else:
-        return torch.diagonal(self, offset).clone()
+        return torch.diagonal_copy(self, offset)
 
 
 @register_decomposition(torch.ops.aten.diagonal, disable_meta=True)
