@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     retry_on_connect_failures,
     sandcastle_skip,
+    sandcastle_skip_if,
 )
 
 def simple_reduce_tests(rank, world_size):
@@ -196,22 +197,18 @@ class RendezvousEnvTest(TestCase):
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     @requires_ucc()
     @retry_on_connect_failures
-    def test_default_store_timeout_gloo(self):
+    def test_default_store_timeout_ucc(self):
         self._test_default_store_timeout("ucc")
 
 class ProcessGroupUCCTest(MultiProcessTestCase):
-    def _create_process_group_ucc(self, store, rank, world_size):
-        c10d.init_process_group(
-            "ucc",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store)
-        pg = c10d.distributed_c10d._get_default_group()
+    def _create_process_group_ucc(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = c10d.ProcessGroupUCC(store, self.rank, self.world_size)
+        dist.barrier(group=pg)
         return pg
 
     def setUp(self):
         super(ProcessGroupUCCTest, self).setUp()
-        # self.num_gpus = torch.cuda.device_count()
         self._spawn_processes()
 
     def tearDown(self):
@@ -223,10 +220,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
     @requires_ucc()
     def test_empty_tensors(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_ucc(
-            store, self.rank, self.world_size
-        )
+        pg = self._create_process_group_ucc()
 
         xs = [torch.FloatTensor([])]
         fut = pg.broadcast(xs).get_future()
@@ -235,11 +229,146 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
         self.assertEqual(0, output[0].numel())
         self.assertEqualIgnoreType(xs[0], output[0])
 
+    # TODO: add error check testing
+
+    def _test_broadcast_basics(self, fn):
+        pg = self._create_process_group_ucc()
+
+        def broadcast(xs, rootRank, rootTensor):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            fut = pg.broadcast(xs, opts).get_future()
+            fut.wait()
+            return fut.value()
+
+        # Every rank is root once
+        for i in range(self.world_size):
+            # Run with 1 input tensor
+            x = fn(torch.tensor([self.rank]))
+            output = broadcast([x], i, 0)
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(torch.tensor([i]), output[0])
+            
+            # TODO: UCC currently does not support multi tensor input
+
+        # Test overloaded convenience function
+        x = torch.tensor([self.rank + 1.0])
+        fut = pg.broadcast(x, root=0).get_future()
+        fut.wait()
+        result = fut.value()
+        self.assertEqual(torch.tensor([1.0]), result[0])
+
+    @requires_ucc()
+    def test_broadcast_basics(self):
+        self._test_broadcast_basics(lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_ucc()
+    def test_broadcast_basics_cuda(self):
+        self._test_broadcast_basics(lambda t: t.clone().cuda())
+
+    def _test_allreduce_basics(self, fn):
+        pg = self._create_process_group_ucc()
+
+        # Single input tests
+        tests = simple_reduce_tests(self.rank, self.world_size)
+        for (op, input, expected) in tests:
+            opts = c10d.AllreduceOptions()
+            opts.reduceOp = op
+            tensor = fn(input)
+            fut = pg.allreduce([tensor], opts).get_future()
+            fut.wait()
+            result = fut.value()
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(expected, result[0])
+
+        # TODO: UCC currently does not support multi tensor input
+
+        # Test overloaded convenience function (defaults to using sum)
+        x = fn(torch.tensor([self.rank + 1.0]))
+        fut = pg.allreduce(x).get_future()
+        fut.wait()
+        result = fut.value()
+        self.assertEqual(
+            torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]),
+            result[0],
+        )
+
+    @requires_ucc()
+    def test_allreduce_basics(self):
+        self._test_allreduce_basics(lambda t: t.clone())
+
+    # TODO: test_allreduce_basics_cuda times out locally
+
+    # TODO: allgather tests from gloo use multi tensor input, which ucc does not support currently
+
+    def _test_reduce_basics(self, fn):
+        pg = self._create_process_group_ucc()
+        for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
+            for root in range(self.world_size):
+                opts = c10d.ReduceOptions()
+                opts.reduceOp = op
+                opts.rootRank = root
+                tmp = fn(input)
+                fut = pg.reduce([tmp], opts).get_future()
+                fut.wait()
+                result = fut.value()
+                if root == self.rank:
+                    # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                    self.assertEqualIgnoreType(output, result[0])
+
+    @requires_ucc()
+    def test_reduce_basics(self):
+        self._test_reduce_basics(lambda t: t.clone())
+
+    # TODO: test_reduce_basics_cuda times out locally
+
+    @requires_ucc()
+    def test_send_recv_all_to_all(self):
+        pg = self._create_process_group_ucc()
+
+        # Preallocate tensors for input/output
+        inputs = [torch.tensor([self.rank]) for _ in range(self.world_size)]
+        outputs = [torch.tensor([-1]) for _ in range(self.world_size)]
+
+        # Issue sends
+        send_work = []
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            send_work.append(pg.send([inputs[i]], i, 0))
+
+        # Issue recvs
+        recv_work = []
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            recv_work.append(pg.recv([outputs[i]], i, 0))
+
+        # Wait for sends to complete
+        for work in send_work:
+            work.wait()
+            self.assertTrue(work.is_completed())
+
+        # Wait for recvs to complete
+        for work in recv_work:
+            work.wait()
+            self.assertTrue(work.is_completed())
+
+        # Test that every output other than our own contains the respective rank
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            self.assertEqual(torch.tensor([i]), outputs[i])
+    
+    # TODO: test_barrier_implies_wait seems to fail even after Sergey's barrier blocking fix
+
+
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @property
     def device(self):
         return "cpu"
-
 
     def setUp(self):
         super(CommTest, self).setUp()
@@ -251,6 +380,61 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             os.remove(self.file_name)
         except OSError:
             pass
+
+    # TODO: merge in sequence number support PR first
+    """
+    @requires_ucc()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_default_pg_ucc(self):
+        self._test_sequence_num_set_default_pg(backend="ucc")
+
+    @requires_ucc()
+    @skip_if_lt_x_gpu(2)
+    def test_sequence_num_set_ucc_new_group(self):
+        self._test_sequence_num_set_new_group(backend="ucc")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_ucc()
+    def test_sequence_num_incremented_ucc_default(self):
+        self._test_sequence_num_incremented_default_group("ucc")
+
+    @skip_if_lt_x_gpu(4)
+    @requires_ucc()
+    def test_sequence_num_incremented_ucc_subgroup(self):
+        if self.world_size < 4:
+            return sandcastle_skip("Test requires world_size of at least 4")
+        self._test_sequence_num_incremented_subgroup("ucc")
+    """
+
+    @requires_ucc()
+    def test_ucc_barrier_device_ids(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="ucc", rank=self.rank, world_size=self.world_size, store=store
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
+            c10d.barrier(device_ids=[self.rank])
+
+    @skip_if_lt_x_gpu(2)
+    @requires_ucc()
+    def test_ucc_warn_not_in_group(self):
+        self._test_warn_not_in_group(backend="ucc")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_ucc()
+    def test_ucc_rank_membership(self):
+        self._test_rank_membership(backend="ucc")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_ucc()
+    def test_tensor_dtype_mismatch(self):
+        self._test_tensor_dtype_mismatch(backend="ucc")
+
+    @skip_if_lt_x_gpu(2)
+    @requires_ucc()
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="ucc")
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
