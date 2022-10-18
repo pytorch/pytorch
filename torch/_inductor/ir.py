@@ -3252,7 +3252,7 @@ class Convolution(ExternKernelAlloc):
         )
 
 
-def _ProgressConvolutionFusionCreat(
+def _ProcessConvolutionFusionCreat(
     cls,
     x: "TensorBox",
     weight: "TensorBox",
@@ -3371,7 +3371,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         algorithm,
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise"
-        (inputs, constant_args, kernel_layout,) = _ProgressConvolutionFusionCreat(
+        (inputs, constant_args, kernel_layout,) = _ProcessConvolutionFusionCreat(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         constant_args = constant_args + [attr, scalars, algorithm]
@@ -3424,7 +3424,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         attr,
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
-        (inputs, constant_args, kernel_layout,) = _ProgressConvolutionFusionCreat(
+        (inputs, constant_args, kernel_layout,) = _ProcessConvolutionFusionCreat(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.require_stride1(cls.realize_input(other))
