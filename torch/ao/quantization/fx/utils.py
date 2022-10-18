@@ -161,13 +161,21 @@ def get_per_tensor_qparams(activation_post_process):
     return scale, zero_point, dtype
 
 def get_quantize_node_info(
-        activation_post_process: Callable,
-        is_decomposed_qtensor: bool
+    activation_post_process: Callable,
+    is_decomposed_qtensor: bool
 ) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
-    ''' Given an activation_post_process module,
-    return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
-    of extracted qparams from the module
-    '''
+    """ Extract information about quantize op from activation_post_process module
+    Args:
+      * `activation_post_process`: observer module instance or fake quant module instance
+        after calibration/QAT
+      * `is_decomposed_qtensor`: a boolean flag to indicate whether we want to use the
+        quantize operator for decomposed quantized tensor (torch.decomposed_quantize_per_tensor) or default/standalone
+        quantized tensor (torch.quantize_per_tensor)
+
+    Returns
+        node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
+        of extracted qparams from the module
+    """
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
     compute_dtype = None
     if hasattr(activation_post_process, "compute_dtype"):
