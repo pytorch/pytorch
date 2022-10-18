@@ -243,6 +243,7 @@ __all__ = [
     "swap_axes",  # alias for transpose
     "squeeze",
     "t",
+    "T",
     "tensor_split",
     "transpose",
     "unfold",
@@ -3619,6 +3620,19 @@ def t(a: TensorLikeType):
     return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
 
 
+# CompositeImplicitAutograd - don't register decomp
+def T(a: TensorLikeType) -> TensorLikeType:
+    # n != 2 && n != 0 is deprecated in regular PyTorch.
+    check(
+        a.ndim in (0, 2),
+        lambda: (
+            "The use of `x.T` on tensors of dimension other than 0 or 2 "
+            "to reverse their shape is not supported."
+        ),
+    )
+    return a.t()
+
+
 @register_decomposition(torch.ops.aten.transpose, disable_meta=True)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
@@ -4815,6 +4829,7 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+import torch._refs._conversions
 import torch._refs.fft
 import torch._refs.linalg
 import torch._refs.nn.functional
