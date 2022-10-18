@@ -446,6 +446,263 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   return true;
 }
 
+// Returns if a fusion cannot transformed into a consistent format since we
+// can't transform forward through view operations, for exmaple:
+//
+// tv0[I0, I1, I2]
+// tv1[I0*I1, I2] = view(tv0)
+// tv2[I0, I1*I2] = view(tv0)
+//
+// If we start transform propagation at either tv1 or tv2, it would require
+// "replaying forward" through the other. If we started at tv1 we'd have to be
+// able to take tv2[I0, I1*I2] and transform it to [I0*I1, I2], however this
+// would "undo" the view transformation which we do not support today.
+//
+// Returns true if a scenario like above is found in the fusion.
+bool requiresForwardViewReplay(Fusion* fusion, ComputeAtMap& ca_map) {
+  // Track the uses of the rfactor domains in the fusion. If an rfactor domain
+  // is used in more than one way it means the above situation is being
+  // encountered.
+  //
+  // tv1 root: [I0rf, I1rf, I2] -> rfactor [I0*I1rf, I2]
+  // tv1 root: [I0, I1rf, I2rf] -> rfactor [I0, I1*I2rf]
+  //
+  // Here we can see I1rf is used in two view transformations, one to I0*I1rf,
+  // and the other to I1*I2rf.
+
+  // Track the transformation each exact disjoint rfactor set is used in. If
+  // more than one is detected we can't support transforming the fusion into a
+  // consistent format.
+  std::unordered_map<std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>, Expr*>
+      unique_exact_uses;
+
+  // Don't check compute uses directly, as IterDomain->uses() isn't protected
+  // from going outside the TensorViews between registered inputs and outputs of
+  // the fusion. If there are view operations defined in the fusion container
+  // (because of how segmentation works) but not between registered input and
+  // outputs, that could be picked up as inconsistent view transformations.
+  //
+  // It would be unlikely this would be picked up as a conflict as we check
+  // which definitions were registered in the compute at map for matching
+  // transformations. However, we may want to support scheduling after
+  // transformations which could map to those views not on the input->output
+  // path.
+
+  // Look through all definitions associated with producing rfactor outputs.
+  // Mark those as an active use of the rfactor, if two are detected, return
+  // true.
+  for (const auto& disjoint_set_shared_ptr :
+       ca_map.idGraph().exactNodes().disjointSets()) {
+    // Make sure there's at least one rfactor domain in the set, otherwise we
+    // don't need to check anything from this set.
+    if (!std::any_of(
+            disjoint_set_shared_ptr->vector().begin(),
+            disjoint_set_shared_ptr->vector().end(),
+            [](IterDomain* id) { return id->isRFactorProduct(); })) {
+      continue;
+    }
+
+    // Grab all the unique definitions detected to consume the iter domains in
+    // this set
+    auto unique_defs =
+        ca_map.uniqueExactDefinitions(disjoint_set_shared_ptr->back());
+
+    // Iterate through the all the rfactor iter domains
+    for (auto id_rfactor_product : disjoint_set_shared_ptr->vector()) {
+      if (!id_rfactor_product->isRFactorProduct()) {
+        continue;
+      }
+
+      // Grab the rfactor definition
+      auto rfactor_def = id_rfactor_product->definition();
+
+      if (rfactor_def == nullptr) {
+        // Guard segfault if there isn't a definition for this iter domain
+        continue;
+      }
+
+      // If one output of the expression is an rfactor ID all of them should be
+      auto def_outs =
+          ir_utils::filterByType<IterDomain>(rfactor_def->outputs());
+      TORCH_INTERNAL_ASSERT(
+          std::all_of(
+              def_outs.begin(),
+              def_outs.end(),
+              [](IterDomain* id) { return id->isRFactorProduct(); }),
+          "This function does not support outputs of transformations with mismatching rfactor flags. ",
+          "If one output is rfactor all should be rfactor.");
+
+      // If outputs are rfactor all the inputs should be as well. It doesn't
+      // make sense to have transforms on non-rfactor domains that produce
+      // rfactor domains.
+      auto def_inps = ir_utils::filterByType<IterDomain>(rfactor_def->inputs());
+      TORCH_INTERNAL_ASSERT(
+          std::all_of(
+              def_inps.begin(),
+              def_inps.end(),
+              [](IterDomain* id) { return id->isRFactorProduct(); }),
+          "Inputs producing an rfactor domain, should be marked as rfactor but found:\n  ",
+          rfactor_def->toString());
+
+      // Check which definition in the unique exact definition set this
+      // definition matches to:
+      for (auto unique_def : unique_defs) {
+        if (ca_map.areExactExprs(rfactor_def, unique_def)) {
+          // Check if we already have an expression that consumes an
+          // equivalent of any of the input rfactor domains. If so and it's
+          // not the already registered transformation, return true
+          for (auto inp : def_inps) {
+            auto inp_disjoint_set =
+                ca_map.disjointSetOf(inp, IdMappingMode::EXACT);
+            // Initialize the use entry for this set (if it doesn't already
+            // exist)
+            if (unique_exact_uses.find(inp_disjoint_set) ==
+                unique_exact_uses.end()) {
+              unique_exact_uses[inp_disjoint_set] = nullptr;
+            }
+
+            if (unique_exact_uses.at(inp_disjoint_set) == nullptr) {
+              // If expression is null pointer register this unique_def
+              unique_exact_uses[inp_disjoint_set] = unique_def;
+            } else if (!ca_map.areExactExprs(
+                           unique_exact_uses[inp_disjoint_set], unique_def)) {
+              // Two transformations that don't match on matching rfactor
+              // domains found, return true.
+              return true;
+            }
+          }
+          // Expression already mapped, stop trying to match expressions
+          break;
+        }
+      }
+    }
+  }
+  // No inconsistent rfactor uses found, we can safely transform this graph.
+  return false;
+}
+
+// Returns if view interferes with how we want to treat the reference, being at
+// least a 2D reduction schedule but maybe a 3D reduction schedule.
+bool reductionInterferingView(
+    Fusion* fusion,
+    const ComputeAtMap& ca_map,
+    TensorView* reduction_reference) {
+  // Make sure the view doesn't interfere with how we'll want to schedule
+  // it. If we might want to do a 3D scheduler make sure views are disjoint
+  // based on what the 3D scheduler's merges would be.
+
+  // Utility to take dimensions out of the vector that we've already
+  // processed or don't want to process.
+  auto remove_dims = [](const std::vector<IterDomain*>& dims,
+                        std::unordered_set<IterDomain*> to_remove) {
+    std::vector<IterDomain*> dims_removed;
+    std::copy_if(
+        dims.begin(),
+        dims.end(),
+        std::back_inserter(dims_removed),
+        [&](IterDomain* id) { return to_remove.find(id) == to_remove.end(); });
+    return dims_removed;
+  };
+
+  // Remove trivial reduction dimensions
+  auto mapped_to_trivial_reduction =
+      scheduler_utils::getTrivialReductionMap(fusion);
+
+  std::vector<IterDomain*> dims = remove_dims(
+      reduction_reference->getMaybeRFactorDomain(),
+      mapped_to_trivial_reduction);
+
+  // The disjoint groups we need for this scheduler
+  std::vector<std::vector<IterDomain*>> groups;
+
+  // Do this three times as we could have a 3D scheduler at maximum
+  for (auto dimension : c10::irange(3)) {
+    // Tracker for this group
+    std::vector<IterDomain*> current_dims;
+
+    // Tracker of what we've already processed to remove from dims
+    std::unordered_set<IterDomain*> processed;
+
+    for (auto i : c10::irange(dims.size())) {
+      auto dim_i = dims.size() - i - 1;
+      if (dims[dim_i]->isReduction() != dims[dims.size() - 1]->isReduction()) {
+        if (dimension == 0) {
+          // First dimension must be contiguous merges
+          break;
+        } else {
+          // Other dimensions can be non contiguous merges
+          continue;
+        }
+      }
+      current_dims.push_back(dims[dim_i]);
+      processed.emplace(dims[dim_i]);
+    }
+
+    // Don't add empty group (would happen if it's a 2D scheduler not 3D)
+    if (current_dims.size() > 0) {
+      groups.push_back(current_dims);
+      dims = remove_dims(dims, processed);
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      dims.empty(), "Error processing ", dims, " in registry.cpp.");
+
+  // Make sure groups are disjoint based on view
+
+  auto disjoint_view_sets = scheduler_utils::disjointViewSets(fusion);
+  auto disjoint_set_information = scheduler_utils::getDisjointViewSetsOf(
+      fusion, reduction_reference, disjoint_view_sets);
+
+  // Convert id's in groups to disjoint_set_ids of disjoint_set_information
+  std::vector<std::vector<int>> disjoint_groups;
+
+  for (auto group : groups) {
+    std::vector<int> disjoint_id_sets;
+    for (auto id : group) {
+      auto find_it = std::find(
+          reduction_reference->getMaybeRFactorDomain().begin(),
+          reduction_reference->getMaybeRFactorDomain().end(),
+          id);
+      TORCH_INTERNAL_ASSERT(
+          find_it != reduction_reference->getMaybeRFactorDomain().end(),
+          "Issue with view analysis on reduction like schedule, with reference: ",
+          reduction_reference->toString());
+      auto rfactor_pos = std::distance(
+          reduction_reference->getMaybeRFactorDomain().begin(), find_it);
+      TORCH_INTERNAL_ASSERT(
+          rfactor_pos < disjoint_set_information.disjoint_set_ids.size(),
+          "Error computing disjoint group on the rfactor domain of ",
+          reduction_reference->toString());
+      disjoint_id_sets.push_back(
+          disjoint_set_information.disjoint_set_ids[rfactor_pos]);
+    }
+    disjoint_groups.push_back(disjoint_id_sets);
+  }
+
+  // Make sure there's no intersection between the groups, otherwise view
+  // will interfere with the schedule. TODO: Make this better complexity,
+  // since it should be relatively small int vectors of a small total nDims,
+  // not too worried about it now.
+
+  for (auto first_dim_i : c10::irange(disjoint_groups.size())) {
+    for (auto second_dim_i = first_dim_i + 1;
+         second_dim_i < disjoint_groups.size();
+         ++second_dim_i) {
+      auto first_group = disjoint_groups[first_dim_i];
+      auto second_group = disjoint_groups[second_dim_i];
+      for (auto first_disjoint_id : first_group) {
+        for (auto second_disjoint_id : second_group) {
+          if (first_disjoint_id == second_disjoint_id) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 void SchedulerRuntimeInfo::initialize(
@@ -980,15 +1237,6 @@ class ReductionScheduler : public SchedulerEntry {
 
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
-    // Temporarily disallow view in reduction scheduler
-    // TODO Add more testing before enabling
-    auto view_tvs = scheduler_utils::getViewTVs(fusion);
-    if (view_tvs.size() > 0) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction, "No support for view op");
-      return false;
-    }
-
     // Needs at least one non-trivial reduction to consider.
     if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
@@ -1004,13 +1252,6 @@ class ReductionScheduler : public SchedulerEntry {
       return false;
     }
 
-    if (findTransposeOps(fusion).size() > 0) {
-      // Use pointwise logic
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction, "No support for transpose op");
-      return false;
-    }
-
     if (hasNonUniqueBcast(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Reduction,
@@ -1018,15 +1259,23 @@ class ReductionScheduler : public SchedulerEntry {
       return false;
     }
 
-    // Persistent scheduler simply uses reduction_tvs[0] as the reference, if
-    // that changes, this needs to be changed. Second check here may be overly
-    // conservative.
-    if (SchedulerTopologyChecker::hasViewNotBeforeRef(
-            fusion, {reduction_tvs[0]}) ||
-        !scheduler_utils::allMatchingViews(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Reduction, "Unsupported view fusion.");
-      return false;
+    if (ir_utils::getViewOps(fusion).size() > 0) {
+      ComputeAtMap ca_map(fusion);
+      if (requiresForwardViewReplay(fusion, ca_map)) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Reduction,
+            "Fusion requires view being reversible.");
+        return false;
+      }
+
+      // Reduction scheduler simply uses reduction_tvs[0] as the reference, if
+      // that changes, this needs to be changed.
+      if (reductionInterferingView(fusion, ca_map, reduction_tvs[0])) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Reduction,
+            "View may interfere with reduction scheduling.");
+        return false;
+      }
     }
 
     // Make sure reduction axes are consistent through the fusion
@@ -1226,12 +1475,14 @@ class PointWiseScheduler : public SchedulerEntry {
       return false;
     }
 
-    if (!scheduler_utils::allMatchingViews(fusion) &&
-        SchedulerTopologyChecker::hasViewNotBeforeRef(
-            fusion, {getReferenceTensorView(fusion)})) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::PointWise, "Unsupported view fusion.");
-      return false;
+    if (ir_utils::getViewOps(fusion).size() > 0) {
+      ComputeAtMap ca_map(fusion);
+      if (requiresForwardViewReplay(fusion, ca_map)) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::PointWise,
+            "Fusion requires view being reversible.");
+        return false;
+      }
     }
 
     auto reduction_ops =
@@ -1312,13 +1563,6 @@ class PersistentKernelScheduler : public SchedulerEntry {
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
 
-    auto view_tvs = scheduler_utils::getViewTVs(fusion);
-    if (view_tvs.size() > 0) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "no support for view");
-      return false;
-    }
-
     if (hasNonUniqueBcast(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Persistent,
@@ -1336,21 +1580,23 @@ class PersistentKernelScheduler : public SchedulerEntry {
       return false;
     }
 
-    // Persistent scheduler simply uses reduction_tvs[0] as the reference, if
-    // that changes, this needs to be changed. Second check here may be overly
-    // conservative.
-    if (SchedulerTopologyChecker::hasViewNotBeforeRef(
-            fusion, {reduction_tvs[0]}) ||
-        !scheduler_utils::allMatchingViews(fusion)) {
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "Unsupported view fusion.");
-    }
+    if (ir_utils::getViewOps(fusion).size() > 0) {
+      ComputeAtMap ca_map(fusion);
+      if (requiresForwardViewReplay(fusion, ca_map)) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Persistent,
+            "Fusion requires view being reversible.");
+        return false;
+      }
 
-    if (findTransposeOps(fusion).size() > 0) {
-      // Use pointwise logic
-      scheduler_debug_utils::canScheduleRejectReason(
-          ScheduleHeuristic::Persistent, "no support for transpose");
-      return false;
+      // Persistent scheduler simply uses reduction_tvs[0] as the reference, if
+      // that changes, this needs to be changed.
+      if (reductionInterferingView(fusion, ca_map, reduction_tvs[0])) {
+        scheduler_debug_utils::canScheduleRejectReason(
+            ScheduleHeuristic::Persistent,
+            "View may interfere with normalization scheduling.");
+        return false;
+      }
     }
 
     // Before examining the reduction axes want to quickly

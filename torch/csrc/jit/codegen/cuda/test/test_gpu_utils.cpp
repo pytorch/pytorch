@@ -106,36 +106,6 @@ TEST_F(NVFuserTest, FusionDisjointViewSet_CUDA) {
       disjoint_exact.strictAreMapped(tv0->axis(1), tv0->axis(2)));
 }
 
-TEST_F(NVFuserTest, FusionMatchingViews_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  int x = 2, y = 3, z = 4;
-
-  auto tv0 = makeConcreteTensor({x, y, z});
-  fusion.addInput(tv0);
-
-  auto tv1 = view(tv0, {x, y, z}, {x * y, z});
-
-  auto tv2 = sin(tv1);
-
-  auto tv3 = view(tv2, {x * y, z}, {x, y * z});
-  fusion.addOutput(tv3);
-
-  auto tv4 = makeConcreteTensor({x, y, z});
-  fusion.addInput(tv4);
-
-  auto tv5 = view(tv4, {x, y, z}, {x, y * z});
-  fusion.addOutput(tv5);
-
-  // Link 0 and 3 together for view analysis done based on before the views
-  // actually happened.
-  auto tv6 = add(tv0, tv4);
-  fusion.addOutput(tv6);
-
-  TORCH_INTERNAL_ASSERT(!scheduler_utils::allMatchingViews(&fusion));
-}
-
 TEST_F(NVFuserTest, FusionBroadcastViewMultiples_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

@@ -165,6 +165,14 @@ bool IterDomainGraph::exprsMap(
   return true;
 }
 
+// Given first and second Exprs "match"
+//   Expr type matches
+//   IterDomain's in the inputs and outputs exact match, (including argument
+//     position positions)
+//   Paramters like Split's factor "match" (exact match on integers could be
+//     better, as today it will just check it's the same symbol or evaluated to
+//     the same constant. However, we know all the extents of all the
+//     IterDomain's that exact map with eachother are the same value.
 void IterDomainGraph::mapThroughExpr(Expr* first, Expr* second, bool forward) {
   if (first == nullptr || second == nullptr) {
     return;
@@ -194,7 +202,37 @@ void IterDomainGraph::mapThroughExpr(Expr* first, Expr* second, bool forward) {
 
 namespace {
 
-// Returns a pair of mapped IDs
+// Returns the first pair of id's in ids detected to match eachother on the
+// permissive map of the ID graph. TODO: what this is really looking for is if
+// there's any overlapping between the iter domains in the provided set.
+//
+// i.e. if we have:
+// tv0 = arange(6).view({3, 2})
+// tv1 = tv0[3, 2].t()
+// tv2 = tv0[3, 2].view({2, 3})
+// tv3 = tv1 + tv2
+//
+// Then we can see this overlap in the tv3 expression as:
+//
+// tv0 = { {0, 1, 2},
+//         {3, 4, 5} }
+//
+// tv1 = { {0, 3},
+//         {1, 4},
+//         {2, 5} }
+//
+// tv2 = { {0, 1},
+//         {2, 3},
+//         {4, 5} }
+//
+// The elements in tv1 {3, 1, 4, 2}, map respectively to the elements in tv2 {1,
+// 2, 3, 4}. The reason this is so important is it means that generating tv3 is
+// no longer a trivially parallelizable problem (if we include the dag all the
+// way to tv0). So tv0's axes cannot be inlined across both the tv0 and tv1
+// path. This breaks some assumptions we have today in schedulers that will
+// assume tv2 can be trivially inlined/parallelized. Instead we'd need to take
+// into consideration the effective communication going on here, so that we pull
+// multiple values of tv0 to compute tv3.
 c10::optional<std::pair<IterDomain*, IterDomain*>> detectMappablePair(
     const std::vector<IterDomain*>& ids,
     const IterDomainGraph& id_graph,
@@ -650,6 +688,7 @@ ComputeAtMap::ComputeAtMap(Fusion* fusion)
 void ComputeAtMap::build(Fusion* fusion) {
   trivial_reduction_info_.build(fusion);
   buildConcreteIds();
+  buildUniqueExactExprMaps();
 }
 
 void ComputeAtMap::validateAndPropagatePType() {
@@ -1062,6 +1101,117 @@ void ComputeAtMap::buildConcreteIds() {
     auto first_id = disjoint_set_shared_ptr->vector().front();
     auto concrete_id = computeConcreteId(first_id, IdMappingMode::LOOP);
     concrete_id_cache_[disjoint_set_shared_ptr] = concrete_id;
+  }
+}
+
+bool ComputeAtMap::areExactExprs(Expr* expr_1, Expr* expr_2) {
+  if (expr_1->getExprType() != expr_2->getExprType()) {
+    return false;
+  }
+
+  if (expr_1->isA<Swizzle2D>()) {
+    auto swizzle_1 = expr_1->as<Swizzle2D>();
+    auto swizzle_2 = expr_2->as<Swizzle2D>();
+    if (swizzle_1->swizzleType() != swizzle_2->swizzleType() ||
+        swizzle_1->swizzleMode() != swizzle_2->swizzleMode()) {
+      return false;
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      expr_1->inputs().size() == expr_2->inputs().size() &&
+          expr_1->outputs().size() == expr_2->outputs().size(),
+      "Expr traversal doesn't support variable number of inputs and outputs.");
+
+  for (auto input_i : c10::irange(expr_1->inputs().size())) {
+    if (expr_1->inputs()[input_i]->isA<IterDomain>() &&
+        !areMapped(
+            expr_1->inputs()[input_i]->as<IterDomain>(),
+            expr_2->inputs()[input_i]->as<IterDomain>(),
+            IdMappingMode::EXACT)) {
+      // Inputs don't exact map in the right order
+      return false;
+    }
+  }
+
+  for (auto output_i : c10::irange(expr_1->outputs().size())) {
+    if (expr_1->outputs()[output_i]->isA<IterDomain>() &&
+        !areMapped(
+            expr_1->outputs()[output_i]->as<IterDomain>(),
+            expr_2->outputs()[output_i]->as<IterDomain>(),
+            IdMappingMode::EXACT)) {
+      // Outputs don't exact map in the right order
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void ComputeAtMap::buildUniqueExactExprMaps() {
+  // Start by building definitions
+  for (const auto& disjoint_set_shared_ptr :
+       id_graph_.exactNodes().disjointSets()) {
+    std::vector<Expr*> definitions;
+
+    for (auto id : disjoint_set_shared_ptr->vector()) {
+      if (id->definition() != nullptr) {
+        bool match = false;
+        for (auto recorded_def : definitions) {
+          if (areExactExprs(id->definition(), recorded_def)) {
+            match = true;
+            break;
+          }
+        }
+        if (!match) {
+          definitions.push_back(id->definition());
+        }
+      }
+    }
+    unique_exact_definitions_[disjoint_set_shared_ptr] = definitions;
+  }
+
+  // Use definitions to build uses
+  for (const auto& disjoint_set_shared_ptr :
+       id_graph_.exactNodes().disjointSets()) {
+    auto definition_it =
+        unique_exact_definitions_.find(disjoint_set_shared_ptr);
+
+    if (definition_it == unique_exact_definitions_.end()) {
+      continue;
+    }
+
+    const auto& definitions = definition_it->second;
+
+    for (auto definition : definitions) {
+      auto inp_ids = ir_utils::filterByType<IterDomain>(definition->inputs());
+      for (auto inp : inp_ids) {
+        auto inp_disjoint_set_shared_ptr =
+            disjointSetOf(inp, IdMappingMode::EXACT);
+        // Initialize uses entry
+        if (unique_exact_uses_.find(inp_disjoint_set_shared_ptr) ==
+            unique_exact_uses_.end()) {
+          unique_exact_uses_[inp_disjoint_set_shared_ptr] = {};
+        }
+
+        auto& uses = unique_exact_uses_.at(inp_disjoint_set_shared_ptr);
+
+        bool already_added = false;
+        for (auto other_use : uses) {
+          if (areExactExprs(definition, other_use)) {
+            already_added = true;
+            break;
+          }
+        }
+        if (already_added) {
+          continue;
+        }
+
+        if (!already_added) {
+          uses.push_back(definition);
+        }
+      }
+    }
   }
 }
 

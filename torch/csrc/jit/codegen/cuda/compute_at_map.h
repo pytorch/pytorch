@@ -177,6 +177,31 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   //! guarenteed to return iter domains in the same disjoint set.
   IterDomain* getConcreteMappedID(IterDomain* id, IdMappingMode mode) const;
 
+  //! Returns a list of expressions that produce the iter domains of all exact
+  //! mapped id's to 'id'. Expressions that are the same exact transformations
+  //! are deduplicated in the returned expressions.
+  std::vector<Expr*> uniqueExactDefinitions(IterDomain* id) const {
+    auto disjoint_set = disjointSetOf(id, IdMappingMode::EXACT);
+    auto unique_exact_definition_it =
+        unique_exact_definitions_.find(disjoint_set);
+    if (unique_exact_definition_it == unique_exact_definitions_.end()) {
+      return {};
+    }
+    return unique_exact_definition_it->second;
+  }
+
+  //! Returns a list of expressions that *use* the iter domains of all exact
+  //! mapped id's to 'id'. Expressions that are the same exact transformations
+  //! are deduplicated in the returned expressions.
+  std::vector<Expr*> uniqueExactUses(IterDomain* id) const {
+    auto disjoint_set = disjointSetOf(id, IdMappingMode::EXACT);
+    auto unique_exact_use_it = unique_exact_uses_.find(disjoint_set);
+    if (unique_exact_use_it == unique_exact_uses_.end()) {
+      return {};
+    }
+    return unique_exact_use_it->second;
+  }
+
   // Prints mapping information, forwards to an internal IterDomainGraph
   std::string toString() const;
 
@@ -211,6 +236,16 @@ class TORCH_CUDA_CU_API ComputeAtMap {
       DoubleBufferLoopStage double_buffer_loop_stage =
           DoubleBufferLoopStage::NotApplicable) const;
 
+  // Returns if expr_1 and expr_2 have exact mapped IterDomains in
+  // inputs/outputs (order matters) and if the expressions have matching
+  // parameters.
+  bool areExactExprs(Expr* expr_1, Expr* expr_2);
+
+  // Produce the disjoint set containing provided id with mapping mode.
+  const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& disjointSetOf(
+      IterDomain* id,
+      IdMappingMode mode) const;
+
  private:
   // Build id_graph_
   void build(Fusion* fusion);
@@ -220,10 +255,8 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   IterDomain* computeConcreteId(IterDomain* id, IdMappingMode mode);
   void buildConcreteIds();
 
-  // Produce the disjoint set containing provided id with mapping mode.
-  const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& disjointSetOf(
-      IterDomain* id,
-      IdMappingMode mode) const;
+  // Relies on concrete_id_cache_, buildConcreteIds() must be run before this.
+  void buildUniqueExactExprMaps();
 
   // Should be built once and never modified again.
   IterDomainGraph id_graph_;
@@ -238,6 +271,23 @@ class TORCH_CUDA_CU_API ComputeAtMap {
       std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>,
       IterDomain*>
       concrete_id_cache_;
+
+  // Unique expressions operating on exact disjoint set. For each IterDomain in
+  // each exact disjoint set will log its definition in the std::vector<Expr*>.
+  // If another expression is already in the set where inputs and outputs
+  // exactly match with the expression to add along with the other parameters of
+  // the transformation (like split's factor, or swizzles types) then the
+  // expression will not be added as it would be an "duplicate" transformation.
+  std::unordered_map<
+      std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>,
+      std::vector<Expr*>>
+      unique_exact_definitions_;
+
+  // Same as unique_exact_definitions_ but for uses instead of definitions
+  std::unordered_map<
+      std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>,
+      std::vector<Expr*>>
+      unique_exact_uses_;
 
   //! Allocated Loop index variable through the CA map.
   //!   only valid for disjoint sets on the loop ca map.

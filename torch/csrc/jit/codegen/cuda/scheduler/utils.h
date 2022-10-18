@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -289,6 +290,41 @@ std::vector<TensorView*> getInputsOutputsWithInnerDim(
     bool inner_only,
     bool vectorize_pass);
 
+// Holder return struct for the below function.
+struct DisjointViewSetInfo {
+  // const* to the disjoint set in disjoint_view_set passed in to
+  // getDisjointViewSetsOf each iterdomain in the rfactor of ref is mapped to.
+  //
+  // WARNING: these pointers are relative to the disjoint_view_set reference
+  // passed into getDisjointViewSetsOf it's the user's responsibility to
+  // maintain the lifetime of that reference to match this vector.
+  std::vector<const VectorOfUniqueEntries<IterDomain*>*> disjoint_sets_of_ref;
+
+  // Unique ID associated to the disjoint view group the rfactor id belongs to
+  // in disjoint_sets_of_ref. It's straight forward to map from
+  // disjoint_sets_of_ref to the vector, but not the other way around.
+  std::vector<int> disjoint_set_ids;
+
+  // TensorView reference the above vectors are relative to.
+  TensorView* ref;
+};
+
+// Returns disjoint view sets mapped onto the given reference. Returns a pair
+// of vectors of size rfactorDomain of reference. Vector of
+// VectorOfUniqueEntries returns a const* to the disjoint set in
+// disjoint_view_set the iterdomain is mapped to. Integer vector represents
+// which disjoint view group the rfactor id belongs to. It's straight forward
+// to map from the former to the latter, but not the latter to former.
+//
+// Since we return a const* to entries in disjoint_view_set, it must be passed
+// in as a reference. Algorithm is N^2 based on number of dims in reference,
+// but generating the disjoint view set is likely the limiter on perf of this
+// function.
+DisjointViewSetInfo getDisjointViewSetsOf(
+    Fusion* fusion,
+    TensorView* of,
+    DisjointSets<IterDomain*>& disjoint_view_set);
+
 // Structure to hold byte multiples for break points. I.e. if we have the
 // tensors:
 // T0[I0, I1] float
@@ -516,11 +552,6 @@ struct TORCH_CUDA_CU_API BoundedDirectionalTransformPropagator {
 // Warning: This pass generates the IdGraphs, not intended for use at runtime.
 TORCH_CUDA_CU_API DisjointSets<IterDomain*> disjointViewSets(Fusion* fusion);
 
-// Return if all trasnformations in all views match.
-// TODO: Should this be moved to registry.cpp/.h?
-// Warning: This pass generates the IdGraphs, not intended for use at runtime.
-TORCH_CUDA_CU_API bool allMatchingViews(Fusion* fusion);
-
 // Makes sure that there are no group id's left of pos that match right of pos.
 // e.g.
 // [1, 0, 0] pos 2 would return false
@@ -535,6 +566,10 @@ TORCH_CUDA_CU_API bool breakIsDisjoint(std::vector<int> group_ids, int pos);
 // This is somewhat similar to orderTiledConcreteIdAsRoot
 TORCH_CUDA_CU_API std::unordered_map<int, int> domainReorderAsRfactorMap(
     TensorView* tv);
+
+// Assumes view's are consistent as detected by
+// registery.cpp::requiresForwardViewReplay returning false
+void propagateViewTransforms(Fusion* fusion, const ComputeAtMap& ca_map);
 
 } // namespace scheduler_utils
 } // namespace cuda

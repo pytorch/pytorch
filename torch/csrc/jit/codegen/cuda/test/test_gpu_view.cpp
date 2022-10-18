@@ -1368,7 +1368,6 @@ TEST_F(NVFuserTest, FusionPwiseViewSchedule_CUDA) {
   auto tv5 = add(tv0, tv3);
   fusion.addOutput(tv5);
 
-  TORCH_INTERNAL_ASSERT(scheduler_utils::allMatchingViews(&fusion));
   {
     TransformPropagator propagator(tv4);
     MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
@@ -1435,7 +1434,6 @@ TEST_F(NVFuserTest, FusionSumViewSchedule_CUDA) {
   auto tv6 = add(tv0, tv3);
   fusion.addOutput(tv6);
 
-  TORCH_INTERNAL_ASSERT(scheduler_utils::allMatchingViews(&fusion));
   {
     TransformPropagator propagator(tv4);
     MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
@@ -1722,6 +1720,100 @@ TEST_F(NVFuserTest, FusionViewMagicSchedule5_CUDA) {
                   .params->isA<PointwiseParams>());
 
   testValidate(&fusion, cg_outputs, {t0, t3}, {t6}, __LINE__, __FILE__);
+}
+
+// View with 3D reduction scheduling
+TEST_F(NVFuserTest, FusionViewMagicSchedule6_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int v = 3, w = 5, x = 42, y = 7, z = 9;
+
+  auto tv0 = makeConcreteTensor({w, v, x, y, z});
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = view(tv1, {w, v, x, y, z}, {v * w, x, y * z});
+
+  auto tv3 = makeConcreteTensor({v, w, x, z, y});
+  fusion.addInput(tv3);
+  auto tv4 = cos(tv3);
+  auto tv5 = view(tv4, {v, w, x, z, y}, {v * w, x, y * z});
+
+  auto tv6 = add(tv2, tv5);
+  auto tv7 = sum(tv6, {0, 2});
+  fusion.addOutput(tv7);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({w, v, x, y, z}, options);
+  auto t1 = sin(t0);
+  auto t2 = at::native::view(t1, {v * w, x, y * z});
+  at::Tensor t3 = at::randn({v, w, x, z, y}, options);
+  auto t4 = cos(t3);
+  auto t5 = at::native::view(t4, {v * w, x, y * z});
+  auto t7 = add(t2, t5).sum(2).sum(0);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  // Collect the heuristic params
+  executor_cache.profile(true);
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t3});
+
+  TORCH_CHECK(!executor_cache.getMostRecentKernelRuntime()->isSegmented());
+  TORCH_CHECK(executor_cache.getMostRecentExecutorInfo()
+                  .params->isA<ReductionParams>());
+
+  testValidate(&fusion, cg_outputs, {t0, t3}, {t7}, __LINE__, __FILE__);
+}
+
+// View with 3D normalization scheduling
+TEST_F(NVFuserTest, FusionViewMagicSchedule7_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int v = 3, w = 5, x = 42, y = 7, z = 9;
+
+  auto tv0 = makeConcreteTensor({w, v, x, y, z});
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = view(tv1, {w, v, x, y, z}, {v * w, x, y * z});
+
+  auto tv3 = makeConcreteTensor({v, w, x, z, y});
+  fusion.addInput(tv3);
+  auto tv4 = cos(tv3);
+  auto tv5 = view(tv4, {v, w, x, z, y}, {v * w, x, y * z});
+
+  auto tv6 = add(tv2, tv5);
+  auto tv7 = sum(tv6, {0, 2});
+  auto tv8 = broadcast(tv7, {true, false, true});
+  auto tv9 = add(tv6, tv8);
+  fusion.addOutput(tv9);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({w, v, x, y, z}, options);
+  auto t1 = sin(t0);
+  auto t2 = at::native::view(t1, {v * w, x, y * z});
+  // This might trigger transpose kernel.
+  at::Tensor t3 = at::randn({v, w, x, z, y}, options);
+  auto t4 = cos(t3);
+  auto t5 = at::native::view(t4, {v * w, x, y * z});
+  auto t6 = add(t2, t5);
+  auto t7 = t6.sum(2).sum(0);
+  auto t8 = t7.unsqueeze(-1).unsqueeze(0);
+  auto t9 = t6 + t8;
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  // Collect the heuristic params
+  executor_cache.profile(true);
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t3});
+
+  TORCH_CHECK(!executor_cache.getMostRecentKernelRuntime()->isSegmented());
+  TORCH_CHECK(executor_cache.getMostRecentExecutorInfo()
+                  .params->isA<ReductionParams>());
+
+  testValidate(&fusion, cg_outputs, {t0, t3}, {t9}, __LINE__, __FILE__);
 }
 
 // Make sure different views that are consumed by the reference are segmented
