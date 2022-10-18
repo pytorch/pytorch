@@ -215,9 +215,9 @@ void initDispatchBindings(PyObject* module) {
           py::arg("alias_analysis") = "")
       .def(
           "fallback_fallthrough",
-          [](py::object self, c10::DispatchKey dispatch) {
+          [](py::object self, const char* dispatch) {
             self.cast<torch::Library&>().fallback(
-                torch::dispatch(dispatch, CppFunction::makeFallthrough()));
+                dispatch_str(dispatch, CppFunction::makeFallthrough()));
             return self;
           },
           "",

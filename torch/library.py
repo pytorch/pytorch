@@ -2,7 +2,6 @@ from ._ops import OpOverload
 from typing import Set
 import traceback
 import torch
-import os
 
 __all__ = ['Library', 'impl', 'define']
 
