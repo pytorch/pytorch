@@ -42,7 +42,7 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
   return pythonTorchFunctionState;
 }
 
-bool function_mode_enabled() {
+bool torch_function_mode_enabled() {
   return PythonTorchFunctionTLS::stack_len() > 0;
 }
 

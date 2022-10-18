@@ -612,7 +612,7 @@ static PyObject* is_torch_function_mode_enabled(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  if (at::impl::function_mode_enabled()) {
+  if (at::impl::torch_function_mode_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;

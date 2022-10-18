@@ -1220,7 +1220,6 @@ class TestTorchFunctionMode(TestCase):
             with A("layer2"):
                 torch.empty([])
 
-        print(out)
         self.assertEqual(out, ["layer2", "layer1"])
 
     def test_nested_same_mode(self):

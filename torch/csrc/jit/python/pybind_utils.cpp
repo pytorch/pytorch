@@ -753,7 +753,7 @@ py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0 || at::impl::function_mode_enabled()) {
+  if (overloaded_args.size() > 0 || at::impl::torch_function_mode_enabled()) {
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();

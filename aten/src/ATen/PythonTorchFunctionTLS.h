@@ -28,7 +28,7 @@ struct TORCH_API PythonTorchFunctionTLS {
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
 };
 
-TORCH_API bool function_mode_enabled();
+TORCH_API bool torch_function_mode_enabled();
 
 } // namespace impl
 } // namespace at
