@@ -1555,8 +1555,24 @@ def sample_inputs_adjoint(self, device, dtype, requires_grad, **kwargs):
 def sample_inputs_T(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
-    shapes = ((), (M, M))
+    shapes = ((), (M, M), (M, L))
     return (SampleInput(make_arg(shape)) for shape in shapes)
+
+def error_inputs_T(self, device, has_ndims_error=False):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # Deprecated behavior in regular PyTorch, but throws an error in primTorch:
+    # https://github.com/pytorch/pytorch/issues/86968
+    if has_ndims_error:
+        # ndims == 1
+        yield ErrorInput(SampleInput(make_arg(M)),
+                         error_regex=(r'The use of `x\.T` on tensors of dimension other than 0 or 2 '
+                                      r'to reverse their shape is not supported\.'))
+
+        # ndims > 2
+        yield ErrorInput(SampleInput(make_arg(M, S, L)),
+                         error_regex=(r'The use of `x\.T` on tensors of dimension other than 0 or 2 '
+                                      r'to reverse their shape is not supported\.'))
 
 
 def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -3491,9 +3507,9 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
-    make_arg = partial(make_tensor, device=device, dtype=dtype,
-                       requires_grad=requires_grad, low=-5, high=5)
-    return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
+    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
+               requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
+    return tensors
 
 def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
@@ -4556,15 +4572,18 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
     # create a helper function wrapping `make_tensor`
-    make_input = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_input = partial(make_tensor, dtype=dtype, device=device, low=-1, high=1)
+
     batches = [(), (0, ), (2, ), (2, 1)]
     ns = [5, 2, 0]
     tf = [True, False]
     for batch, (m, n), left, transpose in product(batches, product(ns, ns), tf, tf):
-        reflectors = make_input((*batch, m, n))
-        tau = make_input((*batch, min(m, n)))
+        input = make_input((*batch, m, n))
+        reflectors, tau = torch.geqrf(input)
+        reflectors.requires_grad_(requires_grad)
+        tau.requires_grad_(requires_grad)
         other_matrix_shape = (m, n) if left else (n, m)
-        other = make_input((*batch, *other_matrix_shape))
+        other = make_input((*batch, *other_matrix_shape), requires_grad=requires_grad)
         yield SampleInput(reflectors, tau, other, left=left, transpose=transpose)
 
 def sample_inputs_symeig(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -4667,19 +4686,21 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     tensor_1d = partial(make_tensor, (S,), device=device, dtype=dtype,
                         requires_grad=requires_grad)
 
-    yield SampleInput(tensor_nd())
-    yield SampleInput(tensor_nd(), dim=1)
-    yield SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True)
-    yield SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True)
-    yield SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False)
+    return [
+        SampleInput(tensor_nd()),
+        SampleInput(tensor_nd(), dim=1),
+        SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True),
+        SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True),
+        SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False),
 
-    yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
-    yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
-    yield SampleInput(tensor_nd(), dim=None, correction=None)
+        SampleInput(tensor_nd(), dim=(1,), correction=S // 2),
+        SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True),
 
-    # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-    yield SampleInput(tensor_nd(), True)
-    yield SampleInput(tensor_nd(), False)
+        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+        SampleInput(tensor_nd(), True),
+        SampleInput(tensor_nd(), False),
+        SampleInput(tensor_nd(), dim=None, correction=None),
+    ]
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
@@ -5226,6 +5247,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
         (shape, dict(ignore_index=1)),
     ]
 
+    sample_inputs = []
     for (input_shape, kwargs), probabilities_target in itertools.product(input_shape_and_kwargs, (False, True)):
         input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5255,7 +5277,9 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 # make sure at least one item in target is not ignored
                 target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
 
-        yield SampleInput(input, target, **kwargs)
+        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
+
+    return sample_inputs
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -5361,8 +5385,6 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S)))
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
-                       high=None, requires_grad=requires_grad)
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5377,13 +5399,15 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
+    sample_inputs = []
     for lhs_shape, rhs_shape in test_cases:
-        lhs = make_arg(lhs_shape)
-        rhs = make_arg(rhs_shape)
+        lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
         if not is_rmatmul:
-            yield SampleInput(lhs, rhs)
+            sample_inputs.append(SampleInput(lhs, args=(rhs,)))
         else:
-            yield SampleInput(rhs, lhs)
+            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
+    return tuple(sample_inputs)
 
 
 def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
@@ -9273,7 +9297,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            ),
     OpInfo('istft',
-           dtypes=floating_and_complex_types(),
+           dtypes=complex_types(),
            sample_inputs_func=sample_inputs_istft,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -9931,11 +9955,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True,
-           decorators=(
-               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
-           )),
+           supports_fwgrad_bwgrad=True),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
@@ -9943,11 +9963,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True,
-           decorators=(
-               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
-           )),
+           supports_fwgrad_bwgrad=True),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
            ref=np.meshgrid,
@@ -12227,13 +12243,14 @@ op_db: List[OpInfo] = [
     OpInfo('ormqr',
            op=torch.ormqr,
            dtypes=floating_and_complex_types(),
-           supports_autograd=False,
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=sample_inputs_ormqr,
            error_inputs_func=error_inputs_ormqr,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # ormqr does not support forward when complex inputs require grad
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            )),
@@ -13860,6 +13877,34 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
         )),
     UnaryUfuncInfo(
+        'cdouble',
+        op=torch.Tensor.cdouble,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+        )),
+    UnaryUfuncInfo(
+        'cfloat',
+        op=torch.Tensor.cfloat,
+        dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_conversion,
+        skips=(
+            # autograd tests don't handle operators that change dtype
+            DecorateInfo(unittest.expectedFailure, 'TestGradients'),
+            DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+            # RuntimeError: attribute lookup is not defined on builtin
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
+        )),
+    UnaryUfuncInfo(
         'chalf',
         op=lambda x, *args, **kwargs: x.chalf(*args, **kwargs),
         dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -14736,7 +14781,8 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),),
-           sample_inputs_func=sample_inputs_T),
+           sample_inputs_func=sample_inputs_T,
+           error_inputs_func=error_inputs_T),
     OpInfo('H',
            op=lambda x: x.H,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
@@ -17309,6 +17355,123 @@ python_ref_db = [
     #
     # Data Conversion & Data Movement Opinfos
     #
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.bfloat16",
+        torch_opinfo_name="bfloat16",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.bool",
+        torch_opinfo_name="bool",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.byte",
+        torch_opinfo_name="byte",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.char",
+        torch_opinfo_name="char",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.double",
+        torch_opinfo_name="double",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.float",
+        torch_opinfo_name="float",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.half",
+        torch_opinfo_name="half",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.int",
+        torch_opinfo_name="int",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.long",
+        torch_opinfo_name="long",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.short",
+        torch_opinfo_name="short",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.chalf",
+        torch_opinfo_name="chalf",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.cfloat",
+        torch_opinfo_name="cfloat",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs._conversions.cdouble",
+        torch_opinfo_name="cdouble",
+        # TODO: If self already has the correct dtype and device, then self is
+        # returned ignoring memory_format.
+        # https://github.com/pytorch/pytorch/issues/86558
+        validate_view_consistency=False,
+        supports_nvfuser=False,
+    ),
     PythonRefInfo(
         "_refs.clone",
         torch_opinfo_name="clone",
@@ -17556,6 +17719,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
+    ),
+    PythonRefInfo(
+        "_refs.T",
+        torch_opinfo_name="T",
+        error_inputs_func=partial(error_inputs_T, has_ndims_error=True),
     ),
     PythonRefInfo(
         "_refs.unfold",
