@@ -139,7 +139,7 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
     if (pad_l > 0) {
       out_slice = out.slice_symint(dim, 0, pad_l);
       in_slice = out.slice_symint(dim,
-                           out_shape[dim] - pad_l - std::max(pad_l, zero),
+                           out_shape[dim] - pad_l - std::max(pad_r, zero),
                            out_shape[dim] - std::max(pad_r, zero));
       out_slice.copy_(in_slice);
     }
