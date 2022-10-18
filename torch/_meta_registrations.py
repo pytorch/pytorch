@@ -15,7 +15,7 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
 
-from torch._subclasses.fake_tensor import check_no_bool_index_tensors
+from torch._subclasses.fake_tensor import check_no_bool_index_tensors, FakeTensor
 from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
@@ -300,6 +300,30 @@ def meta_bernoulli(self, *, generator=None, out):
     return out
 
 
+def is_channels_last(ten):
+    return utils.suggest_memory_format(ten) == torch.channels_last
+
+
+def _device_hint(tensor) -> "str":
+    if isinstance(tensor, FakeTensor):
+        return tensor.fake_device.type
+    else:
+        return "cuda"  # default to cuda
+
+
+def _conv_pick_memory_format(input_tensor, weight):
+    if _device_hint(input_tensor) == "cuda":
+        if is_channels_last(input_tensor) or is_channels_last(weight):
+            return torch.channels_last
+    else:
+        if is_channels_last(input_tensor):
+            return torch.channels_last
+    if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+        return torch.contiguous_format
+    elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
+        return torch.preserve_format
+
+
 @register_meta(aten.convolution.default)
 def meta_conv(
     input_tensor: torch.Tensor,
@@ -402,20 +426,6 @@ def meta_conv(
                 )
         return ret_shape
 
-    def is_channels_last(ten):
-        return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
-
-    def pick_memory_format(device_hint):
-        if device_hint == "cuda":
-            if is_channels_last(input_tensor) or is_channels_last(weight):
-                return torch.channels_last
-        else:
-            if is_channels_last(input_tensor):
-                return torch.channels_last
-        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
-            return torch.contiguous_format
-        elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
-            return torch.preserve_format
 
     kernel_size = weight.shape[2:]
     dims = input_tensor.shape[2:]
@@ -440,14 +450,8 @@ def meta_conv(
         )
     out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
 
-    from torch._subclasses.fake_tensor import FakeTensor
 
-    if isinstance(input_tensor, FakeTensor):
-        device_hint = input_tensor.fake_device.type
-    else:
-        device_hint = "cuda"  # default to cuda
-
-    mem_fmt = pick_memory_format(device_hint)
+    mem_fmt = _conv_pick_memory_format(input_tensor, weight)
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
@@ -842,16 +846,16 @@ def meta_convolution_backward(
     groups,
     output_mask,
 ):
-    # High level logic taken from slow_conv3d_backward_cpu which should
-    # be representative of all convolution_backward impls
     backend_grad_input = None
     backend_grad_weight = None
     backend_grad_bias = None
 
+    mem_fmt = _conv_pick_memory_format(input_, weight_)
+
     if output_mask[0]:
-        backend_grad_input = grad_output_.new_empty(input_.size())
+        backend_grad_input = grad_output_.new_empty(input_.size()).to(memory_format=mem_fmt)
     if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty(weight_.size())
+        backend_grad_weight = grad_output_.new_empty(weight_.size()).to(memory_format=mem_fmt)
     if output_mask[2]:
         backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
@@ -995,7 +999,8 @@ def meta_embedding_bag(
         else:
             return is_fast_path_index_select(src, output, padding_idx)
 
-    if offsets.device.type != "cpu":
+
+    if _device_hint(offsets) != "cpu":
         offset2bag = indices.new_empty(indices.size(0))
         bag_size = indices.new_empty(offsets.size())
         if mode == MODE_MAX:
@@ -1034,7 +1039,7 @@ def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
         weight, indices, offsets, *args
     )
-    if offsets.device.type == "cpu":
+    if _device_hint(offsets) == "cpu":
         bag_size = offsets.new_empty(offsets.size())
     return output, offset2bag, bag_size, max_indices
 
