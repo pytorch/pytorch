@@ -433,7 +433,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
         return static_cast<int8_t>(layout->layout);
       }
-      if (py::isinstance<py::int_>(obj)) {
+      if (py::isinstance<py::bool_>(obj)) {
+        return py::cast<bool>(obj);
+      } else if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
