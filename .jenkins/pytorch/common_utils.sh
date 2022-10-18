@@ -146,8 +146,10 @@ function setup_torchdeploy_deps(){
   sudo apt update && \
   sudo apt install -y binutils && \
   sudo rm -rf /var/lib/apt/lists/*
-  export CC=$(which gcc)
-  export CXX=$(which g++)
+  local CC="$(which gcc)"
+  local CXX="$(which g++)"
+  export CC
+  export CXX
   pip install --upgrade pip
 }
 
