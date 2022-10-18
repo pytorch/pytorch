@@ -26,13 +26,13 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Tensor", ParameterType::TENSOR},
     {"Scalar", ParameterType::SCALAR},
     {"int64_t", ParameterType::INT64},
-    {"SymInt", ParameterType::INT64},
+    {"SymInt", ParameterType::SYM_INT},
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
     {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
-    {"SymIntArrayRef", ParameterType::INT_LIST},
+    {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
     {"Generator", ParameterType::GENERATOR},
     {"bool", ParameterType::BOOL},
@@ -817,8 +817,6 @@ auto FunctionParameter::check(
       return THPStream_Check(obj);
     case ParameterType::STRING:
       return THPUtils_checkString(obj);
-    default:
-      throw std::runtime_error("unknown parameter type");
     case ParameterType::SCALAR_LIST: {
       return is_scalar_list(obj);
     }
@@ -1007,7 +1005,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       throw std::runtime_error(
           "default value for Tensor must be none, got: " + str);
     }
-  } else if (type_ == ParameterType::INT64) {
+  } else if (type_ == ParameterType::INT64 || type_ == ParameterType::SYM_INT) {
     default_int = atol(str.c_str());
   } else if (type_ == ParameterType::BOOL) {
     default_bool = (str == "True" || str == "true");
@@ -1023,7 +1021,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value())
                                               : at::Scalar(atof(str.c_str()));
     }
-  } else if (type_ == ParameterType::INT_LIST) {
+  } else if (type_ == ParameterType::INT_LIST || type_ == ParameterType::SYM_INT_LIST) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
     }
@@ -1061,6 +1059,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_string = parse_string_literal(str);
     }
+  } else {
+    throw std::runtime_error("unknown parameter type");
   }
 }
 
