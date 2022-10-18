@@ -6640,16 +6640,21 @@ TEST_F(NVFuserTest, FusionCastings_CUDA) {
 
   int x = 4, y = 1024;
 
-  auto data_types = {
+  std::vector<DataType> data_types{
       DataType::Double,
       DataType::Float,
       DataType::Half,
       DataType::Int,
       DataType::Int32,
       DataType::Bool,
-      DataType::BFloat16,
       DataType::ComplexFloat,
       DataType::ComplexDouble};
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::getDeviceProperties(0)->major >= 8) {
+    data_types.emplace_back(DataType::BFloat16);
+  }
+#endif
 
   for (auto input_type : data_types) {
     auto tv_in = makeContigTensor(2, input_type);
