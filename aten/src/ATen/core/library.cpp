@@ -218,6 +218,30 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
   );
   return *this;
 }
+
+c10::OperatorHandle Library::_resolve(const char* name_str) const {
+  auto name = torch::jit::parseName(name_str);
+  auto ns_opt = name.getNamespace();
+  // This is a copy paste of Library::_impl
+  if (ns_opt.has_value()) {
+    // See Note [Redundancy in registration code is OK]
+    TORCH_CHECK(*ns_opt == *ns_,
+      IMPL_PRELUDE,
+      "Explicitly provided namespace (", *ns_opt, ") in operator name "
+      "does not match namespace of enclosing ", toString(kind_), " block (", *ns_, ").  "
+      "Move this definition to the ", toString(kind_), " block corresponding to this namespace "
+      "(and consider deleting the namespace from your schema string.)  ",
+      ERROR_CONTEXT
+    );
+  } else {
+    bool b = name.setNamespaceIfNotSet(ns_->c_str());
+    TORCH_INTERNAL_ASSERT(b, ERROR_CONTEXT);
+  }
+  auto r = c10::Dispatcher::singleton().findSchema(name);
+  // We always register before resolving, so this should always succeed
+  TORCH_INTERNAL_ASSERT(r.has_value());
+  return *r;
+}
 #undef IMPL_PRELUDE
 
 Library& Library::_fallback(CppFunction&& f) & {

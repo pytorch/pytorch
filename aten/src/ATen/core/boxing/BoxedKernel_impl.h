@@ -33,6 +33,10 @@ inline bool BoxedKernel::isFallthrough() const {
     return boxed_kernel_func_ == &fallthrough_kernel;
 }
 
+inline bool BoxedKernel::isPythonOpRegistrationTrampoline() const {
+    return functor_ && functor_->isPythonOpRegistrationTrampoline();
+}
+
 inline void BoxedKernel::callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         boxed_kernel_func_ != nullptr,

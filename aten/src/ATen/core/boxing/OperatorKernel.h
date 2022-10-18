@@ -22,6 +22,7 @@ namespace c10 {
  */
 struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
   virtual ~OperatorKernel() = default;
+  virtual bool isPythonOpRegistrationTrampoline() const { return false; }
 };
 
 }  // namespace c10

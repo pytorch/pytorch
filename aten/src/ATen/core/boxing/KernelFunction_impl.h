@@ -39,6 +39,10 @@ inline bool KernelFunction::isFallthrough() const {
   return boxed_kernel_func_.isFallthrough();
 }
 
+inline bool KernelFunction::isPythonOpRegistrationTrampoline() const {
+  return boxed_kernel_func_.isPythonOpRegistrationTrampoline();
+}
+
 inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Stack* stack) const {
   boxed_kernel_func_.callBoxed(opHandle, dispatchKeySet, stack);
 }

@@ -30,9 +30,6 @@ class Library:
         dispatch_key: PyTorch dispatch key (default: "")
     """
     def __init__(self, ns, kind, dispatch_key=""):
-        if os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "1":
-            raise RuntimeError("Trying to use torch.library in an environment where it is disabled")
-
         if kind != "IMPL" and kind != "DEF":
             raise ValueError("Unsupported kind: ", kind)
 
@@ -127,7 +124,7 @@ class Library:
                     " Instead we should let the operator decompose, and ensure that we have meta kernels"
                     " for the base ops that it decomposes into.")
 
-        self.m.impl(name, dispatch_key, fn)
+        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
         _impls.add(key)
         self._op_impls.add(key)
 

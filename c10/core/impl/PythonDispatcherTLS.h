@@ -3,6 +3,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
+#include <atomic>
 
 namespace c10 {
 namespace impl {

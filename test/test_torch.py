@@ -5674,15 +5674,6 @@ class TestTorch(TestCase):
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
 
-    def test_pytorch_library_disabled_env(self):
-        import subprocess
-        env = os.environ.copy()
-        env['PYTORCH_DISABLE_LIBRARY'] = '1'
-        try:
-            subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError("Could not 'import torch' with PYTORCH_DISABLE_LIBRARY=0") from e
-
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
         expected = """

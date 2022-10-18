@@ -145,7 +145,12 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
   if (k[0].kernel.isValid()) {
 #else
-  if (k.size() > 0) {
+  if (k.size() > 0 &&
+        // Don't complain if a PythonOpRegistrationTrampoline is overriding
+        // another PythonOpRegistrationTrampoline; you will have a
+        // registration per multipy/torchdeploy interpreter
+        !(k.front().kernel.isPythonOpRegistrationTrampoline() &&
+          kernel.isPythonOpRegistrationTrampoline())) {
 #endif
     TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
                "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",

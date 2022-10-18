@@ -85,6 +85,7 @@ public:
   bool isValidSymUnboxed() const;
   bool isValid() const;
   bool isFallthrough() const;
+  bool isPythonOpRegistrationTrampoline() const;
 
   /**
    * Call the function in a boxed way.

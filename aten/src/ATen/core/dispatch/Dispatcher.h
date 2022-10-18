@@ -308,6 +308,8 @@ private:
  * to lookup a kernel for a certain set of arguments.
  */
 class TORCH_API OperatorHandle {
+  template <typename T> friend class std::hash;
+
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
@@ -401,6 +403,14 @@ public:
   template <typename F>
   PyObject* getPythonOp(c10::impl::PyInterpreter* self_interpreter, F slow_accessor) const {
     return operatorDef_->op.getPythonOp(self_interpreter, slow_accessor);
+  }
+
+  bool operator==(const OperatorHandle& other) const {
+    return operatorDef_ == other.operatorDef_;
+  }
+
+  bool operator!=(const OperatorHandle& other) const {
+    return operatorDef_ != other.operatorDef_;
   }
 
 private:
@@ -675,3 +685,14 @@ inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet
 }
 
 } // namespace c10
+
+namespace std {
+
+template <>
+struct hash<c10::OperatorHandle> {
+  size_t operator()(c10::OperatorHandle op) const noexcept {
+    return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
+  }
+};
+
+} // hamespace std
