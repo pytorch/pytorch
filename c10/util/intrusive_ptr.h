@@ -714,6 +714,8 @@ class weak_intrusive_ptr final {
     retain_();
   }
 
+  weak_intrusive_ptr() : weak_intrusive_ptr(NullType::singleton()) {}
+
   weak_intrusive_ptr(weak_intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
     rhs.target_ = NullType::singleton();
   }

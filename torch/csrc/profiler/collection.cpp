@@ -37,7 +37,8 @@ RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
       /*device_index_*/ device_index_(t.device().index()),
       /*dtype_=*/dtype_(t.scalar_type()),
       /*layout_=*/layout_(t.layout()),
-      /*dim_=*/dim_(t.sizes().size()){};
+      /*dim_=*/dim_(t.sizes().size()),
+      weakref_(t.getIntrusivePtr()){};
 
 // ============================================================================
 // == PyTorch Ops =============================================================

@@ -89,6 +89,7 @@ struct TORCH_API RawTensorMetadata {
   c10::ScalarType dtype_;
   c10::Layout layout_;
   uint32_t dim_;
+  c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
 };
 
 struct TensorMetadata : public RawTensorMetadata {
