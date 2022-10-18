@@ -101,7 +101,7 @@ jobs:
           no-sudo: true
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v2
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
