@@ -4,7 +4,6 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._C import memory_format
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -18,8 +17,6 @@ from torch._refs import _broadcast_shapes
 
 from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
-
-from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 
 aten = torch.ops.aten
 
@@ -83,12 +80,18 @@ def meta_randperm(n, *, generator=None, out):
     assert out.ndim == 1 and out.size(0) == n
     return out
 
+
 @register_meta(aten.randint.default)
-def meta_randint(high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None):
+def meta_randint(
+    high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
     return torch.empty(size, dtype=dtype, device=device)
 
+
 @register_meta(aten.randint.low)
-def meta_randint_low(low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None):
+def meta_randint_low(
+    low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+):
     return torch.empty(size, dtype=dtype, device=device)
 
 
@@ -104,6 +107,7 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 @register_meta(aten.copy_.default, register_dispatcher=False)
 def meta_copy_(self, src, non_blocking=False):
     return self
+
 
 @register_meta(aten.unsqueeze_.default, register_dispatcher=False)
 def meta_unsqueeze_(self, dim):
@@ -484,234 +488,6 @@ def meta_conv(
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
-# From div_rtn() in aten/src/ATen/div_rtn.h.
-def div_rtn(x, y):
-    q = x / y
-    r = x % y
-    if (r != 0) and ((r < 0) != (y < 0)):
-        q -= 1
-    return q
-
-# From pooling_output_shape_pad_lr() in aten/src/ATen/native/Pool.h.
-def pooling_output_shape_pad_lr(inputSize, kernelSize, pad_l, pad_r, stride, dilation, ceil_mode):
-    outputSize = div_rtn(
-        inputSize + pad_l + pad_r - dilation * (kernelSize - 1) - 1 + ((stride - 1) if ceil_mode else 0),
-        stride,
-    ) + 1
-    if ceil_mode:
-        # ensure that the last pooling starts inside the image
-        # needed to avoid problems in ceil mode
-        if (outputSize - 1) * stride >= inputSize + pad_l:
-            outputSize -= 1
-
-    return outputSize
-
-# From pooling_output_shape() in aten/src/ATen/native/Pool.h.
-def pooling_output_shape(inputSize, kernelSize, pad, stride, dilation, ceil_mode):
-    check(
-        stride != 0,
-        lambda: "stride should not be zero"
-    )
-    check(
-        pad >= 0,
-        lambda: f"pad must be non-negative, but got pad: {pad}"
-    )
-    check(
-        pad <= kernelSize / 2,
-        lambda: f"pad should be at most half of kernel size, but got pad={pad} and kernel_size={kernelSize}"
-    )
-    return pooling_output_shape_pad_lr(inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode)
-
-# From pool2d_shape_check() in aten/src/ATen/native/Pool.h.
-def pool2d_shape_check(
-    input, kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, mem_format
-):
-    ndim = input.dim()
-    nOutputPlane = nInputPlane
-
-    check(
-        kW > 0 and kH > 0,
-        lambda: f"kernel size should be greater than zero, but got kH: {kH} kW: {kW}"
-    )
-    check(
-        dW > 0 and dH > 0,
-        lambda: f"stride should be greater than zero, but got dH: {dH} dW: {dW}"
-    )
-    check(
-        dW > 0 and dH > 0,
-        lambda: f"dilation should be greater than zero, but got dilationH: {dilationH} dilationW: {dilationW}"
-    )
-
-    input_shape = input.shape
-    valid_dims = input_shape[1] != 0 and input_shape[2] != 0
-
-    if mem_format == torch.channels_last:
-        # Expect tensor in NHWC format and allow 0-dim only for N.
-        check(
-            ndim == 4 and valid_dims and input_shape[3] != 0,
-            lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout " +
-                    f" with optional 0 dim batch size for input, but got: {input_shape}"
-        )
-    else:
-        check(
-            (ndim == 3 and input_shape[0] != 0 and valid_dims) or (ndim == 4 and valid_dims and input_shape[3] != 0),
-            lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:{input_shape}"
-        )
-    check(
-        kW / 2 >= padW and kH / 2 >= padH,
-        lambda: "pad should be smaller than or equal to half of kernel size, but got " +
-                f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}"
-    )
-    check(
-        outputWidth >= 1 and outputHeight >= 1,
-        lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). " +
-                f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). " +
-                "Output size is too small"
-    )
-
-# from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
-def check_dim_size(tensor, dim, dim_size, size):
-    check(
-        tensor.dim() == dim and tensor.shape[dim_size] == size,
-        lambda: f"Expected a tensor of dimension {dim} and tensor.size[{dim_size}] == {size}, " +
-                f"but got : dimension {tensor.dim()} and tensor.size[{dim_size}] = {tensor.shape[dim_size]}"
-    )
-
-# from avg_pool2d_backward_shape_check() in aten/src/ATen/native/Pool.h.
-def avg_pool2d_backward_shape_check(
-    input,
-    gradOutput,
-    nbatch,
-    kH, kW, dH, dW, padH, padW,
-    nInputPlane,
-    inputHeight, inputWidth,
-    outputHeight, outputWidth,
-    mem_format
-):
-    pool2d_shape_check(
-        input,
-        kH, kW, dH, dW, padH, padW, 1, 1,
-        nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
-        memory_format)
-
-    ndim = input.dim()
-    nOutputPlane = nInputPlane
-
-    check_dim_size(gradOutput, ndim, ndim - 3, nOutputPlane)
-    check_dim_size(gradOutput, ndim, ndim - 2, outputHeight)
-    check_dim_size(gradOutput, ndim, ndim - 1, outputWidth)
-
-# Don't override the C++ registration.
-@register_meta(aten.avg_pool2d_backward.default, register_dispatcher=False)
-def meta_avg_pool2d_backward(gradOutput_, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override):
-    # From aten/src/ATen/native/AveragePool2d.cpp structured kernel meta func.
-    check(
-        len(kernel_size) == 1 or len(kernel_size) == 2,
-        lambda: "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints"
-    )
-    kH = kernel_size[0]
-    kW = kH if len(kernel_size) == 1 else kernel_size[1]
-    check(
-        len(stride) == 0 or len(stride) == 1 or len(stride) == 2,
-        lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
-    )
-    dH = kH if len(stride) == 0 else stride[0]
-    dW = kW if len(stride) == 0 else dH if len(stride) == 1 else stride[1]
-    check(
-        len(padding) == 1 or len(padding) == 2,
-        lambda: "avg_pool2d: padding must either be a single int, or a tuple of two ints"
-    )
-    padH = padding[0]
-    padW = padH if len(padding) == 1 else padding[1]
-
-    check(
-        divisor_override is None or divisor_override != 0,
-        lambda: "divisor must be not zero"
-    )
-
-    input_size = input.shape
-    nbatch = input_size[-4] if input.dim() == 4 else 1
-    nInputPlane = input_size[-3]
-    inputHeight = input_size[-2]
-    inputWidth = input_size[-1]
-
-    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
-    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
-
-    mem_format = utils.suggest_memory_format(input)
-
-    avg_pool2d_backward_shape_check(
-        input,
-        gradOutput_,
-        nbatch,
-        kH, kW, dH, dW, padH, padW,
-        nInputPlane,
-        inputHeight, inputWidth,
-        outputHeight, outputWidth,
-        mem_format)
-
-    # TODO: should new_empty() get a memory_format kwarg?
-    return input.new_empty((input_size)).to(memory_format=mem_format)
-
-# Don't override the C++ registration.
-@register_meta(aten.avg_pool2d.default, register_dispatcher=False)
-def meta_avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override):
-    # From aten/src/ATen/native/AveragePool2d.cpp structured kernel meta func.
-    check(
-        len(kernel_size) == 1 or len(kernel_size) == 2,
-        lambda: "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints"
-    )
-    check(
-        len(stride) == 0 or len(stride) == 1 or len(stride) == 2,
-        lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
-    )
-    check(
-        len(padding) == 1 or len(padding) == 2,
-        lambda: "avg_pool2d: padding must either be a single int, or a tuple of two ints"
-    )
-
-    padH = padding[0]
-    padW = padH if len(padding) == 1 else padding[1]
-
-    check(
-        divisor_override is None or divisor_override != 0,
-        lambda: "divisor must be not zero"
-    )
-
-    input_size = input.shape
-    nbatch = input_size[-4] if input.dim() == 4 else 1
-    nInputPlane = input_size[-3]
-    inputHeight = input_size[-2]
-    inputWidth = input_size[-1]
-
-    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
-    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
-
-    mem_format = utils.suggest_memory_format(input)
-
-    pool2d_shape_check(
-        input,
-        kH,
-        kW,
-        dH,
-        dW,
-        padH,
-        padW,
-        1,
-        1,
-        nInputPlane,
-        inputHeight,
-        inputWidth,
-        outputHeight,
-        outputWidth,
-        mem_format)
-
-    if input.dim() == 3:
-        return self.new_empty((nInputPlane, outputHeight, outputWidth))
-    else:
-        # TODO: should new_empty() get a memory_format kwarg?
-        return self.new_empty((nbatch, nInputPlane, outputHeight, outputWidth)).to(memory_format=mem_format)
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
 def check_dim_size(tensor, dim, dim_size, size):
@@ -1694,158 +1470,11 @@ def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
 
 
-def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
-    if dim_post_expr <= 0:
-        assert wrap_scalar
-        dim_post_expr = 1
-    min = -dim_post_expr
-    max = dim_post_expr - 1
-    assert not (dim < min or dim > max)
-    if dim < 0:
-        dim += dim_post_expr
-    return dim
-
-def ensure_nonempty_size(t, dim):
-    return 1 if t.dim() == 0 else t.shape[dim]
-
-# From aten/src/ATen/native/ScatterGatherChecks.h
-def gather_shape_check(self, dim, index):
-    self_dims = max(self.dim(), 1)
-    index_dims = max(index.dim(), 1)
-    check(
-        self_dims == index_dims,
-        lambda: "Index tensor must have the same number of dimensions as input tensor"
-    )
-    for i in range(self_dims):
-        if i != dim:
-            check(
-                ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
-                lambda: f"Size does not match at dimension {i} expected index {index.shape}" +
-                        f" to be smaller than self {self.shape} apart from dimension {dim}"
-            )
-
-@register_meta(aten.gather.default, register_dispatcher=False)
-def meta_gather(self, dim, index, sparse_grad=False):
-    wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    is_index_empty = index.numel() == 0
-    if not is_index_empty:
-        check(
-            index.dtype == torch.long,
-            lambda: f"gather(): Expected dtype int64 for index but got {index.dtype}",
-        )
-        gather_shape_check(self, wrapped_dim, index)
-    return self.new_empty(index.shape)
-
-# From aten/src/ATen/native/TensorAdvancedIndexing.cpp
-def get_operator_enum(reduce_, use_new_options=False):
-    if use_new_options:
-        if reduce_ == "sum":
-            return "REDUCE_ADD"
-        elif reduce_ == "prod":
-            return "REDUCE_MULTIPLY"
-        elif reduce_ == "mean":
-            return "REDUCE_MEAN"
-        elif reduce_ == "amax":
-            return "REDUCE_MAXIMUM"
-        elif reduce_ == "amin":
-            return "REDUCE_MINIMUM"
-        check(
-            False,
-            "reduce argument must be either sum, prod, mean, amax or amin."
-        )
-        return
-    else:
-        if reduce_ == "add":
-            return "REDUCE_ADD"
-        elif reduce_ == "multiply":
-            return "REDUCE_MULTIPLY"
-        check(
-            False,
-            "reduce argument must be either add or multiply."
-        )
-        return
-# From aten/src/ATen/native/ScatterGatherChecks.h
-def scatter_gather_dtype_check(method_name, self, index, src_opt=None):
-    if index.numel() != 0:
-        check(
-            index.dtype == torch.long,
-            f"{method_name}(): Expected dtype int64 for index"
-        )
-
-    if src_opt is not None:
-        check(
-            self.dtype == src_opt.dtype,
-            f"{method_name}(): Expected self.dtype to be equal to src.dtype"
-        )
-
-
-def ensure_nonempty_dim(dim):
-    return max(dim, 1)
-
-# From aten/src/ATen/native/ScatterGatherChecks.h
-def scatter_shape_check(self, dim, index, src_opt=None):
-    if index.numel() == 0:
-        return
-    check(
-        ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
-        "Index tensor must have the same number of dimensions as self tensor"
-    )
-
-    is_wrong_shape = False
-    self_dims = ensure_nonempty_dim(self.dim())
-
-    # Check: index.size(d) <= self.size(d) for all d != dim
-    for d in range(self_dims):
-        index_d_size = ensure_nonempty_size(index, d)
-        if d == dim:
-            continue
-        if index_d_size > ensure_nonempty_size(self, d):
-            is_wrong_shape = true
-            break
-
-    # Check: index.size(d) <= src.size(d) for all d if src is Tensor
-    if not is_wrong_shape and src_opt is not None:
-        for d in range(self_dims):
-            index_d_size = ensure_nonempty_size(index, d)
-            if index_d_size > ensure_nonempty_size(src_opt, d):
-                is_wrong_shape = true
-                break
-
-    if src_opt is not None:
-        check(
-            ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
-            "Index tensor must have the same number of dimensions as self tensor"
-        )
-        check(
-            not is_wrong_shape,
-            f"Expected index {index.shape} to be smaller than self {self.shape}" +
-            f" apart from dimension {dim} and to be smaller than src {src_opt.shape}"
-        )
-    else:
-        check(
-            not is_wrong_shape,
-            f"Expected index {index.shape} to be smaller than self {self.shape}" +
-            f" apart from dimension {dim}"
-        )
-
-# From aten/src/ATen/native/TensorAdvancedIndexing.cpp
-def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=False):
-    wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    scatter_gather_dtype_check("scatter", self, index, src)
-    scatter_shape_check(self, wrapped_dim, index, src)
-    if reduce_ is not None:
-        # Check if we have a valid reduce operator.
-        get_operator_enum(reduce_, use_new_options)
-
-@register_meta(aten.scatter_add.default, register_dispatcher=False)
-def meta_scatter_add(self, dim, index, src):
-    scatter_meta_impl(self, dim, index, src, "add")
-    return self.new_empty(self.shape)
-
 @register_meta(aten.scatter.value, register_dispatcher=False)
 def scatter_value(self, dim, index, value):
     scatter_meta_impl(self, dim, index)
     return self.new_empty(self.shape)
+
 
 # hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)
@@ -1908,12 +1537,22 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
 
 
 @register_meta(aten._to_copy.default)
-def _to_copy(x, *, dtype=None, layout=None, device=None, pin_memory=False,
-                non_blocking=False, memory_format=None):
+def _to_copy(
+    x,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=False,
+    non_blocking=False,
+    memory_format=None,
+):
     assert device is not None or dtype is not None or memory_format is not None
     dtype = x.dtype if dtype is None else dtype
     device = x.device if device is None else device
-    return torch.empty(x.size(), dtype=dtype, layout=layout, device=device, memory_format=memory_format)
+    return torch.empty(
+        x.size(), dtype=dtype, layout=layout, device=device, memory_format=memory_format
+    )
 
 
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
