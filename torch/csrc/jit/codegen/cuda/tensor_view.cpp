@@ -210,16 +210,11 @@ TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
       compute_at_pos_(src->compute_at_pos_),
       max_producer_pos_(src->max_producer_pos_),
       memory_type_(src->memory_type_),
-      swizzle_type_(src->swizzle_type_),
       is_double_buffered_(src->is_double_buffered_),
       is_circular_buffered_(src->is_circular_buffered_),
       circular_buffer_stage_(src->circular_buffer_stage_),
       cpu_scalar_(src->cpu_scalar_),
-      has_swizzle_op_(src->has_swizzle_op_) {
-  for (const auto id : src->axesToSwizzle()) {
-    axes_to_swizzle_.push_back(ir_cloner->clone(id));
-  }
-}
+      has_swizzle_op_(src->has_swizzle_op_) {}
 
 bool TensorView::hasAnyReduction() const {
   return domain()->noReductions().size() != domain()->domain().size();
@@ -592,60 +587,6 @@ TensorView* TensorView::reorder(const std::unordered_map<int, int>& old2new_) {
   }
 
   domain()->reorder(old2new_);
-  return this;
-}
-
-TensorView* TensorView::swizzle(
-    SwizzleType type,
-    const std::vector<int>& axes) {
-  TORCH_INTERNAL_ASSERT(
-      !container()->isA<kir::Kernel>(),
-      "Function invalid for kernel container.");
-  swizzle_type_ = type;
-
-  // Clear previously set swizzle axes if any
-  if (axes_to_swizzle_.size()) {
-    axes_to_swizzle_.clear();
-  }
-
-  if (swizzle_type_ == SwizzleType::Transpose) {
-    TORCH_CHECK(
-        axes.size() == 2,
-        "Invalid axis list: ",
-        axes,
-        ". Number of axes must be two.");
-    TORCH_CHECK(
-        axes[0] != axes[1],
-        "Invalid axis list: ",
-        axes,
-        ". Two distinctive axes must be given.");
-    TORCH_CHECK(
-        getMemoryType() == MemoryType::Shared,
-        "Transpose swizzle is meant for tensors on shared memory.");
-    for (auto pos : axes) {
-      if (pos < 0) {
-        pos += nDims();
-      }
-      TORCH_CHECK(pos >= 0 && pos < (int)nDims(), "Invalid axis: ", pos);
-      TORCH_CHECK(
-          pos >= (int)getComputeAtPosition(),
-          "Invalid axis: ",
-          pos,
-          ". Axis outside computeAt position is not allocated.");
-      TORCH_CHECK(
-          !axis(pos)->isReduction(),
-          "Invalid axis: ",
-          pos,
-          ". Swizzling a reduction axis is not supported");
-      TORCH_CHECK(
-          !axis(pos)->isBroadcast(),
-          "Invalid axis: ",
-          pos,
-          ". Swizzling a broadcast axis is not supported");
-      axes_to_swizzle_.push_back(axis(pos));
-    }
-  }
-
   return this;
 }
 

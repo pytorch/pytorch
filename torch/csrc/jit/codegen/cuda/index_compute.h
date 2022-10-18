@@ -250,9 +250,6 @@ class IndexSwizzle : public IndexCompute {
 
  private:
   const TensorView* tv_ = nullptr;
-  SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
-  std::vector<IterDomain*> ids_to_swizzle_;
-  std::unordered_set<IterDomain*> swizzled_ids_;
 };
 
 //! Predicate information of a root or contiguous merged domain

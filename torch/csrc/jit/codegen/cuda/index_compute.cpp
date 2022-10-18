@@ -996,9 +996,7 @@ IndexSwizzle::IndexSwizzle(
           std::move(extent_map),
           std::move(zero_domains),
           std::move(zero_merged_in)),
-      tv_(tv),
-      swizzle_type_(tv->swizzleType()),
-      ids_to_swizzle_(tv->axesToSwizzle()) {}
+      tv_(tv) {}
 
 IndexSwizzle::IndexSwizzle(
     const TensorView* tv,
@@ -1013,44 +1011,10 @@ IndexSwizzle::IndexSwizzle(
           std::move(extent_map),
           std::move(zero_domains),
           std::move(zero_merged_in)),
-      tv_(tv),
-      swizzle_type_(tv->swizzleType()),
-      ids_to_swizzle_(tv->axesToSwizzle()) {}
+      tv_(tv) {}
 
 void IndexSwizzle::run() {
-  TORCH_INTERNAL_ASSERT(
-      swizzle_type_ == SwizzleType::NoSwizzle ||
-          swizzle_type_ == SwizzleType::Transpose,
-      "Invalid swizzle type");
-  if (swizzle_type_ == SwizzleType::Transpose) {
-    // Shifts the second axis by the first axis as ((idx_1 + idx_2) %
-    // ext). Alternatively, ((idx_1 - idx_2) & (ext - 1)) would also
-    // work if ext is a power of two. Practically, ext should be 32 if
-    // the data type of the tensor is float, so the latter approach
-    // should also be fine.
-    TORCH_INTERNAL_ASSERT(tv_->getMemoryType() == MemoryType::Shared);
-    TORCH_INTERNAL_ASSERT(tv_->axesToSwizzle().size() == 2);
-
-    UpdateLeafIndices update_leaves(td_, indexMap(), extentMap());
-    index_map_ = update_leaves.indexMap();
-    extent_map_ = update_leaves.extentMap();
-
-    IterDomain* id_to_swizzle_i = ids_to_swizzle_.at(0);
-    IterDomain* id_to_swizzle_j = ids_to_swizzle_.at(1);
-
-    if (indexMap().find(id_to_swizzle_i) != indexMap().end() &&
-        indexMap().find(id_to_swizzle_j) != indexMap().end()) {
-      auto idx_to_swizzle_i = indexMap().at(id_to_swizzle_i);
-      auto idx_to_swizzle_j = indexMap().at(id_to_swizzle_j);
-
-      auto swizzled_idx = SimplifyingIrBuilder::modExpr(
-          SimplifyingIrBuilder::addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
-          id_to_swizzle_j->extent());
-      index_map_[id_to_swizzle_j] = swizzled_idx;
-      swizzled_ids_.insert(id_to_swizzle_j);
-      IndexCompute::run();
-    }
-  } else if (tv_->hasSwizzleOp()) {
+  if (tv_->hasSwizzleOp()) {
     // Propagate backward for the annotated swizzle path.
     // TODO:
     //  eventually will unify the two swizzling implementation
@@ -1070,25 +1034,14 @@ void IndexSwizzle::run() {
 }
 
 void IndexSwizzle::handle(Expr* e) {
-  auto out_ids = ir_utils::filterByType<IterDomain>(e->outputs());
-  bool needs_update =
-      std::any_of(
-          out_ids.begin(),
-          out_ids.end(),
-          [this](IterDomain* id) {
-            return swizzled_ids_.find(id) != swizzled_ids_.end();
-          }) ||
-      (e->isA<Swizzle2D>() &&
-       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle &&
-       e->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Data);
+  bool needs_update = e->isA<Swizzle2D>() &&
+      e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle &&
+      e->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Data;
   if (!needs_update) {
     return;
   }
 
   IndexCompute::handle(e);
-  for (auto input : ir_utils::filterByType<IterDomain>(e->inputs())) {
-    swizzled_ids_.insert(input);
-  }
 }
 
 void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
@@ -1097,11 +1050,6 @@ void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
 
   auto out_x_it = index_map_.find(out_x_id);
   auto out_y_it = index_map_.find(out_y_id);
-
-  // TODO: unify the legacy path in all usage
-  TORCH_INTERNAL_ASSERT(
-      swizzle_type_ == SwizzleType::NoSwizzle,
-      "Cannot mix usage of two swizzle implementations");
 
   TORCH_INTERNAL_ASSERT(
       out_x_it != index_map_.end() && out_y_it != index_map_.end(),
@@ -1371,12 +1319,6 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
     Val* index) {
   if (isOptionDisabled(DisableOption::IndexHoist) ||
       index->definition() == nullptr) {
-    return c10::nullopt;
-  }
-
-  // The old swizzle interface, which should be deprecated, is not
-  // supported.
-  if (tv->swizzleType() != SwizzleType::NoSwizzle) {
     return c10::nullopt;
   }
 
