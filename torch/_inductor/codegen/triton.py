@@ -719,11 +719,9 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or isinstance(
-            index, sympy.core.numbers.Integer
-        ):
+        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            if isinstance(index, sympy.core.numbers.Integer):
+            if isinstance(index, sympy.Integer):
                 return index_str, "None"
             else:
                 mask = dense_mask
