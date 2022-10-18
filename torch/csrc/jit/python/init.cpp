@@ -335,7 +335,6 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   }
 
   SymIntNode ceil() override;
-  SymIntNode floor() override;
 
   SymIntNode floor() override;
 
