@@ -817,15 +817,12 @@ auto FunctionParameter::check(
       return THPStream_Check(obj);
     case ParameterType::STRING:
       return THPUtils_checkString(obj);
-    case ParameterType::SCALAR_LIST: {
+    case ParameterType::SCALAR_LIST:
       return is_scalar_list(obj);
-    }
-    case ParameterType::SYM_INT: {
+    case ParameterType::SYM_INT:
       return is_int_or_symint(obj);
-    }
-    case ParameterType::SYM_INT_LIST: {
+    case ParameterType::SYM_INT_LIST:
       return is_int_or_symint_list(obj, size);
-    }
     default:
       throw std::runtime_error("unknown parameter type");
   }
