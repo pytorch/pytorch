@@ -98,7 +98,7 @@ TORCH_IMPL_FUNC(signbit_out_mps) (const Tensor& self, const Tensor& output) {
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
                     MPSGraphTensor* output;
                     // signbit is not implemented for int64 type.
-                    // workarounf for `Function signbitOp_i64 was not found in the library`
+                    // workaround for `Function signbitOp_i64 was not found in the library`
                     if ([inputTensor dataType] == MPSDataTypeInt64) {
                       MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
                       output = [mpsGraph lessThanWithPrimaryTensor:inputTensor
