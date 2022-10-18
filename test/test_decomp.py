@@ -200,8 +200,15 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
+        # The decomposition is TOO correct. It computes everything in int64, so sometimes
+        # there's an off-by-one error.
+        (torch.int8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.default) : (0, 1),
     }
-    if (test_dtype, op) in tol_table:
+    if (decomp.dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
     else:
         rtol, atol = _getDefaultRtolAndAtol(orig.dtype, decomp.dtype)
@@ -278,10 +285,6 @@ CROSS_REF_EXCLUDE_SET = {
     # (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)`
     ("cuda", torch.bfloat16, "nn.functional.bilinear"),
     # randomness
-    ("cuda", torch.float16, "nn.functional.dropout"),
-    ("cuda", torch.bfloat16, "nn.functional.dropout"),
-    ("cuda", torch.float64, "nn.functional.dropout"),
-    ("cuda", torch.float32, "nn.functional.dropout"),
     (None, None, "special.ndtr"),  # aten.special_ndtr was not decomposed
     (None, None, "new_empty"),
     (None, None, "empty_like"),
@@ -291,12 +294,12 @@ CROSS_REF_EXCLUDE_SET = {
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
     (None, None, "meshgrid"),
+    # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
+    (None, None, "diag"),
+
 }
 
-CROSS_REF_BACKWARD_EXCLUDE_SET = {
-    # Backward formula is not as precise as the custom CUDA kernel
-    ("cuda", torch.bfloat16, "nn.functional.embedding"),
-}
+CROSS_REF_BACKWARD_EXCLUDE_SET = {}
 
 all_decomposed = set()
 all_called = defaultdict(int)
@@ -412,7 +415,11 @@ class TestDecomp(TestCase):
                     # non-deterministic ops
                     torch.ops.aten.empty.memory_format,
                     torch.ops.aten.empty_like.default,
-                    torch.ops.aten.new_empty.default
+                    torch.ops.aten.new_empty.default,
+                    torch.ops.aten.empty_strided.default,
+                    torch.ops.aten.new_empty_strided.default,
+                    torch.ops.aten.randn.default,
+                    torch.ops.aten.native_dropout.default,
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
 

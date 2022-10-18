@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import NumberType, TensorLike, TensorSequenceType
-from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
+from torch._prims_common.wrappers import _maybe_resize_out, _maybe_convert_to_dtype, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -1025,22 +1025,12 @@ def embedding(
     sparse: bool = False,
 ) -> Tensor:
     assert weight.dim() == 2, "'weight' must be 2-D"
-    # TODO: Assert not ported over yet
-    #   auto indices_arg = TensorArg(indices, "indices", 1);
-    #   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
-
-    if indices.dim() == 1:
-        return weight.index_select(0, indices)
-
-    size = list(indices.shape)
-    for d in weight.shape[1:]:
-        size.append(d)
-
-    return weight.index_select(0, indices.reshape(-1)).view(size)
+    # Nb. scale_grad_by_freq is not used in the forward
+    return weight[indices]
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten.embedding_dense_backward)
+@pw_cast_for_opmath
 def embedding_dense_backward(
     grad_output: Tensor,
     indices: Tensor,
@@ -1048,22 +1038,17 @@ def embedding_dense_backward(
     padding_idx: int,
     scale_grad_by_freq: bool,
 ):
-    numel = indices.numel()
-    grad = grad_output.reshape(numel, grad_output.size(-1))
-    grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
-    indices_rank1 = indices.reshape(numel)
+    indices = _maybe_convert_to_dtype(indices, torch.long)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
-        ones = indices.new_ones((numel,))
-        counts = counts.index_put([indices_rank1], ones, accumulate=True)
-        grad_weights_scale = counts[indices_rank1]
-        grad = grad / grad_weights_scale.unsqueeze(1)
-    skip_padding = (indices_rank1 != padding_idx).unsqueeze(1)
-    skip_padding = skip_padding.expand_as(grad)
-    zero_grad = torch.full_like(grad, 0)
-    return grad_weight.index_put(
-        [indices_rank1], torch.where(skip_padding, grad, zero_grad), accumulate=True
-    )
+        ones = torch.ones_like(indices)
+        counts = counts.index_put([indices], ones, accumulate=True)
+        grad_weights_scale = counts[indices]
+        grad_output = grad_output / grad_weights_scale.unsqueeze(1)
+
+    grad = grad_output.masked_fill(indices == padding_idx, 0)
+    grad_weight = grad_output.new_zeros((num_weights,) + grad_output.shape[indices.ndim:])
+    return grad_weight.index_put([indices], grad, accumulate=True)
 
 
 def prod(x: List[int]):
