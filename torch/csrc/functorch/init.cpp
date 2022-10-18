@@ -6,7 +6,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
-#include <torch/extension.h>
+#include <torch/python.h>
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
@@ -16,7 +16,6 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
-#include <torch/csrc/functorch/CompileCache.h>
 
 // This file contains functorch's Python bindings.
 
@@ -76,15 +75,16 @@ void _propagate_functional_input_mutation(
   // storage.
   if (unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl()) {
   } else {
-    if (unwrapped.nbytes() != wrapped_inner.nbytes()) {
+    if (unwrapped.sym_nbytes() != wrapped_inner.sym_nbytes()) {
       // Functions might resize zero-sized inputs, which we need to reflect
       // ehre.
-      unwrapped.resize_(wrapped_inner.sizes());
+      unwrapped.resize__symint(wrapped_inner.sym_sizes());
     }
     // If the input tensor's metadata was mutated, then use as_strided_()
     // to propagate the metadata change.
-    if (unwrapped.sizes() != wrapped_inner.sizes()) {
-      unwrapped.as_strided_(wrapped_inner.sizes(), wrapped_inner.strides());
+    if (unwrapped.sym_sizes() != wrapped_inner.sym_sizes()) {
+      unwrapped.as_strided__symint(
+          wrapped_inner.sym_sizes(), wrapped_inner.sym_strides());
     }
     unwrapped.copy_(wrapped_inner);
   }
@@ -234,18 +234,18 @@ RandomnessType get_randomness_enum(const std::string& randomness) {
 }
 
 void set_fwd_grad_enabled(bool enabled) {
-  AutogradState::get_tls_state().set_fw_grad_mode(enabled);
+  c10::AutogradState::get_tls_state().set_fw_grad_mode(enabled);
 }
 
 bool get_fwd_grad_enabled() {
-  return AutogradState::get_tls_state().get_fw_grad_mode();
+  return c10::AutogradState::get_tls_state().get_fw_grad_mode();
 }
 
 int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Grad, nullopt, nullopt, prev_grad_mode);
+      TransformType::Grad, c10::nullopt, c10::nullopt, prev_grad_mode);
 }
 
 int64_t _grad_decrement_nesting() {
@@ -258,7 +258,11 @@ int64_t _jvp_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_fwd_grad_mode = get_fwd_grad_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Jvp, nullopt, nullopt, nullopt, prev_fwd_grad_mode);
+      TransformType::Jvp,
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt,
+      prev_fwd_grad_mode);
 }
 
 int64_t _jvp_decrement_nesting() {
@@ -366,7 +370,7 @@ static int64_t currentLevel() {
 
 static void tls_set_vmap_excluded(bool excluded) {
   c10::impl::tls_set_dispatch_key_excluded(
-      DispatchKey::FuncTorchBatched, excluded);
+      c10::DispatchKey::FuncTorchBatched, excluded);
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
@@ -457,8 +461,6 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
-
-  torch::functorch::initCompileCacheBindings(m.ptr());
 }
 
 } // namespace impl

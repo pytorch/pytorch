@@ -1,7 +1,9 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import operator
+import builtins
+import math
 import functools
 from functools import lru_cache, partial
 import traceback
@@ -65,11 +67,7 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self.inner
 
 def has_symbolic_sizes_strides(elem):
-    return (
-        any([isinstance(i, torch.SymIntNode) for i in elem.shape])
-        or any([isinstance(i, torch.SymIntNode) for i in elem.stride()])
-        or isinstance(elem.storage_offset(), torch.SymIntNode)
-    )
+    return elem._has_symbolic_sizes_strides
 
 def create_contiguous(shape):
     strides = [1]
@@ -112,6 +110,9 @@ class PySymInt(object):
 
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
+
+    def clone(self):
+        return PySymInt(self.expr, self.shape_env, constant=self.constant)
 
     def __str__(self):
         return f"{self.expr}"
@@ -169,6 +170,34 @@ if HAS_SYMPY:
                 return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            if isinstance(base, FloorDiv):
+                return FloorDiv(base.args[0], base.args[1] * divisor)
+
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
+
+    class Ceil(sympy.Function):
+        """
+        sympy doesn't have its own ceil(), so rolling one here.
+        We maintain this so that we can simplify a sympy.Rational into a sympy.Float.
+        sympy.Float isn't supported.
+        """
+        nargs = (1,)
+
+        @classmethod
+        def eval(cls, a):
+            if isinstance(a, sympy.Integer):
+                return a
+            elif isinstance(a, sympy.core.symbol.Symbol) and a.is_scalar:
+                # TODO: do we need to simplify expr's first? (e.g. if we have 3/3), is is_scalar() true?
+                return a
+            elif isinstance(a, sympy.Rational):
+                return a.floor() + 1
+            else:
+                raise NotImplementedError("math.ceil() not supported for type: " + str(type(a)))
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -176,8 +205,9 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
+    'pow': lambda a, b: a ** b,
     'truediv': lambda a, b: a / b,
-    'floordiv': lambda a, b: FloorDiv(a, b)
+    'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
 magic_methods = {
@@ -187,22 +217,36 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
+    'ceil': lambda a: Ceil(a),
+    'min': lambda a, b: sympy.Min(a, b),
+    'max': lambda a, b: sympy.Max(a, b),
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv"}
+unary_magic_methods = {
+    'ceil'
+}
+
+float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
 
 def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
 
     def magic_impl(self, other):
+        if method in ["min", "max"]:
+            op = getattr(builtins, method)
+        else:
+            op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
-            return _handle_sym_dispatch(getattr(operator, method), (self, other), {})
+            return _handle_sym_dispatch(op, (self, other), {})
         if isinstance(other, py_type):
-            other = other.expr
+            other_expr = other.expr
+        else:
+            assert isinstance(other, sympy.Expr)
+            other_expr = other
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
-        other = self.shape_env.replace(other)
-        out = func(expr, other)
+        other_expr = self.shape_env.replace(other_expr)
+        out = func(expr, other_expr)
         out = sympy.expand(out)
         if method in ["truediv"]:
             return PySymFloat(out, self.shape_env)
@@ -211,11 +255,31 @@ def _make_magic(method, func, py_type):
             # PySymBool, this is a type error
             return py_type(out, self.shape_env)
 
+    def unary_magic_impl(self):
+        if SYM_FUNCTION_MODE:
+            if method in ["ceil", "floor"]:
+                op = getattr(math, method)
+            else:
+                op = getattr(operator, method)
+            return _handle_sym_dispatch(op, (self,), {})
+        # TODO: consider constant prop here
+        expr = self.shape_env.replace(self.expr)
+        out = func(expr)
+        out = sympy.expand(out)
+        if method in ["ceil", "floor"]:
+            return PySymInt(out, self.shape_env)
+        else:
+            return py_type(out, self.shape_env)
+
     # this should be wrapped transparently into torch.SymIntNode
-    setattr(py_type, method, magic_impl)
-    setattr(py_type, f"__{method}__", magic_impl)
-    if method in reflectable_magic_methods:
-        setattr(py_type, f"__r{method}__", magic_impl)
+    if method in unary_magic_methods:
+        setattr(py_type, method, unary_magic_impl)
+        setattr(py_type, f"__{method}__", unary_magic_impl)
+    else:
+        setattr(py_type, method, magic_impl)
+        setattr(py_type, f"__{method}__", magic_impl)
+        if method in reflectable_magic_methods:
+            setattr(py_type, f"__r{method}__", magic_impl)
 
 for method, func in magic_methods.items():
     _make_magic(method, func, PySymInt)
@@ -265,6 +329,9 @@ class ShapeEnv(object):
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
+        # Duck-shaping says that if two input tensors have the same size,
+        # they get assigned the same symbolic variable
+        self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
 
     def _get_key(self):
         """
@@ -273,18 +340,68 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symint(self, name, val):
+    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+        """
+        Returns a list of symbolic sizes and strides for the given tensor.
+        We try our best to express stride in terms of the sizes, so as to not
+        introduce new symbolic variables.
+        """
+
+        size = [self.create_symbol(i) for i in ex.size()]
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        for i, val in enumerate(ex.stride()):
+            if val in (0, 1):
+                stride[i] = sympy.Integer(val)
+        while any(x is None for x in stride):
+            candidates = {
+                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
+                for i in range(len(size))
+                if stride[i] is not None and ex.stride()[i] >= 0
+            }
+            # iterate over unbound strides in sorted order
+            val_list = sorted(
+                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+            )
+            for _, i in val_list:
+                if stride[i] is None and ex.stride()[i] in candidates:
+                    stride[i] = candidates[ex.stride()[i]]
+                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
+            if any(x is None for x in stride):
+                # bind the smallest unbound stride to a new variable
+                val, i = sorted(
+                    [
+                        (ex.stride()[i], i)
+                        for i in range(len(stride))
+                        if stride[i] is None
+                    ]
+                )[0]
+                stride[i] = self.create_symbol(val)
+        assert all(x is not None for x in stride)
+        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+
+    def create_symintnode(self, expr: Union["sympy.Expr", int]):
+        py_sym_int = PySymInt(expr, self)
+        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        return cpp_sym_int
+
+    def create_symbol(self, val: int) -> "sympy.Expr":
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
-
-        # Currently we don't put 0/1 specialization in guards but perhaps we should
-        if val == 0 or val == 1:
-            return val
-        sympy_expr = sympy.Symbol(name, positive=True, integer=True)
-        py_sym_int = PySymInt(sympy_expr, self)
-        cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
+        if val < 0:
+            # all sympy base variables must be positive and > 1
+            return -self.create_symbol(-val)
+        # This implements duck-shaping: input sizes that match are assigned
+        # the same symint
+        # TODO: Create a guard whenever this happens
+        # TODO: But how do I represent the guard in this case?
+        # Note: val_to_var is also initialized with 0/1 mapping to constants, so
+        # this also ensures that all symbols are > 1
+        if val in self.val_to_var:
+            return self.val_to_var[val]
+        sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
         self.var_to_val[sympy_expr] = sympy.Integer(val)
-        return cpp_sym_int
+        self.val_to_var[val] = sympy_expr
+        return sympy_expr
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
@@ -396,6 +513,7 @@ class ShapeEnv(object):
         self.replacements[a] = self.replacements[a].xreplace(cur_replace)
         return self.replacements[a]
 
+    @lru_cache(256)
     def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
         Evaluates the result of an eq call. If true, uses information to

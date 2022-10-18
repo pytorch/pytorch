@@ -82,7 +82,7 @@ static bool participatesInCurrentLevel(const Tensor& self) {
   return self_level == current_level;
 }
 
-static bool participatesInCurrentLevel(TensorList self) {
+static bool participatesInCurrentLevel(ITensorListRef self) {
   for (const Tensor& tensor : self) {
     if (participatesInCurrentLevel(tensor)) {
       return true;
@@ -413,7 +413,7 @@ static void checkBasicAsStridedValidForSlice(
   }
   if (!max_slice_loc.has_value()) {
     TORCH_CHECK(false,
-        "result = tensor.as_strided(", sizes, ",",  strides, ",", storage_offset, ")",
+        "result = tensor.as_strided(", sizes, ", ",  strides, ", ", storage_offset, ") ",
         "can access memory outside of `tensor`. `tensor` has no storage but the ",
         "passed-in (size, stride, storage_offset) imply a result with some storage. ",
         "This is not supported inside of vmap, please try to rewrite the ",
@@ -422,11 +422,11 @@ static void checkBasicAsStridedValidForSlice(
 
   TORCH_CHECK(
       *max_as_strided_loc <= *max_slice_loc && base_offset <= storage_offset,
-      "result = tensor.as_strided(", sizes, ",",  strides, ",", storage_offset, ")",
-      "can access memory outside of `tensor`. `result` can access some",
+      "result = tensor.as_strided(", sizes, ", ",  strides, ", ", storage_offset, ") ",
+      "can access memory outside of `tensor`. `result` can access some ",
       "memory in range [", storage_offset, ", ", *max_as_strided_loc, "], but ",
       "`tensor` can only access some memory in range [", base_offset, ", ",
-      *max_slice_loc, "]. This is not supported inside of vmap, please try to",
+      *max_slice_loc, "]. This is not supported inside of vmap, please try to ",
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
 }
 
@@ -606,7 +606,7 @@ Tensor unwrap_and_call_method(const Tensor& input, ExtraArgs... extra_args) {
   return makeBatched(output_physical, input_batched->bdim(), input_batched->level());
 }
 
-Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
+Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   if (!participatesInCurrentLevel(tensors)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::cat(tensors, dim);

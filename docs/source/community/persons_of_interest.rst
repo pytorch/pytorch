@@ -114,6 +114,7 @@ Sparse (torch.sparse)
 -  Nikita Vedeneev (`nikitaved <https://github.com/nikitaved>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Andrew James (`amjames <https://github.com/amjames>`__)
 
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -228,10 +229,11 @@ Mobile / Edge
 
 Model Compression & Optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--  Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
+-  Vasiliy Kuznetsov (`vkuzo <https://github.com/vkuzo>`__)
 -  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
 -  Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
 -  Supriya Rao (`supriyar <https://github.com/supriyar>`__)
+-  (emeritus) Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
 
 
 Windows
@@ -287,6 +289,11 @@ TorchVision
 
 -  Francisco Massa (`fmassa <https://github.com/fmassa>`__)
 -  Vasilis Vryniotis (`datumbox <https://github.com/datumbox>`__)
+-  Nicolas Hug (`NicolasHug <https://github.com/NicolasHug>`__)
+-  Yosua Michael Maranatha (`YosuaMichael <https://github.com/YosuaMichael>`__)
+-  Joao Gomes (`jdsgomes <https://github.com/jdsgomes>`__)
+-  Philip Meier (`pmeier <https://github.com/pmeier>`__)
+-  Victor Fomin (`vfdev-5 <https://github.com/vfdev-5>`__)
 
 TorchText
 ~~~~~~~~~

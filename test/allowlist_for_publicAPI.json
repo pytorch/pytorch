@@ -1,5 +1,21 @@
 {
   "being_migrated": {
+    "torch.nn.intrinsic": "torch.ao.nn.intrinsic",
+    "torch.nn.intrinsic.modules": "torch.ao.nn.intrinsic.modules",
+    "torch.nn.intrinsic.modules.fused": "torch.ao.nn.intrinsic.modules.fused",
+    "torch.nn.intrinsic.qat": "torch.ao.nn.intrinsic.qat",
+    "torch.nn.intrinsic.qat.modules": "torch.ao.nn.intrinsic.qat.modules",
+    "torch.nn.intrinsic.qat.modules.conv_fused": "torch.ao.nn.intrinsic.qat.modules.conv_fused",
+    "torch.nn.intrinsic.qat.modules.linear_fused": "torch.ao.nn.intrinsic.qat.modules.linear_fused",
+    "torch.nn.intrinsic.qat.modules.linear_relu": "torch.ao.nn.intrinsic.qat.modules.linear_relu",
+    "torch.nn.intrinsic.quantized": "torch.ao.nn.intrinsic.quantized",
+    "torch.nn.intrinsic.quantized.modules": "torch.ao.nn.intrinsic.quantized.modules",
+    "torch.nn.intrinsic.quantized.modules.bn_relu": "torch.ao.nn.intrinsic.quantized.modules.bn_relu",
+    "torch.nn.intrinsic.quantized.modules.conv_relu": "torch.ao.nn.intrinsic.quantized.modules.conv_relu",
+    "torch.nn.intrinsic.quantized.modules.linear_relu": "torch.ao.nn.intrinsic.quantized.modules.linear_relu",
+    "torch.nn.intrinsic.quantized.dynamic": "torch.ao.nn.intrinsic.quantized.dynamic",
+    "torch.nn.intrinsic.quantized.dynamic.modules": "torch.ao.nn.intrinsic.quantized.dynamic.modules",
+    "torch.nn.intrinsic.quantized.dynamic.modules.linear_relu": "torch.ao.nn.intrinsic.quantized.dynamic.modules.linear_relu",
     "torch.nn.qat": "torch.ao.nn.qat",
     "torch.nn.qat.dynamic": "torch.ao.nn.qat.dynamic",
     "torch.nn.qat.dynamic.modules": "torch.ao.nn.qat.dynamic.modules",
@@ -19,239 +35,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization": [
-    "ABC",
-    "ABCMeta",
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "Module",
-    "Optional",
-    "OrderedDict",
-    "Pattern",
-    "QConfigAny",
-    "Set",
-    "Tuple",
-    "Type",
-    "Union",
-    "abstractmethod",
-    "namedtuple",
-    "partial",
-    "type_before_parametrizations",
-    "wrap_cpp_module"
-  ],
-  "torch.ao.quantization.fake_quantize": [
-    "ABC",
-    "Any",
-    "FixedQParamsObserver",
-    "HistogramObserver",
-    "Module",
-    "MovingAverageMinMaxObserver",
-    "MovingAveragePerChannelMinMaxObserver",
-    "Tuple",
-    "abstractmethod",
-    "default_fixed_qparams_range_0to1_fake_quant",
-    "default_fixed_qparams_range_0to1_observer",
-    "default_affine_fixed_qparams_fake_quant",
-    "default_affine_fixed_qparams_observer",
-    "default_dynamic_fake_quant",
-    "default_embedding_fake_quant",
-    "default_embedding_fake_quant_4bit",
-    "default_fake_quant",
-    "default_fused_act_fake_quant",
-    "default_fused_per_channel_wt_fake_quant",
-    "default_fused_wt_fake_quant",
-    "default_histogram_fake_quant",
-    "default_per_channel_weight_fake_quant",
-    "default_fixed_qparams_range_neg1to1_fake_quant",
-    "default_fixed_qparams_range_neg1to1_observer",
-    "default_symmetric_fixed_qparams_fake_quant",
-    "default_symmetric_fixed_qparams_observer",
-    "default_weight_fake_quant",
-    "fused_per_channel_wt_fake_quant_range_neg_127_to_127",
-    "fused_wt_fake_quant_range_neg_127_to_127"
-  ],
-  "torch.ao.quantization.fuse_modules": [
-    "List",
-    "Optional",
-    "fuse_conv_bn",
-    "fuse_conv_bn_relu",
-    "get_fuser_method",
-    "type_before_parametrizations"
-  ],
-  "torch.ao.quantization.fuser_method_mappings": [
-    "Callable",
-    "Dict",
-    "MatchAllNode",
-    "Optional",
-    "Pattern",
-    "Tuple",
-    "Type",
-    "Union",
-    "get_combined_dict"
-  ],
-  "torch.ao.quantization.backend_config.native": [
-    "Any",
-    "Dict",
-    "FixedQParamsFakeQuantize",
-    "List",
-    "ObservationType",
-    "default_fixed_qparams_range_0to1_observer",
-    "default_fixed_qparams_range_neg1to1_observer",
-    "default_affine_fixed_qparams_observer",
-    "default_symmetric_fixed_qparams_observer",
-    "fuse_conv_bn",
-    "fuse_conv_bn_relu",
-    "fuse_convtranspose_bn",
-    "fuse_linear_bn",
-    "namedtuple",
-    "reverse2",
-    "reverse3",
-    "reverse_sequential_wrapper2"
-  ],
-  "torch.ao.quantization.quantization_types": [
-      "Any",
-      "Node",
-      "NodePattern",
-      "Pattern",
-      "QuantizerCls",
-      "Tuple",
-      "Union"
-  ],
-  "torch.ao.quantization.fx.graph_module": [
-    "Any",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "Set",
-    "Union"
-  ],
-  "torch.ao.quantization.fx.pattern_utils": [
-    "Any",
-    "Dict",
-    "FixedQParamsFakeQuantize",
-    "List",
-    "MatchResult",
-    "Node",
-    "ObserverBase",
-    "Optional",
-    "OrderedDict",
-    "Pattern",
-    "QConfigAny",
-    "QuantizeHandler",
-    "Tuple"
-  ],
-  "torch.ao.quantization.fx.quantization_patterns": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "Node",
-    "NodePattern",
-    "Optional",
-    "Pattern",
-    "all_node_args_have_no_tensors"
-  ],
-  "torch.ao.quantization.fx.quantization_types": [
-    "Any",
-    "Node",
-    "NodePattern",
-    "Pattern",
-    "QuantizerCls",
-    "Tuple",
-    "Union"
-  ],
-  "torch.ao.quantization.fx.backend_config_utils": [
-    "Any",
-    "Callable",
-    "DefaultFuseHandler",
-    "Dict",
-    "NodePattern",
-    "ObservationType",
-    "Optional",
-    "Pattern",
-    "QuantizeHandler",
-    "QuantizerCls",
-    "activation_dtype",
-    "get_combined_dict",
-    "get_default_quant_patterns",
-    "get_native_backend_config_dict",
-    "sorted_patterns_dict",
-    "get_quantize_handler_cls"
-  ],
-  "torch.ao.quantization.qconfig": [
-    "Any",
-    "FakeQuantize",
-    "FakeQuantizeBase",
-    "FusedMovingAvgObsFakeQuantize",
-    "HistogramObserver",
-    "MovingAverageMinMaxObserver",
-    "NoopObserver",
-    "Optional",
-    "PlaceholderObserver",
-    "QConfigAny",
-    "ReuseInputObserver",
-    "default_debug_observer",
-    "default_dynamic_fake_quant",
-    "default_dynamic_quant_observer",
-    "default_embedding_fake_quant",
-    "default_embedding_fake_quant_4bit",
-    "default_fake_quant",
-    "default_float_qparams_observer",
-    "default_float_qparams_observer_4bit",
-    "default_fused_act_fake_quant",
-    "default_fused_per_channel_wt_fake_quant",
-    "default_fused_wt_fake_quant",
-    "default_observer",
-    "default_per_channel_weight_fake_quant",
-    "default_per_channel_weight_observer",
-    "default_placeholder_observer",
-    "default_reuse_input_observer",
-    "default_weight_fake_quant",
-    "default_weight_observer",
-    "fused_per_channel_wt_fake_quant_range_neg_127_to_127",
-    "fused_wt_fake_quant_range_neg_127_to_127",
-    "namedtuple",
-    "per_channel_weight_observer_range_neg_127_to_127",
-    "weight_observer_range_neg_127_to_127"
-  ],
-  "torch.ao.quantization.quantization_mappings": [
-    "Any",
-    "Callable",
-    "DeQuantStub",
-    "Dict",
-    "Optional",
-    "QuantStub",
-    "Set",
-    "Union",
-    "default_fixed_qparams_range_0to1_fake_quant",
-    "default_fixed_qparams_range_neg1to1_fake_quant",
-    "default_affine_fixed_qparams_fake_quant",
-    "default_symmetric_fixed_qparams_fake_quant",
-    "get_combined_dict",
-    "type_before_parametrizations"
-  ],
-  "torch.ao.quantization.quantize": [
-    "DeQuantStub",
-    "QuantWrapper",
-    "activation_is_memoryless",
-    "add_module_to_qconfig_obs_ctr",
-    "get_default_dynamic_quant_module_mappings",
-    "get_default_qat_module_mappings",
-    "get_default_qconfig_propagation_list",
-    "get_default_static_quant_module_mappings",
-    "get_default_static_quant_reference_module_mappings",
-    "get_qparam_dict",
-    "has_no_children_ignoring_parametrizations",
-    "no_observer_set",
-    "type_before_parametrizations"
-  ],
-  "torch.ao.quantization.quantize_jit": [
-    "QConfig",
-    "QuantType",
-    "wrap_cpp_module"
-  ],
   "torch.autograd": [
     "NestedIOFunction",
     "detect_anomaly",
@@ -263,75 +46,11 @@
     "no_grad",
     "set_detect_anomaly",
     "set_grad_enabled",
+    "set_multithreading_enabled",
     "variable"
-  ],
-  "torch.autograd.function": [
-    "Any",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "with_metaclass"
-  ],
-  "torch.autograd.functional": [
-    "List",
-    "Tuple"
-  ],
-  "torch.autograd.graph": [
-    "Any",
-    "Callable"
-  ],
-  "torch.autograd.profiler": [
-    "Any",
-    "ContextDecorator",
-    "DeviceType",
-    "Dict",
-    "Future",
-    "List",
-    "Optional",
-    "ProfilerActivity",
-    "ProfilerConfig",
-    "ProfilerState",
-    "kineto_available",
-    "warn"
-  ],
-  "torch.autograd.profiler_legacy": [
-    "DeviceType",
-    "EventList",
-    "FunctionEvent",
-    "ProfilerConfig",
-    "ProfilerState",
-    "warn"
-  ],
-  "torch.autograd.profiler_util": [
-    "DeviceType",
-    "Dict",
-    "List",
-    "Optional",
-    "Tuple",
-    "attrgetter",
-    "defaultdict",
-    "namedtuple"
-  ],
-  "torch.autograd.variable": [
-    "ImperativeEngine",
-    "with_metaclass"
   ],
   "torch.backends": [
     "contextmanager"
-  ],
-  "torch.cpu.amp.autocast_mode": [
-    "Any"
-  ],
-  "torch.cuda": [
-    "Any",
-    "Device",
-    "Dict",
-    "List",
-    "Optional",
-    "Set",
-    "Tuple",
-    "Union",
-    "classproperty"
   ],
   "torch.cuda.comm": [
     "broadcast",
@@ -341,21 +60,11 @@
     "scatter",
     "gather"
   ],
-  "torch.cuda.amp.autocast_mode": [
-    "Any"
-  ],
-  "torch.cuda.amp.common": [
-    "find_spec"
-  ],
   "torch.cuda.nccl": [
     "init_rank",
     "is_available",
     "unique_id",
     "version"
-  ],
-  "torch.cuda.profiler": [
-    "check_error",
-    "cudart"
   ],
   "torch.distributed": [
     "AllToAllOptions",
@@ -373,6 +82,7 @@
     "GradBucket",
     "HashStore",
     "Logger",
+    "namedtuple",
     "Optional",
     "PrefixStore",
     "ProcessGroup",
@@ -473,47 +183,7 @@
   "torch.distributed.optim.utils": [
     "Type"
   ],
-  "torch.distributed.pipeline.sync.checkpoint": [
-    "Checkpoint",
-    "Checkpointing",
-    "Context",
-    "Function",
-    "Recompute",
-    "ThreadLocal",
-    "checkpoint",
-    "enable_checkpointing",
-    "enable_recomputing",
-    "restore_rng_states",
-    "save_rng_states"
-  ],
-  "torch.distributed.pipeline.sync.copy": [
-    "Context",
-    "Copy",
-    "Wait"
-  ],
-  "torch.distributed.pipeline.sync.dependency": [
-    "Fork",
-    "Join",
-    "fork",
-    "join"
-  ],
-  "torch.distributed.pipeline.sync.microbatch": [
-    "Batch",
-    "NoChunk",
-    "check",
-    "gather",
-    "scatter"
-  ],
-  "torch.distributed.pipeline.sync.phony": [
-    "get_phony"
-  ],
   "torch.distributed.pipeline.sync.pipe": [
-    "BalanceError",
-    "PipeSequential",
-    "Pipeline",
-    "WithDevice"
-  ],
-  "torch.distributed.pipeline.sync.pipeline": [
     "Pipeline"
   ],
   "torch.distributed.pipeline.sync.skip.layout": [
@@ -537,25 +207,6 @@
     "current_skip_tracker",
     "use_skip_tracker"
   ],
-  "torch.distributed.pipeline.sync.stream": [
-    "CPUStreamType",
-    "as_cuda",
-    "current_stream",
-    "default_stream",
-    "get_device",
-    "is_cuda",
-    "new_stream",
-    "record_stream",
-    "use_device",
-    "use_stream",
-    "wait_stream"
-  ],
-  "torch.distributed.pipeline.sync.worker": [
-    "Task",
-    "create_workers",
-    "spawn_workers",
-    "worker"
-  ],
   "torch.distributed.remote_device": [
     "Optional",
     "Union"
@@ -576,69 +227,6 @@
     "urlunparse"
   ],
   "torch.distributed.rpc": [
-    "Any",
-    "Dict",
-    "Future",
-    "Generator",
-    "Generic",
-    "GenericWithOneTypeVar",
-    "PyRRef",
-    "RemoteProfilerManager",
-    "RpcAgent",
-    "RpcBackendOptions",
-    "Set",
-    "Store",
-    "TensorPipeAgent",
-    "Tuple",
-    "TypeVar",
-    "WorkerInfo",
-    "enable_gil_profiling",
-    "get_rpc_timeout",
-    "method",
-    "timedelta",
-    "urlparse"
-  ],
-  "torch.distributed.rpc.api": [
-    "Any",
-    "Dict",
-    "Future",
-    "Generic",
-    "GenericWithOneTypeVar",
-    "PyRRef",
-    "PythonUDF",
-    "RPCExecMode",
-    "RemoteProfilerManager",
-    "Set",
-    "TypeVar",
-    "WorkerInfo",
-    "get_rpc_timeout",
-    "method"
-  ],
-  "torch.distributed.rpc.backend_registry": [
-    "Dict",
-    "List",
-    "Set",
-    "Tuple"
-  ],
-  "torch.distributed.rpc.constants": [
-    "timedelta"
-  ],
-  "torch.distributed.rpc.internal": [
-    "Enum"
-  ],
-  "torch.distributed.rpc.options": [
-    "DeviceType",
-    "Dict",
-    "List",
-    "Optional",
-    "Union"
-  ],
-  "torch.distributions.utils": [
-    "Any",
-    "Dict",
-    "Number",
-    "is_tensor_like",
-    "update_wrapper"
   ],
   "torch.fft": [
     "Tensor",
@@ -703,42 +291,6 @@
     "dispatch",
     "hashable",
     "isvar"
-  ],
-  "torch.fx.graph_module": [
-    "Any",
-    "Dict",
-    "Graph",
-    "Importer",
-    "List",
-    "Optional",
-    "PackageExporter",
-    "PackageImporter",
-    "Path",
-    "PythonCode",
-    "Set",
-    "Type",
-    "Union",
-    "compatibility"
-  ],
-  "torch.fx.operator_schemas": [
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "NamedTuple",
-    "OpOverload",
-    "OpOverloadPacket",
-    "Optional",
-    "Tuple",
-    "cast",
-    "compatibility"
-  ],
-  "torch.fx.passes.graph_drawer": [
-    "Any",
-    "Dict",
-    "TensorMetadata",
-    "chain",
-    "compatibility"
   ],
   "torch.fx.proxy": [
     "assert_fn"
@@ -1373,10 +925,6 @@
   "torch.random": [
     "Generator"
   ],
-  "torch.return_types": [
-    "attr",
-    "pytree_register_structseq"
-  ],
   "torch.serialization": [
     "Any",
     "BinaryIO",
@@ -1550,18 +1098,6 @@
     "Serialization",
     "wrapper_singleton"
   ],
-  "torch.utils.cpp_extension": [
-    "ExtensionVersioner",
-    "FileBaton",
-    "GeneratedFileCleaner",
-    "List",
-    "Optional",
-    "TorchVersion",
-    "Tuple",
-    "Union",
-    "build_ext",
-    "get_hip_file_path"
-  ],
   "torch.utils.data": [
     "_DatasetKind",
     "argument_validation",
@@ -1585,26 +1121,6 @@
   "torch.utils.dlpack": [
     "Any",
     "to_dlpack"
-  ],
-  "torch.utils.hipify.hipify_python": [
-    "Dict",
-    "HipifyFinalResult",
-    "HipifyResult",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Mapping",
-    "Optional"
-  ],
-  "torch.utils.hooks": [
-    "Any",
-    "OrderedDict"
-  ],
-  "torch.utils.show_pickle": [
-    "Any",
-    "BinaryIO",
-    "IO",
-    "Union"
   ],
   "torch": [
     "BFloat16Storage",
