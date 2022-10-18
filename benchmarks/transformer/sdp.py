@@ -6,7 +6,6 @@ import csv
 import random
 
 
-
 class CompositeMHA(torch.nn.Module):
     def __init__(self, num_heads, in_proj_weight, in_proj_bias, out_proj):
         super().__init__()
@@ -62,15 +61,18 @@ def build_composite_mha_from_nn_mha(pt):
     assert pt.batch_first
     return CompositeMHA(pt.num_heads, pt.in_proj_weight, pt.in_proj_bias, pt.out_proj)
 
+
 def generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage=None, dtype=torch.float16, device="cuda"):
     if not pad_percentage:
         return torch.randn(batch_size, max_sequence_len, embed_dimension, dtype=dtype, device=device), None
     # Really slow but should work
-    seq_len_list = [int(max_sequence_len * (1-random.gauss(pad_percentage, 0.01))) for _ in range(batch_size)]
+    seq_len_list = [int(max_sequence_len * (1 - random.gauss(pad_percentage, 0.01))) for _ in range(batch_size)]
     # Make random ele max length
     seq_len_list[random.randint(0, batch_size - 1)] = max_sequence_len
     # print(f"Theoretical padding: {pad_percentage} actual: {1 - (sum(seq_len_list) / (batch_size * max_sequence_len))}")
-    return torch.nested.nested_tensor([torch.randn(seq_len, embed_dimension, dtype=dtype, device=device) for seq_len in seq_len_list]), seq_len_list
+    return torch.nested.nested_tensor([
+        torch.randn(seq_len, embed_dimension, dtype=dtype, device=device) for seq_len in seq_len_list])
+
 
 def benchmark_torch_function(iters, f, *args, **kwargs):
     if f is None:
@@ -96,32 +98,31 @@ def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, 
     )
     npt = pt.eval().half().cuda()
     cpt = build_composite_mha_from_nn_mha(npt)
-    x, lengths = generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage)
+    x = generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage)
     pt_output, _ = pt(x, x, x, mask)
     cpt_output, _ = cpt(x, x, x, mask)
 
     # First order sanity check. Not a replacement for rigorous tests.
     if pt_output.is_nested and cpt_output.is_nested:
-        for a,b in zip(pt_output.unbind(), cpt_output.unbind()):
-             assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
+        for a, b in zip(pt_output.unbind(), cpt_output.unbind()):
+            assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
     else:
         assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
-    # with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True):
-    #     with torch.inference_mode():
-    pt_time = benchmark_torch_function(iters, npt, x, x, x, mask) * 1e3
-    cp_time = benchmark_torch_function(iters, cpt, x, x, x, mask) * 1e3
-    results = {}
-    results["max_sequence_len"] = max_sequence_len
-    results["num_heads"] = num_heads
-    results["embed_dimension"] = embed_dimension
-    results["pt_time"] = pt_time
-    results["cp_time"] = cp_time
-    results["speedup"] = pt_time / cp_time
-    results["dtype"] = str(x.dtype)
-    writer.writerow(results)
+    with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True):
+        with torch.inference_mode():
+            pt_time = benchmark_torch_function(iters, npt, x, x, x, mask) * 1e3
+            cp_time = benchmark_torch_function(iters, cpt, x, x, x, mask) * 1e3
+            results = {}
+            results["max_sequence_len"] = max_sequence_len
+            results["num_heads"] = num_heads
+            results["embed_dimension"] = embed_dimension
+            results["pt_time"] = pt_time
+            results["cp_time"] = cp_time
+            results["speedup"] = pt_time / cp_time
+            results["dtype"] = str(x.dtype)
+            writer.writerow(results)
 
-@torch.inference_mode()
-@torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True)
+
 def main():
     iters = 100
     seed = 123
@@ -137,6 +138,7 @@ def main():
 
     for num_heads, max_seq_len in itertools.product([2, 4, 8, 16, 32], [64, 128, 256]):
         run_timing(iters, batch_size, 1024, num_heads, max_seq_len, pad_percentage, writer)
+
 
 if __name__ == "__main__":
     main()
