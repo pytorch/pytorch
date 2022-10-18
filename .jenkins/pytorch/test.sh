@@ -699,12 +699,16 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -713,7 +717,9 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -731,7 +737,9 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  install_triton
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   install_monkeytype
   test_python
   test_aten
