@@ -31,8 +31,6 @@ from typing import (
     Union,
 )
 
-import onnx
-
 import torch
 import torch._C._onnx as _C_onnx
 import torch.jit._trace
@@ -93,7 +91,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
         )
     originally_training: bool = False
 
-    if not isinstance(model, torch.jit.ScriptFunction):
+    if hasattr(model, "training"):
         originally_training = model.training
 
         # ONNX opset 12 has better support for training amenable models, with updated
@@ -122,10 +120,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     try:
         yield
     finally:
-        if not (
-            isinstance(model, torch.jit.ScriptFunction)
-            or mode == _C_onnx.TrainingMode.PRESERVE
-        ):
+        if hasattr(model, "training") and not mode == _C_onnx.TrainingMode.PRESERVE:
             model.train(originally_training)
 
 
@@ -1669,6 +1664,11 @@ def _export(
 
 @_beartype.beartype
 def _add_onnxscript_fn(model_proto: bytes) -> bytes:
+    # avoid onnx to be dependency
+    try:
+        import onnx
+    except Exception:
+        raise errors.OnnxExporterError("Module onnx is not installed!")
     model = onnx.load_model_from_string(model_proto)
     if _custom_onnxscript is not None:
         model.functions.extend(_custom_onnxscript)
