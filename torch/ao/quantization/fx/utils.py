@@ -268,7 +268,8 @@ def quantize_node(
         module_path = ""
     root_module = modules['']
     graph = quantized_graph
-    maybe_quantize_node_info = get_quantize_node_info(obs_module, False)
+    is_decomposed_qtensor = False
+    maybe_quantize_node_info = get_quantize_node_info(obs_module, is_decomposed_qtensor)
     assert maybe_quantize_node_info is not None, \
         f"Expecting quantize node info not to be None, observer: {obs_module}"
     node_type, quantize_op, qparams = maybe_quantize_node_info
