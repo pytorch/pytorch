@@ -7695,21 +7695,10 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: diag_cpu_out
-    CUDA: diag_cuda_out
-    MPS: diag_mps_out
+    CPU, CUDA: diag_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: diag
-
-- func: diag_backward(Tensor grad, SymInt[] input_sizes, int diagonal) -> Tensor
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeImplicitAutograd: diag_backward_symint
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 

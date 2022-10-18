@@ -2430,25 +2430,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::addbmm, aten_addbmm, [](Node* n) -> SROperator {
   return nullptr;
 });
 
-REGISTER_OPERATOR_FUNCTOR(aten::diag, aten_diag, [](Node* n) -> SROperator {
-  if (n->matches(
-          torch::schema("aten::diag(Tensor self, int diagonal=0) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto diagonal = p_node->Input(1).toInt();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::diag(self, diagonal);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::diag_cpu_out(self, diagonal, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
 REGISTER_OPERATOR_FUNCTOR(aten::cross, aten_cross, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::cross(Tensor self, Tensor other, int? dim=None) -> Tensor"))) {
