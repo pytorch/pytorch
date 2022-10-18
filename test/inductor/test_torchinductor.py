@@ -4042,9 +4042,9 @@ if HAS_CUDA:
         @patch.object(torch._dynamo.config, "dynamic_shapes", True)
         @patch.object(functorch_config, "use_dynamic_shapes", True)
         def test_dynamic_shapes(self):
+            torch._dynamo.reset() # Needed since everywhere else uses "inductor"
             def f(x):
                 return x.cos().view(x.shape).sin()
-
             cnts = torch._dynamo.testing.CompileCounterWithBackend("inductor")
 
             f2 = torch._dynamo.optimize(cnts)(f)
