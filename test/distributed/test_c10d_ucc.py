@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip_if,
 )
 
+
 def simple_reduce_tests(rank, world_size):
     tests = [
         (
@@ -174,6 +175,7 @@ def simple_multi_input_reduce_tests(rank, world_size):
         ),
     ]
 
+
 class RendezvousEnvTest(TestCase):
     @requires_ucc()
     @retry_on_connect_failures
@@ -194,11 +196,13 @@ class RendezvousEnvTest(TestCase):
 
         c10d.destroy_process_group()
 
+
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     @requires_ucc()
     @retry_on_connect_failures
     def test_default_store_timeout_ucc(self):
         self._test_default_store_timeout("ucc")
+
 
 class ProcessGroupUCCTest(MultiProcessTestCase):
     def _create_process_group_ucc(self):
@@ -249,7 +253,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
             output = broadcast([x], i, 0)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(torch.tensor([i]), output[0])
-            
+
             # TODO: UCC currently does not support multi tensor input
 
         # Test overloaded convenience function
@@ -361,7 +365,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
             if i == self.rank:
                 continue
             self.assertEqual(torch.tensor([i]), outputs[i])
-    
+
     # TODO: test_barrier_implies_wait seems to fail even after Sergey's barrier blocking fix
 
 
@@ -381,8 +385,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         except OSError:
             pass
 
-    # TODO: merge in sequence number support PR first
-    """
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_sequence_num_set_default_pg_ucc(self):
@@ -404,7 +406,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         if self.world_size < 4:
             return sandcastle_skip("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("ucc")
-    """
 
     @requires_ucc()
     def test_ucc_barrier_device_ids(self):
@@ -436,6 +437,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="ucc")
 
+
 class CompilerTest(test_c10d_common.CompilerTest):
 
     @property
@@ -452,7 +454,6 @@ class CompilerTest(test_c10d_common.CompilerTest):
         )
         return dist.distributed_c10d._get_default_group()
 
-    
     @skip_if_lt_x_gpu(2)
     def test_allreduce_work_wait_gpu(self):
         self._test_allgather_work_wait(
@@ -482,6 +483,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
         self._test_consecutive_comm_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
+
 
 class UccProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_ucc()
