@@ -3252,7 +3252,7 @@ class Convolution(ExternKernelAlloc):
         )
 
 
-def _ProcessConvolutionFusionCreat(
+def _PrepareConvolutionFusionCreat(
     cls,
     x: "TensorBox",
     weight: "TensorBox",
@@ -3262,6 +3262,12 @@ def _ProcessConvolutionFusionCreat(
     dilation_: List[int],
     groups: int,
 ):
+    """
+    This funtion is a helper function to prepare inputs of convolutuon fusion's
+    create function, including decide the convolution fusion kernel's layout and
+    inputs process(convert tensor to contiguous tensor and convert Liat args to tuple).
+    """
+
     x = cls.require_stride1(cls.realize_input(x))
     weight = cls.require_stride1(cls.realize_input(weight))
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
@@ -3371,7 +3377,7 @@ class ConvolutionUnary(ExternKernelAlloc):
         algorithm,
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise"
-        (inputs, constant_args, kernel_layout,) = _ProcessConvolutionFusionCreat(
+        (inputs, constant_args, kernel_layout,) = _PrepareConvolutionFusionCreat(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         constant_args = constant_args + [attr, scalars, algorithm]
@@ -3424,7 +3430,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         attr,
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
-        (inputs, constant_args, kernel_layout,) = _ProcessConvolutionFusionCreat(
+        (inputs, constant_args, kernel_layout,) = _PrepareConvolutionFusionCreat(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.require_stride1(cls.realize_input(other))
