@@ -101,6 +101,9 @@ Keyword args:
     {device}
     {requires_grad}
 
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+
 Examples::
 
     >>> # Generate a symmetric exponential window of size 10 and with a decay value of 1.0.
@@ -184,6 +187,9 @@ Keyword args:
     {device}
     {requires_grad}
 
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+
 Examples::
 
     >>> # Generate a symmetric cosine window.
@@ -253,6 +259,9 @@ Keyword args:
     {device}
     {requires_grad}
 
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+
 Examples::
 
     >>> # Generate a symmetric gaussian window with a standard deviation of 1.0.
@@ -312,7 +321,7 @@ The Hamming window is defined as follows:
     w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
     """,
     r"""
-    
+
 {normalization}
 
 Arguments:
@@ -320,17 +329,22 @@ Arguments:
 
 Keyword args:
     {sym}
+    alpha (float, optional): The coefficient :math:`\alpha` in the equation above.
+    beta (float, optional): The coefficient :math:`\beta` in the equation above.
     {dtype}
     {layout}
     {device}
     {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
 
 Examples::
 
     >>> # Generate a symmetric Hamming window.
     >>> torch.signal.windows.hamming(10)
     tensor([0.0800, 0.1876, 0.4601, 0.7700, 0.9723, 0.9723, 0.7700, 0.4601, 0.1876, 0.0800])
-    
+
     >>> # Generate a periodic Hamming window.
     >>> torch.signal.windows.hamming(10,sym=False)
     tensor([0.0800, 0.1679, 0.3979, 0.6821, 0.9121, 1.0000, 0.9121, 0.6821, 0.3979, 0.1679])
@@ -339,10 +353,10 @@ Examples::
     ),
 )
 def hamming(M: int,
+            *,
             sym: bool = True,
             alpha: float = 0.54,
             beta: float = 0.46,
-            *,
             dtype: torch.dtype = None,
             layout: torch.layout = torch.strided,
             device: torch.device = None,
@@ -382,7 +396,7 @@ The Hann window is defined as follows:
     \sin^2 \left( \frac{\pi n}{N - 1} \right),
     """,
     r"""
-    
+
 {normalization}
 
 Arguments:
@@ -394,6 +408,9 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
 
 Examples::
 
@@ -409,8 +426,8 @@ Examples::
     ),
 )
 def hann(M: int,
-         sym: bool = True,
          *,
+         sym: bool = True,
          dtype: torch.dtype = None,
          layout: torch.layout = torch.strided,
          device: torch.device = None,
@@ -442,7 +459,7 @@ The Blackman window is defined as follows:
 where :math:`M` is the full window size.
     """,
     r"""
-    
+
 {normalization}
 
 Arguments:
@@ -455,22 +472,25 @@ Keyword args:
     {device}
     {requires_grad}
 
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
+
 Examples::
 
     >>> # Generate a symmetric Blackman window.
-    >>> torch.signal.windows.blackman(10)
-    tensor([-1.4901e-08,  5.0870e-02,  2.5800e-01,  6.3000e-01,  9.5113e-01, 9.5113e-01,  6.3000e-01,  2.5800e-01,  5.0870e-02, -1.4901e-08])
+    >>> torch.signal.windows.blackman(5)
+    tensor([-1.4901e-08,  3.4000e-01,  1.0000e+00,  3.4000e-01, -1.4901e-08])
 
     >>> # Generate a periodic Blackman window.
-    >>> torch.signal.windows.blackman(10,sym=False)
-    tensor([-1.4901e-08,  4.0213e-02,  2.0077e-01,  5.0979e-01,  8.4923e-01, 1.0000e+00,  8.4923e-01,  5.0979e-01,  2.0077e-01,  4.0213e-02])
+    >>> torch.signal.windows.blackman(5,sym=False)
+    tensor([-1.4901e-08,  2.0077e-01,  8.4923e-01,  8.4923e-01,  2.0077e-01])
 """.format(
         **window_common_args
     ),
 )
 def blackman(M: int,
-             sym: bool = True,
              *,
+             sym: bool = True,
              dtype: torch.dtype = None,
              layout: torch.layout = torch.strided,
              device: torch.device = None,
@@ -523,7 +543,7 @@ The Bartlett window is defined as follows:
 where :math:`M` is the full window size.
     """,
     r"""
-    
+
 {normalization}
 
 Arguments:
@@ -535,6 +555,9 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(M,)` containing the window.
 
 Examples::
 
