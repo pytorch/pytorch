@@ -1,6 +1,6 @@
 #define PY_SSIZE_T_CLEAN
-#include <Python.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
 #include <sstream>
 
@@ -333,9 +333,53 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   }
 }
 
+static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
+  /*
+   Assert that a given tensor has a given size/stride, but ignore strides
+   of size==1 dimensions.  Implemented in C++ as this is on the hot path.
+  */
+  PyObject* item;
+  PyObject* size;
+  PyObject* stride;
+  if (!PyArg_ParseTuple(args, "OOO", &item, &size, &stride)) {
+    return NULL;
+  }
+  if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+    PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+    return NULL;
+  }
+  if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
+    PyErr_SetString(PyExc_TypeError, "expected tuple()");
+    return NULL;
+  }
+  at::Tensor tensor = THPVariable_Unpack(item);
+  int64_t ndim = tensor.ndimension();
+  if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
+    PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
+    return NULL;
+  }
+  for (auto i : c10::irange(ndim)) {
+    int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
+    int64_t want_stride = THPUtils_unpackLong(PyTuple_GET_ITEM(stride, i));
+    int64_t actual_size = tensor.size(i);
+    int64_t actual_stride = tensor.stride(i);
+    if (want_size != actual_size ||
+        // ignore stride differences when size is 1
+        (want_stride != actual_stride && actual_size > 1)) {
+      std::stringstream msg;
+      msg << "expected size " << actual_size << "==" << want_size << ", stride "
+          << actual_stride << "==" << want_stride << " at dim=" << i;
+      PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+      return NULL;
+    }
+  }
+  Py_RETURN_TRUE;
+}
+
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, NULL},
     {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
+    {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
