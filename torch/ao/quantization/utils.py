@@ -140,6 +140,17 @@ def getattr_from_fqn(obj: Any, fqn: str) -> Any:
     """
     return functools.reduce(getattr, fqn.split("."), obj)
 
+def to_underlying_dtype(qdtype):
+    DTYPE_MAPPING = {
+        torch.quint8: torch.uint8,
+        torch.qint8: torch.int8,
+        torch.qint32: torch.int32,
+        torch.quint4x2: torch.uint8,
+        torch.quint2x4: torch.uint8,
+    }
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    return DTYPE_MAPPING[qdtype]
+
 def get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
@@ -562,4 +573,5 @@ __all__ = [
     "calculate_qmin_qmax",
     "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
+    "to_underlying_dtype",
 ]
