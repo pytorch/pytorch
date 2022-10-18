@@ -45,9 +45,6 @@ class IOSJob:
             "build_environment": self.gen_job_name(),
             "ios_arch": self.arch_variant.name,
             "ios_platform": platform_name,
-            "when": {
-                "not": True,
-            },
         }
 
         if self.is_org_member_context:
