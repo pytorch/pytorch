@@ -73,10 +73,26 @@ using void_t = std::void_t<T>;
 #else
 #define CUDA_HOST_DEVICE C10_HOST_DEVICE
 #endif
-
+#if defined(_MSC_VER)
+template <class F, class Tuple, std::size_t... INDEX>
+CUDA_HOST_DEVICE constexpr decltype(auto) apply_impl(
+    F&& f,
+    Tuple&& t,
+    std::index_sequence<INDEX...>) {
+        return std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...);
+    }
+#endif
 template <class F, class Tuple>
 CUDA_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
-  return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
+#if defined(_MSC_VER)
+    return guts::apply_impl(
+        std::forward<F>(f),
+        std::forward<Tuple>(t),
+        std::make_index_sequence<
+            std::tuple_size_v<std::remove_reference_t<Tuple>>>{});
+#else
+    return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
+#endif
 }
 
 #undef CUDA_HOST_DEVICE

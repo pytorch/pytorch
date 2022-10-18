@@ -1009,9 +1009,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
             typename c10::invoke_result_t<T &&, Future&>,
             IValueWithStorages>) {
               IValue value;
-              std::vector<WeakStorage> storages;
-              std::tie(value, storages) = cb(parentFut);
-              childFut->markCompleted(std::move(value), std::move(storages));
+              ::std::vector<WeakStorage> storages;
+              ::std::tie(value, storages) = cb(parentFut);
+              childFut->markCompleted(::std::move(value), ::std::move(storages));
             } else {
               childFut->markCompleted(cb(parentFut));
             };

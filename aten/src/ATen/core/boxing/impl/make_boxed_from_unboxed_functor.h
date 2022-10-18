@@ -572,10 +572,10 @@ namespace impl {
       if constexpr (has_outputs) {
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
-        using ReturnType_ = std::decay_t<ReturnType>;
+        using ReturnType_ = ::std::decay_t<ReturnType>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
         torch::jit::drop(*stack, num_inputs);
-        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
+        push_outputs<ReturnType_, AllowDeprecatedTypes>::call(::std::move(output), stack);
       } else {
         call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
         torch::jit::drop(*stack, num_inputs);
