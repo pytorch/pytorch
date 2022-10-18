@@ -220,6 +220,10 @@ def get_quantize_node_info(
         return None
     return node_type, quantize_op, qparams
 
+# Keep it here for BC in torch.quantization namespace, we can remove it after
+# we deprecate the torch.quantization namespace
+quantize_node = NotImplemented
+
 def get_custom_module_class_keys(custom_module_mapping: Dict[QuantType, Dict[Type, Type]]) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
     e.g.
