@@ -429,7 +429,6 @@ cu_library(
         "@cuda//:cublas",
         "@cuda//:cufft",
         "@cuda//:cusparse",
-        "@cutlass",
     ],
     alwayslink = True,
 )
@@ -1674,7 +1673,6 @@ cc_library(
     ] + if_cuda([
         ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
-        "@cutlass",
     ]),
     alwayslink = True,
 )

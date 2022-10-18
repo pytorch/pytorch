@@ -83,7 +83,7 @@ across models. Example usage::
     # in pairs, and can be used for further analysis.
 
 """
-
+from __future__ import annotations
 import collections
 
 import torch
@@ -127,7 +127,7 @@ from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_roo
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
-from torch.ao.quantization.fx.qconfig_mapping_utils import generate_qconfig_map
+from torch.ao.quantization.fx.qconfig_mapping_utils import generate_node_name_to_qconfig
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
@@ -141,9 +141,6 @@ from torch.ao.ns.fx.n_shadows_utils import (
 import copy
 from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type, Union
 
-__all__ = [
-    "QConfigMultiMapping"
-]
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
@@ -754,6 +751,7 @@ def extend_logger_results_with_comparison(
                     comparison_result = comparison_fn(value_1, value_2)
                     result_2[comparison_name].append(comparison_result)
 
+
 _QCONFIG_STYLE_ORDER: List[str] = [
     "global_qconfig",
     "object_type_qconfigs",
@@ -767,11 +765,11 @@ _QCONFIG_STYLE_TO_METHOD: Dict[str, str] = {
     "object_type_qconfigs": "set_object_type",
     "module_name_regex_qconfigs": "set_module_name_regex",
     "module_name_qconfigs": "set_module_name",
-    "module_name_object_type_order_qconfigs": "set_module_name_object_type_order"
+    "module_name_object_type_order_qconfigs": "set_module_name_object_type_order",
 }
 
-class QConfigMultiMapping:
 
+class QConfigMultiMapping:
     """
     This class, used with the prepare_n_shadows_model API, stores a list of :class:`torch.ao.quantization.QConfigMapping`s
     so that multiple QConfigs can be specified for each QConfig matching style.
@@ -805,10 +803,13 @@ class QConfigMultiMapping:
             .set_module_name_object_type_order("foo.bar", torch.nn.functional.linear, 0, [qconfig3])
 
     """
-    def __init__(self):
-        self.qconfig_mappings_list: List[QConfigMapping]=[]
 
-    def _handle_list_size_mismatch(self, qconfig_list: List[QConfigAny], style: str) -> None:
+    def __init__(self):
+        self.qconfig_mappings_list: List[QConfigMapping] = []
+
+    def _handle_list_size_mismatch(
+        self, qconfig_list: List[QConfigAny], style: str
+    ) -> None:
         # this method handles cases where the size of qconfig_list does not match
         # the size of qconfig_mappings_list.
         # Issue: Consider a user inserting global_qconfig A and B first, then inserting
@@ -818,36 +819,37 @@ class QConfigMultiMapping:
 
         # we avoid this by maintaining the invariant that if any QConfigMapping
         # has a qconfig style+key with a qconfig in it, all QConfigMappings must
-        # have either a qconfig or None for that same style+key.
+        # have either a qconfig or None for that same style+key. In the above
+        # example, a None qconfig would prevent the unwanted match in the
+        # second QConfigMapping
 
-        if len(qconfig_list)>len(self.qconfig_mappings_list):
+        if len(qconfig_list) > len(self.qconfig_mappings_list):
             # Case: we have more qconfigs (in qconfig_list) than QConfigMappings
 
             # Add new QConfigMappings (initialized so we maintain the `invariant`)
 
             new_qconfig_mapping = QConfigMapping()
-            # searches an existing QConfigMapping for qconfig style+keys
+            # searches other QConfigMappings for qconfig style+keys
             # that need to be inserted as `None` into the new QConfigMapping
             for qconfig_mapping in self.qconfig_mappings_list:
 
                 # global_qconfig has None by default
                 for check_style in _QCONFIG_STYLE_ORDER[1:]:
-                    if check_style is not style:
-                        qconfigs_dict = getattr(qconfig_mapping, check_style)
-                        target_qconfigs_dict = getattr(new_qconfig_mapping, check_style)
-                        for key in qconfigs_dict:
-                            target_qconfigs_dict[key] = None
+                    qconfigs_dict = getattr(qconfig_mapping, check_style)
+                    target_qconfigs_dict = getattr(new_qconfig_mapping, check_style)
+                    for key in qconfigs_dict:
+                        target_qconfigs_dict[key] = None
                 break
 
             # insert copies of this new QConfigMapping until all entires
             # in qconfig_list can fit among the QConfigMappings
-            while len(qconfig_list)>len(self.qconfig_mappings_list):
+            while len(qconfig_list) > len(self.qconfig_mappings_list):
                 self.qconfig_mappings_list.append(copy.deepcopy(new_qconfig_mapping))
         else:
             # Case: we have fewer qconfigs in qconfig_list than QConfigMappings
 
             # pad qconfig_list with `None` until length is same
-            while len(qconfig_list)<len(self.qconfig_mappings_list):
+            while len(qconfig_list) < len(self.qconfig_mappings_list):
                 qconfig_list.append(None)
 
     def _remove_duplicates(self, qconfig_list) -> None:
@@ -860,13 +862,15 @@ class QConfigMultiMapping:
         for index in to_remove[::-1]:
             qconfig_list.pop(index)
 
-
     # this function applies the insertion method across each QConfigMapping
-    def _insert_qconfig_list(self, style: str, args: Tuple[Any], qconfig_list: List[QConfigAny]) -> None:
+    def _insert_qconfig_list(
+        self, style: str, args: List[str, int, Callable], qconfig_list: List[QConfigAny]
+    ) -> None:
         self._remove_duplicates(qconfig_list)
         self._handle_list_size_mismatch(qconfig_list, style)
         method_name = _QCONFIG_STYLE_TO_METHOD[style]
         for qconfig_mapping, qconfig in zip(self.qconfig_mappings_list, qconfig_list):
+            # uses QConfigMapping set method to insert qconfig
             set_method = getattr(qconfig_mapping, method_name)
             set_method(*args, qconfig)
 
@@ -874,52 +878,73 @@ class QConfigMultiMapping:
         self._insert_qconfig_list("global_qconfig", [], global_qconfig_list)
         return self
 
-    def set_object_type(self, object_type: Union[Callable, str], qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
+    def set_object_type(
+        self, object_type: Union[Callable, str], qconfig_list: List[QConfigAny]
+    ) -> QConfigMultiMapping:
         self._insert_qconfig_list("object_type_qconfigs", [object_type], qconfig_list)
         return self
 
-    def set_module_name_regex(self, module_name_regex: str, qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
-        self._insert_qconfig_list("module_name_regex_qconfigs", [module_name_regex], qconfig_list)
+    def set_module_name_regex(
+        self, module_name_regex: str, qconfig_list: List[QConfigAny]
+    ) -> QConfigMultiMapping:
+        self._insert_qconfig_list(
+            "module_name_regex_qconfigs", [module_name_regex], qconfig_list
+        )
         return self
 
-    def set_module_name(self, module_name: str, qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
+    def set_module_name(
+        self, module_name: str, qconfig_list: List[QConfigAny]
+    ) -> QConfigMultiMapping:
         self._insert_qconfig_list("module_name_qconfigs", [module_name], qconfig_list)
         return self
 
     def set_module_name_object_type_order(
-            self,
-            module_name: str,
-            object_type: Callable,
-            index: int,
-            qconfig_list: List[QConfigAny]):  # -> QConfigMultiMapping:
+        self,
+        module_name: str,
+        object_type: Callable,
+        index: int,
+        qconfig_list: List[QConfigAny],
+    ) -> QConfigMultiMapping:
         self._insert_qconfig_list(
-                "module_name_object_type_order_qconfigs",
-                (module_name, object_type, index),
-                qconfig_list
+            "module_name_object_type_order_qconfigs",
+            [module_name, object_type, index],
+            qconfig_list,
         )
         return self
 
     @classmethod
-    def from_list_qconfig_mapping(cls, qconfig_mapping_list: List[QConfigMapping]):  # -> QConfigMultiMapping:
+    def from_list_qconfig_mapping(
+        cls, qconfig_mapping_list: List[QConfigMapping]
+    ) -> QConfigMultiMapping:
         """
         Creates a QConfigMultiMapping from a list of QConfigMappings
         """
         new_qconfig_multi_mapping = cls()
 
-        new_qconfig_multi_mapping.qconfig_mappings_list = copy.deepcopy(qconfig_mapping_list)
+        new_qconfig_multi_mapping.qconfig_mappings_list = copy.deepcopy(
+            qconfig_mapping_list
+        )
 
         # we need to avoid the issue described in _handle_list_size_mismatch,
         # so we reinsert all the qconfigs using the QConfigMultiMapping
         # set methods
+
+        # go through all qconfig styles
+        # note: global can be ignored since it is None by default
         for style in _QCONFIG_STYLE_ORDER[1:]:
-            set_method_name = _QCONFIG_STYLE_TO_METHOD[style]
-            qconfig_dict_list: Dict[Any, List[QConfigAny]]={}
+
+            # gather all key+qconfigs for current style
+            # into qconfig_dict_list
+            qconfig_dict_list: Dict[Any, List[QConfigAny]] = {}
             for qconfig_mapping in qconfig_mapping_list:
                 qconfig_dict = getattr(qconfig_mapping, style)
                 for key, qconfig in qconfig_dict.items():
                     if key not in qconfig_dict_list:
                         qconfig_dict_list[key] = []
                     qconfig_dict_list[key].append(qconfig)
+
+            # reinsert all gathered key+qconfigs
+            set_method_name = _QCONFIG_STYLE_TO_METHOD[style]
             set_method = getattr(new_qconfig_multi_mapping, set_method_name)
             for key, qconfig_list in qconfig_dict_list.items():
                 if isinstance(key, tuple):
@@ -1005,7 +1030,7 @@ def prepare_n_shadows_model(
     # TODO(future PR): deduplicate repeating entries
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
     for qconfig_mapping in qconfig_mappings:
-        node_name_to_qconfig = generate_qconfig_map(
+        node_name_to_qconfig = generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
         list_of_node_name_to_qconfig.append(node_name_to_qconfig)
 

@@ -968,6 +968,8 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
+        'sympy',
+        'networkx',
     ]
 
     extras_require = {
@@ -1007,11 +1009,11 @@ def main():
         'cuda/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
-        'utils/data/*.pyi',
         'nn/*.pyi',
         'nn/modules/*.pyi',
         'nn/parallel/*.pyi',
         'utils/data/*.pyi',
+        'utils/data/datapipes/*.pyi',
         'lib/*.so*',
         'lib/*.dylib*',
         'lib/*.dll',
@@ -1113,6 +1115,7 @@ def main():
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
+        'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
         'include/torch/csrc/tensor/*.h',
         'include/torch/csrc/lazy/backend/*.h',
