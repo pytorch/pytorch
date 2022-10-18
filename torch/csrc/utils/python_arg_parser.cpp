@@ -1077,6 +1077,10 @@ void FunctionParameter::set_default_str(const std::string& str) {
       // throw std::runtime_error("ParameterType::DIMNAME_LIST");
     } else if (type_ == ParameterType::SCALAR_LIST) {
       // throw std::runtime_error("ParameterType::SCALAR_LIST");
+    } else if (type_ == ParameterType::STORAGE) {
+      // throw std::runtime_error("ParameterType::STORAGE");
+    } else if (type_ == ParameterType::QSCHEME) {
+      // throw std::runtime_error("ParameterType::QSCHEME");
     } else {
       throw std::runtime_error("unknown parameter type");
     }
