@@ -1053,10 +1053,13 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
-    if(c10::utils::check_env("ENABLE_APEX_GRADINPUT")) {
+    if(c10::utils::check_env("ENABLE_APEX_GRADINPUT") && M >= 32768) {
         const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
         const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
-        dim3 threads1(warp_size,4,1);
+        dim3 threads1(warp_size, 4, 1);
+#if defined __HIP_PLATFORM_HCC__
+        threads1.y = 2; // Optimization for ROCm
+#endif
         int nshared =
                 threads1.y > 1 ?
                 threads1.y*threads1.x*sizeof(T_ACC) :
@@ -1083,7 +1086,8 @@ void LayerNormBackwardKernelImplInternal(
     T* dgamma_data =
         dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
     T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
-    if (M < 512) {
+    if (M < 0) { // TODO: For debugging purpose...
+    //if (M < 512) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (N + kCUDANumThreads - 1) / kCUDANumThreads;
       GammaBetaBackwardSimpleCUDAKernel<T, T_ACC>
@@ -1099,9 +1103,13 @@ void LayerNormBackwardKernelImplInternal(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       if(c10::utils::check_env("ENABLE_APEX_GAMMABETA")) {
+#if defined __HIP_PLATFORM_HCC__
           const int part_size = warp_size;
-          const dim3 threads2(warp_size,4,1);
-          const dim3 blocks2((N+threads2.x-1)/threads2.x,part_size,1);
+#else
+          const int part_size = 16;
+#endif
+          const dim3 threads2(warp_size, 4, 1);
+          const dim3 blocks2((N + threads2.x - 1) / threads2.x, part_size, 1);
           const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
           const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
           const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
@@ -1119,8 +1127,8 @@ void LayerNormBackwardKernelImplInternal(
                           part_grad_beta.template data_ptr<T_ACC>());
           C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-          const dim3 threads3(32,8,1);
-          const dim3 blocks3((N+threads2.x-1)/threads2.x,1,1);
+          const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
+          const dim3 blocks3((N + threads2.x - 1) / threads2.x, 1, 1);
           const int nshared3 = threads3.x * threads3.y * sizeof(T);   
           cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
                           part_grad_gamma.template data_ptr<T_ACC>(),
@@ -1131,7 +1139,11 @@ void LayerNormBackwardKernelImplInternal(
                           dbeta_data);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
+#if defined __HIP_PLATFORM_HCC__
+          dim3 threads{16, 64};
+#else
           dim3 threads{16, 32};
+#endif
           int blocks = (N + threads.x-1)/threads.x;
           GammaBetaBackwardCUDAKernel<T, T_ACC> 
               <<<blocks, threads, 2 * sizeof(T_ACC) * threads.x * threads.y, cuda_stream>>>(
