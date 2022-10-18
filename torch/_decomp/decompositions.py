@@ -1447,46 +1447,6 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
     )
 
 
-@register_decomposition(aten.var.correction)
-@reduction_complex_to_real
-def var_correction(
-    x: Tensor,
-    dim: Optional[List[int]],
-    correction: Optional[int] = None,
-    keepdim: bool = False,
-):
-    dims: List[int] = [] if dim is None else dim
-
-    if x.is_complex():
-        # For complex, calculate variance of real and imaginary components
-        # separately then add to get overall variance.
-        real_in = x.real
-        var_real = torch.var(real_in, dims, correction=correction, keepdim=keepdim)
-        imag_in = x.imag
-        var_imag = torch.var(imag_in, dims, correction=correction, keepdim=keepdim)
-        return var_real + var_imag
-
-    if correction is None:
-        correction = 1
-
-    if len(dims) == 0:
-        n = prod(x.shape)  # type: ignore[arg-type]
-    else:
-        n = 1
-        for d in dims:
-            n *= x.shape[d]
-
-    mean = torch.mean(x, dims, True)
-    sub = x - mean
-    sq = sub * sub
-    sum = torch.sum(sq, dims, keepdim)
-
-    if correction:
-        n = n - correction
-
-    return sum / n
-
-
 @register_decomposition(aten.std.correction)
 @reduction_complex_to_real
 def std_decomposition(
