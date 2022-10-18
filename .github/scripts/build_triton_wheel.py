@@ -11,13 +11,19 @@ def read_triton_pin() -> str:
         return f.read().strip()
 
 
+def check_and_replace(inp: str, src: str, dst: str) -> str:
+    """ Checks that `src` can be found in `input` and replaces it with `dst` """
+    if src not in inp:
+        raise RuntimeError(f"Can't find ${src} in the input")
+    return inp.replace(src, dst)
+
 def patch_setup_py(path: Path, *, version: str = "2.0.0", name: str = "triton") -> None:
     with open(path) as f:
         orig = f.read()
     # Replace name
-    orig = orig.replace("name=\"triton\",", f"name=\"{name}\",")
+    orig = check_and_replace(orig, "name=\"triton\",", f"name=\"{name}\",")
     # Replace version
-    orig = orig.replace("version=\"2.0.0\",", f"version=\"{version}\",")
+    orig = check_and_replace(orig, "version=\"2.0.0\",", f"version=\"{version}\",")
     with open(path, "w") as f:
         f.write(orig)
 
@@ -43,4 +49,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
