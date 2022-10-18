@@ -51,6 +51,71 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/Parallel.h>
+
+namespace {
+// Use shape, buffer address and data samples to identify weight
+std::string create_weight_cache_key(
+    const std::vector<int64_t>& input_shape,
+    const std::vector<int64_t>& weight_shape,
+    const void* weight_data_addr,
+    const std::vector<float>& weight_data_samples,
+    const ideep::attr_t& attr,
+    c10::ScalarType input_dtype,
+    c10::ScalarType weight_dtype,
+    int num_threads) {
+  std::string key_str = "[";
+  for (auto d : input_shape) {
+    key_str += std::to_string(d);
+    key_str += ",";
+  }
+  key_str += "],[";
+  for (auto d : weight_shape) {
+    key_str += std::to_string(d);
+    key_str += ",";
+  }
+  key_str += "],";
+  key_str += std::to_string(reinterpret_cast<int64_t>(weight_data_addr));
+  key_str += ",[";
+  for (auto d : weight_data_samples) {
+    key_str += std::to_string(*(int32_t*)&d);
+    key_str += ",";
+  }
+  key_str += "],";
+  std::string attr_str;
+  attr.to_bytes(attr_str);
+  key_str += attr_str;
+  key_str += ",";
+  key_str += std::to_string((int)input_dtype);
+  key_str += ",";
+  key_str += std::to_string((int)weight_dtype);
+  key_str += ",";
+  key_str += std::to_string(num_threads);
+  return key_str;
+}
+
+const ideep::tensor& get_expected_weight(
+    std::string& key,
+    const ideep::tensor& x,
+    const ideep::tensor& w,
+    ideep::attr_t op_attr) {
+  return ideep::utils::computation_cache<ideep::tensor>::fetch_or_create(key, [&]() {
+      // ideep::inner_product_forward::expected_weight_desc() does not
+      // support post ops thus not used here
+      auto x_dims = x.get_dims();
+      auto weights_dims = w.get_dims();
+      auto y_dims = {x_dims[0], weights_dims[0]};
+      ideep::tensor::desc src_desc(x_dims, x.get_data_type(), ideep::tag::any);
+      ideep::tensor::desc dst_desc(y_dims, x.get_data_type(), ideep::tag::any);
+      ideep::tensor::desc weights_desc(weights_dims, w.get_data_type(), ideep::tag::any);
+      auto pd =
+          ideep::inner_product_forward::primitive_desc(
+              {ideep::prop_kind::forward, src_desc, weights_desc, dst_desc},
+              op_attr, ideep::engine::cpu_engine());
+      return w.reorder_if_differ_in(pd.weights_desc());
+  });
+}
+}
 
 namespace at {
 namespace native {
@@ -219,10 +284,21 @@ Tensor mkldnn_linear_pointwise(
   TORCH_CHECK(it != fx_fusion_attr_map().end(), "Fusion behavior undefined.");
   ideep::attr_t op_attr = it->second(scalars, algorithm);
 
+  // Look up in cache of packed weight
+  void* w_buf_ptr = w.get_data_handle();
+  std::vector<float> weight_data_samples = {
+    reinterpret_cast<float*>(w_buf_ptr)[0],
+    reinterpret_cast<float*>(w_buf_ptr)[weight_t.numel()-1]
+  };
+  auto key = create_weight_cache_key(
+      mkldnn_input.get_dims(), w.get_dims(), w_buf_ptr, weight_data_samples,
+      op_attr, input_t.scalar_type(), weight_t.scalar_type(), at::get_num_threads());
+  const ideep::tensor& expected_w = get_expected_weight(key, mkldnn_input, w, op_attr);
+
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute(
         mkldnn_input,
-        w,
+        expected_w,
         mkldnn_bias.value(),
         mkldnn_output,
         ideep::scale_t(),
@@ -232,7 +308,7 @@ Tensor mkldnn_linear_pointwise(
   } else {
     ideep::inner_product_forward::compute(
         mkldnn_input,
-        w,
+        expected_w,
         mkldnn_output,
         ideep::scale_t(),
         ideep::scale_t(),
@@ -302,17 +378,28 @@ Tensor mkldnn_linear_pointwise_binary(
   auto other_desc = mkldnn_other.get_desc();
   auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
 
+  // Look up in cache of packed weight
+  void* w_buf_ptr = w.get_data_handle();
+  std::vector<float> weight_data_samples = {
+    reinterpret_cast<float*>(w_buf_ptr)[0],
+    reinterpret_cast<float*>(w_buf_ptr)[weight_t.numel()-1]
+  };
+  auto key = create_weight_cache_key(
+      mkldnn_input.get_dims(), w.get_dims(), w_buf_ptr, weight_data_samples,
+      op_attr, input_t.scalar_type(), weight_t.scalar_type(), at::get_num_threads());
+  const ideep::tensor& expected_w = get_expected_weight(key, mkldnn_input, w, op_attr);
+
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute_binary(
         mkldnn_input,
         mkldnn_other,
-        w,
+        expected_w,
         mkldnn_bias.value(),
         mkldnn_output,
         op_attr);
   } else {
     ideep::inner_product_forward::compute_binary(
-        mkldnn_input, mkldnn_other, w, mkldnn_output, op_attr);
+        mkldnn_input, mkldnn_other, expected_w, mkldnn_output, op_attr);
   }
 
   if (dim != 2) {

@@ -52,6 +52,106 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub);
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/Parallel.h>
+
+namespace {
+// Use shape, buffer address and data samples to identify weight
+std::string create_weight_cache_key(
+    const std::vector<int64_t>& input_shape,
+    const std::vector<int64_t>& weight_shape,
+    const void* weight_data_addr,
+    const std::vector<float>& weight_data_samples,
+    const std::vector<int64_t>& strides,
+    const std::vector<int64_t>& dilations,
+    const std::vector<int64_t>& padding_l,
+    const std::vector<int64_t>& padding_r,
+    int groups,
+    const ideep::attr_t& attr,
+    c10::MemoryFormat memory_format,
+    c10::ScalarType input_dtype,
+    c10::ScalarType weight_dtype,
+    int num_threads) {
+  std::string key_str = "[";
+  for (auto d : input_shape) {
+    key_str += std::to_string(d);
+    key_str += ",";
+  }
+  key_str += "],[";
+  for (auto d : weight_shape) {
+    key_str += std::to_string(d);
+    key_str += ",";
+  }
+  key_str += "],";
+  key_str += std::to_string(reinterpret_cast<uint64_t>(weight_data_addr));
+  key_str += ",[";
+  for (auto d : weight_data_samples) {
+    key_str += std::to_string(*(int32_t*)&d);
+    key_str += ",";
+  }
+  key_str += "],[";
+  for (auto s : strides) {
+    key_str += std::to_string(s);
+    key_str += ",";
+  }
+  key_str += "],[";
+  for (auto d : dilations) {
+    key_str += std::to_string(d);
+    key_str += ",";
+  }
+  key_str += "],[";
+  for (auto p : padding_l) {
+    key_str += std::to_string(p);
+    key_str += ",";
+  }
+  key_str += "],[";
+  for (auto p : padding_r) {
+    key_str += std::to_string(p);
+    key_str += ",";
+  }
+  key_str += "],";
+  key_str += std::to_string(groups);
+  key_str += ",";
+  std::string attr_str;
+  attr.to_bytes(attr_str);
+  key_str += attr_str;
+  key_str += ",";
+  key_str += std::to_string((int)memory_format);
+  key_str += ",";
+  key_str += std::to_string((int)input_dtype);
+  key_str += ",";
+  key_str += std::to_string((int)weight_dtype);
+  key_str += ",";
+  key_str += std::to_string(num_threads);
+  return key_str;
+}
+
+const ideep::tensor& get_expected_weight(
+    std::string& key,
+    const ideep::tensor& x,
+    const ideep::tensor& w,
+    const ideep::dims strides,
+    const ideep::dims padding_l,
+    const ideep::dims padding_r,
+    const ideep::dims dilates,
+    int groups,
+    ideep::attr_t op_attr,
+    bool is_channels_last) {
+  return ideep::utils::computation_cache<ideep::tensor>::fetch_or_create(key, [&]() {
+      // Conv1d is not supported yet
+      if (w.ndims() > 3) {
+        auto w_desc = ideep::convolution_forward::expected_weights_desc(
+            w.get_dims(), w.get_data_type(),
+            strides, padding_l, padding_r, dilates, groups,
+            ideep::algorithm::convolution_direct, ideep::prop_kind::forward,
+            x.get_data_type(), x.get_dims(), op_attr, is_channels_last
+        );
+        return w.make_grouped_weights(groups).reorder_if_differ_in(w_desc);
+      } else {
+        return w;
+      }
+  });
+}
+}
 
 namespace at { namespace native {
 
@@ -215,6 +315,24 @@ Tensor _mkldnn_convolution(
   const ideep::tensor x = itensor_from_tensor(input);
   const ideep::tensor w = itensor_from_tensor(weight);
 
+  const std::vector<int64_t> strides = {stride.begin(), stride.end()};
+  const std::vector<int64_t> dilates = {dilation.begin(), dilation.end()};
+  const std::vector<int64_t> paddings = {padding.begin(), padding.end()};
+
+  // Look up in cache of packed weight
+  void* w_buf_ptr = w.get_data_handle();
+  std::vector<float> weight_data_samples = {
+    reinterpret_cast<float*>(w_buf_ptr)[0],
+    reinterpret_cast<float*>(w_buf_ptr)[weight_t.numel()-1]
+  };
+  auto key = create_weight_cache_key(
+      x.get_dims(), w.get_dims(), w_buf_ptr, weight_data_samples,
+      strides, dilates, paddings, paddings, groups, op_attr, memory_format,
+      input_t.scalar_type(), weight_t.scalar_type(), at::get_num_threads());
+  const ideep::tensor& expected_w =
+      get_expected_weight(key, x, w, strides, paddings, paddings,
+                          dilates, groups, op_attr, is_channels_last);
+
   ideep::tensor y;
   if (is_channels_last) {
     output.resize_(output_sizes, memory_format);
@@ -224,27 +342,27 @@ Tensor _mkldnn_convolution(
     const ideep::tensor b = itensor_from_tensor(bias);
     ideep::convolution_forward::compute_v3(
         x,
-        w,
+        expected_w,
         b,
         {output_sizes.cbegin(), output_sizes.cend()},
         y,
-        {stride.begin(), stride.end()},
-        {dilation.begin(), dilation.end()},
-        {padding.begin(), padding.end()},
-        {padding.begin(), padding.end()},
+        strides,
+        dilates,
+        paddings,
+        paddings,
         groups,
         is_channels_last,
         op_attr);
   } else {
     ideep::convolution_forward::compute_v3(
         x,
-        w,
+        expected_w,
         {output_sizes.cbegin(), output_sizes.cend()},
         y,
-        {stride.begin(), stride.end()},
-        {dilation.begin(), dilation.end()},
-        {padding.begin(), padding.end()},
-        {padding.begin(), padding.end()},
+        strides,
+        dilates,
+        paddings,
+        paddings,
         groups,
         is_channels_last,
         op_attr);
@@ -357,19 +475,38 @@ Tensor mkldnn_convolution_pointwise_binary(
     auto other_desc = ideep::tensor::desc(
         output_size, get_mkldnn_dtype(weight.scalar_type()), format_tag);
     auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+
+    const std::vector<int64_t> strides = {stride.begin(), stride.end()};
+    const std::vector<int64_t> dilates = {dilation.begin(), dilation.end()};
+    const std::vector<int64_t> paddings = {padding.begin(), padding.end()};
+
+    // Look up in weight cache
+    void* w_buf_ptr = w.get_data_handle();
+    std::vector<float> weight_data_samples = {
+      reinterpret_cast<float*>(w_buf_ptr)[0],
+      reinterpret_cast<float*>(w_buf_ptr)[weight_t.numel()-1]
+    };
+    auto key = create_weight_cache_key(
+        x.get_dims(), w.get_dims(), w_buf_ptr, weight_data_samples,
+        strides, dilates, paddings, paddings, groups, op_attr, memory_format,
+        input_t.scalar_type(), weight_t.scalar_type(), at::get_num_threads());
+    const ideep::tensor& expected_w =
+        get_expected_weight(key, x, w, strides, paddings, paddings,
+                            dilates, groups, op_attr, /* is_channels_last */true);
+
     if (bias.defined()) {
       const ideep::tensor b = itensor_from_tensor(bias);
       ideep::convolution_forward::compute_binary(
           x,
           z,
-          w,
+          expected_w,
           b,
           output_size,
           y,
-          {stride.begin(), stride.end()},
-          {dilation.begin(), dilation.end()},
-          {padding.begin(), padding.end()},
-          {padding.begin(), padding.end()},
+          strides,
+          dilates,
+          paddings,
+          paddings,
           groups,
           /* is_channels_last */ true,
           op_attr);
@@ -377,13 +514,13 @@ Tensor mkldnn_convolution_pointwise_binary(
       ideep::convolution_forward::compute_binary(
           x,
           z,
-          w,
+          expected_w,
           output_size,
           y,
-          {stride.begin(), stride.end()},
-          {dilation.begin(), dilation.end()},
-          {padding.begin(), padding.end()},
-          {padding.begin(), padding.end()},
+          strides,
+          dilates,
+          paddings,
+          paddings,
           groups,
           /* is_channels_last */ true,
           op_attr);
