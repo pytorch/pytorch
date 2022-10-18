@@ -960,12 +960,14 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // --------------------------------------------------------------------------
   ska::flat_hash_map<
       versioned_storage_t,
-      ska::flat_hash_set<TensorImplAddress>,
+      std::pair<bool, ska::flat_hash_set<TensorImplAddress>>,
       PairHash>
       lookahead;
   {
     for (auto& t : raw_tensors) {
-      lookahead[t.storage_].insert(t.impl_.first);
+      auto& it = lookahead[t.storage_];
+      it.first = false;
+      it.second.insert(t.impl_.first);
     }
   }
 
@@ -989,20 +991,31 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
       // created. We don't need to version the TensorImpls since they are all
       // by definition "semantically live" for the purpose of assigning IDs,
       // regardless of whether they are physically live.
-      auto it = lookahead.find(t.storage_);
-      if (it != lookahead.end()) {
-        for (const auto i : it->second) {
-          tensor_version[i].second.insert(it->first);
+      auto& it = lookahead.at(t.storage_);
+
+      // Take "owning references" to all `TensorImpl*`s the first time we see
+      // a given versioned storage.
+      if (!it.first) {
+        it.first = true;
+        for (const auto i : it.second) {
+          tensor_version[i].second.insert(t.storage_);
         }
-        lookahead.erase(it);
       }
 
-      auto& element = tensor_version.insert({t.impl_.first, {}}).first->second;
+      // Set the TensorImpl* version for `t`
+      auto& element =
+          tensor_version.insert({t.impl_.first, {0, {}}}).first->second;
       t.impl_.second = element.first;
       element.second.insert(t.storage_);
+
+      // When a storage is freed we release all of its owning references and
+      // bump the version where applicable.
       if (t.type_ == PairType::kFree) {
-        element.second.erase(t.storage_);
-        element.first += (element.second.empty());
+        for (const auto i : it.second) {
+          auto& version_element = tensor_version[i];
+          version_element.second.erase(t.storage_);
+          version_element.first += (version_element.second.empty());
+        }
       }
     }
   }
