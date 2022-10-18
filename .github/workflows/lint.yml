@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.8
           architecture: x64
@@ -83,7 +83,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.x
           architecture: x64
@@ -147,7 +147,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.x
           architecture: x64
@@ -199,7 +199,7 @@ jobs:
           fetch-depth: 1
       # This is not a node project so there is no package-lock.json to cache
       - name: Setup Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -238,7 +238,7 @@ jobs:
         with:
           submodules: false
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.8
           architecture: x64
@@ -283,7 +283,7 @@ jobs:
           fetch-depth: 1
       - name: Setup Python 3.5
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.5
           architecture: x64
@@ -292,7 +292,7 @@ jobs:
             **/.github/requirements-gha-cache.txt
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.8
           architecture: x64
