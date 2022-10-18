@@ -9,11 +9,13 @@ import sympy
 
 from .codegen.common import index_prevent_reordering
 from .utils import sympy_product, sympy_str, sympy_subs, sympy_symbol, VarRanges
-from .virtualized import V
+from .virtualized import _arg_str, V
 
 log = logging.getLogger(__name__)
 
 Dep = Union["MemoryDep", "StarDep"]
+
+MAX_EXPR_LENGTH = 1000
 
 
 class MemoryDep(typing.NamedTuple):
@@ -145,6 +147,26 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
+
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            fargs = [_arg_str(a) for a in args]
+            fargs.extend(f"{k}={v}" for k, v in kwargs.items())
+            # It hangs if the generated expr str is too long
+            if len(str(fargs)) > MAX_EXPR_LENGTH:
+                return ""
+            else:
+                return f"{name}({', '.join(fargs)})"
+
+        return inner
+
+    @staticmethod
+    def masked(mask, body, other):
+        ret = f"masked({mask}, {body()}, {other})"
+        if len(ret) > MAX_EXPR_LENGTH:
+            return ""
+        else:
+            return ret
 
     def canonicalize(
         self, index: sympy.Expr
