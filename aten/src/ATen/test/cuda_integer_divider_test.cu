@@ -62,13 +62,25 @@ template<typename Value>
 class IntDividerTester {
  public:
   IntDividerTester() {
-    C10_CUDA_CHECK(cudaMalloc(&dividersBuf_, NUM_CASES * sizeof(IntDivider<Value>)));
-    C10_CUDA_CHECK(cudaMalloc(&testCasesBuf_, NUM_CASES * sizeof(TestCase<Value>)));
+    cudaError_t err;
+
+    err = cudaMalloc(&dividersBuf_, NUM_CASES * sizeof(IntDivider<Value>));
+    bool isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
+    err = cudaMalloc(&testCasesBuf_, NUM_CASES * sizeof(TestCase<Value>));
+    isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
   }
 
   ~IntDividerTester() {
-    C10_CUDA_CHECK(cudaFree(dividersBuf_));
-    C10_CUDA_CHECK(cudaFree(testCasesBuf_));
+    cudaError_t err;
+
+    err = cudaFree(dividersBuf_);
+    bool isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
+    err = cudaFree(testCasesBuf_);
+    isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
   }
 
   void addTestCase(Value dividend, Value divisor, int steps) {
@@ -85,25 +97,33 @@ class IntDividerTester {
   }
 
   void flush() {
+    cudaError_t err;
+    bool isTrue;
     if (testCases_.empty())
       return;
 
     ASSERT_FALSE(dividers_.empty());
 
-    ASSERT_TRUE(dividers_.size() <= NUM_CASES);
-    ASSERT_TRUE(testCases_.size() <= NUM_CASES);
-    C10_CUDA_CHECK(cudaMemcpy(
+    isTrue = dividers_.size() <= NUM_CASES;
+    ASSERT_TRUE(isTrue);
+    isTrue = testCases_.size() <= NUM_CASES;
+    ASSERT_TRUE(isTrue);
+    err = cudaMemcpy(
         dividersBuf_,
         dividers_.data(),
         dividers_.size() * sizeof(IntDivider<Value>),
-        cudaMemcpyHostToDevice));
-    C10_CUDA_CHECK(cudaMemcpy(
+        cudaMemcpyHostToDevice);
+    isTrue = err == cudaSuccess;
+    ASSERT_TRUE(isTrue);
+    err = cudaMemcpy(
         testCasesBuf_,
         testCases_.data(),
         testCases_.size() * sizeof(TestCase<Value>),
-        cudaMemcpyHostToDevice));
+        cudaMemcpyHostToDevice);
+    isTrue = err == cudaSuccess;
+    ASSERT_TRUE(isTrue);
 
-    const int numCases = testCases_.size();
+    int numCases = testCases_.size();
     testIntDivider<Value><<<512, 512>>>(dividersBuf_, testCasesBuf_, numCases);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -186,5 +206,7 @@ TEST(TestCUDAIntegerDivider, IntegerDivider) {
   testUint64Divider();
   testUint32Divider();
 
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaError_t err = cudaDeviceSynchronize();
+  bool isTrue = err == cudaSuccess;
+  ASSERT_TRUE(isTrue);
 }

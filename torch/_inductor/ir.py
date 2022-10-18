@@ -21,6 +21,7 @@ from torch._prims_common import is_boolean_dtype, is_float_dtype
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
+from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
 from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs
 from .virtualized import ops, V
@@ -450,7 +451,7 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
-        num_sm = torch.cuda.get_device_properties(device).multi_processor_count
+        num_sm = get_device_properties(device).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
