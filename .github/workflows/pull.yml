@@ -172,6 +172,17 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-bionic-cuda11_6-py3_10-gcc7-a10g-build:
+    name: cuda11.6-py3.10-gcc7-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
           # inductor needs to run on a CUDA device with capability >=7.0
           { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
