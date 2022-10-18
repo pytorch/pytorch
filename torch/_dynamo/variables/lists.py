@@ -243,23 +243,6 @@ class TupleVariable(BaseListVariable):
         return super().call_method(tx, name, args, kwargs)
 
 
-class NNSequentialVariable(TupleVariable):
-    def __init__(self, module, items: List[VariableTracker], **kwargs):
-        super(NNSequentialVariable, self).__init__(items, **kwargs)
-        from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-
-        assert isinstance(module, (NNModuleVariable, UnspecializedNNModuleVariable))
-        self.module = module
-
-    def python_type(self):
-        return torch.nn.Sequential
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        return self.module.call_function(tx, args, kwargs)
-
-
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 

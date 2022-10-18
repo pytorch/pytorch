@@ -12,7 +12,6 @@ from .lists import (
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
-    NNSequentialVariable,
     RangeVariable,
     SliceVariable,
     TupleVariable,

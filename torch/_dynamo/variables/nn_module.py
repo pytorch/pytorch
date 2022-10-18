@@ -220,12 +220,7 @@ class NNModuleVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
-        from . import (
-            ConstantVariable,
-            ListIteratorVariable,
-            NNSequentialVariable,
-            TupleVariable,
-        )
+        from . import ConstantVariable, ListIteratorVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
@@ -383,7 +378,7 @@ class NNModuleVariable(VariableTracker):
                     ),
                     **options,
                 )
-                return NNSequentialVariable(new_module_variable, result, **options)
+                return new_module_variable
 
             key = args[0].as_python_constant()
             submod = module[key]
