@@ -284,6 +284,7 @@ def make_pointwise(
     override_return_dtype=None,
     override_device=None,
     override_fn_when_input_bool=None,
+    override_fn_when_cuda_float64=None,
     allow_alpha=False,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
@@ -297,6 +298,7 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
+        is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -307,6 +309,8 @@ def make_pointwise(
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
+            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
+                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
                 return fn(*[load(index) for load in loaders])
 
@@ -409,10 +413,13 @@ def register_pointwise(
     override_return_dtype=None,
     override_fn_when_input_bool=None,
     allow_alpha=False,
+    use_libdevice_for_f64=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
     fn = ops_wrapper(name)
+    if use_libdevice_for_f64:
+        fn_libdevice = ops_wrapper("libdevice_" + name)
     if override_fn_when_input_bool is not None:
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
@@ -420,6 +427,7 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
+        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,
         allow_alpha=allow_alpha,
     )
     fn = register_lowering(
@@ -3226,23 +3234,33 @@ add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
 )
 exp = register_pointwise(
-    aten.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.exp,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
-    aten.sigmoid, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.sigmoid,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 sqrt = register_pointwise(
-    aten.sqrt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.sqrt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 
 register_pointwise(
-    aten.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.cos,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(
-    aten.sin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.sin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
@@ -3253,7 +3271,9 @@ register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 register_pointwise(
-    aten.log, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.log,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
 register_pointwise(aten.maximum)
@@ -3264,9 +3284,6 @@ register_pointwise(
 )
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
-register_pointwise(
-    aten.silu, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-)
 register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
