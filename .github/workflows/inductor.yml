@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-   linux-bionic-cuda11_6-py3_10-gcc7-inductor-build:
-    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
+  linux-bionic-cuda11_6-py3_10-gcc7-inductor-build:
+    name: cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
@@ -31,11 +31,10 @@ jobs:
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
-    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
+    name: cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_6-py3_10-gcc7-inductor-build
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
-      cuda-arch-list: 8.6
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.test-matrix }}
