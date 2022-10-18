@@ -95,7 +95,9 @@ def sym_float(a):
     return float(a)
 
 def sym_int(a):
-    if isinstance(a, torch._C.SymIntNode):
+    if hasattr(a, '__sym_int__'):
+        return a.__sym_int__()
+    elif isinstance(a, torch._C.SymIntNode):
         return a
     return int(a)
 
