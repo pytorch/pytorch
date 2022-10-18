@@ -1668,7 +1668,6 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.var',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
