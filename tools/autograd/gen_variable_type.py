@@ -288,6 +288,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addmv",
     "addr",
     "linalg_householder_product",
+    "ormqr",
     "constant_pad_nd",
     "reflection_pad1d",
     "reflection_pad2d",

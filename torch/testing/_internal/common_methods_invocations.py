@@ -4556,15 +4556,18 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
     # create a helper function wrapping `make_tensor`
-    make_input = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_input = partial(make_tensor, dtype=dtype, device=device, low=-1, high=1)
+
     batches = [(), (0, ), (2, ), (2, 1)]
     ns = [5, 2, 0]
     tf = [True, False]
     for batch, (m, n), left, transpose in product(batches, product(ns, ns), tf, tf):
-        reflectors = make_input((*batch, m, n))
-        tau = make_input((*batch, min(m, n)))
+        input = make_input((*batch, m, n))
+        reflectors, tau = torch.geqrf(input)
+        reflectors.requires_grad_(requires_grad)
+        tau.requires_grad_(requires_grad)
         other_matrix_shape = (m, n) if left else (n, m)
-        other = make_input((*batch, *other_matrix_shape))
+        other = make_input((*batch, *other_matrix_shape), requires_grad=requires_grad)
         yield SampleInput(reflectors, tau, other, left=left, transpose=transpose)
 
 def sample_inputs_symeig(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -12224,13 +12227,14 @@ op_db: List[OpInfo] = [
     OpInfo('ormqr',
            op=torch.ormqr,
            dtypes=floating_and_complex_types(),
-           supports_autograd=False,
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=sample_inputs_ormqr,
            error_inputs_func=error_inputs_ormqr,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # ormqr does not support forward when complex inputs require grad
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            )),
