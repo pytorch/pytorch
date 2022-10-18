@@ -13,6 +13,7 @@ from torch.fx.experimental.optimization import (
     replace_node_module,
 )
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.modules.utils import _pair
 from torch.overrides import TorchFunctionMode
@@ -276,18 +277,21 @@ def check_node_is_binary(node):
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
-    gm = fuse_unary(gm, example_inputs)
-    gm = fuse_binary(gm)
-
-    return gm
-
-
-def fuse_unary(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
         example_input.device == torch.device("cpu") for example_input in example_inputs
     )
     if not is_cpu:
         return gm
+    # For binary fusion, we need to check inputs info to make sure
+    # the binary inputs have same tensor info(device, dtype, and layout).
+    ShapeProp(gm).propagate(*example_inputs)
+    gm = fuse_unary(gm)
+    gm = fuse_binary(gm)
+
+    return gm
+
+
+def fuse_unary(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
 
     for (unary_module, _), (
