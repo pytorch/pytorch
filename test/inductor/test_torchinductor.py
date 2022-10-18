@@ -35,7 +35,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import config
-    from torch._inductor.compile_fx import compile_fx
+    from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
@@ -2432,6 +2432,18 @@ class CommonTemplate:
             check_lowp=False,  # difference in rnn is too large between half and float inputs
         )
 
+    def test_upsample_nearest1d(self):
+        def fn(a):
+            return (
+                aten.upsample_nearest1d(a, [74], None),
+                aten.upsample_nearest1d(a, [70], None),
+                aten.upsample_nearest1d(a, [45], None),
+                aten.upsample_nearest1d(a, [36], None),
+                aten.upsample_nearest1d(a, None, [2.0]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37]),))
+
     def test_upsample_nearest2d(self):
         def fn(a):
             return (
@@ -2443,6 +2455,18 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_nearest3d(self):
+        def fn(a):
+            return (
+                aten.upsample_nearest3d(a, [74, 76, 78], None),
+                aten.upsample_nearest3d(a, [70, 75, 80], None),
+                aten.upsample_nearest3d(a, [45, 74, 103], None),
+                aten.upsample_nearest3d(a, [36, 39, 40], None),
+                aten.upsample_nearest3d(a, None, [2.0, 2.0, 2.0]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
     def test_upsample_nearest2d_backward(self):
         func = torch.ops.aten.upsample_nearest2d_backward.vec
@@ -3947,6 +3971,27 @@ if HAS_CPU:
         @patch("torch.cuda.is_available", lambda: False)
         def test_timed_cpu_only(self):
             timed(lambda: torch.randn(10), ())
+
+        def test_complex_memory_overlap(self):
+            dense = torch.zeros(64, 32)
+            self.assertFalse(complex_memory_overlap(dense))
+            self.assertFalse(complex_memory_overlap(dense.t()))
+
+            strided = dense.split(4, dim=1)
+            self.assertFalse(complex_memory_overlap(strided[0]))
+            self.assertFalse(complex_memory_overlap(strided[0].t()))
+
+            unsqueezed = dense.unsqueeze(1)
+            self.assertFalse(complex_memory_overlap(unsqueezed))
+            self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
+
+            expanded = unsqueezed.expand(-1, 2, -1)
+            self.assertTrue(complex_memory_overlap(expanded))
+            self.assertTrue(complex_memory_overlap(expanded.permute(1, 2, 0)))
+
+            gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
+            self.assertFalse(complex_memory_overlap(gathered))
+            self.assertFalse(complex_memory_overlap(gathered.t()))
 
 
 if HAS_CUDA:
