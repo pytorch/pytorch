@@ -174,8 +174,17 @@ jobs:
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
+  linux-bionic-cuda11_6-py3_10-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.10-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3_10-gcc7-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.test-matrix }}
+
   linux-bionic-cuda11_6-py3_10-gcc7-a10g-build:
-    name: cuda11.6-py3.10-gcc7-sm86
+    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
@@ -187,14 +196,15 @@ jobs:
           { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_6-py3_10-gcc7-test:
-    name: linux-bionic-cuda11.6-py3.10-gcc7
+  linux-bionic-cuda11_6-py3_10-gcc7-a10g-test:
+    name: linux-bionic-cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_10-gcc7-build
+    needs: linux-bionic-cuda11_6-py3_10-gcc7-a10g-build
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
+      cuda-arch-list: 8.6
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-a10g-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-a10g-build.outputs.test-matrix }}
 
   linux-xenial-py3-clang5-mobile-build:
     name: linux-xenial-py3-clang5-mobile-build
