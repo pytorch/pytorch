@@ -33,7 +33,8 @@
 [submodule "third_party/gloo"]
     ignore = dirty
     path = third_party/gloo
-    url = https://github.com/facebookincubator/gloo
+    url = https://github.com/mantaionut/JaneaSystems-gloo
+	branch = C++17
 [submodule "third_party/NNPACK_deps/pthreadpool"]
     ignore = dirty
     path = third_party/pthreadpool
