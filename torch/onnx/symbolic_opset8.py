@@ -163,7 +163,9 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
     old_type = None
     # Cast the input tensor to Float if its scalarType is known and is not floating number.
     # If casting is performed, return the old scalarType, otherwise return None.
-    arg0_type = args[0].type().scalarType()
+    arg0_type = input_dtype = _type_utils.JitScalarType.from_value(
+        args[0], raises=False
+    ).scalar_name()
     if arg0_type is not None:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
@@ -179,6 +181,7 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
             "{Greater, Less, MatMul, PRelu, Gemm, Flatten}. This might cause "
             "the onnx model to be incorrect, if inputs have integer datatypes."
         )
+
     return (old_type,) + args
 
 

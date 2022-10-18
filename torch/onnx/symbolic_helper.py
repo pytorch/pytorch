@@ -431,9 +431,9 @@ def _if_scalar_type_as(self, tensor):
     if isinstance(self, _C.Value):
         return self
 
-    scalar_type = tensor.type().scalarType()
+    scalar_type = _type_utils.JitScalarType.from_value(tensor, raises=False)
     if scalar_type:
-        ty = scalar_type.lower()
+        ty = scalar_type.scalar_name().lower()
         return getattr(self, ty)()
 
     return self
@@ -647,8 +647,8 @@ def _block_list_in_opset(name: str):
 def _try_get_scalar_type(*args) -> Optional[str]:
     for arg in args:
         try:
-            return arg.type().scalarType()
-        except RuntimeError:
+            return _type_utils.JitScalarType.from_value(arg).scalar_name()
+        except errors.OnnxExporterError:
             pass
     return None
 
@@ -667,8 +667,11 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
                 g, index, g.op("Constant", value_t=torch.LongTensor([1]))
             )
 
-    index_scalar_type = index.type().scalarType()
-    if index_scalar_type is None or index_scalar_type not in {"Long", "Int"}:
+    index_scalar_type = _type_utils.JitScalarType.from_value(index, raises=False)
+    if index_scalar_type is None or index_scalar_type.scalar_name() not in {
+        "Long",
+        "Int",
+    }:
         index = g.op("Cast", index, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -694,46 +697,20 @@ def _slice_helper(
 
 
 @_beartype.beartype
-def _is_in_type_group(value, scalar_types: Set[_type_utils.JitScalarType]) -> bool:
-    """Helper function for determining if a value is in a scalar type group."""
-    if value is None:
-        return False
-    if isinstance(value, torch.Tensor):
-        return _type_utils.JitScalarType.from_dtype(value.dtype) in scalar_types
-    elif isinstance(value.type(), torch.ListType):
-        return (
-            _type_utils.JitScalarType.from_dtype(value.type().getElementType().dtype())
-            in scalar_types
-        )
-    scalar_type = value.type().scalarType()
-    if scalar_type is None:
-        warnings.warn(
-            "Type cannot be inferred, which might cause exported graph to produce incorrect results."
-        )
-        return False
-    try:
-        return _type_utils.JitScalarType.from_name(scalar_type) in scalar_types
-    except ValueError:
-        # scalar_type is not a known ScalarType
-        return False
-
-
-@_beartype.beartype
 def _is_fp(value) -> bool:
-    return _is_in_type_group(
-        value,
-        {
-            _type_utils.JitScalarType.FLOAT,
-            _type_utils.JitScalarType.DOUBLE,
-            _type_utils.JitScalarType.HALF,
-            _type_utils.JitScalarType.BFLOAT16,
-        },
-    )
+    return _type_utils.JitScalarType.from_value(value, raises=False) in {
+        _type_utils.JitScalarType.FLOAT,
+        _type_utils.JitScalarType.DOUBLE,
+        _type_utils.JitScalarType.HALF,
+        _type_utils.JitScalarType.BFLOAT16,
+    }
 
 
 @_beartype.beartype
 def _is_bool(value) -> bool:
-    return _is_in_type_group(value, {_type_utils.JitScalarType.BOOL})
+    return _type_utils.JitScalarType.from_value(value, raises=False) in {
+        _type_utils.JitScalarType.BOOL
+    }
 
 
 @_beartype.beartype
@@ -1262,11 +1239,9 @@ def _arange_cast_helper(
     def _is_all_integral(scalars):
         for scalar in scalars:
             try:
-                if scalar.type().scalarType() != "Long":
+                if _type_utils.JitScalarType.from_value(scalar).scalar_name() != "Long":
                     return False
-            except Exception:
-                # FIXME(justinchuby): Avoid catching Exception.
-                # Catch a more specific exception instead.
+            except errors.OnnxExporterError:
                 pass
         return True
 
@@ -1375,9 +1350,7 @@ def _batchnorm_helper(
             )
         weight_value = torch.tensor(
             [1.0] * channel_size,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or _is_none(bias):
@@ -1388,9 +1361,7 @@ def _batchnorm_helper(
             )
         bias_value = torch.tensor(
             [0.0] * channel_size,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         )
         bias = g.op("Constant", value_t=bias_value)
     # If track_running_stats is set to False batch statistics are instead used during evaluation time
@@ -1534,9 +1505,7 @@ def dequantize_helper(
     tensor, scale, zero_point = unpacked_qtensors[:3]
     axis = unpacked_qtensors[3] if len(unpacked_qtensors) >= 4 else None
     axis_i = _get_const(axis, "i", "axis")
-    input_scalar_type = tensor.type().scalarType()
-    assert input_scalar_type is not None
-    input_qdtype = _type_utils.JitScalarType.from_name(tensor.type().scalarType())
+    input_qdtype = _type_utils.JitScalarType.from_value(tensor)
     if qdtype is None:
         if input_qdtype is not None:
             qdtype = input_qdtype.onnx_type()
@@ -1598,11 +1567,14 @@ def quantize_helper(
         )
 
     assert scale is not None
-    if scale.type().scalarType() != "Float":
+    if _type_utils.JitScalarType.from_value(scale).scalar_name() != "Float":
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if zero_point.type().scalarType() not in ("Byte", "Char"):
+    if _type_utils.JitScalarType.from_value(zero_point).scalar_name() not in {
+        "Byte",
+        "Char",
+    }:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
         "QuantizeLinear",
@@ -1643,8 +1615,10 @@ def requantize_bias_helper(
 @_beartype.beartype
 def args_have_same_dtype(args):
     assert args
-    base_dtype = args[0].type().scalarType()
-    has_same_dtype = all(elem.type().scalarType() == base_dtype for elem in args)
+    base_dtype = _type_utils.JitScalarType.from_value(args[0])
+    has_same_dtype = all(
+        _type_utils.JitScalarType.from_value(elem) == base_dtype for elem in args
+    )
     return has_same_dtype
 
 

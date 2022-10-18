@@ -94,11 +94,9 @@ def _apply_params(*args, **kwargs):
 @symbolic_helper.parse_args("v", "f", "f")
 @_beartype.beartype
 def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val: float):
-    dtype = self.type().scalarType()
-    if dtype is None:
+    scalar_type = _type_utils.JitScalarType.from_value(self, raises=False)
+    if scalar_type is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
-    else:
-        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(min_val, dtype=scalar_type.dtype()),
@@ -115,7 +113,7 @@ def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val:
 @_onnx_symbolic("aten::clamp")
 @_beartype.beartype
 def clamp(g: jit_utils.GraphContext, self, min, max):
-    dtype = self.type().scalarType()
+    scalar_type = _type_utils.JitScalarType.from_value(self, raises=False)
 
     @_beartype.beartype
     def _cast_if_not_none(tensor, dtype):
@@ -123,14 +121,14 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
             return g.op(
                 "Cast",
                 tensor,
-                to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
+                to_i=dtype.onnx_type(),
             )
         else:
             return tensor
 
-    if dtype is not None:
-        min = _cast_if_not_none(min, dtype)
-        max = _cast_if_not_none(max, dtype)
+    if scalar_type is not None:
+        min = _cast_if_not_none(min, scalar_type)
+        max = _cast_if_not_none(max, scalar_type)
 
     if symbolic_helper._is_none(min):
         return clamp_max(g, self, max)
@@ -152,8 +150,7 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
 def clamp_min(g: jit_utils.GraphContext, self, min):
-    dtype = self.type().scalarType()
-    min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
+    min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_value(self).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
         return opset9._op_with_optional_float_cast(
@@ -167,8 +164,7 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
 def clamp_max(g: jit_utils.GraphContext, self, max):
-    dtype = self.type().scalarType()
-    max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
+    max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_value(self).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
         return opset9._op_with_optional_float_cast(
@@ -182,11 +178,9 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 @_beartype.beartype
 def relu6(g: jit_utils.GraphContext, input):
     relu_ = opset9._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
-    dtype = input.type().scalarType()
-    if dtype is None:
+    scalar_type = _type_utils.JitScalarType.from_value(input, raises=False)
+    if scalar_type is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
-    else:
-        scalar_type = _type_utils.JitScalarType.from_name(dtype)
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(0, dtype=scalar_type.dtype()),
@@ -299,12 +293,11 @@ def index_put(
         values = opset9.expand(g, values, values_shape, None)
     values = symbolic_helper._reshape_helper(g, values, values_shape)
 
-    dtype = self.type().scalarType()
-    if dtype is not None and dtype != values.type().scalarType():
-        values = g.op(
-            "Cast", values, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
-        )
-    scalar_type = _type_utils.JitScalarType.from_name(dtype)
+    scalar_type = _type_utils.JitScalarType.from_value(self, raises=False)
+    if scalar_type is not None and scalar_type != _type_utils.JitScalarType.from_value(
+        values
+    ):
+        values = g.op("Cast", values, to_i=scalar_type.onnx_type())
 
     if accumulate:
         zeros = g.op(
@@ -398,20 +391,18 @@ def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
 def scatter(g: jit_utils.GraphContext, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
-    src_type = src.type().scalarType()
+    src_type = _type_utils.JitScalarType.from_value(src)
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
         return g.op("ScatterElements", self, index, src, axis_i=dim)
     else:
         # Check if scalar "src" has same type as self (PyTorch allows different
         # type for scalar src (but not when src is tensor)). If not, insert Cast node.
-        if self.type().scalarType() != src_type:
+        if _type_utils.JitScalarType.from_value(self) != src_type:
             src = g.op(
                 "Cast",
                 src,
-                to_i=_type_utils.JitScalarType.from_name(
-                    self.type().scalarType()
-                ).onnx_type(),
+                to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
             )
         return g.op(
             "ScatterElements", self, index, opset9.expand_as(g, src, index), axis_i=dim
@@ -1024,7 +1015,8 @@ def index(g: jit_utils.GraphContext, self, index):
     if len(indices) == 1:
         index = indices[0]
         if not symbolic_helper._is_none(index) and (
-            symbolic_helper._is_bool(index) or index.type().scalarType() == "Byte"
+            symbolic_helper._is_bool(index)
+            or _type_utils.JitScalarType.from_value(index).scalar_name() == "Byte"
         ):
             index = opset9.nonzero(g, index)
             return g.op("GatherND", self, index)
@@ -1071,16 +1063,16 @@ def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
 def __rshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
-    if other.type().scalarType() != self.type().scalarType():
+    if _type_utils.JitScalarType.from_value(
+        other
+    ) != _type_utils.JitScalarType.from_value(self):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
-                self.type().scalarType()
-            ).onnx_type(),
+            to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
         )
 
-    if self.type().scalarType() == "Byte":
+    if _type_utils.JitScalarType.from_value(self).scalar_name() == "Byte":
         return g.op("BitShift", self, other, direction_s="RIGHT")
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
@@ -1091,7 +1083,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
+        to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
@@ -1102,16 +1094,16 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
 def __lshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
-    if other.type().scalarType() != self.type().scalarType():
+    if _type_utils.JitScalarType.from_value(
+        other
+    ) != _type_utils.JitScalarType.from_value(self):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
-                self.type().scalarType()
-            ).onnx_type(),
+            to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
         )
 
-    if self.type().scalarType() == "Byte":
+    if _type_utils.JitScalarType.from_value(self).scalar_name() == "Byte":
         return g.op("BitShift", self, other, direction_s="LEFT")
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
@@ -1122,7 +1114,7 @@ def __lshift_(g: jit_utils.GraphContext, self, other):
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
+        to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
@@ -1313,9 +1305,7 @@ def linalg_vector_norm(
         cond_op = g.op(
             "Cast",
             cond_op,
-            to_i=_type_utils.JitScalarType.from_name(
-                self.type().scalarType()
-            ).onnx_type(),
+            to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim

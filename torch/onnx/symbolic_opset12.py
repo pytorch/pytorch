@@ -74,13 +74,13 @@ def einsum(g: jit_utils.GraphContext, equation, tensor_list, path=None):
 @_beartype.beartype
 def outer(g: jit_utils.GraphContext, input, other):
     # make sure to cast other to self's type
-    if other.type().scalarType() != input.type().scalarType():
+    if _type_utils.JitScalarType.from_value(
+        other
+    ) != _type_utils.JitScalarType.from_value(input):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).onnx_type(),
+            to_i=_type_utils.JitScalarType.from_value(input).onnx_type(),
         )
     return _einsum_helper(g, "i,j->ij", [input, other])
 
@@ -264,7 +264,7 @@ def binary_cross_entropy_with_logits(
 def celu(g: jit_utils.GraphContext, self, alpha):
     alpha = symbolic_helper._maybe_get_const(alpha, "f")
     # if the input is of type double cast it to float
-    if self.type().scalarType() == "Double":
+    if _type_utils.JitScalarType.from_value(self).scalar_name() == "Double":
         self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         out = g.op("Celu", self, alpha_f=alpha)
         return g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
