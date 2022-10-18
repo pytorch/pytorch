@@ -860,53 +860,74 @@ def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
-@register_lowering(torch.ops.mkldnn._convolution_pointwise)
-def convolution_unary(
-    x: TensorBox,
-    weight: TensorBox,
-    bias: TensorBox,
-    padding,
-    stride,
-    dilation,
-    groups,
-    attr,
-    scalars,
-    algorithm,
-):
-    return TensorBox.create(
-        ir.ConvolutionUnary.create(
-            x, weight, bias, padding, stride, dilation, groups, attr, scalars, algorithm
+def register_onednn_fusion_ops():
+    if torch._C.has_mkldnn:
+
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise)
+        def convolution_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
+        def convolution_binary(
+            x: TensorBox,
+            other: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionBinary.create(
+                    x, other, weight, bias, padding, stride, dilation, groups, attr
+                )
+            )
+
+        @register_lowering(torch.ops.mkldnn._linear_pointwise)
+        def linear_unary(
+            x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm
+        ):
+            return TensorBox.create(
+                ir.LinearUnary.create(x, w, b, attr, scalars, algorithm)
+            )
+
+        @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
+        def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
+            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
+    else:
+        log.warning(
+            "Register OneDNN fusion ops is failed which OneDNN is not enabled at build step"
         )
-    )
 
 
-@register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
-def convolution_binary(
-    x: TensorBox,
-    other: TensorBox,
-    weight: TensorBox,
-    bias: TensorBox,
-    padding,
-    stride,
-    dilation,
-    groups,
-    attr,
-):
-    return TensorBox.create(
-        ir.ConvolutionBinary.create(
-            x, other, weight, bias, padding, stride, dilation, groups, attr
-        )
-    )
-
-
-@register_lowering(torch.ops.mkldnn._linear_pointwise)
-def linear_unary(x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm):
-    return TensorBox.create(ir.LinearUnary.create(x, w, b, attr, scalars, algorithm))
-
-
-@register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
-def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
-    return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+register_onednn_fusion_ops()
 
 
 def fallback_handler(kernel):
