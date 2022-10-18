@@ -13,6 +13,7 @@
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -3437,12 +3438,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::nll_loss, aten_nll_loss, [](Node* n) -> SROperat
       const auto ignore_index = p_node->Input(4).toInt();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) =
-            at::nll_loss(self, target, weight, reduction, ignore_index);
+            at::native::nll_loss(self, target, weight, reduction, ignore_index);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::nll_loss_outf(self, target, weight, reduction, ignore_index, out);
+      at::native::nll_loss_out(
+          self, target, weight, reduction, ignore_index, out);
     };
   }
   LogAndDumpSchema(n);
@@ -3464,7 +3466,7 @@ REGISTER_OPERATOR_FUNCTOR(
           const auto ignore_index = p_node->Input(5).toInt();
           const auto& total_weight = p_node->Input(6).toTensor();
           if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::nll_loss_backward(
+            p_node->Output(0) = at::cpu::nll_loss_backward(
                 grad_output,
                 self,
                 target,
@@ -3476,7 +3478,7 @@ REGISTER_OPERATOR_FUNCTOR(
           }
           auto& grad_input = p_node->Output(0).toTensor();
           fastResizeToZero(grad_input);
-          at::nll_loss_backward_out(
+          at::cpu::nll_loss_backward_out(
               grad_input,
               grad_output,
               self,
@@ -3501,13 +3503,14 @@ REGISTER_OPERATOR_FUNCTOR(aten::nll_loss2d, aten_nll_loss2d, [](Node* n) -> SROp
       const auto reduction = p_node->Input(3).toInt();
       const auto ignore_index = p_node->Input(4).toInt();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) =
-            at::nll_loss2d(self, target, weight, reduction, ignore_index);
+        p_node->Output(0) = at::native::nll_loss2d(
+            self, target, weight, reduction, ignore_index);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::nll_loss2d_outf(self, target, weight, reduction, ignore_index, out);
+      at::native::nll_loss2d_out(
+          self, target, weight, reduction, ignore_index, out);
     };
   }
   LogAndDumpSchema(n);
