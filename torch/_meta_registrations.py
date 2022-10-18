@@ -203,42 +203,6 @@ def meta_linalg_eigh(self, uplo="L"):
     vectors = self.new_empty(self.shape[:-1])
     return (values, vectors)
 
-# From aten/src/ATen/native/ReflectionPad.cpp
-@register_meta([aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default])
-def meta_pad2d_backward(grad_output, self, padding):
-    dim_w = 2
-    dim_h = 1
-    dim_plane = 0
-    nbatch = 1
-
-    self_shape = self.shape
-    if self.dim() == 4:
-        nbatch = self_shape[0]
-        dim_w += 1
-        dim_h += 1
-        dim_plane += 1
-
-    pad_l = padding[0]
-    pad_r = padding[1]
-    pad_t = padding[2]
-    pad_b = padding[3]
-
-    nplane = self_shape[dim_plane]
-    input_h = self_shape[dim_h]
-    input_w = self_shape[dim_w]
-    output_h = input_h + pad_t + pad_b
-    output_w = input_w + pad_l + pad_r
-
-    check(
-        output_w == grad_output.shape[dim_w],
-        lambda: f"gradOutput width unexpected. Expected: {output_w}, Got: {grad_output.shape[dim_w]}"
-    )
-    check(
-        output_h == grad_output.shape[dim_h],
-        lambda: f"gradOutput height unexpected. Expected: {output_h}, Got: {grad_output.shape[dim_h]}"
-    )
-    return self.new_empty(self.shape)
-
 
 # From aten/src/ATen/native/ReflectionPad.cpp
 @register_meta(
@@ -302,28 +266,6 @@ def meta_pad2d(self, padding):
         return self.new_empty((nplane, output_h, output_w))
     else:
         return self.new_empty((nbatch, nplane, output_h, output_w))
-
-@register_meta(aten._fused_moving_avg_obs_fq_helper.default)
-def meta__fused_moving_avg_obs_fq_helper(
-    self,
-    observer_on,
-    fake_quant_on,
-    running_min,
-    running_max,
-    scale,
-    zero_point,
-    averaging_const,
-    quant_min,
-    quant_max,
-    ch_axis,
-    per_row_fake_quant=False,
-    symmetric_quant=False
-):
-    check(
-        ch_axis < self.dim(),
-        lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
-    )
-    return (self.empty_like(), mask)
 
 
 @register_meta(aten.bernoulli_.float, register_dispatcher=False)
