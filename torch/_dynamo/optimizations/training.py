@@ -137,7 +137,6 @@ class AotNop(AotAutogradStrategy):
 
     def candidate(self):
         from functorch.compile import nop
-
         return BACKENDS["aot_autograd"](self.gm, self.example_inputs, fw_compiler=nop)
 
 

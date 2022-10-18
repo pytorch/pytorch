@@ -8,8 +8,11 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
+import functorch._src.config as functorch_config
+
 import torch.nn
 from torch import fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
@@ -104,6 +107,7 @@ class OutputGraph(fx.Tracer):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map = {}
+        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
 
     @property
     def output(self):
@@ -394,8 +398,10 @@ class OutputGraph(fx.Tracer):
         gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
+
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
+
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
@@ -418,6 +424,7 @@ class OutputGraph(fx.Tracer):
         return cg.get_instructions()
 
     def call_user_compiler(self, gm):
+        # print(gm.code)
         try:
             name = (
                 self.compiler_fn.__name__

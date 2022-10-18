@@ -110,16 +110,32 @@ class PySymInt(object):
     our program. They're what sit under FakeTensor, and contains our primary
     implementation of symbolic shapes.
     """
-    def __init__(self, expr, shape_env, constant=None):
+    def __init__(self, expr, shape_env, constant=None, ref_id=None, kind=None, idx=None):
         self.expr = expr
         self.shape_env = shape_env
         self.constant = constant
+        # breakpoint()
+        self.ref_id = ref_id
+        # if not self.ref_id:
+            # breakpoint()
+        self.kind = kind
+        self.idx = idx
+        # pair =ref_id, idx
+        if self.ref_id and str(self.expr) not in ('False', 'True'):
+            if self.expr not in self.shape_env.expr_to_id:
+                self.shape_env.expr_to_id[self.expr] = set()
+            self.shape_env.expr_to_id[self.expr].add((self.ref_id, self.kind, self.idx))
 
-    def wrap(self, num):
+            if self.ref_id not in self.shape_env.expr_to_id:
+                self.shape_env.expr_to_id[self.ref_id] = set()
+            self.shape_env.expr_to_id[self.ref_id].add((self.expr, self.kind, self.idx))
+
+    def wrap(self, num): # Node is a torch._C.SymIntNode
+        # breakpoint()
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
-        return PySymInt(self.expr, self.shape_env, constant=self.constant)
+        return PySymInt(self.expr, self.shape_env, constant=self.constant, ref_id=self.ref_id, kind=self.kind, idx=self.idx)
 
     def __str__(self):
         return f"{self.expr}"
@@ -146,13 +162,24 @@ class PySymInt(object):
         return PySymFloat(self.expr, self.shape_env)
 
     def __bool__(self):
+        # breakpoint()
         return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
 
 class PySymFloat:
-    def __init__(self, expr, shape_env, constant=None):
+    def __init__(self, expr, shape_env, constant=None, ref_id=None):
         self.expr = expr
         self.shape_env = shape_env
         self.constant = constant
+        self.ref_id = ref_id
+        if self.expr in self.shape_env.expr_to_id:
+            assert self.shape_env.expr_to_id[self.expr] == self.ref_id, "Bro im straight up not having a good time right now"
+        if self.expr not in self.shape_env.expr_to_id:
+            self.shape_env.expr_to_id[self.expr] = set()
+        self.shape_env.expr_to_id[self.expr].add(self.ref_id)
+
+        if self.expr not in self.shape_env.expr_to_id:
+            self.shape_env.expr_to_id[self.ref_id] = ()
+        self.shape_env.expr_to_id[self.ref_id].add(self.expr)
 
     def wrap(self, num):
         return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
@@ -239,6 +266,7 @@ def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
 
     def magic_impl(self, other):
+        # breakpoint()
         if method in ["min", "max"]:
             op = getattr(builtins, method)
         else:
@@ -339,6 +367,7 @@ class ShapeEnv(object):
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.expr_to_id = {}
 
     def _get_key(self):
         """
@@ -353,7 +382,7 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-
+        # breakpoint()
         size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
@@ -384,10 +413,10 @@ class ShapeEnv(object):
                 )[0]
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
-        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+        return [self.create_symintnode(x, id(ex), "size", idx) for idx, x in enumerate(size)], [self.create_symintnode(x, id(ex), "stride", idx) for idx, x in enumerate(stride)]  # type: ignore[arg-type]
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int]):
-        py_sym_int = PySymInt(expr, self)
+    def create_symintnode(self, expr: Union["sympy.Expr", int], ref_id: int, kind: str, idx: int):
+        py_sym_int = PySymInt(expr, self, ref_id=ref_id, kind=kind, idx=idx)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         return cpp_sym_int
 

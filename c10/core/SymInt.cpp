@@ -15,7 +15,7 @@ static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   SymIntNodeImpl* common = a ? a.get() : b.get();
   // TODO: technically we need to check that the classes match
   if (!a) {
-    a = common->wrap(a_.as_int_unchecked());
+     a = common->wrap(a_.as_int_unchecked());
     a_.toSymInt(a); //
   }
   if (!b) {

@@ -677,7 +677,7 @@ try:
 
     def wrap_to_fake_tensor(e, fake_mode):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(lambda: fake_mode.from_tensor(e))
+            return wrap_fake_exception(lambda: fake_mode.from_tensor(e, static_shapes=config.dynamic_shapes is False))
         else:
             return e
 
