@@ -399,7 +399,7 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
 
   // If the physical layout of the NestedTensor's storage
   // is not: batch, {seq_len}, num_heads, head_dim then we need
-  //  to call contiguous
+  // to call contiguous
   if (!is_safe_to_get_storage_as_tensor(query_impl, key_impl, value_impl)) {
     q_t = q_t.contiguous();
     k_t = k_t.contiguous();
