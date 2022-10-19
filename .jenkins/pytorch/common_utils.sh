@@ -52,8 +52,7 @@ function assert_git_not_dirty() {
 function pip_install_whl() {
   # This is used to install PyTorch and other build artifacts wheel locally
   # without using any network connection
-  alias pip_install_no_network="pip install --no-index --no-deps"
-  pip_install_no_network "$@"
+  pip install --no-index --no-deps "$@"
 }
 
 function pip_install() {
