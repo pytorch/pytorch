@@ -33,7 +33,7 @@ from collections import defaultdict
 import unittest
 import warnings
 import weakref
-
+from functools import wraps
 
 bf16 = torch.bfloat16
 f64 = torch.float64
@@ -328,7 +328,15 @@ def run_meta_crossref(
                 f"failed to convert args to meta; "
                 f"originally (*{args}, **{kwargs})") from e
 
-    rs = func(*args, **kwargs)
+    try:
+        rs = func(*args, **kwargs)
+    except Exception as e:
+        # A lot of OpInfo for inplace are actually broken because
+        # they're not tested outside of gradcheck which only checks
+        # torch.float64 and torch.complex128 (which this second one
+        # often skipped as well).
+        raise unittest.SkipTest("Original OpInfo is broken")
+
 
     # TODO: also handle cases where func raise an exception
 
@@ -471,7 +479,6 @@ meta_function_expected_failures = {
     torch.nn.functional.multilabel_margin_loss : {f64, f32},
     torch.nn.functional.one_hot : {i64},
     torch.nn.functional.pdist : {f64, f32},
-    torch.nn.functional.rrelu : {f64, bf16, f32},
     torch.polar : {f64, f32},
     torch.segment_reduce : {f64, f16, bf16, f32},
     torch.searchsorted : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
@@ -482,6 +489,11 @@ meta_function_expected_failures = {
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
+    torch.Tensor.conj_physical_: {c128, c32, c64},
+}
+
+meta_function_expected_failures_only_outplace = {
+    torch.nn.functional.rrelu : {f64, bf16, f32},
 }
 
 """
@@ -556,8 +568,8 @@ meta_function_skips = {
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
     # for grid_sampler_2d, so we can't just xfail it
     torch.nn.functional.grid_sample : {f64, f32},
-
     torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
+    torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
 
@@ -635,10 +647,11 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
     device_type: str
     dtype: torch.dtype
 
-    def __init__(self, test_case, *, device, dtype):
+    def __init__(self, test_case, *, device, dtype, inplace):
         self.test_case = test_case
         self.device_type = torch.device(device).type
         self.dtype = dtype
+        self.inplace = inplace
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
@@ -651,6 +664,8 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
         elif self.dtype in meta_function_device_skips[self.device_type].get(func, set()):
             test_expect = TestExpect.SKIP
         elif self.dtype in meta_function_expected_failures.get(func, set()):
+            test_expect = TestExpect.XFAILURE
+        elif not self.inplace and self.dtype in meta_function_expected_failures_only_outplace.get(func, set()):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
@@ -736,6 +751,7 @@ meta_dispatch_expected_failures = {
     aten.unique_consecutive.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
+    aten.conj_physical_.default: {c128, c32, c64},
 }
 
 # these sometimes pass and sometimes fail
@@ -752,7 +768,13 @@ meta_dispatch_skips = {
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
     aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
+    aten.addbmm_.default: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
+
+# For CompositeImplicitAutograd functions that fail before hitting the Mode
+meta_dispatch_early_skips = set({
+    torch.Tensor.float_power_,
+})
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
@@ -869,11 +891,20 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # with the inconsistencies but this takes time.
 @skipIfSlowGradcheckEnv
 class TestMeta(TestCase):
+    # Copies inputs to inplace operations to avoid inplace modifications
+    #   to leaves requiring gradient
+    def _get_safe_inplace(self, inplace_variant):
+        @wraps(inplace_variant)
+        def _fn(t, *args, **kwargs):
+            return inplace_variant(t.clone(), *args, **kwargs)
+
+        return _fn
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
-    def test_meta(self, device, dtype, op):
+    def test_meta_outplace(self, device, dtype, op):
         # run the OpInfo sample inputs, cross-referencing them with the
         # meta implementation and check the results are the same.  All
         # the heavy lifting happens in MetaCrossRefFunctionMode
@@ -882,7 +913,7 @@ class TestMeta(TestCase):
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            with MetaCrossRefFunctionMode(self, dtype=dtype, device=device):
+            with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=False):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
@@ -891,7 +922,25 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
-    def test_dispatch_meta(self, device, dtype, op):
+    def test_meta_inplace(self, device, dtype, op):
+        func = op.get_inplace()
+        if not func:
+            self.skipTest("No inplace variable for this op")
+        func = self._get_safe_inplace(func)
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in samples:
+            if sample_input.broadcasts_input:
+                continue
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+            with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=True):
+                expected = func(*args, **kwargs)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    @ops(op_db)
+    def test_dispatch_meta_outplace(self, device, dtype, op):
         func = op.get_op()
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:
@@ -903,11 +952,33 @@ class TestMeta(TestCase):
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
 
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
-    def test_dispatch_symbolic_meta(self, device, dtype, op):
+    def test_dispatch_meta_inplace(self, device, dtype, op):
+        func = op.get_inplace()
+        if not func:
+            self.skipTest("No inplace variable for this op")
+        if func in meta_dispatch_early_skips:
+            self.skipTest("Function is in dispatch early skips")
+        func = self._get_safe_inplace(func)
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in samples:
+            if sample_input.broadcasts_input:
+                continue
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+
+            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=False):
+                expected = func(*args, **kwargs)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    @ops(op_db)
+    def test_dispatch_symbolic_meta_outplace(self, device, dtype, op):
         func = op.get_op()
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:
@@ -918,6 +989,28 @@ class TestMeta(TestCase):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
+
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    @ops(op_db)
+    def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
+        func = op.get_inplace()
+        if not func:
+            self.skipTest("No inplace variable for this op")
+        if func in meta_dispatch_early_skips:
+            self.skipTest("Function is in dispatch early skips")
+        func = self._get_safe_inplace(func)
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in samples:
+            if sample_input.broadcasts_input:
+                continue
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+
+            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=True):
+                expected = func(*args, **kwargs)
 
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
