@@ -261,7 +261,7 @@ test_inductor() {
   # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
   # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
   # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
-  PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
+  # PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
 }
 
 test_inductor_huggingface_shard() {
@@ -285,7 +285,7 @@ test_inductor_timm_shard() {
   TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
+    --device cuda --inductor --float32 --total-partitions 4 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
