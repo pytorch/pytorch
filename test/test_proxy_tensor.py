@@ -686,6 +686,13 @@ def forward(self, x_1):
 
         make_fx(f)(torch.randn(2, 3, 4, 5))
 
+    def test_pr_86917(self):
+        # Tests the issue brought up here https://github.com/pytorch/pytorch/pull/86917#issuecomment-1283155344
+        def f(a, b):
+            return torch.ops.aten.nll_loss_forward(a, b, None, 1, 10)
+
+        self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
+
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
 
@@ -715,9 +722,6 @@ def xfail_inherited_tests(tests):
     "test_inplace_metadata",
     "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
-    "test_make_fx_model_fwd_bwd_wgtupdate",
-    "test_make_fx_model_fwd_bwd",
-    "test_proxy_tensor",
     "test_resnet18_backward_trace",
     "test_trace_subclasses",
 ])
@@ -847,6 +851,20 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     detach = torch.ops.aten.detach.default(empty);  empty = None
     return detach""")
+
+    def test_sqrt_size(self):
+        def f(a):
+            return a / a.size(-1) ** 0.5
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
+    div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
+    return div""")
+
 
     def test_symint_to_tensor(self):
         def f(a):
@@ -992,6 +1010,7 @@ def forward(self, a_1):
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self._assert_no_guards(fx_g, 1)
+
 
 
 
