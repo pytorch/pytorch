@@ -53,7 +53,6 @@ from .utils import (
     fake_tensors_available,
     graph_break_dup_warning_checker,
     istype,
-    proxy_args_kwargs,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder
@@ -344,7 +343,6 @@ class InstructionTranslatorBase(object):
 
     def run(self):
         try:
-            self.output.push_tx(self)
             while (
                 self.instruction_pointer is not None
                 and not self.output.should_exit
@@ -357,7 +355,6 @@ class InstructionTranslatorBase(object):
 
             raise
         finally:
-            self.output.pop_tx()
             # Cleanup the outputGraph to delete the held tensors. We perform the
             # cleanup only for InstructionTranslator and not
             # InliningInstructionTranslator. The InliningInstructionTranslator
@@ -722,11 +719,7 @@ class InstructionTranslatorBase(object):
             self.push(
                 TensorVariable.create(
                     self,
-                    proxy=self.output.create_proxy(
-                        "call_function",
-                        supported_tensors[op],
-                        *proxy_args_kwargs([left, right], {}),
-                    ),
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
                     **options,
                 )
             )
@@ -1000,22 +993,30 @@ class InstructionTranslatorBase(object):
         )
 
     def UNPACK_SEQUENCE(self, inst):
+        # TODO(jansel): rewrite this using unpack_var_sequence
         seq = self.pop()
+        options = VariableTracker.propagate([seq])
         if isinstance(seq, BaseListVariable):
+            assert len(seq.items) == inst.argval
             self.output.guards.update(seq.guards)
-            val = seq.unpack_var_sequence(self)
+            for i in reversed(seq.items):
+                self.push(i)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
-            val = seq.unpack_var_sequence(self)
+            val = seq.as_python_constant()
+            assert len(val) == inst.argval
+            for i in reversed(val):
+                self.push(ConstantVariable(i, **options))
         elif isinstance(seq, TensorVariable):
-            val = seq.unpack_var_sequence(self, idxes=range(inst.argval))
+            proxy = seq.as_proxy()
+            for i in reversed(range(inst.argval)):
+                self.push(TensorVariable.create(self, proxy[i], **options))
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
-            val = seq.obj.unpack_var_sequence(self, idxes=range(inst.argval))
+            proxy = getattr(seq.obj.as_proxy(), seq.name)
+            for i in reversed(range(inst.argval)):
+                self.push(TensorVariable.create(self, proxy[i], **options))
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
-        for i in reversed(val):
-            self.push(i)
 
     def UNPACK_EX(self, inst):
         assert 0 <= inst.argval <= 0xFFFF

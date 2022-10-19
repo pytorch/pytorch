@@ -306,6 +306,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     get_state_from_generator,
                     *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 example_value=self.value(),
                 **options,
@@ -338,6 +339,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 example_value=example_value,
                 **options,
@@ -361,6 +363,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     self.value,
                     *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
@@ -430,6 +433,7 @@ class TorchVariable(VariableTracker):
                     "call_function",
                     torch.nn.functional.softmax,
                     *proxy_args_kwargs([input, dim], {}),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate([self, dim, input]),
             )
@@ -493,6 +497,7 @@ class TorchVariable(VariableTracker):
                         ],
                         {},
                     ),
+                    current_tx=tx,
                 ),
                 **VariableTracker.propagate(
                     [
@@ -667,6 +672,7 @@ class TorchPyOperator(VariableTracker):
                 self.value,
                 args=tuple(p_args),
                 kwargs={},
+                current_tx=tx,
             ),
             example_value=self.value(*u_args),
         )

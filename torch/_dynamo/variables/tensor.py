@@ -446,19 +446,17 @@ class TensorVariable(VariableTracker):
 
         return result
 
-    def unpack_var_sequence(self, tx, idxes=None):
-        if idxes is None:
-            if self.size:
-                idxes = range(self.size[0])
-            else:
-                return super(TensorVariable, self).unpack_var_sequence(tx)
+    def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate(self)
-        return [
-            variables.BuiltinVariable(operator.getitem, **options).call_function(
-                tx, [self, variables.ConstantVariable(i)], {}
-            )
-            for i in idxes
-        ]
+        if self.size:
+            return [
+                variables.BuiltinVariable(operator.getitem, **options).call_function(
+                    tx, [self, variables.ConstantVariable(i)], {}
+                )
+                for i in range(self.size[0])
+            ]
+
+        return super(TensorVariable, self).unpack_var_sequence(tx)
 
     def call_method(
         self,
@@ -521,10 +519,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_method",
-                        "item",
-                        (self.as_proxy(),),
-                        {},
+                        "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -538,10 +533,7 @@ class TensorVariable(VariableTracker):
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_function",
-                        len,
-                        (self.as_proxy(),),
-                        {},
+                        "call_function", len, (self.as_proxy(),), {}, current_tx=tx
                     ),
                     **options,
                 )
@@ -551,6 +543,7 @@ class TensorVariable(VariableTracker):
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + args, kwargs),
+                current_tx=tx,
             )
             return ConstantVariable(None, **options)
         else:
@@ -570,6 +563,7 @@ class TensorVariable(VariableTracker):
                     "call_method",
                     name,
                     *proxy_args_kwargs([self] + args, kwargs),
+                    current_tx=tx,
                 ),
                 **options,
             )
