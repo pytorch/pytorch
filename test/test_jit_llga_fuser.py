@@ -367,6 +367,23 @@ class TestOp(JitLlgaTestCase):
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
+    def test_cat_check_type_promotion(self):
+        def cat_along_dim(d):
+            def forward_cat(*inputs):
+                return torch.cat(inputs, d)
+            return forward_cat
+
+        for xshape, yshape, dim in [
+            [[4, 8, 8, 16], [4, 8, 8, 24], 3],
+            [[64, 8, 32], [64, 24, 32], 1],
+            [[2048, 64], [1024, 64], 0],
+        ]:
+            x = torch.rand(xshape)
+            y = torch.rand(yshape, dtype=torch.bfloat16)
+            _, graph = self.checkTrace(cat_along_dim(dim), [x, y])
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
+
+    @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
     def test_typecheck(self, dtype):
         x = torch.rand(32, 28, dtype=dtype)

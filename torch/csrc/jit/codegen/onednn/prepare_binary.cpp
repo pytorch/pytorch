@@ -15,6 +15,7 @@ bool compareConstValue(Value* v, double d) {
        (ival->isDouble() && ival->toDouble() == d));
 }
 
+// TODO: factor out type-promotion code to make it generic.
 void handleBinaryOpInputs(Node* node) {
   // We do not handle binary ops with two scalar inputs,
   // and we assume scalar is always at the second place.
@@ -163,10 +164,45 @@ static void EliminateIdentityMulAdd(Block* block) {
     for (auto sub : node->blocks()) {
       EliminateIdentityMulAdd(sub);
     }
-
     if ((node->kind() == aten::add && compareConstValue(node->input(1), 0.0)) ||
         (node->kind() == aten::mul && compareConstValue(node->input(1), 1.0))) {
       node->output()->replaceAllUsesWith(node->namedInput("self"));
+    }
+  }
+}
+
+// Ensure that if tensor inputs to be concatenated have different dtypes,
+// some inputs should undergo type-promotion.
+static void promoteDtypesForCat(Block* block) {
+  for (auto node : block->nodes()) {
+    for (auto sub : node->blocks()) {
+      promoteDtypesForCat(sub);
+    }
+    if (node->kind() == aten::cat) {
+      if ((node->namedInput("tensors")->node()->kind() ==
+           prim::ListConstruct) &&
+          (node->namedInput("tensors")->uses().size() == 1) &&
+          (node->namedInput("dim")->node()->kind() == prim::Constant)) {
+        WithInsertPoint guard(node);
+        auto g = node->owningGraph();
+        auto listConstruct = node->namedInput("tensors")->node();
+        c10::optional<c10::ScalarType> promotedDtype =
+            node->output()[0].type()->expect<TensorType>()->scalarType();
+        if (promotedDtype != c10::nullopt) {
+          for (auto input : listConstruct->inputs()) {
+            c10::optional<c10::ScalarType> inputDtype =
+                input->type()->expect<TensorType>()->scalarType();
+            if ((inputDtype != c10::nullopt) && (inputDtype != promotedDtype)) {
+              auto promotedInput =
+                  g->insert(aten::to, {input}, {{"dtype", promotedDtype}});
+              promotedInput->setType(
+                  input->type()->expect<TensorType>()->withScalarType(
+                      promotedDtype));
+              listConstruct->replaceInputWith(input, promotedInput);
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -177,6 +213,7 @@ void PrepareBinaryForLLGA(const std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // ConvertScalarToTensor must be placed after EliminateIdentityMulAdd
   ConvertScalarToTensor(graph->block());
+  promoteDtypesForCat(graph->block());
 }
 
 } // namespace onednn
