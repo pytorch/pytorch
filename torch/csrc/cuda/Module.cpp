@@ -356,21 +356,7 @@ PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
 
 PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  using c10::cuda::CUDACachingAllocator::AllocatorBackend;
-  AllocatorBackend backend =
-      c10::cuda::CUDACachingAllocator::allocatorBackend();
-  // this call should be uncommon, don't bother interning strings
-  switch (backend) {
-    case AllocatorBackend::NATIVE:
-      return THPUtils_packString("native");
-#ifndef USE_ROCM
-    case AllocatorBackend::CUDAMALLOCASYNC:
-      return THPUtils_packString("cudaMallocAsync");
-#endif
-    default:
-      THPUtils_assert(false, "Unexpected value for backend");
-      return nullptr;
-  }
+  return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
   END_HANDLE_TH_ERRORS
 }
 
