@@ -248,7 +248,7 @@ static void upsample_nearest2d_out_cuda_template(
     const int64_t num_kernels = output.numel();
     const int64_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
       const scalar_t* idata = input.data_ptr<scalar_t>();
       scalar_t* odata = output.data_ptr<scalar_t>();
 
