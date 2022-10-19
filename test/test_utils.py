@@ -100,7 +100,7 @@ class TestCheckpoint(TestCase):
                 self.counter += 1
                 # For reentrant, need to have autograd actually
                 # pack a tensor to trigger recomp
-                ret = input_var * 2
+                ret = input_var * torch.tensor(2.)
                 return ret
 
         # checkpointed
