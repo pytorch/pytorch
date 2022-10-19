@@ -4064,6 +4064,22 @@ Tensor linalg_det_backward(
   }
 }
 
+std::tuple<Tensor, Tensor, Tensor> attn_backward(
+    const Tensor& grad_o,
+    const Tensor& grad_a,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v) {
+  Tensor x = at::matmul(q, k.transpose(0, 1));
+  Tensor a = at::tanh(x);
+  Tensor q_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - at::tanh(x).pow(2)), k) +
+               at::matmul(grad_a * (1 - at::tanh(x).pow(2)), k);
+  Tensor k_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - at::tanh(x).pow(2)).transpose(0, 1), q) +
+               at::matmul(grad_a * (1 - at::tanh(x).pow(2)).transpose(0, 1), q);
+  Tensor v_b = at::matmul(grad_o.transpose(0, 1), a);
+  return std::tuple<Tensor, Tensor, Tensor>(q_b, k_b, v_b);
+}
+
 std::tuple<Tensor, Tensor> slogdet_jvp(
     const Tensor& LU,
     const Tensor& pivots,

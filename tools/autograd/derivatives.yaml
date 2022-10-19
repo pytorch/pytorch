@@ -518,6 +518,9 @@
   sign, logabsdet: slogdet_jvp(LU, pivots, A_t, sign, A_p.is_contiguous() && !A_p.is_complex())
   output_differentiability: [True, True, False, False]
 
+- name: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+  q, k, v: attn_backward(grads[0], grads[1], q, k, v)
+
 - name: block_diag(Tensor[] tensors) -> Tensor
   tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
   result: block_diag_jvp(tensors)

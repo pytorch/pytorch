@@ -146,6 +146,8 @@
 
 - func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: attn
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
