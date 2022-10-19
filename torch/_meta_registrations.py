@@ -1169,10 +1169,11 @@ def meta_zero_(self):
 
 
 @register_meta(
-    [aten.add_.Scalar, aten.sub_.Scalar, aten.mul_.Scalar, aten.div_.Scalar],
+    [aten.add_.Scalar, aten.sub_.Scalar, aten.mul_.Scalar, aten.div_.Scalar,
+     aten.add_.Tensor, aten.sub_.Tensor, aten.mul_.Tensor, aten.div_.Tensor],
     register_dispatcher=False,
 )
-def meta_binop_Scalar_(self, other):
+def meta_binop_inplace(self, other):
     return self
 
 
