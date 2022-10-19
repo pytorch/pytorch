@@ -17590,6 +17590,12 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.diagonal_scatter",
+        torch_opinfo_name="diagonal_scatter",
+        supports_out=True,
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.diag_embed",
         torch_opinfo_name="diag_embed",
         supports_nvfuser=False,
