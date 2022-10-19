@@ -641,7 +641,7 @@ def lint_test_case_extension(suite):
 
 
 def get_report_path(argv=UNITTEST_ARGS, pytest=False):
-    test_filename = argv[0]
+    test_filename = sanitize_test_filename(argv[0])
     test_report_path = TEST_SAVE_XML + LOG_SUFFIX
     test_report_path = os.path.join(test_report_path, test_filename)
     if pytest:
