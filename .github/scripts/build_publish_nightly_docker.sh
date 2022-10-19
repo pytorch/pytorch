@@ -3,13 +3,14 @@
 set -xeuo pipefail
 
 PYTORCH_DOCKER_TAG=$(git describe --tags --always)-devel
-CUDA_VERSION=11.3.1
+CUDA_VERSION=11.6.2
 
 # Build PyTorch nightly docker
 make -f docker.Makefile \
      DOCKER_REGISTRY=ghcr.io \
      DOCKER_ORG=pytorch \
      CUDA_VERSION=${CUDA_VERSION} \
+     CUDA_VERSION_SHORT="${CUDA_VERSION:0:2}.${CUDA_VERSION:4:1}" \
      DOCKER_IMAGE=pytorch-nightly \
      DOCKER_TAG=${PYTORCH_DOCKER_TAG} \
      INSTALL_CHANNEL=pytorch-nightly BUILD_TYPE=official devel-image
