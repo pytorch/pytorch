@@ -4,6 +4,7 @@ import sys
 from .throughput_benchmark import ThroughputBenchmark
 from ._crash_handler import enable_minidumps, disable_minidumps, enable_minidumps_on_exceptions
 from .cpp_backtrace import get_cpp_backtrace
+from .backend_registration import rename_privateuse1_backend
 
 # Set the module for a given object for nicer printing
 def set_module(obj, mod):

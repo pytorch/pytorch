@@ -530,7 +530,7 @@ def _convert_fx(
     _remove_qconfig: bool = True,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
-    is_decomposed_qtensor: bool = False,
+    is_decomposed: bool = False,
 ) -> torch.nn.Module:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
@@ -553,7 +553,7 @@ def _convert_fx(
         _remove_qconfig_flag=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
         backend_config=backend_config,
-        is_decomposed_qtensor=is_decomposed_qtensor,
+        is_decomposed=is_decomposed,
     )
 
     preserved_attributes = convert_custom_config.preserved_attributes
@@ -678,7 +678,7 @@ def convert_to_reference_fx(
         backend_config=backend_config,
     )
 
-def _convert_to_reference_decomposed_qtensor_fx(
+def _convert_to_reference_decomposed_fx(
     graph_module: GraphModule,
     convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
     _remove_qconfig: bool = True,
@@ -717,10 +717,10 @@ def _convert_to_reference_decomposed_qtensor_fx(
         # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
         # TODO: add backend_config after we split the backend_config for fbgemm and qnnpack
         # e.g. backend_config = get_default_backend_config("fbgemm")
-        reference_quantized_model = _convert_to_reference_decomposed_qtensor_fx(prepared_model)
+        reference_quantized_model = _convert_to_reference_decomposed_fx(prepared_model)
 
     """
-    torch._C._log_api_usage_once("quantization_api.quantize_fx._convert_to_reference_decomposed_qtensor_fx")
+    torch._C._log_api_usage_once("quantization_api.quantize_fx._convert_to_reference_decomposed_fx")
     return _convert_fx(
         graph_module,
         is_reference=True,
@@ -728,7 +728,7 @@ def _convert_to_reference_decomposed_qtensor_fx(
         _remove_qconfig=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
         backend_config=backend_config,
-        is_decomposed_qtensor=True,
+        is_decomposed=True,
     )
 
 
