@@ -6387,9 +6387,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_conv_modules_raise_error_on_incorrect_input_size(self):
         for dtype in [torch.bfloat16, torch.double, torch.float]:
-            modules = [nn.Conv1d(3, 8, 3).to(dtype), nn.ConvTranspose1d(3, 8, 3).to(dtype),
-                       nn.Conv2d(3, 8, 3).to(dtype), nn.ConvTranspose2d(3, 8, 3).to(dtype),
-                       nn.Conv3d(3, 8, 3).to(dtype), nn.ConvTranspose3d(3, 8, 3).to(dtype)]
+            modules = [nn.ConvTranspose1d(3, 8, 3).to(dtype),
+                       nn.ConvTranspose2d(3, 8, 3).to(dtype),
+                       nn.ConvTranspose3d(3, 8, 3).to(dtype)]
 
             invalid_input_dims = [(1, 4), (1, 4),
                                   (2, 5), (2, 5),
@@ -6399,33 +6399,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 for dims in invalid_dims:
                     input = torch.empty(torch.Size((3, ) * dims))
                     self.assertRaises(RuntimeError, lambda: module(input))
-
-    def test_conv_shapecheck(self):
-        def test(should_raise, module, input_size, dtype):
-            input = torch.empty(3, *input_size).to(dtype)
-            if should_raise:
-                self.assertRaises(RuntimeError, lambda: module(input))
-            else:
-                # just run it to ensure no exception raised.
-                module(input)
-
-        for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
-            # Conv1d
-            test(True, nn.Conv1d(1, 1, 3).to(dtype), (1, 2), dtype)
-            test(True, nn.Conv1d(1, 1, 3, stride=2).to(dtype), (1, 2), dtype)
-            test(False, nn.Conv1d(1, 1, 2).to(dtype), (1, 2), dtype)
-            test(False, nn.Conv1d(1, 1, 2, stride=2).to(dtype), (1, 2), dtype)
-            test(False, nn.Conv1d(1, 1, 3, stride=2, padding=1).to(dtype), (1, 2), dtype)
-
-            # Conv2d
-            test(True, nn.Conv2d(1, 1, (3, 3)).to(dtype), (1, 2, 2), dtype)
-            test(False, nn.Conv2d(1, 1, (3, 3)).to(dtype), (1, 3, 3), dtype)
-            test(False, nn.Conv2d(1, 1, (3, 3), padding=1).to(dtype), (1, 2, 2), dtype)
-
-            # Conv3D
-            test(True, nn.Conv3d(1, 1, (3, 3, 3)).to(dtype), (1, 2, 2, 2), dtype)
-            test(False, nn.Conv3d(1, 1, (3, 3, 3)).to(dtype), (1, 3, 3, 3), dtype)
-            test(False, nn.Conv3d(1, 1, (3, 3, 3), padding=1).to(dtype), (1, 2, 2, 2), dtype)
 
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
