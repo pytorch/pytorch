@@ -17,6 +17,7 @@ def check_and_replace(inp: str, src: str, dst: str) -> str:
         raise RuntimeError(f"Can't find ${src} in the input")
     return inp.replace(src, dst)
 
+
 def patch_setup_py(path: Path, *, version: str = "2.0.0", name: str = "triton") -> None:
     with open(path) as f:
         orig = f.read()
@@ -43,8 +44,7 @@ def build_triton(commit_hash: str) -> Path:
 
 def main() -> None:
     pin = read_triton_pin()
-    path = build_triton(pin)
-    print(path)
+    build_triton(pin)
 
 
 if __name__ == "__main__":
