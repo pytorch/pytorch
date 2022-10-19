@@ -18,6 +18,7 @@ from torch._prims_common import (
 )
 
 from . import config, ir, overrides
+from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -118,7 +119,7 @@ def decode_device(device):
     if isinstance(device, str):
         device = torch.device(device)
     if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=torch.cuda.current_device())
+        return torch.device("cuda", index=current_device())
     return device
 
 
@@ -1058,6 +1059,8 @@ make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell)
 make_fallback(aten.topk)
+make_fallback(aten.unfold)
+make_fallback(aten.unfold_backward)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
 
