@@ -1,4 +1,4 @@
-# Owner(s): ["module: primTorch"]
+# Owner(s): ["module: primTorch", "module: decompositions"]
 
 from collections import defaultdict
 from torch import Tensor
@@ -162,6 +162,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
+        (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -280,6 +282,7 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
+    (None, None, "special.ndtr"),  # aten.special_ndtr was not decomposed
     (None, None, "new_empty"),
     (None, None, "empty_like"),
     (None, None, "empty"),

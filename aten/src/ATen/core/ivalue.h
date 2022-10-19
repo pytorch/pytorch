@@ -683,26 +683,54 @@ public:
   c10::ArrayRef<IValue> toListRef() const;
 
   // Some template constructors of IValue calls another constructor recursively.
-  // This SNIFAEs the called constructor exists.
+  // This SFINAEs the called constructor exists.
   template <class T>
   using enable_if_ivalue_constructible =
       std::enable_if_t<std::is_constructible<IValue, T>::value, std::nullptr_t>;
 
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  // The rule for lists is more complicated; the generic constructor is only
+  // acceptable if your element isn't SymInt.  If you do have a SymInt element,
+  // then you must also, at construction time, check if you can decay the list
+  // into an int list (this is MANDATORY, as at a use site we may expect
+  // toIntList to work even if at the call site you had a SymIntArrayRef
+  // argument).  In practice, only SymIntArrayRef is used this way, so we
+  // didn't bother making it work for the other constructors, we just make sure
+  // they're not selectable.
+  template <class T>
+  using enable_if_list_is_ivalue_constructible =
+      std::enable_if_t<std::is_constructible<IValue, T>::value &&
+        !std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::List<T>&& v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const c10::List<T>& v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(at::ArrayRef<T> v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(const std::vector<T>& v);
   template <class T, size_t N>
   IValue(std::array<T, N> v);
 
+  // Manual constructors for lists of symints, which decay to int list if
+  // possible.  To avoid ambiguous overload situations, we template them
+  // to prevent implicit conversions
+  template <class T>
+  using enable_if_symint =
+      std::enable_if_t<std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::ArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::OptionalArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(const std::vector<T>& v);
+
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
       std::is_constructible<IValue, T>::value &&
-          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value,
+          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value &&
+          !std::is_same<T, c10::SymInt>::value,
       std::nullptr_t>;
 
   template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
@@ -729,7 +757,7 @@ public:
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(c10::optional<T> v);
-  template <class T, enable_if_ivalue_constructible<T> = nullptr>
+  template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
   IValue(c10::nullopt_t);
 
