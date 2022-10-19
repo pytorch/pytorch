@@ -545,6 +545,9 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
 
   // Sum out contraction dims
   if (perm_index - out_num_dim > 0) {
+    // if there were ops to contract, we would have already done so
+    // in the previous loop and all the dims to sum are now 1
+    // NB: use view instead of squeeze (or sum) for faster (mps) performance
     if (num_ops > 1) {
       auto sizes = ops[0].sym_sizes().vec();
       for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {
