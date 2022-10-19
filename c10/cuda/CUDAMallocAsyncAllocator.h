@@ -8,6 +8,6 @@ namespace CudaMallocAsync {
 CUDAAllocator* allocator();
 
 }
-}
-}
-}
+} // namespace CUDACachingAllocator
+} // namespace cuda
+} // namespace c10

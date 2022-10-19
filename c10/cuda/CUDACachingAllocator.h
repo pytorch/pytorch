@@ -177,29 +177,35 @@ using OutOfMemoryObserver = std::function<void(
     int64_t device_total,
     int64_t device_free)>;
 
-
 class CUDAAllocator : public Allocator {
-public:
-  virtual void* raw_alloc (size_t nbytes) = 0;
-  virtual void* raw_alloc_with_stream (size_t nbytes, cudaStream_t stream) = 0;
-  virtual void raw_delete (void* ptr) = 0;
-  virtual void init (int device_count) = 0;
-  virtual void setMemoryFraction (double fraction, int device) = 0;
-  virtual void emptyCache () = 0;
-  virtual void cacheInfo (int dev_id, size_t* largestBlock) = 0;
-  virtual void* getBaseAllocation (void* ptr, size_t* size) = 0;
-  virtual void recordStream (const DataPtr&, CUDAStream stream) = 0;
-  virtual DeviceStats getDeviceStats (int device) = 0;
-  virtual void resetAccumulatedStats (int device) = 0;
-  virtual void resetPeakStats (int device) = 0;
-  virtual SnapshotInfo snapshot () = 0;
-  virtual void notifyCaptureBegin (int device, CaptureId_t graph_id, MempoolId_t mempool_id) = 0;
-  virtual void notifyCaptureAboutToEnd (int device, CaptureId_t graph_id) = 0;
-  virtual void notifyCaptureEnded (int device, CaptureId_t graph_id) = 0;
-  virtual void notifyCaptureDestroy (int device, MempoolId_t mempool_id) = 0;
-  virtual std::shared_ptr<void> getIpcDevPtr (std::string handle) = 0;
-  virtual void recordHistory (bool enabled, CreateContextFn context_recorder, size_t alloc_trace_max_entries, bool alloc_trace_record_context) = 0;
-  virtual void attachOutOfMemoryObserver (OutOfMemoryObserver observer) = 0;
+ public:
+  virtual void* raw_alloc(size_t nbytes) = 0;
+  virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
+  virtual void raw_delete(void* ptr) = 0;
+  virtual void init(int device_count) = 0;
+  virtual void setMemoryFraction(double fraction, int device) = 0;
+  virtual void emptyCache() = 0;
+  virtual void cacheInfo(int dev_id, size_t* largestBlock) = 0;
+  virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
+  virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
+  virtual DeviceStats getDeviceStats(int device) = 0;
+  virtual void resetAccumulatedStats(int device) = 0;
+  virtual void resetPeakStats(int device) = 0;
+  virtual SnapshotInfo snapshot() = 0;
+  virtual void notifyCaptureBegin(
+      int device,
+      CaptureId_t graph_id,
+      MempoolId_t mempool_id) = 0;
+  virtual void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) = 0;
+  virtual void notifyCaptureEnded(int device, CaptureId_t graph_id) = 0;
+  virtual void notifyCaptureDestroy(int device, MempoolId_t mempool_id) = 0;
+  virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
+  virtual void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_trace_max_entries,
+      bool alloc_trace_record_context) = 0;
+  virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual bool needsPoolSpecificPeerAccess() = 0;
   virtual std::string name() = 0;
 };
@@ -214,7 +220,6 @@ C10_CUDA_API extern std::atomic<CUDAAllocator*> allocator;
 inline CUDAAllocator* get() {
   return allocator.load();
 }
-
 
 // Called directly by clients.
 inline void* raw_alloc(size_t nbytes) {

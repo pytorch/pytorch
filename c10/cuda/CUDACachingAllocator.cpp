@@ -21,7 +21,6 @@
 #include <regex>
 #include <set>
 #include <vector>
-#include <iostream>
 
 namespace c10 {
 
@@ -1933,7 +1932,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       da->emptyCache();
   }
 
-  void* getBaseAllocation(void* ptr, size_t* outSize) override{
+  void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
@@ -2036,8 +2035,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       CaptureId_t graph_id,
       MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureBegin(
-        graph_id, mempool_id);
+    device_allocator[device]->notifyCaptureBegin(graph_id, mempool_id);
   }
 
   void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) override {
@@ -2059,8 +2057,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
-    malloc(
-        &r, device, nbytes, cuda::getCurrentCUDAStream(device));
+    malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     return r;
   }
 
@@ -2077,7 +2074,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   bool needsPoolSpecificPeerAccess() override {
     return false;
   }
-  void raw_delete (void* ptr) override {
+  void raw_delete(void* ptr) override {
     this->free(ptr);
   }
 
@@ -2087,14 +2084,14 @@ class NativeCachingAllocator : public CUDAAllocator {
   //
   // CUDA IPC only allows sharing a big memory block associated with a
   // cudaIpcMemHandle_t and it can be opened only **once** per context per
-  // process. There can be multiple types of storage in the same IPC mem block, so
-  // we must cache the device ptr to construct typed storage as it comes.
+  // process. There can be multiple types of storage in the same IPC mem block,
+  // so we must cache the device ptr to construct typed storage as it comes.
   //
   // ipcMemHandle_to_devptr maps a cudaIpcMemHandle_t to a device pointer in the
-  // process that can be used to access the memory block in the sender process. It
-  // only saves a weak_ptr of the device pointer in the map, the shared_ptr will
-  // be used to reconstruct all storages in this CudaMalloc allocation. And it
-  // will deleted in cudaIpcCloseMemHandle when its reference count is 0.
+  // process that can be used to access the memory block in the sender process.
+  // It only saves a weak_ptr of the device pointer in the map, the shared_ptr
+  // will be used to reconstruct all storages in this CudaMalloc allocation. And
+  // it will deleted in cudaIpcCloseMemHandle when its reference count is 0.
   //
   std::mutex IpcMutex;
   ska::flat_hash_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
@@ -2110,18 +2107,20 @@ class NativeCachingAllocator : public CUDAAllocator {
     // This ipcMemHandle hasn't been opened, or already expired, open it to
     // enable IPC access to that mem block.
     void* dev = nullptr;
-    auto ipc_handle = reinterpret_cast<const cudaIpcMemHandle_t*>(handle.c_str());
-    C10_CUDA_CHECK(
-        cudaIpcOpenMemHandle(&dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
+    auto ipc_handle =
+        reinterpret_cast<const cudaIpcMemHandle_t*>(handle.c_str());
+    C10_CUDA_CHECK(cudaIpcOpenMemHandle(
+        &dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
     // devPtr has to be deleted in same device when created.
     int curr_device;
     C10_CUDA_CHECK(cudaGetDevice(&curr_device));
-    auto sp = std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
-      cuda::CUDAGuard device_guard(curr_device);
-      std::lock_guard<std::mutex> deleter_lock(IpcMutex);
-      C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
-      ipcMemHandle_to_devptr.erase(handle);
-    });
+    auto sp =
+        std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
+          cuda::CUDAGuard device_guard(curr_device);
+          std::lock_guard<std::mutex> deleter_lock(IpcMutex);
+          C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
+          ipcMemHandle_to_devptr.erase(handle);
+        });
     std::weak_ptr<void> wp = sp;
     // To eliminate an additional search, we can use insert().
     // It doesn't overwrite when key already exists(ptr expired).
@@ -2173,7 +2172,6 @@ inline std::string format_size(uint64_t size) {
   return os.str();
 }
 
-
 struct BackendStaticInitializer {
   // Parses env for backend at load time, duplicating some logic from
   // CachingAllocatorConfig. CachingAllocatorConfig double-checks it later (at
@@ -2216,7 +2214,6 @@ struct BackendStaticInitializer {
 
 std::atomic<CUDAAllocator*> allocator{};
 BackendStaticInitializer backend_static_initializer;
-
 
 } // namespace CUDACachingAllocator
 } // namespace cuda

@@ -431,7 +431,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 
   static inline void assertValidDevice(int device) {
-    TORCH_CHECK(0 <= device && device < device_count, "Invalid device argument.");
+    TORCH_CHECK(
+        0 <= device && device < device_count, "Invalid device argument.");
   }
 
   void setMemoryFraction(double fraction, int device) override {
@@ -459,10 +460,10 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // Alternative: Instead of a manual hard limit, we could use
     // cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrReleaseThreshold,
     // &threshold); This is a soft hint: The driver allows the pool's reserved
-    // memory to spike above threshold in regions of high cudaMallocAsync demand,
-    // but opportunistically trims reserved memory back to threshold when the
-    // memory in use is < threshold. I don't like this because it introduces
-    // performance nondeterminism.
+    // memory to spike above threshold in regions of high cudaMallocAsync
+    // demand, but opportunistically trims reserved memory back to threshold
+    // when the memory in use is < threshold. I don't like this because it
+    // introduces performance nondeterminism.
   }
 
   void emptyCache(void) override {
@@ -485,28 +486,29 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // Afaict, the role of cacheInfo is to give getMaxWorkspaceSize a reasonable
     // maximum workspace size to use for an upcoming cudnnFind call.
     //
-    // The native allocator's cacheInfo chooses to return the size of its largest
-    // unused block (which is the largest allocation the native allocator can
-    // service immediately and asynchronously without a cudaMalloc.
+    // The native allocator's cacheInfo chooses to return the size of its
+    // largest unused block (which is the largest allocation the native
+    // allocator can service immediately and asynchronously without a
+    // cudaMalloc.
     //
     // Here, we use a different heuristic: figure out the max usable workspace
-    // size with a bit of educated trial and error. It's ok to be perf-inefficient
-    // because cacheInfo is a prelude to cudnnFind.
+    // size with a bit of educated trial and error. It's ok to be
+    // perf-inefficient because cacheInfo is a prelude to cudnnFind.
     //
     // The algo cache then stores the best-performing algo with workspace <=
-    // maxWorkspaceGuess. Later calls with the same param set hit in cache and try
-    // to allocate the same workspace. If, in one of those future calls, workspace
-    // allocation fails (ie because less ambient memory is available), the
-    // bindings rerun cudnnFind, including calling cacheInfo again beforehand to
-    // estimate a new (smaller) largest-available workspace. Over a few such
-    // calls, the cache should settle to the algo with a workspace size that's
-    // small enough to succeed every time (for that param set).
+    // maxWorkspaceGuess. Later calls with the same param set hit in cache and
+    // try to allocate the same workspace. If, in one of those future calls,
+    // workspace allocation fails (ie because less ambient memory is available),
+    // the bindings rerun cudnnFind, including calling cacheInfo again
+    // beforehand to estimate a new (smaller) largest-available workspace. Over
+    // a few such calls, the cache should settle to the algo with a workspace
+    // size that's small enough to succeed every time (for that param set).
     //
     // So the strategy here is to return a rough, largeish guess and let the
     // bindings retry to trim as needed over time.
     //
-    // The only caveat is, even if a workspace is allocated without OOM errors now
-    // and in future calls, it's hard to be sure those later error-free
+    // The only caveat is, even if a workspace is allocated without OOM errors
+    // now and in future calls, it's hard to be sure those later error-free
     // cudaMallocAsyncs are fast and come straight from the pool (ie,
     // cudaMallocAsync didn't need to reserve more memory from the system).
     // Hopefully, after repeated workspace requests, the pool's reserved memory
@@ -656,8 +658,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // In the native allocator:
     // allocated_bytes is the total bytes of blocks that have been malloc()ed
     // and not yet free()d.
-    // active_bytes is the total bytes of blocks that have been malloc()ed but not
-    // yet released back into a free pool. In other words, it includes all
+    // active_bytes is the total bytes of blocks that have been malloc()ed but
+    // not yet released back into a free pool. In other words, it includes all
     // allocated_bytes, as well as the bytes of "limbo state" blocks had have
     // already been free()ed but not yet free_block()ed back into a pool due to
     // outstanding stream_uses.
@@ -699,8 +701,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     //    ReservedMemHigh) resets it to ReservedMemCurrent inside the driver
     //   (same goes for UsedMemHigh/UsedMemCurrent)"
     uint64_t zero = 0;
-    C10_CUDA_CHECK(
-        cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrReservedMemHigh, &zero));
+    C10_CUDA_CHECK(cudaMemPoolSetAttribute(
+        mempool, cudaMemPoolAttrReservedMemHigh, &zero));
     C10_CUDA_CHECK(
         cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrUsedMemHigh, &zero));
   }
@@ -725,7 +727,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());
     TORCH_CHECK(
-        !capture_underway, "Only one capture at a time is allowed in a process.")
+        !capture_underway,
+        "Only one capture at a time is allowed in a process.")
     capture_underway = true;
   }
 
@@ -743,8 +746,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
     // See Note [Avoid dangling free streams during CUDA graph capture]
     for (const auto& free_stream : capture_free_streams) {
-      // cudaEventRecord requires that the input event and stream are on the same
-      // device.
+      // cudaEventRecord requires that the input event and stream are on the
+      // same device.
       CUDAGuard g(free_stream.device);
 
       // CUDACachingAllocator.cpp uses raw cuda events, as do we.
@@ -815,8 +818,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     mallocAsync(&r, device, nbytes, stream);
     return r;
   }
-  void raw_delete (void* ptr) override {
-      freeAsync(ptr);
+  void raw_delete(void* ptr) override {
+    freeAsync(ptr);
   }
   bool needsPoolSpecificPeerAccess() override {
     return true;
@@ -826,9 +829,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 };
 
-
 CudaMallocAsyncAllocator device_allocator;
-
 
 void local_raw_delete(void* ptr) {
   freeAsync(ptr);
@@ -839,14 +840,11 @@ CUDAAllocator* allocator() {
 
 #else
 CUDAAllocator* allocator() {
-  TORCH_CHECK(
-      false,
-      "Cannot use cudaMallocAsyncAllocator with cuda < 11.4.");
+  TORCH_CHECK(false, "Cannot use cudaMallocAsyncAllocator with cuda < 11.4.");
   return nullptr;
 }
 
 #endif
-
 
 } // namespace CudaMallocAsync
 } // namespace CUDACachingAllocator
