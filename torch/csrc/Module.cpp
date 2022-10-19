@@ -1300,18 +1300,17 @@ Call this whenever a new thread is created in order to propagate values from
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias,
+         const c10::optional<at::Tensor>& bias_opt,
          at::IntArrayRef stride_,
          at::IntArrayRef padding_,
          at::IntArrayRef dilation_,
          bool transposed_,
          at::IntArrayRef output_padding_,
          int64_t groups_) {
-        
         return at::native::select_conv_backend(
             input,
             weight,
-            bias,
+            bias_opt,
             stride_,
             padding_,
             dilation_,
@@ -1319,17 +1318,9 @@ Call this whenever a new thread is created in order to propagate values from
             output_padding_,
             groups_,
             c10::nullopt);
-      },
-      py::arg("input"),
-      py::arg("weight"),
-      py::arg("bias"),
-      py::arg("stride"),
-      py::arg("padding"),
-      py::arg("dilation"),
-      py::arg("transposed"),
-      py::arg("output_padding"),
-      py::arg("groups"));
+      });
 
+  // overload for bias_sizes_opt/backward TODO: figure out default value
   py_module.def(
       "_select_conv_backend",
       [](const at::Tensor& input,
@@ -1342,11 +1333,10 @@ Call this whenever a new thread is created in order to propagate values from
          at::IntArrayRef output_padding_,
          int64_t groups_,
          c10::optional<std::vector<int64_t>> bias_sizes_opt) {
-        
         c10::OptionalArrayRef<long int> ref = c10::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
-        } 
+        }
         return at::native::select_conv_backend(
             input,
             weight,
@@ -1368,7 +1358,7 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("transposed"),
       py::arg("output_padding"),
       py::arg("groups"),
-      py::arg("bias_sizes_opt")); // overload for bias_sizes_opt TODO: figure out default value
+      py::arg("bias_sizes_opt"));
 
   py_module.def(
       "_conv_determine_backend_memory_format",
