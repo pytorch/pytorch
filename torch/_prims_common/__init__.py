@@ -5,7 +5,6 @@ from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
 import weakref
-
 import torch
 
 # nvFuser imports are conditional on being compiled with CUDA
@@ -798,15 +797,14 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float
+    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
-        # TODO: type error here is real, replace with sym_int
-        return lambda x: int(x)  # type: ignore[arg-type]
+        return sym_int
     if dtype in _float_dtypes:
         return sym_float
     if dtype in _complex_dtypes:
