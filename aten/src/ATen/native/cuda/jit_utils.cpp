@@ -3,6 +3,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/hash.h>
 #include <c10/util/Optional.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -926,7 +927,7 @@ void __inline__ initializeCudaContext() {
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::getFreeMutex()));
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
     cudaFree(nullptr);
   }
 }

@@ -1894,6 +1894,9 @@ class NativeCachingAllocator {
   // allocated blocks by device pointer
   ska::flat_hash_map<void*, Block*> allocated_blocks;
 
+  // lock around calls to cudaFree (to prevent deadlocks with NCCL)
+  mutable std::mutex cuda_free_mutex;
+
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
     allocated_blocks[block->ptr] = block;
@@ -1901,6 +1904,10 @@ class NativeCachingAllocator {
 
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
+
+  std::mutex* getCudaFreeMutex() const {
+    return &cuda_free_mutex;
+  }
 
   Block* get_allocated_block(void* ptr, bool remove = false) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -2147,6 +2154,10 @@ void* getBaseAllocation(void* ptr, size_t* size) {
 
 void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
   caching_allocator.recordStream(ptr, stream);
+}
+
+std::mutex* getFreeMutex() {
+  return caching_allocator.getCudaFreeMutex();
 }
 
 static inline void assertValidDevice(int device) {

@@ -546,6 +546,7 @@ class GetAttrVariable(VariableTracker):
                             "call_function",
                             original_torch_or_getattr_variable.value,
                             *proxy_args_kwargs(new_args, new_kwargs),
+                            current_tx=tx,
                         ),
                         **options,
                     )
@@ -556,6 +557,7 @@ class GetAttrVariable(VariableTracker):
                             "call_method",
                             original_torch_or_getattr_variable.name,
                             *proxy_args_kwargs(new_args, new_kwargs),
+                            current_tx=tx,
                         ),
                         **options,
                     )
