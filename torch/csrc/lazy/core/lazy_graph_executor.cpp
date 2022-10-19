@@ -390,13 +390,17 @@ bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
   return false;
 }
 
+std::atomic<LazyGraphExecutor*> lazy_graph_executor_registry;
 } // namespace
 
-LazyGraphExecutor* LazyGraphExecutor::Get() {
-  return getBackend()->GetLazyGraphExecutor();
+void LazyGraphExecutor::Register(LazyGraphExecutor* executor) {
+  lazy_graph_executor_registry.store(executor);
 }
-
-LazyGraphExecutor::~LazyGraphExecutor() = default;
+LazyGraphExecutor* LazyGraphExecutor::Get() {
+  auto* executor = lazy_graph_executor_registry.load();
+  TORCH_CHECK(executor, "Lazy graph executor not registered.");
+  return executor;
+}
 
 void LazyGraphExecutor::RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
   DeviceContextArena::Get()->RegisterTensor(data);
@@ -608,7 +612,6 @@ void LazyGraphExecutor::Async::Wait() {
 bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr tensor) const {
   return tensor->GetIrValue()->op() != ltc_not_supported;
 }
-
 
 LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     const std::vector<LazyTensorPtr>& tensors,

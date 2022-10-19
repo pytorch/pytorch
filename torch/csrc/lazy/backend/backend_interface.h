@@ -42,8 +42,6 @@ class TORCH_API BackendImplInterface {
 
   virtual const IrBuilder* GetIrBuilder() const = 0;
 
-  virtual LazyGraphExecutor* GetLazyGraphExecutor() const;
-
   /**
    * Data Transfer
    * */

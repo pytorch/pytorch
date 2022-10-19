@@ -18,11 +18,6 @@ const BackendImplInterface* getBackend() {
   return interface;
 }
 
-LazyGraphExecutor* BackendImplInterface::GetLazyGraphExecutor() const {
-  static LazyGraphExecutor* executor = new LazyGraphExecutor();
-  return executor;
-}
-
 BackendRegistrar::BackendRegistrar(
     const BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);

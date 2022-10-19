@@ -21,10 +21,16 @@ class TORCH_API LazyGraphExecutor {
     bool read_only = false;
   };
 
+  // Register a lazy graph executor instance that can be retrieved using Get()
+  static void Register(LazyGraphExecutor*);
   static LazyGraphExecutor* Get();
 
-  virtual ~LazyGraphExecutor();
+  virtual ~LazyGraphExecutor() = default;
 
+  // Override these methods to perform custom tensor registration and
+  // unregistration Note: It is vital that the parent implementations are also
+  // called
+  //       in order for the tensors to show up in the live tensor list
   virtual void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
   virtual void UnregisterTensor(LazyTensor::Data* data);
 
