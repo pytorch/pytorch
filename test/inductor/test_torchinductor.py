@@ -4104,6 +4104,7 @@ if HAS_CUDA:
 
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(real_out, compiled_out)
+            torch._dynamo.reset()
 
         @patch.object(config, "size_asserts", False)
         @patch.object(config.triton, "cudagraphs", True)
