@@ -129,7 +129,7 @@ class CallTypeHelper final {
       std::index_sequence<I...>);
 
   template <size_t C, typename T, typename FunctorT, typename... Args>
-  static void map(T& t, FunctorT& f, Args... args) {
+  static void map(T& t, FunctorT& f, Args&&... args) {
     f(std::get<C>(t), args...);
     c10::guts::if_constexpr<C + 1 < End>(
         [&](auto _) { map<C + 1>(_(t), f, std::forward<Args>(args)...); });
@@ -139,7 +139,7 @@ class CallTypeHelper final {
   using tuple_type = decltype(make_tuple_impl(std::make_index_sequence<End>{}));
 
   template <typename FunctorT, typename... Args>
-  static void map(tuple_type& t, FunctorT& f, Args... args) {
+  static void map(tuple_type& t, FunctorT& f, Args&&... args) {
     map<0>(t, f, std::forward<Args>(args)...);
   }
 };
@@ -277,6 +277,9 @@ using PyOptimizerCallKey = Config<CallType::PyOptimizerCall>::key_t;
 
 class ValueCache {
  public:
+  ValueCache() = default;
+  ValueCache(const ValueCache&) = delete;
+
   template <CallType C>
   void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
 
@@ -291,6 +294,10 @@ class ValueCache {
         load<C>(callsite.value_)};
   }
 
+  c10::optional<TensorMetadata> recordIfTensor(py::handle p);
+  std::vector<std::pair<std::string, TensorMetadata>> unpackTensorMap(
+      py::dict tensor_map);
+  TensorMetadata toTensorMetadata(PyObject* self);
   void trimPrefixes();
 
  private:
@@ -302,6 +309,10 @@ class ValueCache {
   using State = typename Config<C>::cache_t;
 
   CallTypeHelper<State>::tuple_type state_;
+
+  // We never use this, but the weak pointers in `RawTensorMetadata` are
+  // important for reserving `TensorImpl*`s.
+  // AppendOnlyList<RawTensorMetadata, 64> raw_tensors_;
 };
 
 template <CallType C>
@@ -324,28 +335,6 @@ typename Config<C>::cls_t set_class(
         at::StringView(py::str(cls_handle.attr("__name__")));
   }
   return cls;
-}
-
-auto toTensorMetadata(PyObject* self) {
-  TORCH_INTERNAL_ASSERT(THPVariable_CheckExact(self));
-  return TensorMetadata{THPVariable_Unpack(self)};
-}
-
-auto recordIfTensor(py::handle p) {
-  return THPVariable_CheckExact(p.ptr())
-      ? c10::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
-      : c10::nullopt;
-}
-
-auto unpackTensorMap(py::dict tensor_map) {
-  std::vector<std::pair<std::string, TensorMetadata>> out;
-  for (auto& it : tensor_map) {
-    auto* value = it.second.ptr();
-    if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
-      out.push_back({py::cast<std::string>(it.first), toTensorMetadata(value)});
-    }
-  }
-  return out;
 }
 
 template <>
@@ -465,6 +454,32 @@ template <>
 ExtraFields<EventType::PyCCall>::args_t ValueCache::load<CallType::PyCCall>(
     const PyCCallKey& key) const {
   return std::get<CallType::PyCCall>(state_).at(key);
+}
+
+c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
+  return THPVariable_CheckExact(p.ptr())
+      ? c10::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
+      : c10::nullopt;
+}
+
+std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
+    py::dict tensor_map) {
+  std::vector<std::pair<std::string, TensorMetadata>> out;
+  for (auto& it : tensor_map) {
+    auto* value = it.second.ptr();
+    if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
+      out.push_back({py::cast<std::string>(it.first), toTensorMetadata(value)});
+    }
+  }
+  return out;
+}
+
+TensorMetadata ValueCache::toTensorMetadata(PyObject* self) {
+  TORCH_INTERNAL_ASSERT(THPVariable_CheckExact(self));
+  const auto& t = THPVariable_Unpack(self);
+  RawTensorMetadata m{t};
+  // raw_tensors_.emplace_back(m);
+  return TensorMetadata{m};
 }
 
 // TODO: Use re2.
