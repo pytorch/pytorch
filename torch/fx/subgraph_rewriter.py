@@ -225,11 +225,11 @@ def _replace_pattern(
     _matches: List[InternalMatch] = matcher.match(original_graph)
 
     # Filter out matches that don't match the filter
-    _matches = \
-        [m for m in _matches
-         if all(match_filter(m, original_graph, pattern_graph)
-            for match_filter in match_filters)
-        ]
+    _matches = [
+        m for m in _matches
+        if all(match_filter(m, original_graph, pattern_graph)
+               for match_filter in match_filters)
+    ]
 
     replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
 
