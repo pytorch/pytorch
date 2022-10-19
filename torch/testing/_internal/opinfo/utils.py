@@ -243,16 +243,6 @@ def reference_reduction_numpy(f, supports_keepdims=True):
                     identity = identity.cpu()
                 kwargs["initial"] = identity.numpy()
 
-        if "unbiased" in keys:
-            unbiased = kwargs.pop("unbiased")
-            if unbiased is not None:
-                kwargs["ddof"] = int(unbiased)
-
-        if "correction" in keys:
-            correction = kwargs.pop("correction")
-            if correction is not None:
-                kwargs["ddof"] = correction
-
         result = f(x, *args, **kwargs)
 
         # Unsqueeze reduced dimensions if NumPy does not support keepdims

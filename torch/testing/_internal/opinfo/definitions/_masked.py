@@ -1,6 +1,7 @@
 import unittest
 from functools import partial
 from typing import List
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -27,7 +28,6 @@ from torch.testing._internal.opinfo.core import (
     SampleInput,
 )
 from torch.testing._internal.opinfo.utils import reference_reduction_numpy
-from torch.testing._internal.opinfo.refs import _find_referenced_opinfo
 
 
 # Used for log_softmax, softmax, softmin
@@ -225,17 +225,46 @@ def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
             )
 
 
+def reference_masked_std_var(
+    numpy_fn,
+):
+    ref = reference_reduction_numpy(numpy_fn)
+
+    # Translate unbiased or correction arguments into ddof
+    def func(
+        input,
+        dim=None,
+        unbiased=None,
+        *,
+        correction=None,
+        **kwargs,
+    ):
+        ddof = 1
+        if unbiased is not None:
+            ddof = 1 if unbiased else 0
+        if correction is not None:
+            ddof = correction
+
+        if isinstance(dim, Sequence):
+            dim = tuple(dim)
+
+        return ref(input, dim, ddof=ddof, **kwargs)
+
+    return func
+
+
 def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked std/var."""
     kwargs["supports_multiple_dims"] = op_info.supports_multiple_dims
-
-    assert op_info.name.startswith("masked.")
-    parent_op_info = _find_referenced_opinfo(op_info.name[7:], op_info.variant_test_name)
+    from torch.testing._internal.common_methods_invocations import sample_inputs_std_var
 
     def masked_samples():
-        for sample_input in parent_op_info.sample_inputs(
-            device, dtype, requires_grad, **kwargs
+        for sample_input in sample_inputs_std_var(
+            op_info, device, dtype, requires_grad, **kwargs
         ):
+            if len(sample_input.args) and isinstance(sample_input.args[0], bool):
+                continue  # masked.{std, var} doesn't support `.var(unbiased)`
+
             for mask in _generate_masked_op_mask(
                 sample_input.input.shape, device, **kwargs
             ):
@@ -864,7 +893,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.var",
-        ref=reference_reduction_numpy(np.var)
+        ref=reference_masked_std_var(np.var)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
         method_variant=None,
@@ -942,7 +971,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.std",
-        ref=reference_reduction_numpy(np.std)
+        ref=reference_masked_std_var(np.std)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
         method_variant=None,
