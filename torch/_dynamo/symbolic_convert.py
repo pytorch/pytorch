@@ -307,7 +307,7 @@ class InstructionTranslatorBase(object):
         else:
             self.instruction_pointer = None
             self.next_instruction = None
-        if inst.starts_line:
+        if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
             log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
 
