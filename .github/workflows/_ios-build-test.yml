@@ -75,16 +75,17 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           conda install -y \
-            cffi \
-            cmake \
-            mkl \
-            mkl-include \
-            ninja \
-            numpy \
-            pyyaml \
-            requests \
-            setuptools \
-            typing_extensions
+            blas=1.0 \
+            cffi=1.15.1 \
+            cmake=3.22.1 \
+            mkl=2022.1.0 \
+            mkl-include=2022.1.0 \
+            ninja=1.10.2 \
+            numpy=1.23.3 \
+            pyyaml=6.0 \
+            requests=2.28.1 \
+            setuptools=63.4.1 \
+            typing_extensions=4.3.0
 
       - name: Setup Fastlane
         run: |
