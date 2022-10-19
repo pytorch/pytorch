@@ -5410,6 +5410,19 @@ def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
         sample_inputs.append(SampleInput(q, k, v))
     return tuple(sample_inputs)
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = (((S, S), (S, S), (S, S)),
+                  ((S, S), (S, S), (S, M)),
+                  ((M, S), (M, S), (M, M)),
+                  ((S, M), (S, M), (S, S)))
+    sample_inputs = []
+    for qs, ks, vs in test_cases:
+        q = make_tensor(qs, dtype=dtype, device=device, requires_grad=requires_grad)
+        k = make_tensor(ks, dtype=dtype, device=device, requires_grad=requires_grad)
+        v = make_tensor(vs, dtype=dtype, device=device, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(q, k, v))
+    return tuple(sample_inputs)
+
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
                        high=None, requires_grad=requires_grad)
