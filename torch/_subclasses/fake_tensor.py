@@ -749,6 +749,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         from torch._decomp import _disabled_meta_decomps, decomposition_table
 
+        with self:
+            # Decomposes CompositeImplicitAutograd ops
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
@@ -773,11 +779,6 @@ class FakeTensorMode(TorchDispatchMode):
                     return r
                 if func in decomposition_table:
                     return decomposition_table[func](*args, **kwargs)
-
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return r
 
         if (
             func in decomposition_table

@@ -686,6 +686,13 @@ def forward(self, x_1):
 
         make_fx(f)(torch.randn(2, 3, 4, 5))
 
+    def test_pr_86917(self):
+        # Tests the issue brought up here https://github.com/pytorch/pytorch/pull/86917#issuecomment-1283155344
+        def f(a, b):
+            return torch.ops.aten.nll_loss_forward(a, b, None, 1, 10)
+
+        self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
+
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
 
@@ -1003,6 +1010,7 @@ def forward(self, a_1):
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self._assert_no_guards(fx_g, 1)
+
 
 
 
