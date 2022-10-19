@@ -1704,7 +1704,10 @@ def activate_meta():
 #             )
             pass
         elif name in {
-            "aten::empty_strided",  # causing infinite recursion
+            "aten::empty_strided",  # causing infinite recursion, test/test_meta.py
+            "aten::clone",  # causing infinite recursion,
+            "aten::_to_copy", # causing infinite recursion, test/test_serialization.py -k test_tensor_subclass_getstate_overwrite
+            "aten::randn",  # pin_memory parameter is not supported!, test/test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32
         }:
             pass
         else:
