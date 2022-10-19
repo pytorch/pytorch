@@ -77,6 +77,11 @@ std::vector<UsageStream> dummy_unifying_free_streams;
 // Keeping it simple with an ordinary mutex for now.
 std::mutex general_mutex;
 
+// Copy-paste CUDACachingAllocator's
+// lock around calls to cudaFree (to prevent deadlocks with NCCL)
+// is this safe?
+std::mutex cuda_free_mutex;
+
 /**
  * Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -597,6 +602,10 @@ void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
   }
 }
 
+std::mutex* getFreeMutex() {
+  return &cuda_free_mutex;
+}
+
 std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   TORCH_CHECK(
       false,
@@ -889,6 +898,9 @@ void notifyCaptureEnded(int device, CaptureId_t graph_id) {
 }
 void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   NOT_AVAILABLE("notifyCaptureDestroy");
+}
+std::mutex* getFreeMutex() {
+  NOT_AVAILABLE("getFreeMutex");
 }
 std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   NOT_AVAILABLE("getIpcDevPtr");

@@ -321,19 +321,8 @@ def make_pointwise(
             else:
                 return fn(*[load(index) for load in loaders])
 
-        if not override_device:
-            device = None
-            for i in inputs:
-                if i.get_device().type == "cuda":
-                    device = i.get_device()
-                    break
-            if not device:
-                device = inputs[0].get_device()
-
-        device = override_device or device
-
         return Pointwise.create(
-            device=device,
+            device=override_device or inputs[0].get_device(),
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,

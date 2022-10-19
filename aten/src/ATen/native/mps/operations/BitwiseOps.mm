@@ -302,10 +302,6 @@ at::Tensor& bitwise_not_out_mps (const at::Tensor& self, at::Tensor& output_) {
     }
     return output_;
   }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return output_;
-  }
   using namespace at::mps;
   MPSStream* stream = getCurrentMPSStream();
   id<MTLComputePipelineState> cplState = getCPLState(MPSDevice::getInstance()->device(),
@@ -313,6 +309,7 @@ at::Tensor& bitwise_not_out_mps (const at::Tensor& self, at::Tensor& output_) {
                                                      getMetalType(self),
                                                      getMetalType(self),
                                                      "bitwise_not");
+  uint32_t length = output.numel();
   dispatch_sync(stream->queue(), ^(){
     id<MTLCommandBuffer> buffer = stream->commandBuffer();
     id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];
