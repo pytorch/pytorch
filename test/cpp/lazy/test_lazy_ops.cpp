@@ -1,8 +1,6 @@
-#include <gtest/gtest.h>
-#include <iostream>
-#include "c10/core/DeviceType.h"
-
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <gtest/gtest.h>
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 #include <torch/csrc/lazy/core/helpers.h>
@@ -13,6 +11,7 @@
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/torch.h>
+#include <iostream>
 
 namespace torch {
 namespace lazy {

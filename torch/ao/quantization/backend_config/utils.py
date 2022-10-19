@@ -4,7 +4,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .backend_config import BackendConfig, DTypeConfig
-from ..quantization_types import Pattern
+from ..utils import Pattern
+
+__all__ = [
+    "get_pattern_to_dtype_configs",
+    "get_qat_module_classes",
+    "get_fused_module_classes",
+    "get_pattern_to_input_type_to_index",
+    "get_root_module_to_quantized_reference_module",
+    "get_fuser_method_mapping",
+    "get_module_to_qat_module",
+    "get_fusion_pattern_to_root_node_getter",
+    "get_fusion_pattern_to_extra_inputs_getter",
+    "remove_boolean_dispatch_from_name",
+    "pattern_to_human_readable",
+    "entry_to_pretty_str",
+]
 
 def get_pattern_to_dtype_configs(backend_config: BackendConfig) -> Dict[Pattern, List[DTypeConfig]]:
     pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = {}

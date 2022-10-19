@@ -100,5 +100,23 @@ inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
   return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
+inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
+  bool ret = false;
+  for (auto& variable : variables) {
+    ret |= isFwGradDefined(variable);
+  }
+  return ret;
+}
+
+inline bool isFwGradDefinedTensorList(
+    const c10::List<c10::optional<at::Tensor>> li) {
+  bool ret = false;
+  for (auto i : c10::irange(li.size())) {
+    auto t = li.get(i);
+    ret |= (t.has_value() && isFwGradDefined(t.value()));
+  }
+  return ret;
+}
+
 } // namespace autograd
 } // namespace torch

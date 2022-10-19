@@ -78,6 +78,7 @@ Features described in this documentation are classified by release status:
    torch.jit <jit>
    torch.linalg <linalg>
    torch.monitor <monitor>
+   torch.signal <signal>
    torch.special <special>
    torch.overrides
    torch.package <package>
@@ -92,7 +93,7 @@ Features described in this documentation are classified by release status:
    rpc
    torch.random <random>
    masked
-   nested
+   torch.nested <nested>
    sparse
    storage
    torch.testing <testing>

@@ -80,7 +80,7 @@ The following table compares the differences between Eager Mode Quantization and
 |                 |Static, Dynamic,   |Static, Dynamic,   |
 |                 |Weight Only        |Weight Only        |
 |                 |                   |                   |
-|                 |Quantiztion Aware  |Quantiztion Aware  |
+|                 |Quantization Aware |Quantization Aware |
 |                 |Training:          |Training:          |
 |                 |Static             |Static             |
 +-----------------+-------------------+-------------------+
@@ -103,7 +103,7 @@ There are three types of quantization supported:
 3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
-Please see our `Introduction to Quantization on Pytorch
+Please see our `Introduction to Quantization on PyTorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
@@ -632,7 +632,7 @@ Quantization Mode Support
 |                             |Quantization                                          |Dataset         | Works Best For | Accuracy   |      Notes      |
 |                             |Mode                                                  |Requirement     |                |            |                 |
 +-----------------------------+---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|Post Training Quantization   |Dyanmic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
+|Post Training Quantization   |Dynamic/Weight Only Quantization |activation          |None            |LSTM, MLP,      |good        |Easy to use,     |
 |                             |                                 |dynamically         |                |Embedding,      |            |close to static  |
 |                             |                                 |quantized (fp16,    |                |Transformer     |            |quantization when|
 |                             |                                 |int8) or not        |                |                |            |performance is   |
@@ -640,7 +640,7 @@ Quantization Mode Support
 |                             |                                 |statically quantized|                |                |            |bound due to     |
 |                             |                                 |(fp16, int8, in4)   |                |                |            |weights          |
 |                             +---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|                             |Static Quantization              |acivation and       |calibration     |CNN             |good        |Provides best    |
+|                             |Static Quantization              |activation and      |calibration     |CNN             |good        |Provides best    |
 |                             |                                 |weights statically  |dataset         |                |            |perf, may have   |
 |                             |                                 |quantized (int8)    |                |                |            |big impact on    |
 |                             |                                 |                    |                |                |            |accuracy, good   |
@@ -652,7 +652,7 @@ Quantization Mode Support
 |                             |                                 |weight are fake     |dataset         |                |            |for now          |
 |                             |                                 |quantized           |                |                |            |                 |
 |                             +---------------------------------+--------------------+----------------+----------------+------------+-----------------+
-|                             |Static Quantization              |activatio nand      |fine-tuning     |CNN, MLP,       |best        |Typically used   |
+|                             |Static Quantization              |activation and      |fine-tuning     |CNN, MLP,       |best        |Typically used   |
 |                             |                                 |weight are fake     |dataset         |Embedding       |            |when static      |
 |                             |                                 |quantized           |                |                |            |quantization     |
 |                             |                                 |                    |                |                |            |leads to bad     |
@@ -736,7 +736,7 @@ Backend/Hardware Support
 +-----------------+---------------+------------+------------+------------+
 |server GPU       |TensorRT (early|Not support |Supported   |Static      |
 |                 |prototype)     |this it     |            |Quantization|
-|                 |               |requries a  |            |            |
+|                 |               |requires a  |            |            |
 |                 |               |graph       |            |            |
 +-----------------+---------------+------------+------------+------------+
 
@@ -1144,9 +1144,9 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.quantization
 .. py:module:: torch.ao.quantization.fx
 .. py:module:: torch.ao.quantization.backend_config
-.. py:module:: torch.ao.sparsity
-.. py:module:: torch.ao.sparsity.scheduler
-.. py:module:: torch.ao.sparsity.sparsifier
+.. py:module:: torch.ao.pruning
+.. py:module:: torch.ao.pruning.scheduler
+.. py:module:: torch.ao.pruning.sparsifier
 
 .. py:module:: torch.nn.qat
 .. py:module:: torch.nn.qat.modules
@@ -1156,3 +1156,6 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.nn.quantized.modules
 .. py:module:: torch.nn.quantized.dynamic
 .. py:module:: torch.nn.quantized.dynamic.modules
+
+.. py:module:: torch.ao.nn.quantized.reference
+.. py:module:: torch.ao.nn.quantized.reference.modules

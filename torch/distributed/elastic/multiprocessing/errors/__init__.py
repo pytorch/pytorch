@@ -65,6 +65,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
 
+__all__ = ["ProcessFailure", "ChildFailedError", "record", "ErrorHandler", "get_error_handler"]
 
 log = get_logger()
 

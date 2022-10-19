@@ -33,16 +33,38 @@ on:
         description: secret acess key for test stats upload
 
 jobs:
+  # This needs to be run right before the test starts so that it can gather the
+  # latest labels from the PR
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   test:
-    # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
+    needs: filter
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
     # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
     # Also ensure that we always run with the right architecture
     defaults:
       run:
         shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
@@ -85,7 +107,7 @@ jobs:
           ${CONDA_RUN} python3 -m pip install psutil==5.9.1
           ${CONDA_RUN} python3 -m pip install pynvml==11.4.1
           ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "::set-output name=monitor-script-pid::${!}"
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Install macOS homebrew dependencies
         run: |
@@ -120,7 +142,7 @@ jobs:
           export PR_BODY="${PR_BODY//[\'\"]}"
           arch
 
-          ${CONDA_RUN} python3 -mpip install dist/*.whl
+          ${CONDA_RUN} python3 -mpip install $(echo dist/*.whl)[opt-einsum]
           ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
 
       - name: Get workflow job id

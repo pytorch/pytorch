@@ -1,4 +1,4 @@
-#include <c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
 namespace c10d {
 
@@ -77,6 +77,10 @@ const std::chrono::milliseconds& PrefixStore::getTimeout() const noexcept {
 
 void PrefixStore::setTimeout(const std::chrono::milliseconds& timeout) {
   store_->setTimeout(timeout);
+}
+
+c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
+  return store_;
 }
 
 } // namespace c10d
