@@ -828,7 +828,7 @@ class TestSerialization(TestCase, SerializationMixin):
         big_model = torch.nn.Conv2d(20000, 3200, kernel_size=3)
 
         with BytesIOContext() as f:
-            torch.save(big_model, f)
+            torch.save(big_model.state_dict(), f)
             f.seek(0)
             state = torch.load(f)
 
@@ -837,7 +837,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with TemporaryFileName() as fname:
             path = pathlib.Path(fname)
-            torch.save(model, path)
+            torch.save(model.state_dict(), path)
             torch.load(path)
 
     def test_meta_serialization(self):
