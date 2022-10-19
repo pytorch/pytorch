@@ -19,7 +19,10 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     # consuming all CPU cores.
     torch.set_num_threads(1)
 
-    torch.cuda.set_device(device_id)
+    if device == "cuda":
+        torch.cuda.set_device(device_id)
+    elif device == "xpu":
+        torch.xpu.set_device(device_id)  # type: ignore[attr-defined]
 
     def do_one_step():
         try:
