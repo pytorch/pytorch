@@ -217,6 +217,7 @@ __all__ = [
     "diag_embed",
     "diag",
     "diagonal",
+    "diagonal_copy",
     "dsplit",
     "dstack",
     "expand",
@@ -1973,6 +1974,26 @@ def _reduction(
     return result
 
 
+def _make_copy_from_view(fn):
+    # Does not handle multiple outputs, but I think we don't have any such an op
+    name = fn.__name__
+    fn = out_wrapper()(fn)
+
+    def _fn(*args, out=None, **kwargs):
+        result = fn(*args, **kwargs)
+        if out is None:
+            return result.clone()
+        else:
+            _maybe_resize_out(out, result.shape)
+            _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=False)  # type: ignore[arg-type]
+            return out
+
+    copy_name = f"{name}_copy"
+    _fn.__name__ = copy_name
+    _fn = register_decomposition(getattr(torch.ops.aten, copy_name))(_fn)
+    return _fn
+
+
 # Saves Python all
 py_all = all
 
@@ -3495,6 +3516,9 @@ def diagonal(
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
 
     return result
+
+
+diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)
