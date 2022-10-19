@@ -4339,7 +4339,7 @@ def randn(
     pin_memory: Optional[bool] = None,
 ) -> TensorLikeType:
 
-    check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
+    # check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
 
     shape_ = utils.extract_shape_from_varargs(shape)
 

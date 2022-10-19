@@ -14,6 +14,7 @@ from torch._decomp import register_decomposition
 from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
+from torch.fx.experimental.symbolic_shapes import guard_int_hack_please_dont_use
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -1095,8 +1096,9 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
         assert dim_size == 0
         return [self]
     chunks = (dim_size + split_size - 1) // split_size
+    chunks = guard_int_hack_please_dont_use(chunks)
     split_sizes = [split_size for i in range(chunks)]
-    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
+    split_sizes[-1] = split_size - (split_size * chunks - dim_size)
     return torch.split(self, split_sizes, dim)
 
 
