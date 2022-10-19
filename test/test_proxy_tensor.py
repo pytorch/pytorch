@@ -1483,10 +1483,10 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
             if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                 arg.uniform_(0, 1)
         try:
-            old_out = f(args, kwargs)
+            old_out = f(args, kwargs, extra_args)
         except Exception:
             continue
-        new_out = wrapper_set_seed(new_f, args, kwargs)
+        new_out = wrapper_set_seed(new_f, args, kwargs, extra_args)
         self.assertEqual(new_out, old_out)
 
 class TestProxyTensorOpInfo(TestCase):
