@@ -574,6 +574,7 @@ meta_function_skips = {
 
 
 meta_function_device_expected_failures = defaultdict(dict)
+meta_function_device_expected_failures_only_outplace = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
@@ -603,8 +604,11 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.max_unpool3d: {f16},  # aten::max_unpool3d
     torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
-    torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
+}
+
+meta_function_device_expected_failures_only_outplace['cuda'] = {
+    torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
 }
 
 meta_function_device_skips['cpu'] = {
@@ -668,6 +672,9 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
         elif not self.inplace and self.dtype in meta_function_expected_failures_only_outplace.get(func, set()):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
+            test_expect = TestExpect.XFAILURE
+        elif not self.inplace and \
+                self.dtype in meta_function_device_expected_failures_only_outplace[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
         else:
             test_expect = TestExpect.SUCCESS
