@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 decompositions = get_decompositions(
     [
+        aten.acos,
         aten._adaptive_avg_pool2d_backward,
         aten.addcmul,
         aten.avg_pool2d_backward,
