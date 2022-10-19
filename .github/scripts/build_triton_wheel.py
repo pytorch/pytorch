@@ -34,7 +34,7 @@ def build_triton(commit_hash: str) -> Path:
         triton_pythondir = triton_basedir / "python"
         check_call(["git", "clone", "https://github.com/openai/triton"], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
-        patch_setup_py(triton_pythondir / "setup.py", name="pytorch-triton", version=f"2.0.0+{commit_hash[:10]}")
+        patch_setup_py(triton_pythondir / "setup.py", name="torchtriton", version=f"2.0.0+{commit_hash[:10]}")
         check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir)
         whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())

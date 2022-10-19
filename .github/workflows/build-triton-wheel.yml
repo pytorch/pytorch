@@ -1,7 +1,18 @@
 name: Build Triton wheels
 
 on:
+  push:
+    branches:
+      main
+    paths:
+      - .github/workflows/build-triton-wheel.yml
+      - .github/scripts/build_triton_wheel.py
+      - .github/ci_commit_pins/triton.txt
   pull_request:
+    paths:
+      - .github/workflows/build-triton-wheel.yml
+      - .github/scripts/build_triton_wheel.py
+      - .github/ci_commit_pins/triton.txt
 
 jobs:
   build-wheel:
