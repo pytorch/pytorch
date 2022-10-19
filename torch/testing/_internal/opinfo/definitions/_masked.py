@@ -50,9 +50,9 @@ def sample_inputs_softmax_variant(
     if torch.device(device).type != "xla":
         cases.append(((), (0,)))
 
-    return [
+    return (
         SampleInput(make_arg(shape), args=dim, kwargs=kwargs) for shape, dim in cases
-    ]
+    )
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
@@ -281,24 +281,18 @@ def sample_inputs_masked_softmax(
     same shape as input or a shape that is broadcastable to input
     shape.
     """
-    inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(
         op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs
     ):
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = sample_input.args, dict(
-                mask=mask, **sample_input.kwargs
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
+                *sample_input.args,
+                mask=mask,
+                **sample_input.kwargs,
             )
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
-            )
-    return inputs
 
 
 def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
@@ -325,15 +319,11 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
                     continue
                 dim = sample_input_kwargs.pop("dim")
                 sample_input_args = (dim,)
-            inputs.append(
-                SampleInput(
-                    sample_input.input.clone().requires_grad_(requires_grad),
-                    args=sample_input_args,
-                    kwargs=sample_input_kwargs,
-                )
+            yield SampleInput(
+                sample_input.input.clone().requires_grad_(requires_grad),
+                *sample_input_args,
+                **sample_input_kwargs,
             )
-
-    return inputs
 
 
 def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
@@ -571,6 +561,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                 "TestCompositeCompliance",
                 "test_backward",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
                 device_type="cuda",
             ),
         ),

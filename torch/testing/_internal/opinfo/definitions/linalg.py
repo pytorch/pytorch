@@ -318,7 +318,6 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
         [2, 4, 3, 5, 3, 2],
     ]
 
-    result = []
     for sizes in test_cases:
         tensors = []
         for size in zip(sizes[:-1], sizes[1:]):
@@ -326,9 +325,7 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
                 size, dtype=dtype, device=device, requires_grad=requires_grad
             )
             tensors.append(t)
-        result.append(SampleInput(tensors))
-
-    return result
+        yield SampleInput(tensors)
 
 
 def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
