@@ -28,6 +28,7 @@ ignored_attributes = [
     "_buffers",
     "_non_persistent_buffers_set",
     "_backward_hooks",
+    "_backward_pre_hooks",
     "_forward_hooks",
     "_forward_pre_hooks",
     "_state_dict_hooks",

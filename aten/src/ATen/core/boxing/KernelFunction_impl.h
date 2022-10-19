@@ -52,6 +52,7 @@ inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKerne
 
 // This template requires you to explicitly specify the argument you want to
 // forward; it doesn't work if you try to deduce it
+// NB: keep this in sync with cloneWithRealTypes in function_schema.cpp
 
 template <typename T>
 inline typename remove_symint<T>::type unpackSymInt(T x) { return x; }
