@@ -6391,9 +6391,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                        nn.ConvTranspose2d(3, 8, 3).to(dtype),
                        nn.ConvTranspose3d(3, 8, 3).to(dtype)]
 
-            invalid_input_dims = [(1, 4), (1, 4),
-                                  (2, 5), (2, 5),
-                                  (3, 6), (3, 6)]
+            invalid_input_dims = [(1, 4), (2, 5), (3, 6)]
 
             for invalid_dims, module in zip(invalid_input_dims, modules):
                 for dims in invalid_dims:
