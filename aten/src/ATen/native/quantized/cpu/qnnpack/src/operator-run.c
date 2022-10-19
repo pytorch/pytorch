@@ -176,7 +176,7 @@ static void compute_q8gemm_prepack_a_sparse(
       context->a_packed + mr_packed_block_start);
 }
 
-static void compute_q8gemm_prepacked_sparse_dq(
+static enum pytorch_qnnp_status compute_q8gemm_prepacked_sparse_dq(
     const struct q8gemm_prepackA_sparse_dq_context context[RESTRICT_STATIC 1],
     size_t group_index, /* ignored */
     size_t pixel_index, /* ignored */
@@ -244,8 +244,9 @@ static void compute_q8gemm_prepacked_sparse_dq(
       pytorch_qnnp_log_error(
           "Invalid indices dtype specified for "
           "operator-run compute_q8gemm_prepacked_sparse_dq");
-      assert(false);
+      return pytorch_qnnp_status_invalid_parameter;
   }
+  return pytorch_qnnp_status_success;
 }
 
 struct q8sum_rows_context {
