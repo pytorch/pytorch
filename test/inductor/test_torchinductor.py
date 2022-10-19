@@ -35,7 +35,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import config
-    from torch._inductor.compile_fx import compile_fx
+    from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import has_torchvision_roi_align, has_triton, timed
@@ -2432,6 +2432,18 @@ class CommonTemplate:
             check_lowp=False,  # difference in rnn is too large between half and float inputs
         )
 
+    def test_upsample_nearest1d(self):
+        def fn(a):
+            return (
+                aten.upsample_nearest1d(a, [74], None),
+                aten.upsample_nearest1d(a, [70], None),
+                aten.upsample_nearest1d(a, [45], None),
+                aten.upsample_nearest1d(a, [36], None),
+                aten.upsample_nearest1d(a, None, [2.0]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37]),))
+
     def test_upsample_nearest2d(self):
         def fn(a):
             return (
@@ -2443,6 +2455,18 @@ class CommonTemplate:
             )
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
+    def test_upsample_nearest3d(self):
+        def fn(a):
+            return (
+                aten.upsample_nearest3d(a, [74, 76, 78], None),
+                aten.upsample_nearest3d(a, [70, 75, 80], None),
+                aten.upsample_nearest3d(a, [45, 74, 103], None),
+                aten.upsample_nearest3d(a, [36, 39, 40], None),
+                aten.upsample_nearest3d(a, None, [2.0, 2.0, 2.0]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38, 39]),))
 
     def test_upsample_nearest2d_backward(self):
         func = torch.ops.aten.upsample_nearest2d_backward.vec
@@ -3800,25 +3824,33 @@ class CommonTemplate:
     @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs(self):
         def fn(x, y):
-            return x + y
+            return x + y, x * y, x / y
+
+        opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
             rand_strided((2, 3), (3, 1), device="cuda"),
             rand_strided((), (), device="cpu"),
         )
-        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @requires_cuda()
     @patch.object(config.triton, "cudagraphs", True)
     def test_unspec_inputs_cudagraphs(self):
         def fn(x, y):
-            return x + y
+            return x + y, x * y, x / y
+
+        opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
             rand_strided((2, 3), (3, 1), device="cuda"),
             rand_strided((), (), device="cpu"),
         )
-        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
@@ -3948,6 +3980,27 @@ if HAS_CPU:
         def test_timed_cpu_only(self):
             timed(lambda: torch.randn(10), ())
 
+        def test_complex_memory_overlap(self):
+            dense = torch.zeros(64, 32)
+            self.assertFalse(complex_memory_overlap(dense))
+            self.assertFalse(complex_memory_overlap(dense.t()))
+
+            strided = dense.split(4, dim=1)
+            self.assertFalse(complex_memory_overlap(strided[0]))
+            self.assertFalse(complex_memory_overlap(strided[0].t()))
+
+            unsqueezed = dense.unsqueeze(1)
+            self.assertFalse(complex_memory_overlap(unsqueezed))
+            self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
+
+            expanded = unsqueezed.expand(-1, 2, -1)
+            self.assertTrue(complex_memory_overlap(expanded))
+            self.assertTrue(complex_memory_overlap(expanded.permute(1, 2, 0)))
+
+            gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
+            self.assertFalse(complex_memory_overlap(gathered))
+            self.assertFalse(complex_memory_overlap(gathered.t()))
+
 
 if HAS_CUDA:
     import triton
@@ -4036,6 +4089,30 @@ if HAS_CUDA:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+        # TODO: Abstract this out, test more extensively
+        @patch.object(config, "dynamic_shapes", True)
+        @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+        @patch.object(functorch_config, "use_dynamic_shapes", True)
+        def test_dynamic_shapes(self):
+            torch._dynamo.reset()  # Needed since everywhere else uses "inductor"
+
+            def f(x):
+                return x.cos().view(x.shape).sin()
+
+            cnts = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+
+            f2 = torch._dynamo.optimize(cnts)(f)
+
+            f2(torch.randn(32))
+
+            inp = torch.randn(16)
+            real_out = f(inp)
+            compiled_out = f2(inp)
+
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(real_out, compiled_out)
+            torch._dynamo.reset()
 
         @patch.object(config, "size_asserts", False)
         @patch.object(config.triton, "cudagraphs", True)

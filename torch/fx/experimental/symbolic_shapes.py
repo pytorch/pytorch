@@ -94,6 +94,13 @@ def sym_float(a):
         return a
     return float(a)
 
+def sym_int(a):
+    if hasattr(a, '__sym_int__'):
+        return a.__sym_int__()
+    elif isinstance(a, torch._C.SymIntNode):
+        return a
+    return int(a)
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -218,12 +225,14 @@ magic_methods = {
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
     'ceil': lambda a: Ceil(a),
+    'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
 }
 
 unary_magic_methods = {
-    'ceil'
+    'ceil',
+    'neg'
 }
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
