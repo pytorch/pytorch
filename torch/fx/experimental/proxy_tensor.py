@@ -66,7 +66,14 @@ def is_sym_node(node):
 def set_proxy_slot(obj, tracer, proxy):
     d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
     assert isinstance(d, weakref.WeakKeyDictionary)
-    d[tracer] = proxy
+    # NB: Never clobber pre-existing proxy.  Although the proxies
+    # are in principle equivalent, when we do graph partitioning
+    # we need there not to be spurious dependencies on tangent inputs.
+    # This works because primals get their SymInts set first, and
+    # THEN later we allocate tangent inputs.  Make sure if a SymInt
+    # is derivable from a primal that we use that.
+    if tracer not in d:
+        d[tracer] = proxy
 
 def has_proxy_slot(obj, tracer):
     return get_proxy_slot(obj, tracer, False, lambda _: True)
@@ -78,12 +85,12 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     d = obj.__dict__.get(proxy_slot)
     if not d:
         if default is no_default:
-            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
+            raise RuntimeError(f"{obj} is not tracked with proxy for {tracer}, nor any other")
         return default
     assert isinstance(d, weakref.WeakKeyDictionary)
     if tracer not in d:
         if default is no_default:
-            raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
+            raise RuntimeError(f"{obj} is not tracked with proxy for {tracer} (is tracked for {d.keys()})")
         else:
             return default
     return transform(d[tracer])

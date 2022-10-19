@@ -117,7 +117,7 @@ class PySymInt(object):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
-        return PySymInt(self.expr, self.shape_env, constant=self.constant)
+        return self
 
     def __str__(self):
         return f"{self.expr}"
