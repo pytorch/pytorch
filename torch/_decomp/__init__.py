@@ -2,19 +2,29 @@ import inspect
 from collections import defaultdict
 from functools import wraps
 from itertools import chain
-from typing import Callable, Dict, NamedTuple, Sequence, Tuple, Union
+from typing import Callable, Dict, Sequence, Union
 
 import torch
-import torch._ops
 import torch.library
+from torch._ops import OpOverload, OpOverloadPacket
 from torch.utils._pytree import tree_map
 
-__all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
+__all__ = [
+    "decomposition_table",
+    "pre_autograd_decomposition_table",
+    "meta_table",
+    "register_decomposition",
+    "get_decompositions",
+]
+
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
+global_decomposition_table: Dict[str, Dict[OpOverload, Callable]] = defaultdict(dict)
 
+decomposition_table = global_decomposition_table["post_autograd"]
+pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
+meta_table = global_decomposition_table["meta"]
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -23,7 +33,9 @@ meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 _disabled_meta_decomps = set()
 
 
-def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False):
+def register_decomposition(
+    aten_op, registry=None, *, type="post_autograd", disable_meta: bool = False
+):
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -44,6 +56,8 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
     a Meta implementation, we will register it to the dispatcher.  Use
     `disable_meta` to disable this behavior.
     """
+
+    assert type in {"post_autograd", "pre_autograd", "meta"}
 
     def decomposition_decorator(f: Callable) -> Callable:
         sig = inspect.signature(f)
@@ -90,14 +104,14 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
 
         nonlocal registry
         if registry is None:
-            registry = decomposition_table
+            registry = global_decomposition_table[type]
 
         def add_op_to_table(aten_op):
             overloads = []
-            if isinstance(aten_op, torch._ops.OpOverload):
+            if isinstance(aten_op, OpOverload):
                 overloads.append(aten_op)
             else:
-                assert isinstance(aten_op, torch._ops.OpOverloadPacket)
+                assert isinstance(aten_op, OpOverloadPacket)
                 for ol in aten_op.overloads():
                     overloads.append(getattr(aten_op, ol))
             for op_overload in overloads:
@@ -154,8 +168,9 @@ Please set `disable_meta=True`.
 
 
 def get_decompositions(
-    aten_ops: Sequence[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]]
-) -> Dict[torch._ops.OpOverload, Callable]:
+    aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
+    type: str = "post_autograd",
+) -> Dict[OpOverload, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
     operator overloads and overload packets passed as input.  Overload
@@ -167,16 +182,19 @@ def get_decompositions(
     they know how to implement, and we provide decompositions for everything
     not in this set.
     """
+    assert type in {"post_autograd", "pre_autograd", "meta"}
+
+    registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
-    for opo in decomposition_table:
+    for opo in registry:
         packets_to_overloads[opo.overloadpacket].append(opo)
     decompositions = {}
     for op in aten_ops:
-        if isinstance(op, torch._ops.OpOverloadPacket) and op in packets_to_overloads:
+        if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
-                decompositions[op_overload] = decomposition_table[op_overload]
-        elif isinstance(op, torch._ops.OpOverload) and op in decomposition_table:
-            decompositions[op] = decomposition_table[op]
+                decompositions[op_overload] = registry[op_overload]
+        elif isinstance(op, OpOverload) and op in registry:
+            decompositions[op] = registry[op]
     return decompositions
 
 
