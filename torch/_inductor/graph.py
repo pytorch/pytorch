@@ -4,11 +4,11 @@ import os
 import time
 
 import sympy
-from sympy import Integer
 
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -34,35 +34,18 @@ class GraphLowering(torch.fx.Interpreter):
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
-        size = [self.sizevars[i] for i in ex.size()]
-        stride = [None] * len(size)
-        for i, val in enumerate(ex.stride()):
-            if val in (0, 1):
-                stride[i] = Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None and ex.stride()[i] >= 0
-            }
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
-            )
-            for _, i in val_list:
-                if stride[i] is None and ex.stride()[i] in candidates:
-                    stride[i] = candidates[ex.stride()[i]]
-                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = sorted(
-                    [
-                        (ex.stride()[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ]
-                )[0]
-                stride[i] = self.sizevars[val]
+        if self.reuse_shape_env:
+            size = ex.size()
+            stride = ex.stride()
+        else:
+            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+
+        size = [
+            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in size
+        ]
+        stride = [
+            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in stride
+        ]
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
@@ -73,9 +56,18 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    def __init__(self, gm: torch.fx.GraphModule, num_dynamic_inputs=None):
+    def __init__(
+        self, gm: torch.fx.GraphModule, shape_env=None, num_static_inputs=None
+    ):
         super().__init__(gm)
-        self.sizevars = SizeVarAllocator("s")
+        if shape_env is None:
+            shape_env = ShapeEnv()
+            self.reuse_shape_env = False
+        else:
+            self._shape_env = shape_env
+            self.reuse_shape_env = True
+        self._shape_env = shape_env
+        self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs = {}
         self.graph_inputs_original = {}
         self.graph_outputs = None
@@ -85,8 +77,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
         self.wrapper_code = None
-        self.num_dynamic_inputs = num_dynamic_inputs
-        self.num_static_inputs = None
+        self.num_static_inputs = num_static_inputs
         self.mutated_inputs = set()
         self.unaligned_buffers = set()
         self.randomness_offset = sympy.Integer(0)
@@ -137,9 +128,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_utils.dynamo_timed
     def run(self, *args):
-        if self.num_dynamic_inputs is None:
-            self.num_dynamic_inputs = len(args)
-        self.num_static_inputs = len(args) - self.num_dynamic_inputs
         return super().run(*args)
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
@@ -251,7 +239,8 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            return lowerings[target](*args, **kwargs)
+            out = lowerings[target](*args, **kwargs)
+            return out
         except Exception as e:
             raise LoweringException(e, target, args, kwargs) from e
 
@@ -279,7 +268,9 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
-            isinstance(x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer))
+            isinstance(
+                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+            )
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
@@ -352,4 +343,5 @@ class GraphLowering(torch.fx.Interpreter):
             node.get_name()
             for node in self.graph_outputs
             if not isinstance(node, ir.NoneAsConstantBuffer)
+            and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]

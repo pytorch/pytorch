@@ -6,7 +6,7 @@ import sympy
 
 from torch.fx.graph import inplace_methods, magic_methods
 
-from .utils import sympy_str
+from .utils import sympy_str, sympy_symbol
 
 threadlocal = local()
 
@@ -70,7 +70,7 @@ class MockHandler:
 
     @staticmethod
     def indirect_indexing(index_var):
-        return sympy.Symbol(str(index_var))
+        return sympy_symbol(str(index_var))
 
     @classmethod
     def _init_cls(cls):
