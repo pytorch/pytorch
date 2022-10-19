@@ -18,6 +18,7 @@ from torch._refs import _broadcast_shapes
 
 from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
+from torch._ops import OpOverload, OpOverloadPacket
 
 aten = torch.ops.aten
 
@@ -26,17 +27,30 @@ _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", 
 
 def register_meta(op, register_dispatcher=True):
     def wrapper(f):
-        def add_func(op):
-            meta_table[op] = f
-            if register_dispatcher:
-                name = (
-                    op.__name__
-                    if op._overloadname != "default"
-                    else op.overloadpacket.__name__
-                )
-                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+        def add_func(aten_op):
 
-            op.py_impl(torch._C.DispatchKey.Meta)(f)
+            overloads = []
+            if isinstance(aten_op, OpOverload):
+                overloads.append(aten_op)
+            else:
+                assert isinstance(aten_op, OpOverloadPacket)
+                for ol in aten_op.overloads():
+                    overloads.append(getattr(aten_op, ol))
+            for op_overload in overloads:
+                if op_overload in meta_table:
+                    raise RuntimeError(f"duplicate registrations for {op_overload}")
+                meta_table[op_overload] = f
+
+            # meta_table[op] = f
+            # if register_dispatcher:
+            #     name = (
+            #         op.__name__
+            #         if op._overloadname != "default"
+            #         else op.overloadpacket.__name__
+            #     )
+            #     _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+
+            # op.py_impl(torch._C.DispatchKey.Meta)(f)
 
         tree_map(add_func, op)
         return f
