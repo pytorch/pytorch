@@ -1650,3 +1650,64 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
 import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
+
+from torch._decomp import global_decomposition_table
+
+def activate_meta():
+
+    activate_meta_table = {}
+
+    for type in ["meta", "post_autograd", "pre_autograd"]:
+        registry = global_decomposition_table[type]
+
+        for opo in registry:
+            if opo not in activate_meta_table:
+                activate_meta_table[opo] = registry[opo]
+
+    for op_overload, fn in activate_meta_table.items():
+        assert isinstance(op_overload, OpOverload)
+
+        op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
+
+        # TODO: factor this logic into OpOverload or Library API
+        name = op_overload._schema.name
+        if op_overload._schema.overload_name:
+            name += "." + op_overload._schema.overload_name
+
+        dispatch_key_registration = torch._C._dispatch_dump(name)
+
+        # Internally, we shouldn't be registering meta kernels for any operators that
+        # have CompositeImplicitAutograd kernels.
+        # Instead, we should be letting those decompositions run, and writing meta kernels
+        # only for the base operators.
+        if 'CompositeImplicitAutograd' in dispatch_key_registration:
+            # raise RuntimeError(
+            #     f"We should not register a meta kernel directly to the operator '{name}',"
+            #     " because it has a CompositeImplicitAutograd kernel in core."
+            #     " Instead we should let the operator decompose, and ensure that we have meta kernels"
+            #     " for the base ops that it decomposes into.")
+            pass
+        # skip if it's a view op
+        elif any(
+            a.alias_info is not None and not a.alias_info.is_write
+            for a in op_overload._schema.arguments
+        ):
+#             raise RuntimeError(
+#                 f"""
+# Attempting to register a python meta kernel for a view operator: {str(op_overload)}.
+# We shouldn't do this, because the output will report as not having aliased storages.
+# All view ops have meta kernels in C++ today, so we should use those instead.
+
+# If you're registering an operator through the `@register_decomposition` decorator,
+# Please set `disable_meta=True`.
+#             """
+#             )
+            pass
+        elif name in {
+            "aten::empty_strided",  # causing infinite recursion
+        }:
+            pass
+        else:
+            _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+
+activate_meta()
