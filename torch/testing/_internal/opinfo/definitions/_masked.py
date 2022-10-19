@@ -565,7 +565,9 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}),
-                'TestInductorOpInfo', 'test_comprehensive', device_type='cuda',
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
             ),
         ),
         # Can reuse the same inputs; dim is required in both
