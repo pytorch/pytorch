@@ -7050,6 +7050,122 @@ TEST_F(NVFuserTest, FusionIssue2075_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {t10}, __LINE__, __FILE__);
 }
 
+// Simple test of propagating vectorize predicates through the Exact
+// CA map
+TEST_F(NVFuserTest, FusionPropagateVectorizePredicate_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+
+  fusion.addOutput(tv2);
+
+  const int vec_factor = 4;
+  tv1->split(-1, vec_factor);
+
+  MaxRootDomainInfoSpanningTree tree(tv1);
+  TransformPropagator tp(tv1);
+  tree.traverse(&tp);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  // The predicate tv2 should look like (i * 4) + j < tv0.extent(0),
+  // where i and j are the loop indices of the two leaf axes,
+  // respectively. PredChecker checks if the second loop index is
+  // indeed used in the predicate of tv2.
+
+  class PredChecker : public kir::IrVisitor {
+   public:
+    PredChecker(bool vectorized) : vectorized_(vectorized) {}
+
+    using kir::IrVisitor::handle;
+
+    void handle(UnaryOp* uop) final {
+      if (uop->getUnaryOpType() == UnaryOpType::Set) {
+        if (uop->out()->as<kir::TensorIndex>()->view()->name() == 2) {
+          // Make sure the index of the inner loop isn't used in the
+          // predicate of the tv2 expression
+          TORCH_INTERNAL_ASSERT(!scope_exprs_.empty());
+          TORCH_INTERNAL_ASSERT(scope_exprs_.back()->isA<kir::IfThenElse>());
+          auto ite = scope_exprs_.back()->as<kir::IfThenElse>();
+          auto cond = ite->predicate()->value();
+          // Make sure the index of the inner loop isn't used in the predicate
+          TORCH_INTERNAL_ASSERT(!for_loops_.empty());
+          auto loop_index = for_loops_.back()->index();
+          auto cond_inputs = InputsOf::output(cond->fusion(), cond);
+          auto index_it =
+              std::find(cond_inputs.begin(), cond_inputs.end(), loop_index);
+          auto vec_factor_it = std::find_if(
+              cond_inputs.begin(), cond_inputs.end(), [](Val* inp) {
+                auto int_val = inp->getInt();
+                return int_val.has_value() && int_val.value() == vec_factor - 1;
+              });
+          // If vectorized, the predicate should use (vec_factor - 1)
+          // rather than the loop index.
+          if (vectorized_) {
+            TORCH_CHECK(
+                index_it == cond_inputs.end(),
+                "Not expected to have ",
+                loop_index->toInlineString(),
+                " in ",
+                cond->toInlineString());
+            TORCH_CHECK(
+                vec_factor_it != cond_inputs.end(),
+                "Expected to have ",
+                vec_factor - 1,
+                " in ",
+                cond->toInlineString());
+          } else {
+            TORCH_CHECK(
+                index_it != cond_inputs.end(),
+                "Expected to have ",
+                loop_index->toInlineString(),
+                " in ",
+                cond->toInlineString());
+            TORCH_CHECK(
+                vec_factor_it == cond_inputs.end(),
+                "Not expected to have ",
+                vec_factor - 1,
+                " in ",
+                cond->toInlineString());
+          }
+        }
+      }
+    }
+
+    bool vectorized_ = false;
+  };
+
+  GpuLower gpulw_wo_vec(&fusion);
+  PredChecker(false).handle(gpulw_wo_vec.kernel()->topLevelExprs());
+
+  // Vectorize the second axis of tv1
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  // Now, the predicate tv2 should look like (i * 4) + 3 <
+  // tv0.extent(0), i.e., j should be replaced with 3 since the second
+  // axis is exactly mapped with the vectorized axis of tv1. It is
+  // sufficient to check the condition using the last value of j,
+  // i.e., 3.
+
+  GpuLower gpulw_w_vec(&fusion);
+  PredChecker(true).handle(gpulw_w_vec.kernel()->topLevelExprs());
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({32}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  TORCH_CHECK(t0.equal(cg_outputs[0]));
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

@@ -330,7 +330,7 @@ class StmtSort : public IterVisitor {
       bool traverse_members = false);
 };
 
-class InputsOf : public IterVisitor {
+class TORCH_CUDA_CU_API InputsOf : public IterVisitor {
  private:
   std::unordered_set<Val*> grabbed_inputs;
   std::vector<Val*> ordered_inputs;

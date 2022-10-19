@@ -2290,7 +2290,7 @@ bool TensorDomain::hasViewLikeRFactor() const {
       getMaybeRFactorDomain().begin(),
       getMaybeRFactorDomain().end(),
       [](IterDomain* id) {
-        return id->isReduction() && id->isRFactorProduct();
+        return (id->isReduction() || id->isStride()) && id->isRFactorProduct();
       });
 }
 

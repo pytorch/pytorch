@@ -2354,7 +2354,7 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
       predicate_contiguity,
       final_ids,
       concrete_index_map,
-      GpuLower::current()->divisbleSplitSet(),
+      GpuLower::current()->divisibleSplitSet(),
       GpuLower::current()->caMap(),
       GpuLower::current()->haloInfo(),
       GpuLower::current()->concretizedBroadcastDomains(),

@@ -129,7 +129,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return non_divisible_split_info_;
   }
 
-  const auto& divisbleSplitSet() const {
+  const auto& divisibleSplitSet() const {
     return divisible_splits_;
   }
 

@@ -59,8 +59,8 @@ void NonDivisibleSplitInfo::handle(Split* split) {
         // If we know this split must be divisible, it's either validated as
         // above, exact matches to a case matching the above, or exact matches
         // to a transformation from view which must be divisible.
-        if (gpu_lower->divisbleSplitSet().find(split) ==
-            gpu_lower->divisbleSplitSet().end()) {
+        if (gpu_lower->divisibleSplitSet().find(split) ==
+            gpu_lower->divisibleSplitSet().end()) {
           splits_to_predicate_[current_tv_].push_back(split);
         }
       }
