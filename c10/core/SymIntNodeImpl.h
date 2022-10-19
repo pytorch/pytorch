@@ -90,6 +90,9 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymIntNode neg() {
+    TORCH_CHECK(false, "NYI");
+  };
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
