@@ -118,8 +118,8 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-def cpp_compile_command(input, output, include_pytorch=True):
-    if include_pytorch:
+def cpp_compile_command(input, output, include_pytorch=False):
+    if include_pytorch or config.cpp.simdlen:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
