@@ -16,7 +16,7 @@ Motivation
 
 .. warning::
 
-  The PyTorch API of masked tensors is in prototype stage and may or may not change in the future.
+  The PyTorch API of masked tensors is in the prototype stage and may or may not change in the future.
 
 MaskedTensor serves as an extension to :class:`torch.Tensor` that provides the user with the ability to:
 - use any masked semantics (e.g. variable length tensors, nan* operators, etc.)
@@ -24,10 +24,10 @@ MaskedTensor serves as an extension to :class:`torch.Tensor` that provides the u
 - various sparse applications (see tutorial below)
 
 "Specified" and "unspecified" have a long history in PyTorch without formal semantics and certainly without
-consistency; indeed, MaskedTensor was born out of a build up of :ref:`issues` that the vanilla :class:`torch.Tensor`
+consistency; indeed, MaskedTensor was born out of a build up of issues that the vanilla :class:`torch.Tensor`
 class could not properly address. Thus, a primary goal of MaskedTensor is to become the source of truth for
 said "specified" and "unspecified" values in PyTorch where they are a first class citizen instead of an afterthought.
-In turn, this should further unlock `sparsity's <https://pytorch.org/docs/stable/sparse.html>`__ potential,
+In turn, this should further unlock `sparsity's <https://pytorch.org/docs/stable/sparse.html>`_ potential,
 enable safer and more consistent operators, and provide a smoother and more intuitive experience
 for users and developers alike.
 
@@ -40,8 +40,8 @@ which entries from the input should be included or ignored.
 By way of example, suppose that we wanted to mask out all values that are equal to 0 (represented by the gray)
 and take the max:
 
-.. image:: _static/img/masked/tensor_comparison.png
-      :scale: 50 %
+.. image:: _static/img/masked/tensor_comparison.jpg
+      :scale: 50%
 
 On top is the vanilla tensor example while the bottom is MaskedTensor where all the 0's are masked out.
 This clearly yields a different result depending on whether we have the mask, but this flexible structure
@@ -49,15 +49,16 @@ allows the user to systematically ignore any elements they'd like during computa
 
 There are already a number of existing tutorials that we've written to help users onboard, such as:
 
-1. `Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html>`__. The place to start for new users:
-this tutorial discusses how to use :class:`MaskedTensor`s and why they're useful.
-2. `Sparsity <https://pytorch.org/tutorials/prototype/maskedtensor_sparsity.html>`__.
-:class:`MaskedTensor` also supports sparse COO and CSR data and mask Tensors!
-3. `Adagrad sparse semantics <https://pytorch.org/tutorials/prototype/maskedtensor_adagrad_semantics.html>`__.
-A practical example of how :class:`MaskedTensor` can simply sparse semantics and implementations
-4. `Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`__.
-Discusses why certain decisions were made (e.g. requiring masks to match for binary/reduction operations),
-differences with NumPy's :class:`MaskedArray`, and reduction semantics.
+-  `Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful`_
+-  `Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors`_
+-  `Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations`_
+-  `Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations),
+   differences with NumPy's MaskedArray, and reduction semantics`_
+
+.. _Overview - the place to start for new users, discusses how to use MaskedTensors and why they're useful: https://pytorch.org/tutorials/prototype/maskedtensor_overview.html/
+.. _Sparsity - MaskedTensor supports sparse COO and CSR data and mask Tensors: https://pytorch.org/tutorials/prototype/maskedtensor_sparsity.html/
+.. _Adagrad sparse semantics - a practical example of how MaskedTensor can simplify sparse semantics and implementations: https://pytorch.org/tutorials/prototype/maskedtensor_adagrad_semantics.html>
+.. _Advanced semantics - discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics: https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html/
 
 Supported Operators
 +++++++++++++++++++
@@ -218,9 +219,9 @@ Reductions
 ----------
 
 The following reductions are available (with autograd support). For more information, the
-`Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html>`__ tutorial
+`Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html/>`_ tutorial
 details some examples of reductions, while the
-`Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`__ tutorial
+`Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`_ tutorial
 has some further in-depth discussions about how we decided on certain reduction semantics.
 
 .. autosummary::
