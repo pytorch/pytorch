@@ -99,7 +99,6 @@ class OutputGraph(fx.Tracer):
         self.compiler_fn = compiler_fn
         self.root_globals = f_globals
         self.root_tx = root_tx
-        self._current_tx = []
         self.cleanups = []
         self.should_exit = False
         self.random_values_var = None
@@ -113,16 +112,6 @@ class OutputGraph(fx.Tracer):
     @property
     def fake_mode(self):
         return self.root_tx.fake_mode
-
-    def push_tx(self, tx):
-        self._current_tx.append(tx)
-
-    def pop_tx(self):
-        return self._current_tx.pop()
-
-    @property
-    def current_tx(self):
-        return self.root_tx if not self._current_tx else self._current_tx[-1]
 
     def copy_graphstate(self):
         """Create a checkpoint of the current state by copying everything"""
@@ -216,12 +205,7 @@ class OutputGraph(fx.Tracer):
             def wrap_name(module_key):
                 return TensorVariable.create(
                     self,
-                    self.create_proxy(
-                        "get_attr",
-                        module_key,
-                        tuple(),
-                        {},
-                    ),
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=mod,
                     **options,
                 )
@@ -417,15 +401,10 @@ class OutputGraph(fx.Tracer):
 
         try:
             # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= torchdynamo_logging.CODE:
-                graph_str = (
-                    gm.print_readable()
-                    if config.output_graph_code
-                    else format_graph_tabular(gm.graph)
-                )
+            if config.log_level <= logging.INFO:
                 log.log(
                     torchdynamo_logging.CODE,
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
+                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
             log.warning(
@@ -533,13 +512,14 @@ class OutputGraph(fx.Tracer):
         name=None,
         type_expr=None,
         proxy_factory_fn=None,
+        current_tx=None,
     ):
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
         )
 
         # append stack trace to fx node
-        tx = self.current_tx
+        tx = current_tx if current_tx else self.root_tx
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
