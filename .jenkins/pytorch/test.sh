@@ -255,7 +255,7 @@ test_dynamo_shard() {
 
 
 test_inductor() {
-  # TODO: enable inductor on core tests
+  echo "TODO: enable inductor unit tests"
   # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
 
   # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
