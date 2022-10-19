@@ -137,12 +137,19 @@ Node* addDummyClone(
     auto* noneNode = graph->create(prim::Constant);
     noneNode->output()->setType(NoneType::get());
     // For scripting mode, aten::clone requires input to be a TensorType
-    // Hence if we encounter an IntType or loatType, we set the input
+    // Hence if we encounter an IntType or FloatType, we set the input
     // to the appropriate TensorType
-    if (orig_data->type()->kind() == TypeKind::IntType) {
+    if (orig_data->type()->kind() == TypeKind::IntType &&
+        insertBefore == false) {
       orig_data->setType(TensorType::fromNumberType(*IntType::get()));
-    } else if (orig_data->type()->kind() == TypeKind::FloatType) {
+    } else if (
+        orig_data->type()->kind() == TypeKind::FloatType &&
+        insertBefore == false) {
       orig_data->setType(TensorType::fromNumberType(*FloatType::get()));
+    } else if (
+        orig_data->type()->kind() == TypeKind::BoolType &&
+        insertBefore == false) {
+      orig_data->setType(TensorType::fromBoolType());
     }
     newNode = graph->create(aten::clone, /*num_outputs =*/1);
     newNode->addInput(orig_data);
