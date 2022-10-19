@@ -24,7 +24,6 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/execution_graph_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
@@ -53,6 +52,10 @@ struct MultithreadingEnabled {
     c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
   }
   bool old_;
+};
+
+struct DisableAutocast {
+  c10::impl::ExcludeDispatchKeyGuard guard_{c10::autocast_dispatch_keyset};
 };
 
 struct EnableTorchFunction {
@@ -235,21 +238,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
 
-  // PyTorch profiler execution graph internal interface.
-  m.def(
-      "_add_execution_graph_observer",
-      &torch::profiler::impl::addExecutionGraphObserver,
-      py::arg("output_file_name"));
-  m.def(
-      "_remove_execution_graph_observer",
-      &torch::profiler::impl::removeExecutionGraphObserver);
-  m.def(
-      "_enable_execution_graph_observer",
-      &torch::profiler::impl::enableExecutionGraphObserver);
-  m.def(
-      "_disable_execution_graph_observer",
-      &torch::profiler::impl::disableExecutionGraphObserver);
-
   // NOTICE: These record functions are not torch operators and may not show up
   // in TorchScript tracing, FX transforms, or operator serialization. For these
   // use cases, please use `torch.profiler.record_function`.
@@ -368,7 +356,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
   py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
       .def(py::init<bool>());
-
+  py::class_<DisableAutocast>(_C_m, "_DisableAutocast").def(py::init<>());
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
@@ -407,6 +395,17 @@ static PyObject* set_autocast_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
+      at::autocast::is_xpu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -732,6 +731,7 @@ static PyMethodDef methods[] = { // NOLINT
      nullptr},
     {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
     {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
+    {"_is_any_autocast_enabled", is_any_autocast_enabled, METH_NOARGS, nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
     {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
     {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},

@@ -386,6 +386,10 @@ const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
   return current_graph_task ? &current_graph_task->nodes_in_graph_ : nullptr;
 }
 
+int get_current_graph_task_id() {
+  return current_graph_task ? current_graph_task->id_ : -1;
+}
+
 bool get_current_graph_task_keep_graph() {
   return current_graph_task ? current_graph_task->keep_graph_ : true;
 }
@@ -462,7 +466,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // NB: The ThreadLocalStateGuard doesn't set the grad_mode because
         // GraphTask always saves ThreadLocalState without grad_mode.
         at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
-        c10::Warning::WarningHandlerGuard warnings_guard(
+        c10::WarningUtils::WarningHandlerGuard warnings_guard(
             &local_graph_task->warning_handler_);
 
         try {
