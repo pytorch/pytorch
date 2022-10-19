@@ -1735,6 +1735,18 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
         memory_format=mem_format
     )
 
+@register_meta(aten.upsample_nearest2d_backward.vec)
+def upsample_nearest2d_backward_vec_meta(grad_output, output_size, input_size, scale_factors):
+    mem_format = utils.suggest_memory_format(grad_output)
+    return grad_output.new_empty(input_size).to(memory_format=mem_format)
+
+@register_meta(aten._thnn_fused_lstm_cell.default)
+def _thnn_fused_lstm_cell_meta(input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None):
+    workspace = torch.empty_like(input_gates).to(memory_format.torch.contiguous)
+    hy = torch.empty_like(cx).to(memory_format.torch.contiguous)
+    cy = torch.empty_like(cx).to(memory_format.torch.contiguous)
+    return (workspace, hy, cy)
+
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
