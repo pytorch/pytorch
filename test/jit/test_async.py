@@ -420,20 +420,6 @@ class TestAsync(JitTestCase):
         self.assertGraphContainsExactly(traced.graph, kind='aten::wait', num_kind_nodes=0)
         self.assertGraphContainsExactly(traced.graph, kind='aten::add', num_kind_nodes=2)
 
-    def test_trace_fork_wait_inline_onnx(self):
-        def fork_body(x):
-            return torch.neg(x), torch.neg(x)
-
-        class MyMod(torch.nn.Module):
-            def forward(self, x):
-                fut = torch.jit._fork(fork_body, x)
-                val = torch.jit._wait(fut)
-                return val[1]
-
-        # smoke test for ONNX export
-        f = io.BytesIO()
-        torch.onnx.export(MyMod(), (torch.rand(3, 4),), f)
-
     def test_trace_fork_wait_list_modulecalls(self):
         def add_one(input):
             return input + torch.ones(input.size())
