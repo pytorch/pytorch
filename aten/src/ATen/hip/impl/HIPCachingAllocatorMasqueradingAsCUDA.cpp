@@ -4,7 +4,7 @@
 namespace c10 { namespace hip {
 namespace HIPCachingAllocatorMasqueradingAsCUDA {
 
-HIPCachingAllocator::HIPAllocator* get() {
+Allocator* get() {
   static HIPAllocatorMasqueradingAsCUDA allocator(HIPCachingAllocator::get());
   return &allocator;
 }

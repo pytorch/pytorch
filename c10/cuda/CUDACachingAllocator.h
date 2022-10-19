@@ -314,6 +314,10 @@ inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return get()->getIpcDevPtr(handle);
 }
 
+inline std::string name() {
+  return get()->name();
+}
+
 } // namespace CUDACachingAllocator
 } // namespace cuda
 } // namespace c10

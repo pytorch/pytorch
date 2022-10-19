@@ -356,7 +356,7 @@ PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
 
 PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return THPUtils_packString(c10::cuda::CUDACachingAllocator::get()->name());
+  return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
   END_HANDLE_TH_ERRORS
 }
 
