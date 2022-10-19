@@ -13,7 +13,7 @@ from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
-    from sympy.printing.precedence import precedence
+    from sympy.printing.precedence import precedence  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
