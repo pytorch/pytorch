@@ -975,8 +975,6 @@ def main():
     extras_require = {
         'opt-einsum': ['opt-einsum>=3.3']
     }
-    import pdb
-    pdb.set_trace()
     if platform.system() == 'Linux':
         triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton.txt")
         if os.path.exists(triton_pin_file):
