@@ -111,8 +111,7 @@ file(GLOB_RECURSE native_mps_h "native/mps/*.h")
 file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
-            "native/quantized/cpu/*.cpp"
-            "native/quantized/decomposed/*.cpp")
+            "native/quantized/cpu/*.cpp")
 file(GLOB native_nested_cpp "native/nested/*.cpp")
 file(GLOB native_transformers_cpp "native/transformers/*.cpp")
 
@@ -122,7 +121,7 @@ file(GLOB native_ao_sparse_h
             "native/ao_sparse/cpu/*.h"
             "native/ao_sparse/quantized/*.h"
             "native/ao_sparse/quantized/cpu/*.h")
-file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/decomposed/*.h" "native/quantized/cudnn/*.h")
+file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
 
 file(GLOB native_cuda_cu "native/cuda/*.cu")
