@@ -99,7 +99,7 @@ class WeightNormSparsifier(BaseSparsifier):
         dw = (block_w - w % block_w) % block_w
 
         if mask is None:
-            mask = torch.ones(h+dh, w+dw, device=data.device)
+            mask = torch.ones(h + dh, w + dw, device=data.device)
 
         if sparsity_level >= 1.0:
             mask.data = torch.zeros_like(mask)
@@ -148,7 +148,7 @@ class WeightNormSparsifier(BaseSparsifier):
         values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
 
         if mask is None:
-            mask = torch.ones((h+dh, w+dw), device=data.device)
+            mask = torch.ones((h + dh, w + dw), device=data.device)
 
         if values_per_block == zeros_per_block:
             # Everything should be sparsified
