@@ -3817,6 +3817,22 @@ class CommonTemplate:
         inputs = (inputs[1], inputs[0])
         self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
+    @requires_cuda()
+    @patch.object(config.triton, "cudagraphs", False)
+    def test_unspec_inputs_fp16(self):
+        def fn(x, y):
+            return x + y, x * y, x / y
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+
+        inputs = (
+            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
+            rand_strided((), (), dtype=torch.float16, device="cpu"),
+        )
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
 

@@ -43,6 +43,7 @@ def signature_of(arg):
     if isinstance(arg, TensorArg):
         tye = JITFunction._type_of(arg.dtype)
         if V.graph.is_unspec_arg(arg.buffer):
+            # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
             if new_tye in ["fp16", "bf16"]:
                 return "fp32"
