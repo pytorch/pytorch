@@ -3150,8 +3150,10 @@ class CommonTemplate:
             ],
         )
 
-    @unittest.skip("unstable on sm86")
     def test_scatter2(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("unstable on sm86")
+
         def fn(a, dim, index, b):
             return aten.scatter.reduce(a, dim, index, b, reduce="add")
 
