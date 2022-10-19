@@ -573,6 +573,7 @@ args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, r
 {model_str}
 
 mod = Repro().cuda()
+mod(*args)
 opt_mod = {config.dynamo_import}.optimize("{compiler_name}")(mod)
 
 {run_code}
@@ -700,7 +701,11 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     loose similarity metric to guide the minifier path.
     """
     from difflib import SequenceMatcher
-
+    try:
+        gm(*example_inputs)
+    except Exception as e:
+        # If original model fails the minifier isn't working right
+        return False
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
         run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
@@ -808,7 +813,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError("Issue deteced. Repro at minifier_launcher.py.")
+                    raise ValueError("Issue detected. Repro at minifier_launcher.py.")
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
