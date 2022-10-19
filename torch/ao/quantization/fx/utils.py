@@ -28,6 +28,7 @@ from torch.fx.graph import (
     Node,
 )
 from .custom_config import PrepareCustomConfig
+from ._decomposed import quantized_decomposed_lib
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 from collections import namedtuple
@@ -162,14 +163,14 @@ def get_per_tensor_qparams(activation_post_process):
 
 def get_quantize_node_info(
     activation_post_process: Callable,
-    is_decomposed_qtensor: bool
+    is_decomposed: bool
 ) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
     """ Extract information about quantize op from activation_post_process module
     Args:
       * `activation_post_process`: observer module instance or fake quant module instance
         after calibration/QAT
-      * `is_decomposed_qtensor`: a boolean flag to indicate whether we want to use the
-        quantize operator for decomposed quantized tensor (torch.decomposed_quantize_per_tensor) or default/standalone
+      * `is_decomposed`: a boolean flag to indicate whether we want to use the
+        quantize operator for decomposed quantized tensor (torch.ops.quantized_decomposed.quantize_per_tensor) or default/standalone
         quantized tensor (torch.quantize_per_tensor)
 
     Returns
@@ -188,14 +189,14 @@ def get_quantize_node_info(
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
-            if is_decomposed_qtensor:
+            if is_decomposed:
                 raise NotImplementedError("decomposed quantize_per_tensor op not implemented yet")
             else:
                 quantize_op = torch.quantize_per_channel
         else:
             scale = float(scale)
             zero_point = int(zero_point)
-            if is_decomposed_qtensor:
+            if is_decomposed:
                 quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
                 quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
                 dtype = to_underlying_dtype(dtype)
@@ -206,7 +207,7 @@ def get_quantize_node_info(
                     "_quant_max": quant_max,
                     "_dtype_": dtype
                 }
-                quantize_op = torch.decomposed_quantize_per_tensor
+                quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
             else:
                 qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
                 quantize_op = torch.quantize_per_tensor
@@ -214,7 +215,7 @@ def get_quantize_node_info(
         # TODO(future PR): switch compute_dtype to is_dynamic
         # dynamic quantization
         node_type = "call_function"
-        if is_decomposed_qtensor:
+        if is_decomposed:
             raise NotImplementedError("decomposed quantize_per_tensor_dynamic op not implemented yet")
         else:
             quantize_op = torch.quantize_per_tensor_dynamic
