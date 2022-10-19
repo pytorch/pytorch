@@ -1044,11 +1044,12 @@ def prepare_n_shadows_model(
         _get_dedup_subgraphs(matches)
 
     if isinstance(qconfig_mappings, QConfigMultiMapping):
-        qconfig_mappings: List[QConfigMapping] = qconfig_mappings.qconfig_mappings_list
+        qconfig_mappings = qconfig_mappings.qconfig_mappings_list
 
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
+    assert isinstance(qconfig_mappings, list)
     for qconfig_mapping in qconfig_mappings:
         node_name_to_qconfig = generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
