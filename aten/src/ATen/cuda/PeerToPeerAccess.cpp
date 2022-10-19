@@ -40,7 +40,7 @@ bool get_p2p_access(int dev, int dev_to_access) {
   TORCH_INTERNAL_ASSERT(num_devices_ >= 0, "p2p access cache not initialized");
 
 #ifdef USE_ROCM
-  bool using_cudaMallocAsync = false;
+  bool needs_pool_specific_peer_access = false;
 #else
   bool needs_pool_specific_peer_access = CUDACachingAllocator::get()->needsPoolSpecificPeerAccess();
 #endif
