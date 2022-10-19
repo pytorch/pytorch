@@ -1,5 +1,6 @@
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include "c10/util/Optional.h"
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -1271,50 +1272,68 @@ Call this whenever a new thread is created in order to propagate values from
       .def("expired", &WeakTensorRef::expired);
 
   py::enum_<at::native::ConvBackend>(py_module, "_ConvBackend")
-      .value("CudaDepthwise2d", at::native::ConvBackend::CudaDepthwise2d)
-      .value("CudaDepthwise3d", at::native::ConvBackend::CudaDepthwise3d)
-      .value("Cudnn", at::native::ConvBackend::Cudnn)
-      .value("CudnnTranspose", at::native::ConvBackend::CudnnTranspose)
-      .value("Empty", at::native::ConvBackend::Empty)
-      .value("Miopen", at::native::ConvBackend::Miopen)
-      .value("MiopenDepthwise", at::native::ConvBackend::MiopenDepthwise)
-      .value("MiopenTranspose", at::native::ConvBackend::MiopenTranspose)
-      .value("Mkldnn", at::native::ConvBackend::Mkldnn)
-      .value("MkldnnEmpty", at::native::ConvBackend::MkldnnEmpty)
-      .value("NnpackSpatial", at::native::ConvBackend::NnpackSpatial)
-      .value("Overrideable", at::native::ConvBackend::Overrideable)
-      .value("Slow2d", at::native::ConvBackend::Slow2d)
-      .value("Slow3d", at::native::ConvBackend::Slow3d)
-      .value("SlowDilated2d", at::native::ConvBackend::SlowDilated2d)
-      .value("SlowDilated3d", at::native::ConvBackend::SlowDilated3d)
-      .value("SlowTranspose2d", at::native::ConvBackend::SlowTranspose2d)
-      .value("SlowTranspose3d", at::native::ConvBackend::SlowTranspose3d)
-      .value(
-          "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
-      .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d);
+    .value("CudaDepthwise2d", at::native::ConvBackend::CudaDepthwise2d)
+    .value("CudaDepthwise3d", at::native::ConvBackend::CudaDepthwise3d)
+    .value("Cudnn", at::native::ConvBackend::Cudnn)
+    .value("CudnnTranspose", at::native::ConvBackend::CudnnTranspose)
+    .value("Empty", at::native::ConvBackend::Empty)
+    .value("Miopen", at::native::ConvBackend::Miopen)
+    .value("MiopenDepthwise", at::native::ConvBackend::MiopenDepthwise)
+    .value("MiopenTranspose", at::native::ConvBackend::MiopenTranspose)
+    .value("Mkldnn", at::native::ConvBackend::Mkldnn)
+    .value("MkldnnEmpty", at::native::ConvBackend::MkldnnEmpty)
+    .value("NnpackSpatial", at::native::ConvBackend::NnpackSpatial)
+    .value("Overrideable", at::native::ConvBackend::Overrideable)
+    .value("Slow2d", at::native::ConvBackend::Slow2d)
+    .value("Slow3d", at::native::ConvBackend::Slow3d)
+    .value("SlowDilated2d", at::native::ConvBackend::SlowDilated2d)
+    .value("SlowDilated3d", at::native::ConvBackend::SlowDilated3d)
+    .value("SlowTranspose2d", at::native::ConvBackend::SlowTranspose2d)
+    .value("SlowTranspose3d", at::native::ConvBackend::SlowTranspose3d)
+    .value("Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
+    .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d)
+    .value("Mps", at::native::ConvBackend::Mps)
+    .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose);
 
   py_module.def(
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias_opt,
+         const c10::optional<at::Tensor>& bias,
          at::IntArrayRef stride_,
          at::IntArrayRef padding_,
          at::IntArrayRef dilation_,
          bool transposed_,
          at::IntArrayRef output_padding_,
-         int64_t groups_) {
+         int64_t groups_,
+         const c10::optional<std::vector<int64_t>> bias_sizes_opt) {
+        
+        // auto bias_sizes = bias_sizes_opt.has_value() ? c10::optional<IntArrayRef>(*bias_sizes_opt) : c10::nullopt;
         return at::native::select_conv_backend(
             input,
             weight,
-            bias_opt,
+            bias,
             stride_,
             padding_,
             dilation_,
             transposed_,
             output_padding_,
-            groups_);
-      });
+            groups_,
+            c10::nullopt);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("stride"),
+      py::arg("padding"),
+      py::arg("dilation"),
+      py::arg("transposed"),
+      py::arg("output_padding"),
+      py::arg("groups"),
+      py::arg("bias_sizes")
+    );
+
+  py_module.def("_conv_determine_backend_memory_format", at::native::_determine_backend_memory_format);
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
@@ -1410,6 +1429,7 @@ Call this whenever a new thread is created in order to propagate values from
     std::cout << "Included: " << toString(local_keyset.included_) << "\n";
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
   });
+
 
   py_module.def(
       "_should_allow_numbers_as_tensors", [](const std::string& name) {
