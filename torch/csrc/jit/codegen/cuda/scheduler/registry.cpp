@@ -1693,9 +1693,13 @@ class PersistentKernelScheduler : public SchedulerEntry {
     auto persistent_buffer_size_info = scheduler_utils::persistentBufferSize(
         fusion, runtime_info, persistent_buffer_info, data_cache);
 
-    auto persistent_buffer_size = std::min(
-        persistent_buffer_size_info.persistent_buffer_size,
-        persistent_buffer_size_info.projected_persistent_buffer_size);
+    // Note that projected buffer size can be zero
+    auto persistent_buffer_size =
+        persistent_buffer_size_info.projected_persistent_buffer_size == 0
+        ? persistent_buffer_size_info.persistent_buffer_size
+        : std::min(
+              persistent_buffer_size_info.persistent_buffer_size,
+              persistent_buffer_size_info.projected_persistent_buffer_size);
 
     if (persistent_buffer_size > scheduler_utils::register_file_size) {
       scheduler_debug_utils::canScheduleRejectReason(
