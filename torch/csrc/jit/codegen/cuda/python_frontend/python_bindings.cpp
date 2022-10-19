@@ -85,7 +85,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           py::init<nvfuser::FusionInterface*, int>(),
           py::arg("fusion"),
-          py::arg("max_length") = int(256))
+          py::arg("max_length") = int(1024))
       .def_readwrite("ops", &nvfuser::FusionDefinition::ops)
       .def(
           "__enter__",
@@ -1222,6 +1222,26 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("original_shape"),
       py::arg("dim"),
       py::return_value_policy::reference);
+  nvf_ops.def(
+      "view",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor arg,
+         std::vector<int64_t>& original_shape,
+         std::vector<int64_t>& new_shape) -> nvfuser::Tensor {
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        self.fusion_definition->defineRecord(new nvfuser::ViewOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
+            original_shape,
+            new_shape));
+        return output;
+      },
+      py::arg("arg"),
+      py::arg("original_shape"),
+      py::arg("new_shape"),
+      py::return_value_policy::reference);
+
   nvf_ops.def(
       "var",
       [](nvfuser::FusionDefinition::Operators& self,

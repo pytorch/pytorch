@@ -2,8 +2,9 @@
 # Owner(s): ["module: unknown"]
 
 from torch import nn
-from torch.ao.sparsity import WeightNormSparsifier
-from torch.ao.sparsity import BaseScheduler, LambdaSL, CubicSL
+
+from torch.ao.pruning import WeightNormSparsifier
+from torch.ao.pruning import BaseScheduler, LambdaSL, CubicSL
 
 from torch.testing._internal.common_utils import TestCase
 
