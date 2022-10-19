@@ -18,6 +18,7 @@ import git  # type: ignore[import]
 import pathlib
 import argparse
 import subprocess
+import urllib.parse
 from pathlib import Path
 
 from typing import List, Tuple
@@ -51,7 +52,9 @@ class S3Client:
         print(f"Uploading file {file_name} to S3 with key: {s3_key}")
         self.s3.upload_file(str(file_path), self.bucket, s3_key)
         # output the result URL
-        print(f"Uploaded the result file {file_name} to {S3_URL_BASE}{s3_key}")
+        url = f"{S3_URL_BASE}{s3_key}"
+        print(f"Uploaded the result file {file_name} to {url}")
+        return url
 
 def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
     d = {}
@@ -168,7 +171,10 @@ def process_upload_s3(result_dir: str) -> None:
     s3_client: S3Client = S3Client()
     filekey_prefix = result_dir_path.name
     for f in files:
-        s3_client.upload_file(f, filekey_prefix)
+        file_url = s3_client.upload_file(f, filekey_prefix)
+        escaped_url = urllib.parse.quote_plus(file_url)
+        visualize_url = f"https://davidberard98.github.io/torchbench-nvfuser-visualize/?url={escaped_url}"
+        print(f"\nSee results here: {visualize_url}\n
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run TorchBench tests based on PR')
