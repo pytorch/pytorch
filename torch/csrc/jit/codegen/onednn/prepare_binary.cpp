@@ -172,23 +172,27 @@ static void EliminateIdentityMulAdd(Block* block) {
 }
 
 // Ensure that if tensor inputs to be concatenated have different dtypes,
-// some inputs should undergo type-promotion.
+// some inputs would undergo type-promotion.
 static void promoteDtypesForCat(Block* block) {
   for (auto node : block->nodes()) {
     for (auto sub : node->blocks()) {
       promoteDtypesForCat(sub);
     }
     if (node->kind() == aten::cat) {
+      // Check if this instance of cat can indeed be mapped to oneDNN Graph.
       if ((node->namedInput("tensors")->node()->kind() ==
            prim::ListConstruct) &&
           (node->namedInput("tensors")->uses().size() == 1) &&
           (node->namedInput("dim")->node()->kind() == prim::Constant)) {
-        WithInsertPoint guard(node);
-        auto g = node->owningGraph();
         auto listConstruct = node->namedInput("tensors")->node();
+        // Type-promotion would be to the dtype of cat's output.
         c10::optional<c10::ScalarType> promotedDtype =
             node->output()[0].type()->expect<TensorType>()->scalarType();
+        // Just a sanity-check to ensure we have the required info in the IR.
         if (promotedDtype != c10::nullopt) {
+          // output dtype is present in the JIT IR.
+          WithInsertPoint guard(node);
+          auto g = node->owningGraph();
           for (auto input : listConstruct->inputs()) {
             c10::optional<c10::ScalarType> inputDtype =
                 input->type()->expect<TensorType>()->scalarType();
@@ -200,11 +204,11 @@ static void promoteDtypesForCat(Block* block) {
                       promotedDtype));
               listConstruct->replaceInputWith(input, promotedInput);
             }
-          }
-        }
-      }
-    }
-  }
+          } // end inner for loop
+        } // end output dtype is present in IR
+      } // end cat op can be mapped to oneDNN Graph
+    } // end op is aten::cat
+  } // end outer for loop
 }
 
 void PrepareBinaryForLLGA(const std::shared_ptr<Graph>& graph) {
