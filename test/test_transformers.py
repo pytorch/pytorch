@@ -19,7 +19,8 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
-    IS_WINDOWS
+    IS_WINDOWS,
+    slowTest
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 
@@ -71,6 +72,7 @@ class TestTransformers(NNTestCase):
             self.assertEqual(output_mask_4d, output_mask_TxT)
 
     @parametrize("device", device_list)
+    @slowTest
     def test_train_with_pad_and_catch_error(self, device):
         iters = 100
         pad_mask = torch.tensor([[1, 1, 0, 0]], dtype=torch.bool).to(device)
@@ -148,14 +150,14 @@ class TestTransformers(NNTestCase):
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
-    def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor, use_autocast):
+    @parametrize("d_model", [12, 256])
+    def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor, use_autocast, d_model):
         """
         Test TransformerEncoder fastpath output matches slowpath output
         """
         torch.manual_seed(1234)
-        d_model = 12
         nhead = 4
-        dim_feedforward = 12
+        dim_feedforward = d_model
         batch_first = True
 
         model = torch.nn.TransformerEncoder(
@@ -224,7 +226,6 @@ class TestTransformers(NNTestCase):
                 with torch.no_grad():
                     fastpath_output = model(input, src_key_padding_mask=src_key_padding_mask)
                 slowpath_output = model(input, src_key_padding_mask=src_key_padding_mask)  # reference
-
                 # Make sure fastpath_output is same shape as slowpath_output and mask.
                 # When enable_nested_tensor=true, fastpath_output may be smaller than input tensor.
                 # Eg if input bs=1, seqlen=6, and we mask out 2 tokens, fastpath_output will have bs=1, seqlen=4.
