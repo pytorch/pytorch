@@ -825,6 +825,7 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   append_cxx_flag_if_supported("-Werror=return-type" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
@@ -927,14 +928,16 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
-  check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
-  # This doesn't work globally so we use the test on specific
-  # target_compile_options
 endif()
 
 if(USE_ASAN)
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address")
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
+endif()
+
+if(USE_TSAN)
+    string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=thread")
+    string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=thread")
 endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
@@ -1133,10 +1136,6 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(DIRECTORY
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
-      DESTINATION share/cmake/Caffe2/
-      COMPONENT dev)
-  install(FILES
-      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 

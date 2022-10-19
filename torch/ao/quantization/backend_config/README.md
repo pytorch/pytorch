@@ -43,7 +43,7 @@ tensor_1            tensor_2
 
 During prepare and convert, we’ll match the last node, which will be the anchor point of the match, and we can retrieve the whole graph by tracing back from the node. E.g. in the example above, we matched the `nn.ReLU` node, and `node.args[0]` is the `operator.add` node.
 
-## BackendConfig Specification
+## BackendConfig Implementation
 
 The BackendConfig is comprised of a list of BackendPatternConfigs, each of which define the specifications and the requirements for an operator pattern. Here is an example usage:
 
@@ -75,35 +75,39 @@ backend_config = BackendConfig("my_backend") \
     .set_backend_pattern_config(linear_config) \
     .set_backend_pattern_config(conv_relu_config)
 ```
-#### set_observation_type
 
-Observation type here refers to how observers (or QuantDeQuantStubs) are placed in the graph. There are two observation types:
-- `OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` (default): the output observer instance will be different from the input. This is the most common observation type.
-- `OUTPUT_SHARE_OBSERVER_WITH_INPUT`: the output observer instance will be the same as the input. This is useful for operators like `cat`.
+### Observer Insertion
 
-Note: This will be renamed in the near future, since we will soon insert QuantDeQuantStubs with observers (and fake quantizes) attached instead of observers themselves.
+Relevant APIs:
+* `set_observation_type`
 
-#### set_dtype_configs / add_type_config
+During the prepare phase, we insert observers (or QuantDeQuantStubs in the future) into the graph for this operator pattern based on the observation type, which specifies whether to use different observers for the inputs and the outputs of the pattern. For more detail, see `torch.ao.quantization.backend_config.ObservationType`.
 
-Each operator pattern may support one or more sets of input/output/weight/bias data types, and each set may have their own constraints. These requirements are captured in DTypeConfigs, which will be described in more detail in the next section.
+### Reference Quantized Patterns
 
-#### set_root_module / set_reference_quantized_module
+Relevant APIs:
+* `set_root_module`
+* `set_reference_quantized_module`
 
-When we construct the reference quantized model during the convert phase, the root modules (e.g. `nn.Linear` for `nni.LinearReLU` or `nniqat.LinearReLU`) will be swapped to the corresponding reference quantized modules (e.g. `torch.ao.nn.reference.Linear`). This allows custom backends to specify custom reference quantized module implementations to match the numerics of their lowered operators. Since this is a one-to-one mapping, both the root module and the reference quantized module must be specified in the same BackendPatternConfig in order for the conversion to take place.
+During the convert phase, when we construct the reference quantized model, the root modules (e.g. `torch.nn.Linear` for `nni.LinearReLU` or `nniqat.LinearReLU`) will be swapped to the corresponding reference quantized modules (e.g. `torch.ao.nn.reference.Linear`). This allows custom backends to specify custom reference quantized module implementations to match the numerics of their lowered operators. Since this is a one-to-one mapping, both the root module and the reference quantized module must be specified in the same BackendPatternConfig in order for the conversion to take place.
 
-#### set_fuser_method
+### Fusion
 
-As an optimization, operator patterns such as (`torch.nn.ReLU`, `torch.nn.Linear`) may be fused into `nni.LinearReLU`. `set_fuser_method` specifies the function through which this is performed. The first argument of this function is `is_qat`, and the rest of the arguments are the items in the tuple pattern, e.g. the fuser method for the above pattern will have three arguments, `is_qat`, `relu`, and `linear`. See [this example](https://gist.github.com/jerryzh168/8bea7180a8ba3c279f2c9b050f2a69a6) for a slightly more complicated usage.
+Relevant APIs:
+* `set_fuser_method`
+* `set_fused_module`
+* `_set_root_node_getter`
+* `_set_extra_inputs_getter`
 
-#### set_fused_module
+As an optimization, operator patterns such as (`torch.nn.ReLU`, `torch.nn.Linear`) may be fused into `nni.LinearReLU`. This is performed during the prepare phase according to the function specified in `set_fuser_method`, which replaces the pattern with the fused module. During the convert phase, these fused modules (identified by `set_fused_module`) will then be converted to the reference quantized versions of the modules.
 
-This is used to identify fused weighted modules (e.g. `nni.LinearReLU`) that need to be converted to reference quantized modules.
+In FX graph mode quantization, we replace the corresponding nodes in the graph using two helper functions set by the user: `root_node_getter`, which returns the root node (typically the weighted module in the pattern like `torch.nn.Linear`) to replace the matched pattern in the graph, and `extra_inputs_getter`, which returns a list of extra input arguments that will be appended to the existing arguments of the fused module (copied over from the root node). See [this snippet](https://gist.github.com/jerryzh168/8bea7180a8ba3c279f2c9b050f2a69a6) for an example usage.
 
-#### _set_root_node_getter / _set_extra_inputs_getter
+### Data Type Restrictions
 
-For operator patterns that can be fused, `root_node_getter` refers to a function that takes in an operator pattern and returns the root node in the pattern, while `extra_inputs_getter` also takes in an operator pattern but returns a list of extra input arguments that will be appended to the existing arguments of the resulting fused module (which are copied from the root node). See [this example](https://gist.github.com/jerryzh168/8bea7180a8ba3c279f2c9b050f2a69a6) for an example usage.
-
-## DTypeConfig Specification
+Relevant APIs:
+* `add_dtype_config`
+* `set_dtype_configs`
 
 DTypeConfig specifies a set of supported data types for input/output/weight/bias along with the associated constraints, if any. There are two ways of specifying `input_dtype`, `output_dtype`, and `weight_dtype`, as simple `torch.dtype`s or as `DTypeWithConstraints`, e.g.:
 
@@ -141,10 +145,10 @@ dtype_config_with_constraints = DTypeConfig(
 
 During the prepare phase of quantization, we will compare the data types specified in these DTypeConfigs to the ones specified in the matching QConfig for a given operator pattern. If the data types do not match (or the constraints are not satisfied) for all the DTypeConfigs specified for the operator pattern, then we will simply ignore the QConfig and skip quantizing this pattern.
 
-### Quantization range
+#### Quantization range
 
 The user's QConfig may specify `quant_min` and `quant_max`, which are min and max restrictions on the quantization values. Here we set the lower bound for the `quant_min` and then upper bound for the `quant_max` to represent the limits of the backend. If a QConfig exceeds these limits in either direction, it will be treated as violating this constraint.
 
-### Scale range
+#### Scale range
 
 Similarly, the user's QConfig may specify a minimum value for the quantization scale (currently exposed as `eps` but will change in the future to better reflect the semantics). Here we set the lower bound for the `scale_min` to represent the limits of the backend. If a QConfig's min scale value falls below this limit, the QConfig will be treated as violating this constraint. Note that `scale_max_upper_bound` is currently not used, because there is no corresponding mechanism to enforce this on the observer yet.

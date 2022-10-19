@@ -105,7 +105,6 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-  set(Caffe2_CUDA_DEPENDENCY_LIBS ${Caffe2_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 endif()
 
 # ---[ Caffe2 build
@@ -586,7 +585,7 @@ endif()
 if(${USE_ITT})
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
-    ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
+    ${TORCH_SRC_DIR}/csrc/profiler/stubs/itt.cpp
   )
 endif()
 
@@ -638,6 +637,7 @@ if(USE_CUDA)
   else()
     set(DELAY_LOAD_FLAGS "")
   endif()
+
   target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
   target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -665,6 +665,7 @@ if(BUILD_ONEDNN_GRAPH)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_rewriter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/register_interface.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/decompose_silu.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/defer_size_check.cpp
@@ -979,17 +980,18 @@ elseif(USE_CUDA)
     )
     if($ENV{ATEN_STATIC_CUDA})
       target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver_static
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
       )
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver
+          ${CUDA_cusolver_LIBRARY}
       )
     endif()
     # NS: TODO, is this really necessary?
     if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::culibos ${CMAKE_DL_LIBS})
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
     endif()
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
