@@ -270,7 +270,9 @@ class BuiltinVariable(VariableTracker):
                     fn, args = operator.add, [args[1], args[0]]
 
                 proxy = tx.output.create_proxy(
-                    "call_function", fn, *proxy_args_kwargs(args, kwargs), current_tx=tx
+                    "call_function",
+                    fn,
+                    *proxy_args_kwargs(args, kwargs),
                 )
                 if any([isinstance(arg, FakeItemVariable) for arg in args]):
                     return variables.FakeItemVariable.create(
