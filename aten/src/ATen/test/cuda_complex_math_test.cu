@@ -3,7 +3,7 @@
 
 int safeDeviceCount() {
   int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
+  cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
   if (err == cudaErrorInsufficientDriver || err == cudaErrorNoDevice) {
     return 0;
   }
@@ -22,10 +22,10 @@ int safeDeviceCount() {
 __global__ void CUDA##a##b();                       \
 TEST(a##Device, b) {                                \
   SKIP_IF_NO_GPU();                                 \
-  cudaDeviceSynchronize();                          \
+  C10_CUDA_CHECK(cudaDeviceSynchronize());                          \
   CUDA##a##b<<<1, 1>>>();                           \
   C10_CUDA_KERNEL_LAUNCH_CHECK();                   \
-  cudaDeviceSynchronize();                          \
+  C10_CUDA_CHECK(cudaDeviceSynchronize());                          \
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);       \
 }                                                   \
 __global__ void CUDA##a##b()
