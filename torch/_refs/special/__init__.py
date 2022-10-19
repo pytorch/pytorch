@@ -4,6 +4,7 @@ from typing import Optional
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
+import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
