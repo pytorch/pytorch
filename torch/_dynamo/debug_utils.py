@@ -263,16 +263,19 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         )
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
+    # Commenting out the stdout/stderr pipes, otherwise communicate hangs during
+    # segfaults.  This will lead to somewhat bad ux because we will bombard
+    # stdout/err for each minifier run.
     p = subprocess.Popen(
         ["python", file_name],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # stdout=subprocess.PIPE,
+        # stderr=subprocess.PIPE,
         env=new_env,
     )
     out, err = p.communicate()
     if p.returncode != 0:
-        print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
-        print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
+        # print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
+        # print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
         return True
     return False
 
