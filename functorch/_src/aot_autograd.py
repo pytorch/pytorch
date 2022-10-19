@@ -459,7 +459,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             else:
                 ctx.save_for_backward(*fw_outs[num_outs:])
                 ctx.symints = []
-            ctx.save_for_backward(*fw_outs[num_outs:])
 
             fw_outs_not_requiring_grad = [
                 x for (i, x) in enumerate(fw_outs[0:num_outs]) if CompiledFunction.flat_outs_not_requiring_grad[i]
