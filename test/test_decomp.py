@@ -11,7 +11,6 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
     skipIfCrossRef,
-    slowTest,
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
