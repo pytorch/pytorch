@@ -271,7 +271,6 @@ test_inductor_huggingface_shard() {
   fi
   TEST_REPORTS_DIR=test/test-reports/inductor
   mkdir -p "$TEST_REPORTS_DIR"
-
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
@@ -283,6 +282,8 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+  TEST_REPORTS_DIR=test/test-reports/inductor
+  mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
