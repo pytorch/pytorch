@@ -269,7 +269,7 @@ test_inductor_huggingface_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  TEST_REPORTS_DIR="$TORCH_TEST_DIR"/test-reports
+  TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
@@ -282,7 +282,7 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  TEST_REPORTS_DIR="$TORCH_TEST_DIR"/test-reports
+  TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
     --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
