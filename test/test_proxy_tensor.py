@@ -1,6 +1,6 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 import torch
 import unittest
 import warnings
@@ -28,7 +28,8 @@ aten = torch.ops.aten
 
 try:
     import sympy  # noqa: F401
-    HAS_SYMPY = True
+    # TODO(jansel): these tests fail on windows
+    HAS_SYMPY = not IS_WINDOWS
 except ImportError:
     HAS_SYMPY = False
 skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
@@ -685,6 +686,13 @@ def forward(self, x_1):
 
         make_fx(f)(torch.randn(2, 3, 4, 5))
 
+    def test_pr_86917(self):
+        # Tests the issue brought up here https://github.com/pytorch/pytorch/pull/86917#issuecomment-1283155344
+        def f(a, b):
+            return torch.ops.aten.nll_loss_forward(a, b, None, 1, 10)
+
+        self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
+
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
 
@@ -714,9 +722,6 @@ def xfail_inherited_tests(tests):
     "test_inplace_metadata",
     "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
-    "test_make_fx_model_fwd_bwd_wgtupdate",
-    "test_make_fx_model_fwd_bwd",
-    "test_proxy_tensor",
     "test_resnet18_backward_trace",
     "test_trace_subclasses",
 ])
@@ -763,6 +768,19 @@ class TestFakeProxyTensor(TestCase):
 def forward(self, x_1):
     alias = torch.ops.aten.alias.default(x_1);  x_1 = None
     return alias""")
+
+    def test_meta(self):
+        def f(x):
+            a = x.cos()
+            b = torch.var_mean(a, dim=0)
+            c = b * 2
+            return c
+
+        out = make_fx(f, tracing_mode="fake")(torch.randn(5, 5))
+        for n in out.graph.nodes:
+            if n.op == 'output':
+                continue
+            self.assertTrue('val' in n.meta)
 
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
@@ -833,6 +851,20 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     detach = torch.ops.aten.detach.default(empty);  empty = None
     return detach""")
+
+    def test_sqrt_size(self):
+        def f(a):
+            return a / a.size(-1) ** 0.5
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
+    div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
+    return div""")
+
 
     def test_symint_to_tensor(self):
         def f(a):
@@ -982,6 +1014,7 @@ def forward(self, a_1):
 
 
 
+
 make_fx_failures = {
     # unknown
     xfail('allclose'),
@@ -1064,6 +1097,7 @@ symbolic_tensor_failures = {
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('chunk', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
+    xfail('combinations', ''),
     xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
@@ -1256,17 +1290,13 @@ symbolic_tensor_failures = {
     xfail('special.bessel_y1', ''),  # aten.special_bessel_y1.default - couldn't find symbolic meta function/decomposition
     xfail('special.chebyshev_polynomial_t', ''),  # aten.special_chebyshev_polynomial_t.default - couldn't find symbolic me...
     xfail('special.chebyshev_polynomial_u', ''),  # aten.special_chebyshev_polynomial_u.default - couldn't find symbolic me...
-    xfail('special.entr', ''),  # aten.special_entr.default - couldn't find symbolic meta function/decomposition
-    xfail('special.erfcx', ''),  # aten.special_erfcx.default - couldn't find symbolic meta function/decomposition
     xfail('special.hermite_polynomial_h', ''),  # aten.special_hermite_polynomial_h.default - couldn't find symbolic meta f...
     xfail('special.hermite_polynomial_he', ''),  # aten.special_hermite_polynomial_he.default - couldn't find symbolic meta...
     xfail('special.laguerre_polynomial_l', ''),  # aten.special_laguerre_polynomial_l.default - couldn't find symbolic meta...
-    xfail('special.log_ndtr', ''),  # aten.special_log_ndtr.default - couldn't find symbolic meta function/decomposition
     xfail('special.modified_bessel_i0', ''),  # aten.special_modified_bessel_i0.default - couldn't find symbolic meta funct...
     xfail('special.modified_bessel_i1', ''),  # aten.special_modified_bessel_i1.default - couldn't find symbolic meta funct...
     xfail('special.modified_bessel_k0', ''),  # aten.special_modified_bessel_k0.default - couldn't find symbolic meta funct...
     xfail('special.modified_bessel_k1', ''),  # aten.special_modified_bessel_k1.default - couldn't find symbolic meta funct...
-    xfail('special.ndtri', ''),  # aten.special_ndtri.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/...
     xfail('special.scaled_modified_bessel_k0', ''),  # aten.special_scaled_modified_bessel_k0.default - couldn't find symbo...
     xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
@@ -1290,6 +1320,7 @@ symbolic_tensor_failures = {
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
+    skip('nn.functional.batch_norm')  # Segfault??
 }
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
