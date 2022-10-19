@@ -3800,25 +3800,33 @@ class CommonTemplate:
     @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs(self):
         def fn(x, y):
-            return x + y
+            return x + y, x * y, x / y
+
+        opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
             rand_strided((2, 3), (3, 1), device="cuda"),
             rand_strided((), (), device="cpu"),
         )
-        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @requires_cuda()
     @patch.object(config.triton, "cudagraphs", True)
     def test_unspec_inputs_cudagraphs(self):
         def fn(x, y):
-            return x + y
+            return x + y, x * y, x / y
+
+        opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
             rand_strided((2, 3), (3, 1), device="cuda"),
             rand_strided((), (), device="cpu"),
         )
-        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
