@@ -59,6 +59,7 @@ SavedVariable::SavedVariable(
 
     auto maybe_hooks = get_default_hooks();
 
+    // Avoid wrapped numbers from being leaked to the user
     if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
