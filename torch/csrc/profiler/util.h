@@ -181,12 +181,11 @@ class TORCH_API GlobalStateManager {
     return singleton_;
   }
 
-  template <typename... Args>
-  static void init(Args... args) {
+  static void push(std::shared_ptr<T>&& state) {
     if (singleton().state_) {
       LOG(WARNING) << "GlobalStatePtr already exists!";
     } else {
-      singleton().state_ = std::make_shared<T>(std::forward<Args>(args)...);
+      singleton().state_ = std::move(state);
     }
   }
 
@@ -195,9 +194,6 @@ class TORCH_API GlobalStateManager {
   }
 
   static std::shared_ptr<T> pop() {
-    TORCH_INTERNAL_ASSERT(
-        singleton().state_ != nullptr,
-        "Global state ptr cannot be null before resetting");
     auto out = singleton().state_;
     singleton().state_.reset();
     return out;

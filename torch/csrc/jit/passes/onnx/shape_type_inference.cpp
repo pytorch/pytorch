@@ -12,6 +12,8 @@
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <torch/csrc/onnx/diagnostics/diagnostics.h>
+
 #include <onnx/shape_inference/implementation.h>
 #include <algorithm>
 #include <cmath>
@@ -89,6 +91,7 @@ void MergeInferredTypeAndSetMap(
 namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
+namespace diagnostics = ::torch::onnx::diagnostics;
 
 c10::ShapeSymbol ONNXDimToShapeSymbol(
     const onnx::TensorShapeProto_Dimension& dim,
@@ -882,17 +885,18 @@ void ProcessReduceNode(Node* n) {
     auto input_shape_value_0 = input_shape_0.value().sizes();
     size_t rank_0 = input_shape_value_0.value().size();
     std::vector<::c10::ShapeSymbol> final_shape;
+    std::vector<int64_t> axes_vector(rank_0);
     if (!n->hasAttributeS("axes")) {
-      UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
-      return;
+      std::iota(axes_vector.begin(), axes_vector.end(), 0);
+    } else {
+      axes_vector = n->is(attr::axes);
     }
-    final_shape.reserve(rank_0);
-    std::vector<int64_t> axes_vector = n->is(attr::axes);
     for (auto idx : c10::irange(axes_vector.size())) {
       if (axes_vector[idx] < 0) {
         axes_vector[idx] += rank_0;
       }
     }
+    final_shape.reserve(rank_0);
     // ONNX keepdims defaults to 1 when not set.
     int64_t keepdims = 1;
     if (n->hasAttributeS("keepdims")) {
@@ -1882,6 +1886,11 @@ void UpdateReliable(
         output->node()->kind().toDisplayString(),
         " type is missing, so it may result in wrong shape inference for the exported graph. ",
         "Please consider adding it in symbolic function.");
+    // Experimental, nothing sent to stdout nor stderr.
+    diagnostics::Diagnose(
+        diagnostics::Rule::kNodeMissingOnnxShapeInference,
+        diagnostics::Level::kWarning,
+        {output->node()->kind().toDisplayString()});
   }
   auto reliable = false;
   if (inferred) {

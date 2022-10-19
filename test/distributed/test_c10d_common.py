@@ -7,12 +7,10 @@ import tempfile
 import threading
 import time
 from contextlib import suppress
-from dataclasses import dataclass
 from datetime import timedelta
-from functools import partial
 from itertools import product
 from sys import platform
-from typing import Any, Tuple
+from typing import Callable
 
 import torch
 import torch.distributed as dist
@@ -26,15 +24,8 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
-from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental.proxy_tensor import (
-    _ProxyTensor,
-    fetch_tensor_proxy,
-    get_proxy_slots,
-    make_fx,
-    set_proxy_slot,
-    track_tensor_tree,
-)
+from torch.distributed._spmd.comm_tensor import _wait_comm, CommTensor
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -47,13 +38,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize
-)
-from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import (
-    tree_flatten,
-    tree_map,
-    tree_map_only,
-    tree_unflatten
 )
 from torch.utils.checkpoint import checkpoint
 
@@ -988,6 +972,10 @@ class AbstractCommTest(object):
     def world_size(self):
         return 2
 
+    @property
+    def device(self):
+        self.fail("test subclass didn't override device")
+
     def _verify_sequence_number_across_pg(self, pg, verify_pg):
 
         seq_num = pg._get_sequence_number_for_group()
@@ -1160,7 +1148,81 @@ class AbstractCommTest(object):
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
 
+    def _test_tensor_dtype_mismatch(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
+        tensor = torch.ones(2, 2, device=self.device) * 7
+        tensor_h = tensor.half()
+        tensor_list = [torch.zeros(2, 2, device=self.device) for _ in range(self.world_size)]
+        tensor_list_h = list(tensor_list)
+        tensor_list_h[1] = tensor_list_h[1].half()
+
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_gather(tensor_list_h, tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_gather(tensor_list, tensor_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_gather_coalesced([tensor_list_h], tensor_list)
+            dist.all_gather_coalesced([tensor_list], tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_reduce_coalesced(tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.reduce_scatter(tensor, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.reduce_scatter(tensor_h, tensor_list)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_to_all_single(tensor_h, tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_to_all(tensor_list_h, tensor_list)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_to_all(tensor_list, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.scatter(tensor, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.gather(tensor_h, tensor_list)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.gather(tensor, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.scatter(tensor_h, tensor_list)
+
+    def _test_tensor_dtype_complex(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        tensor = torch.rand(2, device=self.device)
+        tensor_c = torch.view_as_complex(tensor)
+        tensor_list = [torch.rand(2, device=self.device) for _ in range(self.world_size)]
+        tensor_list_c = list(tensor_list)
+        tensor_list_c[1] = torch.view_as_complex(tensor_list_c[1])
+
+        dist.all_gather(tensor_list, tensor)
+        dist.all_gather(tensor_list, tensor_c)
+        dist.all_gather(tensor_list_c, tensor)
+        dist.all_gather(tensor_list_c, tensor_c)
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
@@ -1304,13 +1366,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
-            dist.Backend._plugins["DUMMY"],
+            dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
 
+    class Options:
+        def __init__(self):
+            pass
+
+        def create(self):
+            pass
+
     @staticmethod
-    def create_dummy(store, rank, size, timeout):
-        return DummyProcessGroup(rank, size)
+    def create_dummy(store, group_rank, group_size, timeout):
+        return DummyProcessGroup(group_rank, group_size)
 
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
@@ -1370,212 +1439,54 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
+class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
 
-def wait_comm(comm_result):
-    # This function is only used by tracing mode as a call_function node right
-    # before consuming a collective result tensor.
-    comm_result._work.wait()
-    return comm_result._tensor
+    def setUp(self):
+        super(ProcessGroupWithDispatchedCollectivesTests, self).setUp()
+        self._spawn_processes()
 
+    def tearDown(self):
+        super(ProcessGroupWithDispatchedCollectivesTests, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
 
-@dataclass
-class CommResult:
-    # a custom type wrapping both inplace output tensor and work handle
-    _tensor: torch.Tensor
-    _work: torch.classes.c10d.Work
+    def _call_collective_with_varying_tensors(self, backend, collective, *args):
+        # call collective with varying tensors to ensure that the tensors are
+        # correctly dispatched
 
-
-def wrap_comm_result(result: Tuple[Any]) -> Tuple[Any]:
-    def wrap(work, e):
-        assert isinstance(e, torch.Tensor), (
-            "Excepting collection of tensors as the first element in the "
-            "return value of communication operations."
-        )
-
-        return CommResult(e, work)
-
-    # E.g.,
-    # allreduce_ returns ([tensor], work)
-    # allgather_ returns ([[tensor1, tensor2]], work)
-    work = result[1]
-    return (tree_map(partial(wrap, work), result[0]), work)
-
-
-class CommTensor(torch.Tensor):
-    r"""
-    A Tensor subclass to wrap input tensors for collective communications. This
-    Tensor subclass works for both eager and tracing mode.
-
-    In eager mode, it will record whether the inplace collective communication
-    has been launched using this Tensor and remember the corresponding work
-    handle. If yes, it will expliclty call wait() in the ``__torch_dispatch__``
-    function before subsequent operations consuming the value of the Tensor.
-
-    In tracing mode, ``CommTensor`` inserts two node into the graph using the
-    ``__torch_dispatch__`` function.
-
-    1. The first node is inserted right after the
-    communication, wrapping both the inplace output tensor and the returned
-    work handle into a custom CommResult type. We have to do this because
-    ``ProxyTorchDispatchMode`` only handles ``torch.Tensor``, ``_ProxyTensor``,
-    and ``torch.nn.Parameter`` objects and will treat the work handle
-    as a constant and embed that into the graph. As a result, during execution,
-    it will use the work handle created during tracing and will lead to wrong
-    result. The solution in this test is to manually create a proxy on the
-    return value of ``allreduce_`` which is ``([tensor], work)``, and wrap that
-    to ``[(CommResult(tensor, work)), work]``. In this way, subsequent nodes can
-    directly consume ``CommResult``.
-    2. The second node is inserted right before any subsequent node reads from
-    ``CommResult``. It will call ``wait()`` on the stashed work handle to ensure
-    that computation waits for communication.
-
-    It is specifically tailored for allreduce_ at the moment.
-    """
-    @staticmethod
-    def __new__(cls, tensor: torch.Tensor):
-        r = torch.Tensor._make_subclass(  # type: ignore[attr-defined]
-            cls,
-            tensor,
-            require_grad=tensor.requires_grad,
-        )
-        # The tensor object wrapped by this CommTensor
-        r._tensor: torch.Tensor = tensor
-        # Record whether communication has launched on this tensor.
-        r._after_comm: bool = False
-        return r
-
-    def __repr__(self):
-        return f"CommTensor({self._tensor}, after_comm={self._after_comm})"
-
-    # disable __torch_function__ so that CommTensor can recursively dispatch
-    # with ProxyTorchDispatchMode in make_fx
-    __torch_function__ = _disabled_torch_function_impl
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # shared states when unwrapping args
-        tracer = None
-        after_comm = False
-
-        def get_tracer(obj):
-            slots = get_proxy_slots(obj)
-            if slots is None:
-                return None
-            keys = tuple(slots.keys())
-            assert len(keys) == 1
-            return keys[0]
-
-        def get_proxy(obj):
-            slots = get_proxy_slots(obj)
-            if slots is None:
-                return None
-            vals = tuple(slots.values())
-            assert len(vals) == 1
-            return vals[0]
-
-        # wrapped ._tensor if this is a CommTensor, and insert/call wait()
-        # if communication has been launched on this tensor.
-        def unwrap(e):
-            if isinstance(e, CommTensor):
-                nonlocal tracer, after_comm
-
-                after_comm = e._after_comm
-                tracer = get_tracer(e._tensor)
-
-                if after_comm:
-                    if tracer is not None:
-                        # insert a node to the traced graph.
-                        proxy_res = tracer.create_proxy(
-                            'call_function',
-                            wait_comm,
-                            (get_proxy(e._tensor).proxy,),
-                            {},
-                            name="wait_comm"
-                        )
-                        # HACK: update the proxy for the inplace output
-                        set_proxy_slot(e._tensor, tracer, proxy_res)
-                    # For eager mode, simply wait.
-                    # During tracing, still need to wait here, to make sure the
-                    # execution during tracing is correct.
-                    e._work.wait()
-
-                return e._tensor
-            else:
-                return e
-
-        def wrap(e):
-            return CommTensor(e) if isinstance(e, torch.Tensor) else e
-
-        def mark_after_comm(work, e):
-            if isinstance(e, torch.Tensor) or isinstance(e, CommTensor):
-                e._work = work
-                e._after_comm = True
-
-            return e
-
-        unwrapped_args = tree_map(unwrap, args)
-        unwrapped_kwargs = tree_map(unwrap, kwargs)
-
-        if "allreduce_" in func.__name__:
-            if tracer is not None:
-                # in tracing mode, get proxies for args
-                proxy_args, proxy_kwargs = tree_map_only(
-                    _ProxyTensor,
-                    lambda e: e.proxy,
-                    tree_map_only(
-                        torch.Tensor,
-                        fetch_tensor_proxy(tracer),
-                        (unwrapped_args, unwrapped_kwargs)
-                    ),
-                )
-
-                # get proxy for output tuple
-                proxy_res = func(*proxy_args, **proxy_kwargs)
-                # insert a node that wraps the output tuple into
-                # CommResult(tensor, work)
-                comm_result_proxy = tracer.create_proxy(
-                    'call_function',
-                    wrap_comm_result,
-                    (proxy_res, ),
-                    {},
-                    name="comm_result"
-                )
-
-                with no_dispatch():
-                    # disable dispatch to avoid trigger ProxyTorchDispatchMode logic
-                    out = func(*unwrapped_args, **unwrapped_kwargs)
-
-                # wrap output with the proxy of CommResult, so that subsequent
-                # ops and link to it.
-                track_tensor_tree(out, comm_result_proxy, constant=None, tracer=tracer)
-
-                # N.B.: we still need to remember the work handle here, and wait
-                # for it later to make sure the execution during tracing is
-                # correct. Also, remember comm is already launched
-                # args[0] is always the collection of output tensors
-                tree_map(partial(mark_after_comm, out[1]), args[0])
-
-                # HACK: update the proxy on the input argument as this is an
-                # inplace collective communication.
-                flat_args, args_spec = tree_flatten(unwrapped_args[0])
-                flat_out, out_spec = tree_flatten(out[0])
-                for a, o in zip(flat_args, flat_out):
-                    set_proxy_slot(a, tracer, get_proxy(o))
-
-                return (tree_unflatten(flat_out, out_spec), out[1])
-            else:
-                # in eager mode, simply remember work handle as an attribute
-                out = func(*unwrapped_args, **kwargs)
-                tree_map(partial(mark_after_comm, out[1]), args[0])
-                return out
+        # TODO: this will be updated in the future to not be backend specific
+        device = "cuda" if backend == "nccl" else "cpu"
+        # ensure supported devices (cpu, cuda) succeeds during dispatch call
+        tensor = torch.zeros(2, 2, device=torch.device(device))
+        # multi tensor collectives
+        if collective == dist.all_gather:
+            collective([tensor], tensor, *args)
         else:
-            if after_comm:
-                return func(*unwrapped_args, **unwrapped_kwargs)
-            else:
-                # we need to propagate CommTensor wrapping until the first
-                # subsequent operation has waited for it.
-                return tree_map(wrap, func(*unwrapped_args, **unwrapped_kwargs))
+            collective(tensor, *args)
 
+    # TODO: backend will be replaced with a non specified backend
+    def _test_collectives(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        collectives_and_args = [
+            (dist.reduce, self.rank),
+            (dist.broadcast, self.rank),
+            (dist.all_reduce,),
+            (dist.all_gather,)
+        ]
+        for collective, *args in collectives_and_args:
+            with self.subTest(collective=collective, args=args):
+                self._call_collective_with_varying_tensors(backend, collective, *args)
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
@@ -1592,7 +1503,7 @@ class CompilerTest(MultiProcessTestCase):
     def _get_process_group(self):
         raise NotImplementedError("To be implemented by subclass")
 
-    def _test_work_wait(self, x: torch.Tensor):
+    def _test_work_wait(self, x: torch.Tensor, comm_fn: Callable):
         pg = self._get_default_group()
 
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -1600,12 +1511,12 @@ class CompilerTest(MultiProcessTestCase):
             # all_reduce Python implementation, as the later will need more
             # discussion.
             y = CommTensor(x + x)
-            work = dist.all_reduce(y, group=pg, async_op=True)
+            work, z = comm_fn(y, group=pg)
             # this wait() will be ignored in tracing mode as
             # ProxyTorchDispatchMode only supports torch.Tensor, _ProxyTensor,
             # and torch.nn.Parameter objects
             work.wait()
-            return y * 2
+            return z * 2
 
         xx = x.clone()
 
@@ -1625,11 +1536,11 @@ class CompilerTest(MultiProcessTestCase):
                     curr = prev
                     waited |= all([
                         curr.op == "call_function",
-                        curr.target == wait_comm,
+                        curr.target == _wait_comm,
                     ])
                     commed |= all([
                         curr.op == "call_function",
-                        "allreduce_" in curr.target.__name__
+                        CommTensor._is_supported(curr.target.__name__),
                     ])
 
                     prev = curr.args[0]
@@ -1651,6 +1562,64 @@ class CompilerTest(MultiProcessTestCase):
         xx += 1
         yy = traced_fn(xx)
         self.assertFalse(y.allclose(yy))
+
+    def _test_allreduce_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(tensor, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_allgather_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            out_tensors = [torch.zeros_like(tensor) for _ in range(group.size())]
+            work = dist.all_gather(out_tensors, tensor, group=group, async_op=True)
+            work.wait()
+
+            return work, sum(out_tensors)
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_reduce_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor.clone() + i for i in range(group.size())]
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.reduce_scatter(out_tensor, in_tensors, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_broadcast_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.broadcast(tensor, src=0, group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_scatter_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            in_tensors = [tensor + i for i in range(group.size())] if self.rank == 0 else None
+            out_tensor = torch.zeros_like(tensor)
+            work = dist.scatter(out_tensor, in_tensors, src=0, group=group, async_op=True)
+            return work, out_tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_nested_comm_tensor_wrapping(self, tensor):
+        def comm_fn(tensor, group=None):
+            work = dist.all_reduce(CommTensor(tensor), group=group, async_op=True)
+            return work, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
+
+    def _test_consecutive_comm_work_wait(self, tensor):
+        def comm_fn(tensor, group=None):
+            work1 = dist.all_reduce(tensor, group=group, async_op=True)
+            work1.wait()
+            work2 = dist.all_reduce(tensor, group=group, async_op=True)
+            return work2, tensor
+
+        self._test_work_wait(tensor, comm_fn=comm_fn)
 
 
 if __name__ == "__main__":

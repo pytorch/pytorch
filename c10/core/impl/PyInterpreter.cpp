@@ -27,8 +27,22 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(dispatch);
   }
 
-  bool is_contiguous(const TensorImpl* self) const override {
+  void python_dispatcher(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet,
+      torch::jit::Stack* stack) const override {
+    PANIC(python_dispatcher);
+  }
+
+  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
     PANIC(is_contiguous);
+  }
+  bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
+      const override {
+    PANIC(is_strides_like);
+  }
+  bool is_non_overlapping_and_dense(const TensorImpl* self) const override {
+    PANIC(is_non_overlapping_and_dense);
   }
   c10::Device device(const TensorImpl* self) const override {
     PANIC(device);
@@ -54,6 +68,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override {
     PANIC(sym_strides);
   }
+  c10::SymInt sym_storage_offset(const TensorImpl* self) const override {
+    PANIC(sym_storage_offset);
+  }
 
   // Just swallow the event, don't do anything
   void trace_gpu_event_creation(uintptr_t event) const override {}
@@ -64,6 +81,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void trace_gpu_memory_allocation(uintptr_t ptr) const override {}
   void trace_gpu_memory_deallocation(uintptr_t ptr) const override {}
   void trace_gpu_stream_creation(uintptr_t stream) const override {}
+  void trace_gpu_device_synchronization() const override {}
+  void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
+  void trace_gpu_event_synchronization(uintptr_t event) const override {}
 };
 
 void PyInterpreter::disarm() noexcept {
