@@ -6964,10 +6964,10 @@ for shape in [(1,), ()]:
             self.assertEqual(6 * 8 * a, a.grad)
 
     def test_wrapped_number_saved_variable_hooks(self):
-        def pack_hook(x):
+        def err_hook(x):
             raise RuntimeError("this hook should not be called")
 
-        with torch.autograd.graph.saved_tensors_hooks(pack_hook, lambda x: x):
+        with torch.autograd.graph.saved_tensors_hooks(err_hook, err_hook):
             a = torch.randn(5, requires_grad=True)
             out = (a * 3).sum()
             # 3 is saved as a saved tensor because it is a wrapped number, but
