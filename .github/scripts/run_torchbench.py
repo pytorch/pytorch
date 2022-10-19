@@ -174,7 +174,7 @@ def process_upload_s3(result_dir: str) -> None:
         file_url = s3_client.upload_file(f, filekey_prefix)
         escaped_url = urllib.parse.quote_plus(file_url)
         visualize_url = f"https://davidberard98.github.io/torchbench-nvfuser-visualize/?url={escaped_url}"
-        print(f"\nSee results here: {visualize_url}\n
+        print(f"\nSee results here: {visualize_url}\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run TorchBench tests based on PR')
