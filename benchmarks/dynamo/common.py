@@ -1463,6 +1463,12 @@ def parse_args():
         help="Fail a benchmark if backend throws an exception",
     )
     parser.add_argument(
+        "--raise-on-any",
+        "--raise",
+        action="store_true",
+        help="Raise on assertion or backend errors",
+    )
+    parser.add_argument(
         "--output",
         help="Overrides the output filename",
     )
@@ -1653,8 +1659,7 @@ def main(runner, original_dir=None):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
-        args.raise_on_assertion_error = True
-        args.raise_on_backend_error = True
+        args.raise_on_any = True
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1718,8 +1723,12 @@ def main(runner, original_dir=None):
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
 
-    torch._dynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
-    torch._dynamo.config.raise_on_backend_error = args.raise_on_backend_error
+    torch._dynamo.config.raise_on_assertion_error = (
+        args.raise_on_assertion_error or args.raise_on_any
+    )
+    torch._dynamo.config.raise_on_backend_error = (
+        args.raise_on_backend_error or args.raise_on_any
+    )
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass
