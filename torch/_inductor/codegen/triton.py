@@ -791,7 +791,12 @@ class TritonKernel(Kernel):
             other = ", other=0"
         else:
             other = ""
-        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+
+        if V.graph.is_unspec_arg(name):
+            line = var
+        else:
+            line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line += ".to(tl.float32)"
 
@@ -1064,6 +1069,10 @@ class TritonKernel(Kernel):
 
     def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
+        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+        for i in range(len(call_args)):
+            if V.graph.is_unspec_arg(call_args[i]):
+                call_args[i] = call_args[i] + ".item()"
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
