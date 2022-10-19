@@ -140,8 +140,10 @@ function install_triton() {
 function setup_torchdeploy_deps(){
   conda install -y cmake
   conda install -y -c conda-forge libpython-static=3.10
-  local CC="$(which gcc)"
-  local CXX="$(which g++)"
+  local CC
+  local CXX
+  CC="$(which gcc)"
+  CXX="$(which g++)"
   export CC
   export CXX
   pip install --upgrade pip
