@@ -1801,9 +1801,9 @@
            _trilinear(i1_p, i2_t, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_p, i3_t, expand1, expand2, expand3, sumdim, unroll_dim)"
 
-- name: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
+- name: constant_pad_nd(Tensor self, SymInt[] pad, Scalar value=0) -> Tensor
   self: constant_pad_nd_backward(grad, pad)
-  result: constant_pad_nd(self_t, pad, 0)
+  result: constant_pad_nd_symint(self_t, pad, 0)
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
@@ -2015,28 +2015,28 @@
   self: threshold_backward(grad, self, threshold)
   result: self_t.copy_(threshold_backward(self_t.conj(), original_self_p, threshold).conj())
 
-- name: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
-  self: reflection_pad1d_backward(grad, self, padding)
+- name: reflection_pad1d(Tensor self, SymInt[2] padding) -> Tensor
+  self: reflection_pad1d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: reflection_pad2d(Tensor self, int[4] padding) -> Tensor
-  self: reflection_pad2d_backward(grad, self, padding)
+- name: reflection_pad2d(Tensor self, SymInt[4] padding) -> Tensor
+  self: reflection_pad2d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: reflection_pad3d(Tensor self, int[6] padding) -> Tensor
-  self: reflection_pad3d_backward(grad, self, padding)
+- name: reflection_pad3d(Tensor self, SymInt[6] padding) -> Tensor
+  self: reflection_pad3d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: replication_pad1d(Tensor self, int[2] padding) -> Tensor
-  self: replication_pad1d_backward(grad, self, padding)
+- name: replication_pad1d(Tensor self, SymInt[2] padding) -> Tensor
+  self: replication_pad1d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: replication_pad2d(Tensor self, int[4] padding) -> Tensor
-  self: replication_pad2d_backward(grad, self, padding)
+- name: replication_pad2d(Tensor self, SymInt[4] padding) -> Tensor
+  self: replication_pad2d_backward_symint(grad, self, padding)
   result: auto_linear
 
-- name: replication_pad3d(Tensor self, int[6] padding) -> Tensor
-  self: replication_pad3d_backward(grad, self, padding)
+- name: replication_pad3d(Tensor self, SymInt[6] padding) -> Tensor
+  self: replication_pad3d_backward_symint(grad, self, padding)
   result: auto_linear
 
 - name: upsample_linear1d(Tensor self, SymInt[1] output_size, bool align_corners, float? scales=None) -> Tensor
@@ -2391,35 +2391,35 @@
   self: zeros_like(grad)
   result: rrelu_with_noise_backward(grad_output_t, self_p, noise, lower, upper, training, false)
 
-- name: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  grad_output: reflection_pad1d(grad, padding)
+- name: reflection_pad1d_backward(Tensor grad_output, Tensor self, SymInt[2] padding) -> Tensor
+  grad_output: reflection_pad1d_symint(grad, padding)
   self: zeros_like(self)
-  result: reflection_pad1d_backward(grad_output_t, self_p, padding)
+  result: reflection_pad1d_backward_symint(grad_output_t, self_p, padding)
 
-- name: reflection_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  grad_output: reflection_pad2d(grad, padding)
+- name: reflection_pad2d_backward(Tensor grad_output, Tensor self, SymInt[4] padding) -> Tensor
+  grad_output: reflection_pad2d_symint(grad, padding)
   self: zeros_like(self)
-  result: reflection_pad2d_backward(grad_output_t, self_p, padding)
+  result: reflection_pad2d_backward_symint(grad_output_t, self_p, padding)
 
-- name: reflection_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
-  grad_output: reflection_pad3d(grad, padding)
+- name: reflection_pad3d_backward(Tensor grad_output, Tensor self, SymInt[6] padding) -> Tensor
+  grad_output: reflection_pad3d_symint(grad, padding)
   self: zeros_like(self)
-  result: reflection_pad3d_backward(grad_output_t, self_p, padding)
+  result: reflection_pad3d_backward_symint(grad_output_t, self_p, padding)
 
-- name: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  grad_output: replication_pad1d(grad, padding)
+- name: replication_pad1d_backward(Tensor grad_output, Tensor self, SymInt[2] padding) -> Tensor
+  grad_output: replication_pad1d_symint(grad, padding)
   self: zeros_like(self)
-  result: replication_pad1d_backward(grad_output_t, self_p, padding)
+  result: replication_pad1d_backward_symint(grad_output_t, self_p, padding)
 
-- name: replication_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  grad_output: replication_pad2d(grad, padding)
+- name: replication_pad2d_backward(Tensor grad_output, Tensor self, SymInt[4] padding) -> Tensor
+  grad_output: replication_pad2d_symint(grad, padding)
   self: zeros_like(self)
-  result: replication_pad2d_backward(grad_output_t, self_p, padding)
+  result: replication_pad2d_backward_symint(grad_output_t, self_p, padding)
 
-- name: replication_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
-  grad_output: replication_pad3d(grad, padding)
+- name: replication_pad3d_backward(Tensor grad_output, Tensor self, SymInt[6] padding) -> Tensor
+  grad_output: replication_pad3d_symint(grad, padding)
   self: zeros_like(self)
-  result: replication_pad3d_backward(grad_output_t, self_p, padding)
+  result: replication_pad3d_backward_symint(grad_output_t, self_p, padding)
 
 - name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
