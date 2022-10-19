@@ -427,7 +427,11 @@ There are multiple quantization types in post training quantization (weight only
 FXPTQ API Example::
 
   import torch
-  from torch.ao.quantization import QConfigMapping
+  from torch.ao.quantization import (
+    get_default_qconfig_mapping,
+    get_default_qat_qconfig_mapping,
+    QConfigMapping,
+  )
   import torch.quantization.quantize_fx as quantize_fx
   import copy
 
@@ -454,7 +458,7 @@ FXPTQ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('qnnpack'))
+  qconfig_mapping = get_default_qconfig_mapping('qnnpack')
   model_to_quantize.eval()
   # prepare
   model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
@@ -467,7 +471,7 @@ FXPTQ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qat_qconfig('qnnpack'))
+  qconfig_mapping = get_default_qat_qconfig_mapping('qnnpack')
   model_to_quantize.train()
   # prepare
   model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping, example_inputs)
