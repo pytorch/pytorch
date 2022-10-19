@@ -20,6 +20,7 @@ from ..utils import (
     instance_descriptor,
     sympy_product,
     sympy_subs,
+    sympy_symbol,
 )
 from ..virtualized import ops, V
 from .common import (
@@ -360,10 +361,10 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
-            expr = ir.IndexingDiv(sympy.Symbol(f"{self.prefix}index"), divisor)
+            expr = ir.IndexingDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
             expr = ir.ModularIndexing(
-                sympy.Symbol(f"{self.prefix}index"), divisor, length
+                sympy_symbol(f"{self.prefix}index"), divisor, length
             )
 
         if expr not in self.nodes:
@@ -476,7 +477,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name
 
     def symbol(self):
-        return sympy.Symbol(self.name)
+        return sympy_symbol(self.name)
 
     def __hash__(self):
         return hash(self.name)
@@ -1018,7 +1019,8 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            self.codegen_static_numels(code)
+            if not config.dynamic_shapes:
+                self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
