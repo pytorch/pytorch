@@ -3420,10 +3420,16 @@
 
 - func: decomposed_quantize_per_tensor(Tensor input, float scale, int zero_point, int quant_min, int quant_max, ScalarType dtype) -> Tensor
   variants: function
+  dispatch:
+    CPU: decomposed_quantize_per_tensor
+  autogen: decomposed_quantize_per_tensor.out
 
 - func: decomposed_dequantize_per_tensor(Tensor input, float scale, int zero_point, int quant_min, int quant_max, ScalarType dtype) -> Tensor
   variants: function
-
+  dispatch:
+    CPU: decomposed_dequantize_per_tensor
+  autogen: decomposed_dequantize_per_tensor.out    
+    
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
 # are namespacing issues in C++
 - func: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
