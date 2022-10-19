@@ -3401,19 +3401,17 @@ Tensor diag(const Tensor& self, int64_t offset) {
   }
 }
 
-Tensor& diag_out(const Tensor& self, int64_t offset, Tensor& result) {
+Tensor& diag_out(const Tensor& self, int64_t offset, Tensor& out) {
   auto ndim = self.dim();
   TORCH_CHECK(ndim == 1 || ndim == 2, "Supports 1D or 2D tensors. Got ", self.dim(), "D");
-  TORCH_CHECK(canCast(self.scalar_type(), result.scalar_type()),
-              self.scalar_type(),
-              " can't be cast to the desired output type ", result.scalar_type());
   if (ndim == 1) {
-    return at::diag_embed_out(result, self, offset);
+    TORCH_CHECK(
+        canCast(self.scalar_type(), out.scalar_type()),
+        "diag: result type ", self.scalar_type(), " can't be cast to the desired out= type ",
+        out.scalar_type());
+    return at::diag_embed_out(out, self, offset);
   } else {
-    auto d = at::diagonal(self, offset);
-
-    at::native::resize_output(result, d.sizes());
-    return result.copy_(d);
+    return at::diagonal_copy_out(out, self, offset);
   }
 }
 
@@ -3668,8 +3666,16 @@ at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayR
 
 
 at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
-  auto tmp = self.diagonal(offset, dim1, dim2);
-  out.copy_(tmp);
+  TORCH_CHECK(
+    out.device() == self.device(),
+    "diagonal_copy: Expected out and self tensors to be on the same device, but got ",
+    "out on ", out.device(), " and self on ", self.device());
+  auto result = self.diagonal(offset, dim1, dim2);
+  at::native::resize_output(out, result.sizes());
+  TORCH_CHECK(
+      canCast(result.scalar_type(), out.scalar_type()),
+      "diagonal_copy: result type ", result.scalar_type(), " can't be cast to the desired out= type ", out.scalar_type());
+  out.copy_(result);
   return out;
 }
 
