@@ -166,6 +166,20 @@ class DisjointSets {
  public:
   DisjointSets() = default;
 
+  DisjointSets(const DisjointSets<T, Hash>& other);
+
+  DisjointSets(DisjointSets<T, Hash>&& other) = default;
+
+  DisjointSets<T, Hash>& operator=(const DisjointSets<T, Hash>& other);
+
+  DisjointSets<T, Hash>& operator=(DisjointSets<T, Hash>&& other) = default;
+
+  friend void swap(DisjointSets<T, Hash>& sets1, DisjointSets<T, Hash>& sets2) {
+    using std::swap;
+    swap(sets1.disjoint_sets_, sets2.disjoint_sets_);
+    swap(sets1.disjoint_set_maps_, sets2.disjoint_set_maps_);
+  }
+
   // Warning: returned values should never be modified. This accessor isn't
   // strictly safe as VectorOfUniqueEntries is not returned as a const.
   const std::
@@ -323,6 +337,42 @@ class DisjointSets {
   // Keep a list of disjoint_sets that's deterministic to iterate over
   std::vector<std::shared_ptr<VectorOfUniqueEntries<T, Hash>>> disjoint_sets_;
 };
+
+template <typename T, typename Hash>
+DisjointSets<T, Hash>::DisjointSets(const DisjointSets<T, Hash>& other) {
+  std::unordered_map<std::shared_ptr<VectorOfUniqueEntries<T, Hash>>, int>
+      ptr_map;
+
+  // Deep copy the vector of the disjoint sets, keeping the same
+  // ordering of the sets.
+  for (const auto other_set : other.disjoint_sets_) {
+    auto new_set = std::make_shared<VectorOfUniqueEntries<T, Hash>>(*other_set);
+    int new_set_index = disjoint_sets_.size();
+    disjoint_sets_.emplace_back(new_set);
+    TORCH_INTERNAL_ASSERT(
+        ptr_map.emplace(other_set, new_set_index).second,
+        "Duplicated set found: ",
+        other_set->toString());
+  }
+
+  // Copy the mappings using the new sets
+  for (const auto kv : other.disjoint_set_maps_) {
+    const auto key = kv.first;
+    const auto new_set_index = ptr_map.at(kv.second);
+    disjoint_set_maps_.emplace(key, disjoint_sets_.at(new_set_index));
+  }
+}
+
+template <typename T, typename Hash>
+DisjointSets<T, Hash>& DisjointSets<T, Hash>::operator=(
+    const DisjointSets<T, Hash>& other) {
+  disjoint_set_maps_.clear();
+  disjoint_sets_.clear();
+
+  DisjointSets<T, Hash> copy(other);
+  swap(*this, copy);
+  return *this;
+}
 
 } // namespace cuda
 } // namespace fuser
