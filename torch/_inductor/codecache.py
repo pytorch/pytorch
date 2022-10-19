@@ -118,11 +118,16 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-def cpp_compile_command(input, output, include_pytorch=False):
+def cpp_compile_command(input, output, include_pytorch=True):
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        macros = ""
+        if config.cpp.simdlen == 16:
+            macros = " " + "-DCPU_CAPABILITY_AVX512"
+        elif config.cpp.simdlen == 8:
+            macros = " " + "-DCPU_CAPABILITY_AVX2"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -131,15 +136,17 @@ def cpp_compile_command(input, output, include_pytorch=False):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = []
         libs = ["gomp"]
+        macros = ""
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
+
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
             {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
-            {ipaths} {lpaths} {libs}
+            {ipaths} {lpaths} {libs} {macros}
             -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
             -o{output} {input}
         """,

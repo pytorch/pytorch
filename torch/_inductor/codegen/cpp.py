@@ -120,6 +120,13 @@ def float16_reduction_prefix(rtype):
     return prefix
 
 
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
+
+
 @functools.lru_cache()
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
@@ -233,6 +240,26 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
+
+    @staticmethod
+    def tanh(a):
+        return f"{a}.tanh()"
+
+    @staticmethod
+    def reciprocal(a):
+        return f"{a}.reciprocal()"
+
+    @staticmethod
+    def constant(val, dtype):
+        if val == float("inf"):
+            quote = f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif val == float("-inf"):
+            quote = f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
+        elif val is True or val is False:
+            quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({str(val).lower()})"
+        else:
+            quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({repr(val)})"
+        return f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({quote})"
 
 
 class CppOverrides(OpOverrides):
@@ -491,14 +518,8 @@ class CppKernel(Kernel):
     def size_hint(self):
         return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
 
-    def parallel_num_threads(self):
-        threads = config.cpp.threads
-        if threads < 1:
-            threads = torch.get_num_threads()
-        return threads
-
     def codegen_loops(self, code, worksharing):
-        threads = self.parallel_num_threads()
+        threads = parallel_num_threads()
 
         loops = [LoopLevel(var, size) for var, size in zip(self.itervars, self.ranges)]
         loops, reductions = LoopNest(loops[: self.reduction_depth]), LoopNest(
@@ -508,11 +529,10 @@ class CppKernel(Kernel):
 
         if config.cpp.simdlen:
             # TODO(jansel): detect stride-1 dimension and vectorize that
-            if reductions and len(reductions.loops) > 0:
+            if reductions:
                 reductions.loops[-1].simd = True
-            else:
-                if len(loops.loops) > 0:
-                    loops.loops[-1].simd = True
+            elif loops:
+                loops.loops[-1].simd = True
 
         par_depth = 0
         reduction_par_depth = 0
@@ -666,7 +686,7 @@ class CppVecKernelChecker(CppVecKernel):
     def is_legal_data_access(self, var: sympy.Symbol, index: sympy.Expr):
         return self.is_var_irrevelant(var, index) or self.is_single_step_var(var, index)
 
-    def could_be_simd_vec(self, name: str, index: sympy.Expr):
+    def could_vec(self, name: str, index: sympy.Expr):
         if V.graph.get_dtype(name) is not torch.float:
             return False
 
@@ -681,7 +701,7 @@ class CppVecKernelChecker(CppVecKernel):
     def load(self, name: str, index: sympy.Expr):
         index = self.rename_indexing(index)
 
-        self.simd_vec = self.simd_vec and self.could_be_simd_vec(name, index)
+        self.simd_vec = self.simd_vec and self.could_vec(name, index)
         return self.simd_vec
 
     def store(self, name, index, value, mode=None):
@@ -692,7 +712,7 @@ class CppVecKernelChecker(CppVecKernel):
             self.simd_vec = False
             return False
 
-        self.simd_vec = self.simd_vec and self.could_be_simd_vec(name, index)
+        self.simd_vec = self.simd_vec and self.could_vec(name, index)
         return self.simd_vec
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
@@ -726,6 +746,14 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.reduction(
                     name, dtype, src_dtype, reduction_type, index, value
                 )
+
+            @staticmethod
+            def constant(val, dtype):
+                supported_dtype = (torch.float32, torch.int32)
+                is_supported_dtype = dtype in (supported_dtype)
+                if not is_supported_dtype:
+                    self.simd_vec = False
+                return is_supported_dtype
 
             @staticmethod
             def index_expr(expr, dtype):
@@ -768,7 +796,7 @@ class CppKernelProxy(CppKernel):
         return loop_nest
 
     def codegen_loops(self, code, worksharing):
-        threads = self.parallel_num_threads()
+        threads = parallel_num_threads()
 
         if self.simd_vec_kernel is None:
             assert self.simd_omp_kernel
@@ -951,9 +979,9 @@ class KernelGroup:
 
     def new_kernel(self, simd_vec=False):
         if simd_vec:
-            return CppVecKernel(self.args, self.ws.num_threads)
+            return CppVecKernel(self.args, parallel_num_threads())
         else:
-            return CppKernel(self.args, self.ws.num_threads)
+            return CppKernel(self.args, parallel_num_threads())
 
     def finalize_kernel(self, new_kernel, scheduler):
         self.count += 1
@@ -1106,17 +1134,29 @@ class LoopNest:
         sympy_factor = sympy.Integer(factor)
 
         most_inner_loop = self.loops[-1]
+
+        # If the most inner loop needs to be collapsed, we need to
+        # exclude it since we need to split it into two loops. Meanwhile,
+        # we still mark it as parallized.
+        if most_inner_loop.collapsed:
+            assert self.loops[0].parallel == len(self.loops)
+            self.loops[0].parallel -= 1
+
         main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
 
         main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
-        main_loop.parallel = most_inner_loop.parallel
+        main_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
+        main_loop.collapsed = False
 
         offset = main_loop_range * sympy_factor
         tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
         tail_loop.offset = offset
-        tail_loop.parallel = most_inner_loop.parallel
+        tail_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
+        tail_loop.collapsed = False
 
         loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
+        loop_with_tail.parallel = 0
+        loop_with_tail.collapsed = False
         self.loops[-1] = loop_with_tail
 
     def codegen(self, code, stack):
