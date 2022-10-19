@@ -59,6 +59,43 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
     raise AssertionError(op)
 
 
+def cleanup_module(nn_module):
+    # Hack to unblock FSDP team. This is the FlattenParamWrapper snippet. It
+    # delattrs the original param, create views from the original param, and
+    # then setattrs the view into the module (instead of register paramemter)
+    # This causes multiple issues
+    # 1) we cannt deepcopy. We get this error
+    # RuntimeError: Only Tensors created explicitly by the user (graph leaves) support the deepcopy protocol at the moment
+    #
+    # 2) The new attr sort of elides fake tensor conversion.
+
+    # code from fsdp flat param wrapper
+    # for i, (view, (param_name, module, _)) in enumerate(
+    #     zip(views, self.flat_param._param_infos)
+    # ):
+    #     if hasattr(module, param_name):
+    #         delattr(module, param_name)
+    #     if self._use_orig_params and as_params:
+    #         param = self.flat_param._params[i]  # type: ignore[index]
+    #         setattr(module, param_name, param)
+    #         param.data = view
+    #     elif as_params:
+    #         module.register_parameter(param_name, nn.Parameter(view))
+    #     else:
+    #         setattr(module, param_name, view)
+
+    # very bad hack to mutate the original module back to have register_parameters
+
+    if hasattr(nn_module, "is_flat_param"):
+        for attr_name in dir(nn_module):
+            attr = getattr(nn_module, attr_name)
+            if isinstance(attr, torch.Tensor):
+                copy_tensor = copy.deepcopy(attr.clone().detach())
+                delattr(nn_module, attr_name)
+                nn_module.register_buffer(attr_name, copy_tensor)
+    return nn_module
+
+
 def _get_real_value(node, output_graph):
     """
     Run the actual computation represented by `node` and return the result.
@@ -76,6 +113,7 @@ def _get_real_value(node, output_graph):
 
     if op == "call_module":
         nn_module = output_graph.nn_modules[node.target]
+        nn_module = cleanup_module(nn_module)
         if not is_lazy_module(nn_module):
             nn_module = copy.deepcopy(nn_module)
         else:
@@ -111,6 +149,7 @@ def _get_fake_value(node, tx):
     nnmodule = None
     if op == "call_module":
         nnmodule = tx.output.nn_modules[node.target]
+        nnmodule = cleanup_module(nnmodule)
 
         if not is_lazy_module(nnmodule):
             nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)

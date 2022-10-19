@@ -1148,6 +1148,7 @@ class FlatParamHandle:
                 module.register_parameter(param_name, nn.Parameter(view))
             else:
                 setattr(module, param_name, view)
+                setattr(module, "is_flat_param", True)
         for i, (
             param_name,
             module,
