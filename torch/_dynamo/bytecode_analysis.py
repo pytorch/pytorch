@@ -81,7 +81,9 @@ def remove_extra_line_nums(instructions):
 
     def remove_line_num(inst):
         nonlocal cur_line_no
-        if inst.starts_line == cur_line_no:
+        if inst.starts_line is None:
+            return
+        elif inst.starts_line == cur_line_no:
             inst.starts_line = None
         else:
             cur_line_no = inst.starts_line
