@@ -595,7 +595,7 @@ class TestSummonFullParams(FSDPTest):
                 ],
                 "use_orig_params": [True],
             },
-            self._test_with_grads,
+            self._test_with_grads_core,
         )
 
     def _test_with_grads_core(
