@@ -697,7 +697,6 @@ class Graph:
         self._insert = self._root.prepend
         self._len = 0
         self._graph_namespace = _Namespace()
-        self._owners = 0
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
@@ -705,18 +704,11 @@ class Graph:
 
     @property
     def owning_module(self):
-        """
-        Return the module that owns this ``GraphModule``, if there is one,
-        ``None`` if there is no owning module or if there are multiple owning
-        modules.
-        """
         return self._owning_module
 
     @owning_module.setter
     def owning_module(self, mod: Optional["GraphModule"]):
-        if mod:
-            self._owning_module = mod if not self._owners else None
-            self._owners += 1
+        self._owning_module = mod
 
     @property
     def nodes(self) -> _node_list:

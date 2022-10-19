@@ -116,36 +116,40 @@ def compile_fx_inner(
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
+    shape_env = None
+    for inp in example_inputs:
+        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
+            shape_env = inp.fake_mode.shape_env
 
-    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         compiled_fn = graph.compile_to_fn()
 
-    complex_memory_overlap_inputs = any(
-        complex_memory_overlap(t) for t in example_inputs
-    )
-
-    if (
-        cudagraphs
-        and set(graph.device_types) == {"cuda"}
-        and not graph.mutated_inputs
-        and not has_incompatible_cudagraph_ops(gm)
-        and not complex_memory_overlap_inputs
-    ):
-        compiled_fn = cudagraphify(
-            compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+    if cudagraphs:
+        complex_memory_overlap_inputs = any(
+            complex_memory_overlap(t) for t in example_inputs
         )
-    elif cudagraphs:
-        BoxedBool.disable(cudagraphs)
 
-        if len(set(graph.device_types)) > 1:
-            log.warning("skipping cudagraphs due to multiple devices")
-        elif set(graph.device_types) == {"cuda"}:
-            if graph.mutated_inputs:
-                log.warning("skipping cudagraphs due to input mutation")
-            elif complex_memory_overlap_inputs:
-                log.warning("skipping cudagraphs due to complex input striding")
+        if (
+            set(graph.device_types) == {"cuda"}
+            and not graph.mutated_inputs
+            and not has_incompatible_cudagraph_ops(gm)
+            and not complex_memory_overlap_inputs
+        ):
+            compiled_fn = cudagraphify(
+                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+            )
+        else:
+            BoxedBool.disable(cudagraphs)
+
+            if len(set(graph.device_types)) > 1:
+                log.warning("skipping cudagraphs due to multiple devices")
+            elif set(graph.device_types) == {"cuda"}:
+                if graph.mutated_inputs:
+                    log.warning("skipping cudagraphs due to input mutation")
+                elif complex_memory_overlap_inputs:
+                    log.warning("skipping cudagraphs due to complex input striding")
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(
@@ -348,7 +352,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
     num_example_inputs = len(example_inputs_)
-    cudagraphs = BoxedBool(config.triton.cudagraphs)
+    cudagraphs = BoxedBool(config.triton.cudagraphs and not config.dynamic_shapes)
 
     graph_id = next(_graph_counter)
 
