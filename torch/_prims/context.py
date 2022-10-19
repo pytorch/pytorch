@@ -60,6 +60,8 @@ def torch_to_refs_map():
         # TODO: Should these methods be mapped some other way?
         torch.Tensor.copy_: torch._prims.copy_to,
         torch.Tensor.resize: torch._prims.resize,
+        # Attributes that are refs
+        torch.Tensor.T.__get__: torch._refs.T,  # type: ignore[attr-defined]
     }
     for mod_torch, mod_refs in modules:
         for s in mod_refs.__all__:  # type: ignore[attr-defined]
