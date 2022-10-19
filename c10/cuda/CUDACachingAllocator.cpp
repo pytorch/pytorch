@@ -1,5 +1,4 @@
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAMallocAsyncAllocator.h>
 
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAException.h>
@@ -2171,6 +2170,12 @@ inline std::string format_size(uint64_t size) {
   }
   return os.str();
 }
+
+namespace CudaMallocAsync {
+// If this is put in its own header file, it gets incorrectly renamed in HIPify.
+CUDAAllocator* allocator();
+
+} // namespace CudaMallocAsync
 
 struct BackendStaticInitializer {
   // Parses env for backend at load time, duplicating some logic from
