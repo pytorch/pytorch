@@ -4,9 +4,9 @@ import torch
 from torch import nn
 
 import torch.nn.functional as F
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
-import torch.nn.intrinsic.quantized.dynamic as nniqd
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.intrinsic.quantized as nniq
+import torch.ao.nn.intrinsic.quantized.dynamic as nniqd
 import torch.ao.nn.intrinsic.qat as nniqat
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.reference as nnqr

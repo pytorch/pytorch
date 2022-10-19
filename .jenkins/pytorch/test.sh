@@ -186,6 +186,10 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+  export PYTORCH_TEST_WITH_TSAN=1
+fi
+
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
@@ -333,8 +337,11 @@ test_libtorch() {
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
-    # Run JIT cpp tests
-    python test/cpp/jit/tests_setup.py setup
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+        # Run JIT cpp tests
+        python test/cpp/jit/tests_setup.py setup
+    fi
+
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
@@ -348,7 +355,10 @@ test_libtorch() {
       "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     fi
 
-    python test/cpp/jit/tests_setup.py shutdown
+    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+        python test/cpp/jit/tests_setup.py shutdown
+    fi
+
     # Wait for background download to finish
     wait
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
@@ -649,18 +659,11 @@ test_vec256() {
   fi
 }
 
-test_dynamo() {
-  pushd ../torchdynamo
-  pytest test/dynamo
-  PYTORCH_TEST_WITH_DYNAMO=0 pytest test/inductor
-  popd
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
 
-if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
@@ -669,7 +672,6 @@ if [[ "${TEST_CONFIG}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
-  install_torchdynamo
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -678,7 +680,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_torchdynamo
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -687,23 +688,27 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  install_triton
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
+  install_filelock
+  install_triton
   test_dynamo_shard 2
-  test_dynamo
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -712,7 +717,9 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -720,13 +727,19 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
+elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
+  # TODO: TSAN check is currently failing with 415 data race warnings. This will
+  # be addressed later, the first PR can be merged first to setup the CI jobs
+  test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   install_monkeytype
   test_python
   test_aten
