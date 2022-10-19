@@ -348,6 +348,12 @@ c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
   return value_.unsafeGetTensorImpl()->sym_strides();
 }
+c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
+  return value_.unsafeGetTensorImpl()->sym_size(d);
+}
+c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_storage_offset();
+}
 
 namespace functionalization {
 namespace impl {
