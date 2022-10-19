@@ -60,7 +60,7 @@ std::string create_weight_cache_key(
     const std::vector<int64_t>& input_shape,
     const std::vector<int64_t>& weight_shape,
     const void* weight_data_addr,
-    const std::vector<float>& weight_data_samples,
+    const std::vector<int32_t>& weight_data_samples,
     const std::vector<int64_t>& strides,
     const std::vector<int64_t>& dilations,
     const std::vector<int64_t>& padding_l,
@@ -85,7 +85,7 @@ std::string create_weight_cache_key(
   key_str += std::to_string(reinterpret_cast<uint64_t>(weight_data_addr));
   key_str += ",[";
   for (auto d : weight_data_samples) {
-    key_str += std::to_string(*(int32_t*)&d);
+    key_str += std::to_string(d);
     key_str += ",";
   }
   key_str += "],[";
@@ -321,10 +321,13 @@ Tensor _mkldnn_convolution(
 
   // Look up in cache of packed weight
   void* w_buf_ptr = w.get_data_handle();
-  std::vector<float> weight_data_samples = {
-    reinterpret_cast<float*>(w_buf_ptr)[0],
-    reinterpret_cast<float*>(w_buf_ptr)[weight_t.numel()-1]
-  };
+  auto sample1 = w.data_type_size(w.get_data_type()) == sizeof(float) ?
+                 reinterpret_cast<int32_t*>(w_buf_ptr)[0] :
+                 (int32_t)reinterpret_cast<int16_t*>(w_buf_ptr)[0];
+  auto sample2 = w.data_type_size(w.get_data_type()) == sizeof(float) ?
+                 reinterpret_cast<int32_t*>(w_buf_ptr)[weight_t.numel()-1] :
+                 (int32_t)reinterpret_cast<int16_t*>(w_buf_ptr)[weight_t.numel()-1];
+  std::vector<int32_t> weight_data_samples = {sample1, sample2};
   auto key = create_weight_cache_key(
       x.get_dims(), w.get_dims(), w_buf_ptr, weight_data_samples,
       strides, dilates, paddings, paddings, groups, op_attr, memory_format,
@@ -482,10 +485,13 @@ Tensor mkldnn_convolution_pointwise_binary(
 
     // Look up in weight cache
     void* w_buf_ptr = w.get_data_handle();
-    std::vector<float> weight_data_samples = {
-      reinterpret_cast<float*>(w_buf_ptr)[0],
-      reinterpret_cast<float*>(w_buf_ptr)[weight_t.numel()-1]
-    };
+    auto sample1 = w.data_type_size(w.get_data_type()) == sizeof(float) ?
+                  reinterpret_cast<int32_t*>(w_buf_ptr)[0] :
+                  (int32_t)reinterpret_cast<int16_t*>(w_buf_ptr)[0];
+    auto sample2 = w.data_type_size(w.get_data_type()) == sizeof(float) ?
+                  reinterpret_cast<int32_t*>(w_buf_ptr)[weight_t.numel()-1] :
+                  (int32_t)reinterpret_cast<int16_t*>(w_buf_ptr)[weight_t.numel()-1];
+    std::vector<int32_t> weight_data_samples = {sample1, sample2};
     auto key = create_weight_cache_key(
         x.get_dims(), w.get_dims(), w_buf_ptr, weight_data_samples,
         strides, dilates, paddings, paddings, groups, op_attr, memory_format,
