@@ -97,8 +97,7 @@ void copy_device_to_device(TensorIterator& iter,
 #ifdef USE_ROCM
       bool using_cudaMallocAsync = false;
 #else
-      bool using_cudaMallocAsync = (CUDACachingAllocator::allocatorBackend() ==
-                                    CUDACachingAllocator::AllocatorBackend::CUDAMALLOCASYNC);
+      bool using_cudaMallocAsync = CUDACachingAllocator::get()->needsPoolSpecificPeerAccess();
 #endif
       bool needs_MemcpyPeer = (src_device != dst_device &&
                                using_cudaMallocAsync &&
