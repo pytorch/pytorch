@@ -177,31 +177,31 @@ Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const T
     return base.slice_scatter_symint(mutated_view, dim, start, end, step);
 }
 
-Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, int64_t split_size, int64_t dim) {
+Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
     // on top of the base tensor.
     // For autograd, we have all of the tensors outputted by split() and we just want to stack them.
-    dim = at::maybe_wrap_dim(dim, base.sizes().size());
-    auto dim_size = base.size(dim);
-    auto start = mutated_view_idx * split_size;
-    auto end = start + split_size;
+    dim = at::maybe_wrap_dim(dim, base.dim());
+    auto dim_size = base.sym_size(dim);
+    auto start = split_size * mutated_view_idx;
+    auto end = split_size + start;
     if (end > dim_size) end = dim_size;
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, 1);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
 }
 
-Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, at::IntArrayRef split_sizes, int64_t dim) {
-    dim = at::maybe_wrap_dim(dim, base.sizes().size());
-    auto dim_size = base.size(dim);
-    int64_t start = 0;
+Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
+    dim = at::maybe_wrap_dim(dim, base.dim());
+    auto dim_size = base.sym_size(dim);
+    c10::SymInt start = 0;
     for (auto i = 0; i < mutated_view_idx; ++i) {
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];
     if (end > dim_size) end = dim_size;
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, 1);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
 }
 
 Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
