@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 
 from collections.abc import Sequence
-import enum
 from functools import partial
 import warnings
 import unittest
@@ -11,6 +10,7 @@ import contextlib
 from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
+from typing import Dict
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
+    slowTest,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -73,77 +74,6 @@ from torch.testing._internal import composite_compliance
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import TorchDispatchMode
 
-
-@enum.unique
-class CtxTestMode(enum.Enum):
-    """
-    Used to check op behavior and API compatibility inside and outside an
-    execution context.  For example, with TorchRefsMode(strict=True) as the
-    context, a function with torch.foo in it will call refs.foo instead.
-
-    Note that the torch to refs dispatch must first hit a special conditional at
-    the start of a torch function before going to the ref.  That is why we have
-    the OP_OP and OP_ALIASES modes.  If a torch op and its ref have incompatible
-    signatures, the call in the said conditional will fail.  The REF_OP and
-    REF_OP_ALIASES modes exists so that we could call ref's entrypoint directly.
-    """
-
-    OP_OP = enum.auto()
-    """
-    Check *the same* op inside and outside the context.  This is the entrypoint
-    that users will actually be executing both inside and outside the context.
-    """
-
-    REF_OP = enum.auto()
-    """
-    Directly call each ref (in the context) and test it against the
-    corresponding op (outside of the context).  This test calls *different*
-    entrypoints.  Users are not expected to call the ref directly, this is only
-    done to check for compatibility issues.
-    """
-
-    OP_ALIASES = enum.auto()
-    """
-    Check *the same* aliases inside and outside the context.  This is the
-    entrypoint that users will actually be executing both inside and outside the
-    context.
-    """
-
-    REF_OP_ALIASES = enum.auto()
-    """
-    Directly call each ref alias (in the context) and test it against the
-    corresponding alias op (outside of the context).  This test calls
-    *different* entrypoints.  Users are not expected to call the ref alias
-    directly, this is only done to check for compatibility issues.
-    """
-
-
-class CtxTestInput(object):
-    """
-    Create an input to be tested inside and outside an execution context.  For
-    example, with TorchRefsMode(strict=True) as the context, a function with
-    torch.foo in it will call refs.foo instead.  Also see CtxTestMode.
-    """
-
-    @classmethod
-    def same(cls, x):
-        """
-        Test the same input inside and outside the context.
-        """
-        cls.ctx = x
-        cls.no_ctx = x
-        return cls
-
-    @classmethod
-    def different(cls, ctx, no_ctx):
-        """
-        Test different inputs inside and outside the context.
-        """
-        cls.ctx = ctx
-        cls.no_ctx = no_ctx
-        return cls
-
-
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
 
@@ -168,6 +98,11 @@ _ref_test_ops = tuple(
     )
 )
 _ops_and_refs = op_db + python_ref_db
+
+# Create a list of operators that are a subset of _ref_test_ops but don't have a
+# numpy ref to compare them too, If both CPU and CUDA are compared to numpy
+# then they do not need to be compared to each other
+_ops_and_refs_with_no_numpy_ref = [op for op in _ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
 
@@ -237,6 +172,37 @@ class TestCommon(TestCase):
         finally:
             torch.set_default_dtype(cur_default)
 
+    # Tests that the cpu and gpu results are consistent
+    @onlyCUDA
+    @suppress_warnings
+    @slowTest
+    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    def test_compare_cpu(self, device, dtype, op):
+
+        def to_cpu(arg):
+            if isinstance(arg, torch.Tensor):
+                return arg.to(device='cpu')
+            return arg
+
+        samples = op.sample_inputs(device, dtype)
+
+        for sample in samples:
+            cpu_sample = sample.transform(to_cpu)
+            cuda_results = op(sample.input, *sample.args, **sample.kwargs)
+            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+            # output_process_fn_grad has a very unfortunate name
+            # We use this function in linalg extensively to postprocess the inputs of functions
+            # that are not completely well-defined. Think svd and muliplying the singular vectors by -1.
+            # CPU and CUDA implementations of the SVD can return valid SVDs that are different.
+            # We use this function to compare them.
+            cuda_results = sample.output_process_fn_grad(cuda_results)
+            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
+
+            # Lower tolerance because we are running this as a `@slowTest`
+            # Don't want the periodic tests to fail frequently
+            self.assertEqual(cuda_results, cpu_results, atol=1e-3, rtol=1e-3)
+
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
     # See https://github.com/pytorch/pytorch/issues/78050 for a discussion of stride propagation.
@@ -281,7 +247,7 @@ class TestCommon(TestCase):
         device,
         dtype,
         op,
-        ctx_test_mode,
+        make_test_inputs,
         skip_zero_numel=False,
         skip_zero_dim=False,
         skip_bfloat=False,
@@ -316,32 +282,7 @@ class TestCommon(TestCase):
                 continue
 
             # Check op behavior and API compatibility inside and outside ctx.
-            # See CtxTestMode documentation on how these should be used.
-            if ctx_test_mode is CtxTestMode.OP_OP:
-                test_inputs = (CtxTestInput.same(op.torch_opinfo),)
-            elif ctx_test_mode is CtxTestMode.OP_ALIASES:
-                test_inputs = tuple(CtxTestInput.same(x) for x in op.torch_opinfo.aliases)
-            elif ctx_test_mode is CtxTestMode.REF_OP_ALIASES:
-                # The output of zip is determined by the shortest input
-                # iterable, so make sure both inputs have the same length.
-                self.assertTrue(len(op.aliases) == len(op.torch_opinfo.aliases),
-                                msg="Ref and op aliases have different lengths")
-                test_inputs = tuple(
-                    CtxTestInput.different(ctx=ctx, no_ctx=no_ctx)
-                    for ctx, no_ctx
-                    # ref aliases, op aliases
-                    in zip(op.aliases, op.torch_opinfo.aliases)
-                    # As an optimization, this only considers "near aliases" and
-                    # skips "proper aliases".  A "near alias" is a ref alias
-                    # which is defined with a 'def', as a wrapper around a torch
-                    # op, due to signature compatibility issues.  A "proper
-                    # alias" is declared as 'foo_alias = torch.foo'.  "Proper
-                    # aliases" are already covered by the REF_OP mode.
-                    if ctx.op is not op.torch_opinfo.op)  # like: absolute = torch.abs
-            elif ctx_test_mode is CtxTestMode.REF_OP:  # default
-                test_inputs = (CtxTestInput.different(ctx=op, no_ctx=op.torch_opinfo),)  # ref, op
-            else:
-                raise AssertionError(f"Unexpected context test mode: {ctx_test_mode}")
+            test_inputs = make_test_inputs(op)
 
             # No matching test input functions found, exit right away instead of
             # iterating through the rest of sample inputs.
@@ -349,18 +290,20 @@ class TestCommon(TestCase):
                 self.skipTest("Skipped! No matching test inputs found")
 
             for test_input in test_inputs:
-                with ctx():
-                    ref_result = test_input.ctx(sample.input, *sample.args, **sample.kwargs)
-                    if hasattr(ctx(), "mock") and ctx().mock:
+                test_input_ctx = self._get_test_input_ctx(test_input)
+                test_input_no_ctx = self._get_test_input_no_ctx(test_input)
+                with ctx() as c:
+                    ref_result = test_input_ctx(sample.input, *sample.args, **sample.kwargs)
+                    if hasattr(c, "mock") and c.mock:
                         # This tests API compatibility by checking whether we
                         # can call a ref with sample inputs by going through the
-                        # torch to ref dispatch.  The mocked ref returns a
+                        # torch to ref dispatch. The mocked ref returns a
                         # sentinel value, so move to the next sample instead of
                         # doing any consistency checks against the no_ctx
                         # result.
                         self.assertEqual(ref_result, MOCK_REF_RESULT)
                         continue
-                torch_result = test_input.no_ctx(sample.input, *sample.args, **sample.kwargs)
+                torch_result = test_input_no_ctx(sample.input, *sample.args, **sample.kwargs)
 
                 for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
@@ -447,6 +390,84 @@ class TestCommon(TestCase):
             msg = "Test passed because the reference was more accurate than the torch operator."
             warnings.warn(msg)
 
+    # Create an input to be tested inside and outside an execution context. For
+    # example, with TorchRefsMode(strict=True) as the context, a function with
+    # torch.foo in it will call refs.foo instead.
+
+    # Setters
+    # Test different inputs inside and outside an execution context.
+    def _set_test_input_different(self, ctx, no_ctx):
+        # keep in sync with get functions
+        return (ctx, no_ctx)
+
+    # Test the same input inside and outside an execution context.
+    def _set_test_input_same(self, x):
+        # keep in sync with get functions
+        return (x, x)
+
+    # Getters
+    def _get_test_input_ctx(self, test_input):
+        # keep in sync with set functions
+        # (ctx, no_ctx)
+        return test_input[0]
+
+    def _get_test_input_no_ctx(self, test_input):
+        # keep in sync with set functions
+        # (ctx, no_ctx)
+        return test_input[1]
+
+    # Create test input functions to check op behavior and API compatibility
+    # inside and outside an execution context. For example, with
+    # TorchRefsMode(strict=True) as the context, a function with torch.foo in it
+    # will call refs.foo instead.
+    #
+    # Note that the torch to refs dispatch must first hit a special conditional
+    # at the start of a torch function before going to the ref. That is why we
+    # have the op_op and op_aliases test input functions. If a torch op and its
+    # ref have incompatible signatures, the call in the said conditional will
+    # fail. The ref_op and ref_op_aliases test input functions exist so that we
+    # could call ref's entrypoint directly.
+
+    # Directly call each ref (in the context) and test it against the
+    # corresponding op (outside of the context). This test calls *different*
+    # entrypoints. Users are not expected to call the ref directly, this is only
+    # done to check for compatibility issues.
+    def _make_test_inputs_ref_op(self, op):  # default
+        return (self._set_test_input_different(ctx=op, no_ctx=op.torch_opinfo),)  # ref, op
+
+    # Directly call each ref alias (in the context) and test it against the
+    # corresponding alias op (outside of the context). This test calls
+    # *different* entrypoints. Users are not expected to call the ref alias
+    # directly, this is only done to check for compatibility issues.
+    def _make_test_inputs_ref_op_aliases(self, op):
+        # The output of zip is determined by the shortest input iterable, so
+        # make sure both inputs have the same length.
+        self.assertTrue(len(op.aliases) == len(op.torch_opinfo.aliases),
+                        msg="Ref and op aliases have different lengths")
+        return tuple(
+            self._set_test_input_different(ctx=ctx, no_ctx=no_ctx)
+            for ctx, no_ctx
+            # ref aliases, op aliases
+            in zip(op.aliases, op.torch_opinfo.aliases)
+            # As an optimization, this only considers "near aliases" and skips
+            # "proper aliases". A "near alias" is a ref alias which is defined
+            # with a 'def', as a wrapper around a torch op, due to signature
+            # compatibility issues. A "proper alias" is declared as 'foo_alias =
+            # torch.foo'. "Proper aliases" are already covered by the ref_op
+            # test input function.
+            if ctx.op is not op.torch_opinfo.op)  # like: absolute = torch.abs
+
+    # Check *the same* op inside and outside the context. This is the entrypoint
+    # that users will actually be executing both inside and outside the context.
+    def _make_test_inputs_op_op(self, op):
+        return (self._set_test_input_same(op.torch_opinfo),)
+
+    # Check *the same* aliases inside and outside the context. This is the
+    # entrypoint that users will actually be executing both inside and outside
+    # the context.
+    def _make_test_inputs_op_aliases(self, op):
+        return tuple(self._set_test_input_same(x) for x in op.torch_opinfo.aliases)
+
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
@@ -458,14 +479,14 @@ class TestCommon(TestCase):
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
-                              ctx_test_mode=CtxTestMode.REF_OP)
+                              make_test_inputs=self._make_test_inputs_ref_op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_mode_ref_op_aliases(self, device, dtype, op):
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
-                              ctx_test_mode=CtxTestMode.REF_OP_ALIASES)
+                              make_test_inputs=self._make_test_inputs_ref_op_aliases)
 
     # This only checks API compatibility, so test on one device with any dtype.
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -473,7 +494,7 @@ class TestCommon(TestCase):
     @ops(python_ref_db, dtypes=OpDTypes.any_one)
     def test_python_ref_mock_mode_op_op(self, device, dtype, op):
         self._ref_test_helper(lambda: TorchRefsMode(strict=True, mock=True), device, dtype, op,
-                              ctx_test_mode=CtxTestMode.OP_OP)
+                              make_test_inputs=self._make_test_inputs_op_op)
 
     # This only checks API compatibility, so test on one device with any dtype.
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -481,7 +502,7 @@ class TestCommon(TestCase):
     @ops(python_ref_db, dtypes=OpDTypes.any_one)
     def test_python_ref_mock_mode_op_aliases(self, device, dtype, op):
         self._ref_test_helper(lambda: TorchRefsMode(strict=True, mock=True), device, dtype, op,
-                              ctx_test_mode=CtxTestMode.OP_ALIASES)
+                              make_test_inputs=self._make_test_inputs_op_aliases)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
@@ -494,7 +515,7 @@ class TestCommon(TestCase):
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op,
-                              ctx_test_mode=CtxTestMode.REF_OP)
+                              make_test_inputs=self._make_test_inputs_ref_op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
@@ -519,9 +540,15 @@ class TestCommon(TestCase):
         if executor == "nvfuser" and isinstance(op, ReductionPythonRefInfo):
             skip_zero_dim = True
 
-        # skip zero-dim tensors for some composites of reduction operations
-        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax", "_refs.sum_to_size"]
-        if executor == "nvfuser" and op.name in normalization_ops:
+        # skip zero-dim tensors for some composites of reduction operations and view
+        skip_zero_dim_ops = [
+            "_refs.softmax",
+            "_refs.logsumexp",
+            "_refs.log_softmax",
+            "_refs.sum_to_size",
+            "ops.nvprims.view",
+        ]
+        if executor == "nvfuser" and op.name in skip_zero_dim_ops:
             skip_zero_dim = True
 
         from torch._prims.executor import make_traced
@@ -534,7 +561,7 @@ class TestCommon(TestCase):
             device,
             dtype,
             op,
-            ctx_test_mode=CtxTestMode.REF_OP,
+            make_test_inputs=self._make_test_inputs_ref_op,
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
             skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
@@ -1246,8 +1273,10 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
+        dtype_error: Dict[torch.dtype, Exception] = dict()
 
-        def unsupported(dtype):
+        def unsupported(dtype, e):
+            dtype_error[dtype] = e
             unsupported_dtypes.add(dtype)
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.add(dtype)
@@ -1262,7 +1291,7 @@ class TestCommon(TestCase):
                     op.sample_inputs(device, dtype, requires_grad=requires_grad)
                 )
             except Exception as e:
-                unsupported(dtype)
+                unsupported(dtype, e)
                 continue
 
             for sample in samples:
@@ -1275,7 +1304,7 @@ class TestCommon(TestCase):
                     # NOTE: some ops will fail in forward if their inputs
                     #   require grad but they don't support computing the gradient
                     #   in that type! This is a bug in the op!
-                    unsupported(dtype)
+                    unsupported(dtype, e)
                     continue
 
                 # Checks for backward support in the same dtype, if the input has
@@ -1320,6 +1349,7 @@ class TestCommon(TestCase):
                     backward_tensor.backward(grad)
                     supported_backward_dtypes.add(dtype)
                 except Exception as e:
+                    dtype_error[dtype] = e
                     unsupported_backward_dtypes.add(dtype)
 
         # Checks that dtypes are listed correctly and generates an informative
@@ -1413,6 +1443,12 @@ class TestCommon(TestCase):
                     claimed_but_unsupported_backward
                 )
             )
+
+        all_claimed_but_unsupported = set.union(claimed_but_unsupported_backward, claimed_but_unsupported_forward)
+        if all_claimed_but_unsupported:
+            msg += "Unexpected failures raised the following errors:\n"
+            for dtype in all_claimed_but_unsupported:
+                msg += f"{dtype} - {dtype_error[dtype]}\n"
 
         self.fail(msg)
 
@@ -1719,7 +1755,7 @@ class TestTags(TestCase):
 @skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs.linalg"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs.linalg", "_refs._conversions"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = set(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
@@ -1742,6 +1778,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
+        '_refs.special.expit',
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
@@ -1768,9 +1805,23 @@ class TestRefsOpsInfo(TestCase):
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
         # these are not aten ops?
+        '_refs._conversions.bfloat16',
+        '_refs._conversions.bool',
+        '_refs._conversions.byte',
+        '_refs._conversions.char',
+        '_refs._conversions.double',
+        '_refs._conversions.float',
+        '_refs._conversions.half',
+        '_refs._conversions.int',
+        '_refs._conversions.long',
+        '_refs._conversions.short',
+        '_refs._conversions.chalf',
+        '_refs._conversions.cfloat',
+        '_refs._conversions.cdouble',
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
+        '_refs.nn.functional.triplet_margin_loss',
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
@@ -1807,8 +1858,12 @@ class TestRefsOpsInfo(TestCase):
         '_refs.reshape',
         '_refs.reshape_as',
         '_refs.softmax',
+        '_refs.special.expit',
+        '_refs.special.log_softmax',
+        '_refs.special.softmax',
         '_refs.square',
         '_refs.std',
+        '_refs.T',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
@@ -1994,8 +2049,6 @@ data_dependent_op_tests = (
 
 aliasing_failures = (
     "histogramdd",
-    "nn.functional.pixel_shuffle",
-    "nn.functional.pixel_unshuffle",
 )
 
 # tests which have inconsistent fake tensor stride propagation
@@ -2030,10 +2083,6 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "linalg.norm",
     "linalg.svd",
     "linalg.svdvals",
-    "nn.functional.binary_cross_entropy_with_logits",
-    "nn.functional.huber_loss",
-    "nn.functional.logsigmoid",
-    "nn.functional.multilabel_soft_margin_loss",
     "pca_lowrank",
     "roll",
     "svd_lowrank",
@@ -2153,7 +2202,7 @@ class TestFakeTensor(TestCase):
 
             # TODO: enable check_aliasing, batch norm fails
             with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                with warnings.catch_warnings(), context():
+                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
                         sample.output_process_fn_grad,

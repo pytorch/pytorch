@@ -19,8 +19,10 @@ __all__ = [
     "bessel_j0",
     "bessel_j1",
     "digamma",
+    "entr",
     "erf",
     "erfc",
+    "erfcx",
     "erfinv",
     "exp2",
     "expit",
@@ -33,10 +35,13 @@ __all__ = [
     "i1",
     "i1e",
     "log1p",
+    "log_ndtr",
     "logit",
     "log_softmax",
     "logsumexp",
     "multigammaln",
+    "ndtr",
+    "ndtri",
     "psi",
     "round",
     "sinc",
@@ -65,10 +70,34 @@ def bessel_j1(a: TensorLikeType) -> TensorLikeType:
 digamma = torch.digamma  # alias
 
 
+@register_decomposition(torch.ops.aten.special_entr)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def entr(a: TensorLikeType) -> TensorLikeType:
+    return torch.where(
+        torch.isnan(a),
+        a,
+        torch.where(a > 0, -a * torch.log(a), torch.where(a == 0, 0, -torch.inf)),
+    )
+
+
 erf = torch.erf  # alias
 
 
 erfc = torch.erfc  # alias
+
+
+@register_decomposition(torch.ops.aten.special_erfcx)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def erfcx(a: TensorLikeType) -> TensorLikeType:
+    return prims.erfcx(a)
 
 
 erfinv = torch.erfinv  # alias
@@ -116,6 +145,23 @@ def i1e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1e(a)
 
 
+@register_decomposition(torch.ops.aten.special_log_ndtr)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def log_ndtr(a: TensorLikeType) -> TensorLikeType:
+    # Note: M_SQRT1_2 is the value of 1 / √2
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    t = a * M_SQRT1_2
+    return torch.where(
+        a < 1.0,
+        torch.log(torch.special.erfcx(-t) / 2) - t * t,
+        torch.log1p(-refs.erfc(t) / 2),
+    )
+
+
 @register_decomposition(torch.ops.aten.logit)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
@@ -135,6 +181,29 @@ log1p = torch.log1p  # alias
 
 
 multigammaln = torch.mvlgamma  # alias
+
+
+@register_decomposition(torch.ops.aten.special_ndtr)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def ndtr(a: TensorLikeType) -> TensorLikeType:
+    # Note: M_SQRT1_2 is the value of 1 / √2
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    a_sqrt_2 = a * M_SQRT1_2
+    return (1 + torch.erf(a_sqrt_2)) * 0.5
+
+
+@register_decomposition(torch.ops.aten.special_ndtri)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def ndtri(a: TensorLikeType) -> TensorLikeType:
+    return prims.ndtri(a)
 
 
 # Forwarding alias: the special variant doesn't support the out kwarg
