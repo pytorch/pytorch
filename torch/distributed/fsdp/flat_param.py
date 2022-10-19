@@ -207,10 +207,19 @@ class FlatParameter(nn.Parameter):
         _saved_grad_shard (Tensor): Sharded gradient with padding from previous
             iterations for gradient accumulation without :meth:`no_sync`.
 
-        TODO
-        _params (List[nn.Parameter]):
-        _shared_params (List[nn.Parameter]):
-        _is_grad_none (List[bool]):
+        _params (Optional[List[nn.Parameter]]): The original parameter
+            variables if ``use_orig_params=True`` and ``None`` otherwise.
+        _shared_params (Optional[List[nn.Parameter]]): The original shared
+            parameter variables if ``use_orig_params=True`` and ``None``
+            otherwise.
+        _is_grad_none (Optional[List[bool]]): A mask over the original
+            parameters' gradients indicating if it is logically ``None`` or not
+            if ``use_orig_params=True`` and ``None`` otherwise. This is needed
+            because only some of the parameters may have ``None`` gradient, in
+            which case the ``FlatParameter`` gradient must be non-``None`` and
+            must use zeros to approximate those original ``None`` gradients.
+            This mask informs FSDP to set the original parameter gradients to
+            ``None`` (instead of zeros) as needed.
     """
 
     def _init_metadata(

@@ -345,6 +345,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_multiple_optimizers(self):
         """
+        Tests using two optimizers where only one sets gradients to ``None``.
         """
         self.run_subtests(
             {
