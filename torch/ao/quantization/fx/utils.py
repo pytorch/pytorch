@@ -197,10 +197,16 @@ def get_quantize_node_info(
             scale = float(scale)
             zero_point = int(zero_point)
             if is_decomposed_qtensor:
-                quant_min = activation_post_process.quant_min
-                quant_max = activation_post_process.quant_max
+                quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
+                quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
                 dtype = to_underlying_dtype(dtype)
-                qparams = {"_scale_": scale, "_zero_point_": zero_point, "_quant_min": quant_max, "_quant_max": quant_max, "_dtype_": dtype}
+                qparams = {
+                    "_scale_": scale,
+                    "_zero_point_": zero_point,
+                    "_quant_min": quant_max,
+                    "_quant_max": quant_max,
+                    "_dtype_": dtype
+                }
                 quantize_op = torch.decomposed_quantize_per_tensor
             else:
                 qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
