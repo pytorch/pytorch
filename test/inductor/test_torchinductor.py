@@ -3801,25 +3801,6 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
-    @unittest.skip("https://github.com/pytorch/torchdynamo/issues/1297")
-    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
-    def test_symbolic(self):
-        def f(x):
-            x = x.cos()
-            x = x.view(x.shape[0] * 2, -1)
-            return (x,)
-
-        traced = make_fx(f, tracing_mode="symbolic")(
-            torch.randn(8, 4, device=self.device)
-        )
-        compiled = compile_fx_inner(traced, [torch.randn(8, 4, device=self.device)])
-
-        out = compiled([torch.randn(8, 4, device=self.device)])
-        self.assertEqual(out[0].shape, (16, 2))
-
-        out = compiled([torch.randn(12, 4, device=self.device)])
-        self.assertEqual(out[0].shape, (24, 2))
-
     @requires_cuda()
     @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs(self):
