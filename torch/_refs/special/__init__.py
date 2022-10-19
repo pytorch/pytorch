@@ -33,11 +33,13 @@ __all__ = [
     "i1e",
     "log_ndtr",
     "logit",
-    "xlog1py",
+    "log_softmax",
     "multigammaln",
     "ndtr",
     "ndtri",
+    "softmax",
     "spherical_bessel_j0",
+    "xlog1py",
     "zeta",
 ]
 
@@ -197,6 +199,26 @@ def ndtr(a: TensorLikeType) -> TensorLikeType:
 )
 def ndtri(a: TensorLikeType) -> TensorLikeType:
     return prims.ndtri(a)
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
+# CompositeImplicitAutograd - don't register decomp
+def softmax(
+    a: TensorLikeType,
+    dim: int,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
 @_make_elementwise_unary_reference(
