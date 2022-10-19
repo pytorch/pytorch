@@ -138,10 +138,14 @@ function install_triton() {
 }
 
 function install_huggingface() {
+  pip_install pandas
+  pip_install scipy
   pip_install git+https://github.com/huggingface/transformers.git#egg=transformers
 }
 
 function install_timm() {
+  pip_install pandas
+  pip_install scipy
   pip_install git+https://github.com/rwightman/pytorch-image-models
 }
 
