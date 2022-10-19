@@ -469,7 +469,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.deg2rad: lambda input, out=None: -1,
         torch.dequantize: lambda input: -1,
-        torch.decomposed_dequantize_per_tensor: lambda input, scale, zero_point, quant_min, quant_max, dtype: -1,
         torch.det: lambda input: -1,
         torch.linalg.det: lambda input: -1,  # alias for torch.det  # type: ignore[attr-defined]
         torch.detach: lambda input: -1,
@@ -906,7 +905,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nanquantile: lambda input, q, dim=None, keepdim=False, interpolation='linear', out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
         torch.quantize_per_tensor: lambda input, scale, zero_point, dtype: -1,
-        torch.decomposed_quantize_per_tensor: lambda input, scale, zero_point, quant_min, quant_max, dtype: -1,
         torch.quantize_per_tensor_dynamic: lambda input, dtype, reduce_range: -1,
         torch.quantized_batch_norm: lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1,
         torch.quantized_gru_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
