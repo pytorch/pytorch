@@ -385,17 +385,8 @@ class TestDecomp(TestCase):
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
-    @slowTest
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
-    @skipIfCrossRef
-    @suppress_warnings
-    @ops(op_db)
-    def test_decompose_recursively(self, device, dtype, op):
-        self.do_cross_ref(device, dtype, op, run_all=True, decompose_fully=True)
-
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
-    def do_cross_ref(self, device, dtype, op, *, run_all, decompose_fully=False):
+    def do_cross_ref(self, device, dtype, op, *, run_all):
         test_keys = [
             (torch.device(device).type, dtype, op.name),
             (None, dtype, op.name),
@@ -455,7 +446,7 @@ class TestDecomp(TestCase):
                 # decomposition and pytorch are from the "ground truth" (i.e.
                 # fp64). If the decomposition results in more error, we error
 
-                # If decompose_fully, we also decompose the decomposition recursively for
+                # We also decompose the decomposition recursively for
                 # further coverage, as some paths not be exercised directly by
                 # OpInfos (sadly) but just by other ops
 
@@ -465,7 +456,7 @@ class TestDecomp(TestCase):
                 real_out_unflat = func(*args, **kwargs)
                 real_out, _ = tree_flatten(real_out_unflat)
 
-                if decompose_fully:
+                if run_all:
                     # Execute recursively via DFS, to find the root of a possible error first
                     with self:
                         decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
