@@ -17,8 +17,7 @@ inline Tensor view_tensor(
   auto new_tensor = detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, std::move(storage), key_set, scalarTypeToTypeMeta(dtype));
   auto * impl = new_tensor.unsafeGetTensorImpl();
-  impl->set_storage_offset(offset);
-  impl->set_sizes_and_strides(sizes, strides);
+  impl->set_sizes_and_strides(sizes, strides, offset);
   return new_tensor;
 }
 
