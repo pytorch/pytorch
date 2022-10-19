@@ -255,6 +255,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
+  OP_DECOMPOSE(diagonal_copy);
   OP_DECOMPOSE(pad);
   OP_DECOMPOSE(_pad_circular);
   OP_DECOMPOSE(t_);
