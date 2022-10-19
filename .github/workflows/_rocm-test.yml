@@ -69,7 +69,7 @@ jobs:
           python3 -m pip install psutil==5.9.1
           python3 -m pip install pynvml==11.4.1
           python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
-          echo "::set-output name=monitor-script-pid::${!}"
+          echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
