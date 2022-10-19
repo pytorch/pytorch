@@ -585,7 +585,7 @@ endif()
 if(${USE_ITT})
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
-    ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
+    ${TORCH_SRC_DIR}/csrc/profiler/stubs/itt.cpp
   )
 endif()
 
@@ -637,6 +637,7 @@ if(USE_CUDA)
   else()
     set(DELAY_LOAD_FLAGS "")
   endif()
+
   target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
   target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -664,6 +665,7 @@ if(BUILD_ONEDNN_GRAPH)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_rewriter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/register_interface.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/decompose_silu.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/defer_size_check.cpp
@@ -1154,12 +1156,6 @@ install(FILES
   "${TORCH_SRC_DIR}/library.h"
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-if(USE_DEPLOY)
-  install(FILES
-    "${TORCH_SRC_DIR}/deploy.h"
-    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-endif()
-
 if(BUILD_TEST)
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
