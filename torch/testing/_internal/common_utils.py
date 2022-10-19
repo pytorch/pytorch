@@ -506,6 +506,7 @@ parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
+parser.add_argument('--individual-test', type=str)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
 def run_unittest_help(argv):
@@ -716,13 +717,11 @@ def run_tests(argv=UNITTEST_ARGS):
 
     if TEST_IN_SUBPROCESS:
         failed_tests = []
-        test_cases = discover_test_cases_recursively(suite)
-        print(f"there are {len(test_cases)} unitest tests in {argv[0]}")
-        a = count_pytest_test_cases(argv[0])
-        if USE_PYTEST:
-            print(f"there are {len(a)} pytest tests in {argv[0]}")
+        test_cases = count_pytest_test_cases(argv[0])
+        print(test_cases)
         for case in test_cases:
-            test_case_full_name = case.id().split('.', 1)[1]
+            if case.startswith("test/"):
+                case = case[len("test/"):]
             other_args = []
             if DISABLED_TESTS_FILE:
                 other_args.append('--import-disabled-tests')
@@ -730,21 +729,20 @@ def run_tests(argv=UNITTEST_ARGS):
                 other_args.append('--import-slow-tests')
             if USE_PYTEST:
                 other_args.append('--use-pytest')
-                test_case_full_name = f"-k={test_case_full_name.split('.')[1]}"
-            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
+            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + ["--individual-test", case]
             print(cmd)
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
-                if 'TestDistBackendWithSpawn' in case.id().split('.', 1)[1]:
+                if 'TestDistBackendWithSpawn' in case:
                     backend = os.environ.get("BACKEND", "")
                     world_size = os.environ.get("WORLD_SIZE", "")
                     env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
                     string_cmd = env_prefix + " " + string_cmd
                 # Log the command to reproduce the failure.
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
-                failed_tests.append(test_case_full_name)
+                failed_tests.append(case)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
@@ -767,6 +765,8 @@ def run_tests(argv=UNITTEST_ARGS):
         import pytest
         os.environ["NO_COLOR"] = "1"
         os.environ["USING_PYTEST"] = "1"
+        if args.individual_test:
+            argv = argv[1:] + [args.individual_test]
         exit_code = pytest.main(args=argv + [f'--junit-xml-reruns={test_report_path}'] if TEST_SAVE_XML else [])
         del os.environ["USING_PYTEST"]
         if TEST_SAVE_XML:

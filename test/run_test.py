@@ -280,6 +280,7 @@ DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS = {
         "nccl",
     ],
 }
+
 PYTEST_INCOMPATIBLE = [
     "test_jit",  # test_warn, I think pytest eats warnings
     "test_jit_legacy",  # test_warn, I think pytest eats warnings
