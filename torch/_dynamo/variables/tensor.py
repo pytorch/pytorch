@@ -328,7 +328,8 @@ class TensorVariable(VariableTracker):
                 )
         elif (
             proxy.node.target == torch._C._DisableFuncTorch
-            or proxy.node.target == torch._C._cuda_isInBadFork
+            or proxy.node.target
+            == getattr(torch._C, "_cuda_isInBadFork", "_cuda_isInBadFork")
         ):
             from . import UserDefinedObjectVariable
 
