@@ -246,23 +246,22 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 def fuse_unary(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
 
-    for (unary_module, _), (
-        computation_module,
-        fuse_func,
-    ) in itertools.product(unary_modules_map.items(), computation_modules_map.items()):
+    for (unary_module, _), (computation_module, fuse_func,) in itertools.product(
+        unary_modules_map.items(), computation_op_unary_op_fusion_map.items()
+    ):
         pattern = (computation_module, unary_module)
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if (
                     len(node.args[0].users) > 1
-                ):  # Output of convolution is used by other nodes
+                ):  # Output of computation_node is used by other nodes
                     continue
                 conv = modules[node.args[0].target]
-                unary = modules[node.target]
-                eval_mode = all(not n.training for n in [conv, unary])
+                unary_node = modules[node.target]
+                eval_mode = all(not n.training for n in [conv, unary_node])
                 if not eval_mode:
                     continue
-                fused_conv = fuse_func(conv, unary)
+                fused_conv = fuse_func(conv, unary_node)
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
@@ -459,7 +458,7 @@ def rand_like(x, **kwargs):
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
 
 
-computation_modules_map = {nn.Conv2d: fuse_conv_unary_eval}
+computation_op_unary_op_fusion_map = {nn.Conv2d: fuse_conv_unary_eval}
 
 
 unary_modules_map = {
