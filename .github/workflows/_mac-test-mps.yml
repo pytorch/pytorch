@@ -63,8 +63,6 @@ jobs:
           # shellcheck disable=SC1090
           set -ex
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
-          # This step currently fails if we actually run as if we're in CI.
-          unset CI
 
           ${CONDA_RUN} --cwd test python3 test_mps.py -v
           ${CONDA_RUN} --cwd test python3 test_metal.py -v
