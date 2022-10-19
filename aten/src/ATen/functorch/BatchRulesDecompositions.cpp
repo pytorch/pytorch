@@ -256,8 +256,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
-  OP_DECOMPOSE(pad);
-  OP_DECOMPOSE(_pad_circular);
+  m.impl("pad", native::pad_symint);
+  m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(t_);
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);

@@ -32,7 +32,7 @@ def quantize_per_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
         " actual quant_max:" + \
         str(quant_max)
 
-    inv_scale = 1.0 / scale;
+    inv_scale = 1.0 / scale
     return torch.clamp(torch.round(input * inv_scale) + zero_point, quant_min, quant_max).to(dtype)
 
 quantized_decomposed_lib.define(
@@ -42,6 +42,6 @@ quantized_decomposed_lib.define(
 def dequantize_per_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
     assert input.dtype == dtype, "Expecting input to have dtype:" + str(dtype)
     if dtype in [torch.uint8, torch.int8]:
-        return (input.to(torch.float32) - zero_point) * scale;
+        return (input.to(torch.float32) - zero_point) * scale
     else:
         raise ValueError("Unsupported dtype in dequantize_per_tensor: ", dtype)
