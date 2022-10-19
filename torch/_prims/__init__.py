@@ -2321,7 +2321,7 @@ def _arange_meta(
     )
     if dtype is not None:
         pass
-    elif all(isinstance(arg, int) for arg in (start, end, step)):
+    elif all(isinstance(arg, (int, torch.SymIntNode)) for arg in (start, end, step)):
         dtype = torch.int64
     else:
         dtype = torch.get_default_dtype()
