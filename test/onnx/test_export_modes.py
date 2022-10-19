@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: jit"]
+# Owner(s): ["module: onnx"]
 
 import io
 import os
@@ -14,16 +14,11 @@ from torch.autograd import Variable
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfNoLapack, skipIfCaffe2, skipIfNoCaffe2
+from torch.testing._internal import common_utils
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
 
 # Smoke tests for export methods
-class TestExportModes(JitTestCase):
+class TestExportModes(common_utils.TestCase):
     class MyModel(nn.Module):
         def __init__(self):
             super(TestExportModes.MyModel, self).__init__()
@@ -66,10 +61,10 @@ class TestExportModes(JitTestCase):
             return (a, a)
         f = io.BytesIO()
         x = torch.ones(3)
-        torch.onnx._export(foo, (x,), f)
+        torch.onnx.export(foo, (x,), f)
 
-    @skipIfNoCaffe2
-    @skipIfNoLapack
+    @common_utils.skipIfNoCaffe2
+    @common_utils.skipIfNoLapack
     def test_caffe2_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
@@ -85,8 +80,8 @@ class TestExportModes(JitTestCase):
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
-    @skipIfCaffe2
-    @skipIfNoLapack
+    @common_utils.skipIfCaffe2
+    @common_utils.skipIfNoLapack
     def test_aten_fallback(self):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
@@ -119,3 +114,6 @@ class TestExportModes(JitTestCase):
             add_node_names=False,
             do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)
+
+if __name__ == "__main__":
+    common_utils.run_tests()
