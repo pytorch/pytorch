@@ -57,11 +57,9 @@ __global__ void test_reinterpret_cast() {
 
 int safeDeviceCount() {
   int count;
-  const cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
+  cudaError_t err = cudaGetDeviceCount(&count);
   if (err == cudaErrorInsufficientDriver || err == cudaErrorNoDevice) {
     return 0;
-  } else {
-    C10_CUDA_CHECK(err);  // Reraise the error
   }
   return count;
 }
@@ -76,24 +74,27 @@ int safeDeviceCount() {
 TEST(DeviceTests, ThrustConversion) {
   SKIP_IF_NO_GPU();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
   test_thrust_kernel<<<1, 1>>>();
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
 
 TEST(DeviceTests, StdFunctions) {
   SKIP_IF_NO_GPU();
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
   test_std_functions_kernel<<<1, 1>>>();
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
 
 TEST(DeviceTests, ReinterpretCast) {
   SKIP_IF_NO_GPU();
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
   test_reinterpret_cast<<<1, 1>>>();
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
