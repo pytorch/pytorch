@@ -82,8 +82,8 @@ from torch.ao.ns._numeric_suite_fx import (
     print_comparisons_n_shadows_model,
     loggers_set_enabled,
     loggers_set_save_activations,
-    QConfigMultiMapping,
 )
+from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 
@@ -2113,9 +2113,8 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         example_input = (torch.randn(2, 2),)
 
-        qconfig_mappings = [
-            QConfigMapping().set_global(torch.quantization.default_qconfig),
-        ]
+        qconfig_mappings = \
+            QConfigMultiMapping().set_global([torch.quantization.default_qconfig])
         self._test_impl(m, example_input, qconfig_mappings)
 
     def test_linear_relu_mod(self):
@@ -2135,10 +2134,12 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         example_input = (torch.randn(2, 2),)
 
-        qconfig_mappings = [
-            QConfigMapping().set_global(torch.quantization.default_qconfig),
-            QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig),
-        ]
+        qconfig_mappings = (
+            QConfigMultiMapping().set_global([
+                torch.quantization.default_qconfig,
+                torch.quantization.default_dynamic_qconfig
+            ])
+        )
         self._test_impl(m, example_input, qconfig_mappings)
 
     def test_conv_bn_relu_mod(self):
@@ -2157,10 +2158,12 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
 
         m = M().eval()
         example_input = (torch.randn(32, 1, 16, 16),)
-        qconfig_mappings = [
-            QConfigMapping().set_global(torch.quantization.default_qconfig),
-            QConfigMapping().set_global(torch.quantization.default_per_channel_qconfig),
-        ]
+
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([
+                torch.quantization.default_qconfig,
+                torch.quantization.default_per_channel_qconfig
+            ])
         self._test_impl(m, example_input, qconfig_mappings)
 
     def test_functions(self):
@@ -2197,10 +2200,8 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         m = M().eval()
         example_input = (torch.randn(2, 2),)
 
-        qconfig_mappings = [
-            QConfigMapping().set_global(torch.quantization.default_qconfig),
-            # QConfigMapping().set_global(torch.quantization.default_per_channel_qconfig),
-        ]
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([torch.quantization.default_qconfig])
         self._test_impl(m, example_input, qconfig_mappings)
 
     def test_partial_qconfig_mapping(self):
@@ -2223,19 +2224,17 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         example_input = (torch.randn(2, 2),)
         qconfig = torch.ao.quantization.default_qconfig
 
-        qconfig_mappings = [
-            QConfigMapping().set_global(None)
-                            .set_object_type(F.linear, qconfig)
-                            .set_object_type(F.relu, qconfig),
-        ]
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_object_type(F.linear, [qconfig]) \
+            .set_object_type(F.relu, [qconfig])
         self._test_impl(m, example_input, qconfig_mappings)
 
     def test_logger_enabled_and_save_activations_flags(self):
         m = nn.Sequential(nn.Linear(1, 1)).eval()
         example_input = (torch.randn(1, 1),)
-        qconfig_mappings = [
-            QConfigMapping().set_global(torch.quantization.default_qconfig),
-        ]
+
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([torch.quantization.default_qconfig])
         backend_config = get_native_backend_config()
 
         msp = prepare_n_shadows_model(
@@ -2284,10 +2283,9 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             pretrained=False, quantize=False).eval()
         example_input = (torch.randn(1, 3, 224, 224),)
 
-        qconfig_mappings = [
-            QConfigMapping().set_global(torch.quantization.default_qconfig),
-            QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig),
-        ]
+        qconfig_mappings = QConfigMultiMapping() \
+            .set_global([torch.quantization.default_qconfig, torch.quantization.default_dynamic_qconfig])
+
         self._test_impl(m, example_input, qconfig_mappings)
 
     def test_qconfig_multi_mapping_deduplication(self):
