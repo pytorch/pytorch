@@ -147,6 +147,8 @@ inductor_skips["cuda"] = {
     "acos": {b8, f16, f32, f64, i32, i64},
     "acosh": {b8, f16, f32, f64, i32, i64},
     "nn.functional.conv_transpose3d": {f16},
+    "max.reduction_with_dim": {i32, i64},
+    "min.reduction_with_dim": {i32, i64},
     # Issues on sm86 periodic job (complex numbers)
     "cdouble": {b8, f16, f32, f64, i32, i64},
     "cfloat": {b8, f16, f32, f64, i32, i64},

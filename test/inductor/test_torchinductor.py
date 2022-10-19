@@ -3124,6 +3124,7 @@ class CommonTemplate:
             ],
         )
 
+    @unittest.skip("unstable on sm86")
     def test_slice_scatter2(self):
         def fn(a, b):
             return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
