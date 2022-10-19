@@ -49,6 +49,13 @@ function assert_git_not_dirty() {
     fi
 }
 
+function pip_install_whl() {
+  # This is used to install PyTorch and other build artifacts wheel locally
+  # without using any network connection
+  alias pip_install_no_network="pip install --no-index --no-deps"
+  pip_install_no_network "$@"
+}
+
 function pip_install() {
   # retry 3 times
   # old versions of pip don't have the "--progress-bar" flag
