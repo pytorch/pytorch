@@ -428,7 +428,7 @@ class TestONNXExport(common_utils.TestCase):
         onnx_model = export_to_onnx(
             MyClip(),
             torch.randn(3, 4, requires_grad=True),
-            custom_ops=[common_utils.custom_op("aten::clamp", bad_clamp, 9)],
+            custom_ops=[common_utils.custom_op("aten::clamp", bad_clamp, GLOBALS.export_onnx_opset_version)],
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
