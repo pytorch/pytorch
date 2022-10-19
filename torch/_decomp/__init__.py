@@ -147,7 +147,8 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                             )
                         meta_lib.impl(op_overload, fn)
                     else:
-                        print(f"WARNING: {name} has no C++ meta kernel but disable_meta is {disable_meta} ")
+                        pass
+                        # print(f"WARNING: {name} has no C++ meta kernel but disable_meta is {disable_meta} ")
 
 
         # To handle allowing multiple aten_ops at once

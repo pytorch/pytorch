@@ -63,7 +63,8 @@ def register_meta(op, register_dispatcher=True):
 
                 else:
                     if register_dispatcher:
-                        print(f"WARNING: {name} has c++ meta impl, but register_dispatcher is {register_dispatcher}")
+                        pass
+                        # print(f"WARNING: {name} has c++ meta impl, but register_dispatcher is {register_dispatcher}")
 
             op.py_impl(torch._C.DispatchKey.Meta)(f)
 
@@ -1633,6 +1634,18 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     return input.new_empty((nbatch, channels, output_height, output_width)).to(
         memory_format=mem_format
     )
+
+# this is needed to work around
+# "NotImplementedError: convolution_overrideable not implemented.
+# You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN,
+# if this is intended, please use TORCH_LIBRARY_IMPL to override this function "
+# when running `python test/test_meta.py -k test_dispatch_meta_nn_functional_conv2d_cuda_float32`
+_meta_lib_dont_use_me_use_register_meta.impl(aten.convolution.default, meta_conv)
+
+# this is needed to work around
+# TypeError: meta_nanmedian_dim() got an unexpected keyword argument 'values'
+# repro with `python test/test_meta.py -k test_dispatch_meta_nanmedian_cpu_float32`
+_meta_lib_dont_use_me_use_register_meta.impl(aten.nanmedian.dim, meta_nanmedian_dim)
 
 
 # We must also trigger meta registrations from PrimTorch ref
