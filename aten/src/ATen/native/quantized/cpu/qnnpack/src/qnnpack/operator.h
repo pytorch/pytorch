@@ -38,11 +38,20 @@ enum pytorch_qnnp_ukernel_type {
 };
 
 typedef struct {
-  const uint32_t* col_indices;
-  const uint32_t* row_values;
+  union {
+    const uint32_t* col_indices_w32;
+    const uint16_t* col_indices_w16;
+    const uint8_t* col_indices_w8;
+  };
+  union {
+    const uint32_t* row_values_w32;
+    const uint16_t* row_values_w16;
+    const uint8_t* row_values_w8;
+  };
   const uint8_t* values;
   uint32_t row_block_size;
   uint32_t col_block_size;
+  enum pytorch_qnnp_sparse_matrix_indices_dtype indices_dtype;
 } sparse_matrix_t;
 
 struct pytorch_qnnp_operator {
