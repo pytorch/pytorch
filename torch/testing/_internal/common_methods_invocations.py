@@ -14097,7 +14097,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
                # CPU randint generates different values based on the strides of out tensor
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # randint fails to warn when resizing its out tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # FX failed to normalize op - add the op to the op_skip list.
