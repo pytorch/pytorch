@@ -5,6 +5,9 @@
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
+#include <tuple>
+#include <vector>
+
 //
 // The operations defined in this header is intended as user facing functions.
 // The user will provide the necessary input TensorViews and the function will
@@ -42,6 +45,89 @@ struct VarMeanResult {
   TensorView* var = nullptr;
   TensorView* mean = nullptr;
 };
+
+} // namespace cuda
+} // namespace fuser
+} // namespace jit
+} // namespace torch
+
+namespace std {
+
+// Make these results behave like a std::tuple
+using torch::jit::fuser::cuda::BackwardNormResult;
+using torch::jit::fuser::cuda::BackwardRMSNormResult;
+using torch::jit::fuser::cuda::ForwardNormResult;
+using torch::jit::fuser::cuda::ForwardRMSNormResult;
+using torch::jit::fuser::cuda::TensorView;
+using torch::jit::fuser::cuda::VarMeanResult;
+
+template <int i>
+constexpr TensorView* get(const ForwardNormResult& results) {
+  if (i == 0) {
+    return results.output;
+  }
+  if (i == 1) {
+    return results.mean;
+  }
+  if (i == 2) {
+    return results.invstd;
+  }
+  return nullptr;
+}
+
+template <int i>
+constexpr TensorView* get(const BackwardNormResult& results) {
+  if (i == 0) {
+    return results.grad_input;
+  }
+  if (i == 1) {
+    return results.grad_weight;
+  }
+  if (i == 2) {
+    return results.grad_bias;
+  }
+  return nullptr;
+}
+
+template <int i>
+constexpr TensorView* get(const ForwardRMSNormResult& results) {
+  if (i == 0) {
+    return results.output;
+  }
+  if (i == 1) {
+    return results.invstd;
+  }
+  return nullptr;
+}
+
+template <int i>
+constexpr TensorView* get(const BackwardRMSNormResult& results) {
+  if (i == 0) {
+    return results.grad_input;
+  }
+  if (i == 1) {
+    return results.grad_weight;
+  }
+  return nullptr;
+}
+
+template <int i>
+constexpr TensorView* get(const VarMeanResult& results) {
+  if (i == 0) {
+    return results.var;
+  }
+  if (i == 1) {
+    return results.mean;
+  }
+  return nullptr;
+}
+
+} // namespace std
+
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cuda {
 
 TORCH_CUDA_CU_API TensorView* mean(
     TensorView* x,

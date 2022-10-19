@@ -20,6 +20,7 @@ exclude_patterns = [
     'venv/**',
     '**/*.pyi',
     'tools/test/test_selective_build.py',
+    'torch/csrc/jit/codegen/cuda/tools/examples/**',  # examples of generated files
 ]
 command = [
     'python3',
@@ -59,6 +60,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'c10/util/strong_type.h',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/jit/codegen/cuda/tools/examples/**',  # examples of generated files
 ]
 init_command = [
     'python3',
@@ -299,6 +301,7 @@ exclude_patterns=[
     'tools/clang_format_hash/**',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    'torch/csrc/jit/codegen/cuda/tools/examples/**',  # examples of generated files
 ]
 command = [
     'python3',
