@@ -74,11 +74,10 @@ using StorageImplData = strong::type<
 // handle ABA for TensorImpl as those allocations are not instrumented.)
 using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
 
-struct TORCH_API RawTensorMetadata {
-  RawTensorMetadata() = default;
-  RawTensorMetadata(const RawTensorMetadata&) = default;
-  explicit RawTensorMetadata(const at::Tensor& t);
-  TensorImplAddress impl_;
+struct TORCH_API RawTensorMetadataBase {
+  RawTensorMetadataBase() = default;
+  explicit RawTensorMetadataBase(const at::Tensor& t);
+
   StorageImplData data_;
 
   // Device is separated into DeviceType and DeviceIndex as Device
@@ -89,16 +88,29 @@ struct TORCH_API RawTensorMetadata {
   c10::ScalarType dtype_;
   c10::Layout layout_;
   uint32_t dim_;
-  c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
 };
 
-struct TensorMetadata : public RawTensorMetadata {
-  explicit TensorMetadata(const RawTensorMetadata& r) : RawTensorMetadata(r) {}
-  explicit TensorMetadata(const at::Tensor& t) : RawTensorMetadata(t) {}
+struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
+  RawTensorMetadata() = default;
+  RawTensorMetadata(const RawTensorMetadata&) = default;
+  explicit RawTensorMetadata(const at::Tensor& t)
+      : RawTensorMetadataBase(t),
+        weak_self_(
+            c10::weak_intrusive_ptr<c10::TensorImpl>(t.getIntrusivePtr())){};
+
+  // Wrap in `c10::optional` to make `weak_self_` default constructable.
+  c10::optional<c10::weak_intrusive_ptr<c10::TensorImpl>> weak_self_;
+};
+
+struct TensorMetadata : public RawTensorMetadataBase {
+  explicit TensorMetadata(const RawTensorMetadata& r)
+      : RawTensorMetadataBase(r), impl_{r.weak_self_->_unsafe_get_target()} {}
+
   c10::Device device() const {
     return {device_type_, device_index_};
   }
 
+  TensorImplAddress impl_;
   c10::optional<TensorID> id_;
 };
 
@@ -239,29 +251,34 @@ using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
 using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
 
-struct ParameterInfo {
-  std::string param_name_;
-  TensorMetadata param_;
-  c10::optional<TensorMetadata> grad_;
-};
-
 struct NNModuleInfo {
+  struct ParameterInfo {
+    std::string name_;
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+  };
+
   PyModuleSelf self_;
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<ParameterInfo> params_;
+  std::vector<ParameterInfo> parameters_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };
 
 struct OptimizerInfo {
-  PyOptimizerSelf self_;
-  PyOptimizerCls opt_;
-  at::StringView opt_name_;
+  struct ParameterInfo {
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+    std::vector<std::pair<std::string, TensorMetadata>> state_;
+  };
 
-  std::vector<TensorMetadata> params_addr_;
-  std::vector<std::pair<std::string, TensorMetadata>> opt_state_;
+  PyOptimizerSelf self_;
+  PyOptimizerCls cls_;
+  at::StringView cls_name_;
+
+  std::vector<ParameterInfo> parameters_;
 };
 
 struct PyExtraFieldsBase {
@@ -278,10 +295,10 @@ struct PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
-  using args_t = struct {
+  struct args_t {
     PyFrameState frame_state_;
     c10::optional<NNModuleInfo> module_info_;
-    c10::optional<OptimizerInfo> opt_info_;
+    c10::optional<OptimizerInfo> optimizer_info_;
   };
 
   ExtraFields(
@@ -292,11 +309,11 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
         callsite_{args.frame_state_},
         module_{args.module_info_},
-        opt_{args.opt_info_} {}
+        optimizer_{args.optimizer_info_} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
-  c10::optional<OptimizerInfo> opt_;
+  c10::optional<OptimizerInfo> optimizer_;
 };
 
 template <>
