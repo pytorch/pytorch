@@ -98,6 +98,7 @@ decompositions = get_decompositions(
         aten.upsample_nearest2d_backward,
         aten.softplus,
         aten.softplus_backward,
+        aten.silu,
     ]
 )
 
