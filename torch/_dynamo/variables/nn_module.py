@@ -195,7 +195,6 @@ class NNModuleVariable(VariableTracker):
                         "call_module",
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
-                        current_tx=tx,
                     ),
                     **options,
                 )
