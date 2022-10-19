@@ -262,6 +262,10 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return dispatch_common_(__FUNCTION__);
   }
 
+  virtual SymIntNode neg() override {
+    return dispatch_common_(__FUNCTION__);
+  }
+
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
   }
@@ -1436,14 +1440,14 @@ void initJITBindings(PyObject* module) {
           .def(
               "__truediv__",
               [](c10::SymIntNode a, py::object b) -> c10::SymFloatNode {
-                auto snb = toSymIntNode(a, b);
-                return a->truediv(snb);
+                auto float_a = a->sym_float();
+                return float_a->truediv(float_a->wrap(py::cast<double>(b)));
               })
           .def(
               "__rtruediv__",
               [](c10::SymIntNode a, py::object b) -> c10::SymFloatNode {
-                auto snb = toSymIntNode(a, b);
-                return snb->truediv(a);
+                auto float_a = a->sym_float();
+                return float_a->wrap(py::cast<double>(b))->truediv(float_a);
               })
           .def(
               "__floordiv__",
@@ -1514,6 +1518,9 @@ void initJITBindings(PyObject* module) {
           .def(
               "__ceil__",
               [](c10::SymIntNode a) -> c10::SymIntNode { return a->ceil(); })
+          .def(
+              "__neg__",
+              [](c10::SymIntNode a) -> c10::SymIntNode { return a->neg(); })
           .def(
               "__min__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
