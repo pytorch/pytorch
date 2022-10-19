@@ -116,7 +116,6 @@ __all__ = [
     "get_observer_state_dict",
     "get_quantized_operator",
     "get_static_quant_module_class",
-    "get_symmetric_qnnpack_qconfig_mapping",
     "get_unique_devices_",
     "get_valid_patterns",
     "is_activation_post_process",

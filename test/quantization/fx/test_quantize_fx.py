@@ -87,7 +87,7 @@ from torch.ao.quantization.backend_config.native import (
 )
 
 from torch.ao.quantization.qconfig_mapping import (
-    get_symmetric_qnnpack_qconfig_mapping,
+    _get_symmetric_qnnpack_qconfig_mapping,
     GLOBAL_DICT_KEY,
     MODULE_NAME_DICT_KEY,
     MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
@@ -5153,7 +5153,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_symmetric_qnnpack_qconfig_mapping(self):
         """
-        Test whether `torch.ao.quantization.qconfig_mapping.get_symmetric_qnnpack_qconfig_mapping`
+        Test whether `torch.ao.quantization.qconfig_mapping._get_symmetric_qnnpack_qconfig_mapping`
         works with the QNNPACK BackendConfig.
         """
         if "qnnpack" not in supported_qengines:
@@ -5168,7 +5168,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.linear(x)
 
         with override_quantized_engine("qnnpack"):
-            qconfig_mapping = get_symmetric_qnnpack_qconfig_mapping()
+            qconfig_mapping = _get_symmetric_qnnpack_qconfig_mapping()
             example_inputs = (torch.rand((1, 30), dtype=torch.float),)
             backend_config = get_qnnpack_backend_config()
             model = MyModel()
