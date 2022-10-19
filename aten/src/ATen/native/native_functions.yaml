@@ -1174,7 +1174,8 @@
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
-    NestedTensorCPU, NestedTensorCUDA: bmm_nested
+    NestedTensorCPU: bmm_nested
+    NestedTensorCUDA: bmm_nested_cuda
   tags: canonical
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
@@ -13284,7 +13285,8 @@
   dispatch:
     CUDA: _scaled_dot_product_attention_forward_cuda
     CPU: _scaled_dot_product_attention_forward_math
-    NestedTensorCPU, NestedTensorCUDA: _scaled_dot_product_attention_forward_math
+    NestedTensorCUDA: _scaled_dot_product_attention_forward_nested
+    NestedTensorCPU: _scaled_dot_product_attention_forward_math
     Meta: _scaled_dot_product_attention_forward_math
 
 - func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
