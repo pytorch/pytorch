@@ -127,24 +127,6 @@ function install_filelock() {
   pip_install filelock
 }
 
-function install_torchdynamo() {
-  local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@${commit}"
-}
-
-function checkout_install_torchdynamo() {
-  local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pushd ..
-  git clone https://github.com/pytorch/torchdynamo
-  pushd torchdynamo
-  git checkout "${commit}"
-  time python setup.py develop
-  popd
-  popd
-}
-
 function install_triton() {
   local commit
   if [[ "${TEST_CONFIG}" == *rocm* ]]; then
