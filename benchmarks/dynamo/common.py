@@ -151,6 +151,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
     "xcit_large_24_p8_224",  # fp64_OOM
+
 ]
 
 

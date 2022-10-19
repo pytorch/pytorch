@@ -269,7 +269,7 @@ test_inductor_huggingface_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  python benchmarks/huggingface.py --ci --training --accuracy -d cuda --inductor --float32 \
+  python benchmarks/dynamo/huggingface.py --ci --training --accuracy -d cuda --inductor --float32 \
     --total-partitions 2 --partition-id "$1" --output=inductor_huggingface_"$1".csv
   python benchmarks/dynamo/check_csv.py -f inductor_huggingface_"$1".csv
 }
@@ -279,7 +279,7 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  python benchmarks/timm_models.py --ci --training --accuracy -d cuda --inductor --float32 \
+  python benchmarks/dynamo/timm_models.py --ci --training --accuracy -d cuda --inductor --float32 \
     --total-partitions 3 --partition-id "$1" --output=inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f inductor_timm_"$1".csv
 }
