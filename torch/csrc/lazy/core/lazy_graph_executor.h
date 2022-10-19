@@ -197,7 +197,7 @@ class TORCH_API LazyGraphExecutor {
       const SyncTensorsConfig& config,
       c10::ArrayRef<size_t> indices,
       const std::vector<torch::lazy::BackendDataPtr>& tensor_data_vec);
-  
+
   void ExtractIRAndPrepareXlaData(
       std::vector<LazyTensorPtr>* tensors,
       const SyncTensorsConfig& config,

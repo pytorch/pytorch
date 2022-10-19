@@ -693,7 +693,7 @@ void LazyGraphExecutor::ExtractIRAndPrepareXlaData(
     ir_values.push_back(ir_value);
     const BackendDevice& tensor_device = tensor->GetDevice();
     BackendDataPtr handle = getBackend()->CreateDataPlaceholder(
-          tensor_device, std::move(tensor->shape()));
+        tensor_device, std::move(tensor->shape()));
     tensor_data_vec.push_back(handle);
     if (tensor->CurrentDataHandle() == nullptr && config.sync_ltc_data) {
       tensor->AssignIrValue(Value());
@@ -702,8 +702,9 @@ void LazyGraphExecutor::ExtractIRAndPrepareXlaData(
 }
 
 std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
-    std::vector<LazyTensorPtr>* tensors, const SyncTensorsConfig& config,
-    c10::ArrayRef<size_t>indices,
+    std::vector<LazyTensorPtr>* tensors,
+    const SyncTensorsConfig& config,
+    c10::ArrayRef<size_t> indices,
     const std::vector<BackendDataPtr>& tensor_data_vec) {
   std::vector<BackendDataPtr> tensors_data;
   tensors_data.reserve(indices.size());
@@ -933,8 +934,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       "ScheduleSyncTensorsGraph", *tensors, &coll.indices);
   std::vector<Value> ir_values;
   std::vector<BackendDataPtr> tensor_data_vec;
-  ExtractIRAndPrepareXlaData(tensors, coll.config, coll.indices, ir_values,
-                             tensor_data_vec);
+  ExtractIRAndPrepareXlaData(
+      tensors, coll.config, coll.indices, ir_values, tensor_data_vec);
   PostOrderData po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   VLOG(4) << "Parameter sequence graph hash " << HashToString(coll.hash);
@@ -1045,11 +1046,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         std::vector<BackendDataPtr> parameters_data,
         ComputationCache::TypePtr cached_computation,
         const std::vector<BackendDataPtr>& tensor_data_vec) {
-  auto tensors_data = SetTensorData(
-        tensors,
-        coll->config,
-        coll->indices,
-        tensor_data_vec);
+  auto tensors_data =
+      SetTensorData(tensors, coll->config, coll->indices, tensor_data_vec);
   return ScheduleSyncTensorsGraph(
       coll,
       std::move(parameters_data),
