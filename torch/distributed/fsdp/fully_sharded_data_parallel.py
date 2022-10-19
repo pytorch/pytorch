@@ -307,6 +307,7 @@ class StateDictType(Enum):
     LOCAL_STATE_DICT = auto()
     SHARDED_STATE_DICT = auto()
 
+
 @dataclass
 class StateDictConfig:
     """
@@ -315,7 +316,8 @@ class StateDictConfig:
     order to configure settings for the particular type of ``state_dict``
     implementation FSDP will use.
     """
-    pass
+    offload_to_cpu: bool = False
+
 
 @dataclass
 class FullStateDictConfig(StateDictConfig):
@@ -345,22 +347,25 @@ class FullStateDictConfig(StateDictConfig):
         >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
     """
-    offload_to_cpu: bool = False
     rank0_only: bool = False
+
 
 @dataclass
 class LocalStateDictConfig(StateDictConfig):
     pass
 
+
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
     pass
+
 
 _state_dict_type_to_config = {
     StateDictType.FULL_STATE_DICT: FullStateDictConfig,
     StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
     StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
 }
+
 
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
@@ -572,7 +577,7 @@ class _ExecOrderData:
             tensor_kwargs = {"dtype": torch.int32, "device": device}
             world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)
             local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_num_valid_indices,
                 local_num_valid_indices,
                 group=self.process_group,
@@ -597,7 +602,7 @@ class _ExecOrderData:
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
             local_indices = torch.tensor(local_indices, **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
             # Check that all ranks plan to all-gather the same index parameters
@@ -2327,10 +2332,12 @@ class FullyShardedDataParallel(nn.Module):
         local_shards = [
             Shard.from_tensor_and_offsets(flat_param, [shard_offset], self.rank)
         ]
-        state_dict[f"{prefix}{FLAT_PARAM}"] = init_from_local_shards(
+        sharded_tensor = init_from_local_shards(
             local_shards, full_numel, process_group=self.process_group
         )  # type: ignore[assignment]
-
+        if self._state_dict_config.offload_to_cpu:
+            sharded_tensor = sharded_tensor.cpu()
+        state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
         return state_dict
 
     @torch.no_grad()
@@ -2355,13 +2362,16 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _ext_chunk_tensor(
+                sharded_tensor = _ext_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
                     num_devices_per_node=torch.cuda.device_count(),
                     pg=self.process_group
-                )  # type: ignore[assignment]
+                )
+                if self._state_dict_config.offload_to_cpu:
+                    sharded_tensor = sharded_tensor.cpu()
+                state_dict[f"{prefix}{fqn}"] = sharded_tensor
         # For `use_orig_params=True`, the `FlatParameter` is not registered, so
         # there is no entry in the state dict for it to pop.
         if not self._use_orig_params:
@@ -2598,9 +2608,10 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         nonsharded_tensors = []
-        # TODO: Reduce the communication by using only one _all_gather_base to
-        # gather all the parameters in this layer. This can be achieved by
-        # concatenated all the local shards and then append the padding.
+        # TODO: Reduce the communication by using only one
+        # `all_gather_into_tensor()` to gather all the parameters in this
+        # layer. This can be achieved by concatenating all the local shards and
+        # then appending the padding.
         # https://github.com/pytorch/pytorch/issues/77461
         shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
         for fqn, _, _ in self._param_fqns:
@@ -2630,7 +2641,7 @@ class FullyShardedDataParallel(nn.Module):
             tensor = torch.empty(
                 chunk_size * self.world_size, dtype=local_tensor.dtype
             ).cuda()
-            dist._all_gather_base(tensor, local_tensor, group=self.process_group)
+            dist.all_gather_into_tensor(tensor, local_tensor, group=self.process_group)
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             nonsharded_tensors.append(tensor)
 

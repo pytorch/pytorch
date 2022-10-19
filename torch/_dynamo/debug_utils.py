@@ -228,7 +228,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(*args)
+                compiled(args)
                 """
             )
         )
@@ -293,7 +293,7 @@ def inductor_fails(fx_g, args, check_str=None):
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
-        compile_mod(*args)
+        compile_mod(args)
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
@@ -382,10 +382,13 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
 
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
+        from torch._subclasses import FakeTensorMode
+
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
+        inner_compiled_fn = None
 
-        def deferred_for_real_inputs(*real_inputs):
+        def deferred_for_real_inputs(real_inputs):
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
@@ -393,6 +396,15 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             should be called with real tensors. Therefore, the actual invocation
             is deffered.
             """
+            # Avoid re-compiling when we call the compiled function twice. This happens
+            # when we run the model inference or training in a for loop like here
+            # https://github.com/pytorch/torchdynamo/issues/1687#issuecomment-1280040633
+            nonlocal inner_compiled_fn
+            # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
+            # because inductor clears the tensor list in its codegen. And example_inputs
+            # are available only for the first invocation.
+            fake_mode = FakeTensorMode()
+            copy_tensor_attrs = [fake_mode.from_tensor(x) for x in real_inputs]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
@@ -404,43 +416,50 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                if inner_compiled_fn is None:
+                    inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     raise ValueError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return compiled_fn(*real_inputs)
+                    return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
-                    compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                    if inner_compiled_fn is None:
+                        inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                     # Call the compiled function with real inputs
-                    return compiled_fn(*real_inputs)
+                    return inner_compiled_fn(real_inputs)
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            copy_tensor_attrs,
+                            compiler_name,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            copy_tensor_attrs,
+                            compiler_name,
                         )
                     raise e
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
+            compiled_fn._boxed_call = True
         else:
             compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -453,6 +472,8 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
+    from functorch._src.aot_autograd import make_boxed_func
+
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
@@ -465,7 +486,14 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
-    out = gm(*args)
+
+    # TorchInductor returned callable expects lists. So, boxing the call.
+    if not hasattr(gm, "_boxed_call") and hasattr(gm, "named_parameters"):
+        orig_named_parameters = gm.named_parameters
+        gm = make_boxed_func(gm)
+        gm.named_parameters = orig_named_parameters
+
+    out = gm(args)
     if only_fwd:
         return out
     if requires_bwd_pass(out):
@@ -775,7 +803,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             else:
                 try:
                     compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
-                    run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+                    run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
                         "Compiled Fx GraphModule failed with following error. Setting up minifier."
@@ -815,7 +843,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
-        run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+        run_fwd_maybe_bwd(compiled_gm, example_inputs)
         raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
