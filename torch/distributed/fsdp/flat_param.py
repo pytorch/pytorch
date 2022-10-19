@@ -799,7 +799,7 @@ class FlatParamHandle:
             padded_unsharded_flat_param.numel() == expected_numel,
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
-        dist._all_gather_base(
+        dist.all_gather_into_tensor(
             padded_unsharded_flat_param,
             sharded_flat_param,
             self.process_group,
@@ -861,7 +861,7 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-        dist._all_gather_base(padded_unsharded_grad, sharded_grad, self.process_group)
+        dist.all_gather_into_tensor(padded_unsharded_grad, sharded_grad, self.process_group)
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[:unsharded_size.numel()].view(unsharded_size)
         self._use_unsharded_grad_views()
