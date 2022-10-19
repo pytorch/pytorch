@@ -3,8 +3,6 @@ import logging
 import math
 import numbers
 
-from functorch._src.aot_autograd import aot_autograd_decompositions
-
 import torch
 import torch._decomp as decomp
 from torch import Tensor
@@ -98,9 +96,11 @@ decompositions = get_decompositions(
         aten.tril.default,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
+        aten.softplus,
+        aten.softplus_backward,
+        aten.silu,
     ]
 )
-decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):
@@ -195,9 +195,12 @@ def rsub(a, b):
 def masked_fill(value, mask, other):
     if isinstance(other, numbers.Number):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
+    assert other.numel() == 1 and other.ndim == 0
     if other.device != value.device and other.numel() == 1:
         other = other.to(value.device)
-    value, mask, other = torch.broadcast_tensors(value, mask, other)
+    if other.dtype != value.dtype:
+        # TODO: error out on improper complex conversions
+        other = other.to(value.dtype)
     return torch.where(mask, other, value)
 
 

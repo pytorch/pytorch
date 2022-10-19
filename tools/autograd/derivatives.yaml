@@ -1249,9 +1249,7 @@
   result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)
 
 - name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
-  self: not_implemented("ormqr")
-  input2: not_implemented("ormqr")
-  input3: not_implemented("ormqr")
+  self, input2, input3: ormqr_backward(grad, result, self, input2, input3, left, transpose, grad_input_mask)
 
 - name: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   self: permute_backwards(grad, dims)
@@ -1472,20 +1470,20 @@
   output_differentiability: [True, False]
   values: gather_with_keepdimed_indices(self_t, dim, indices, true)
 
-- name: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
-  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+- name: split.Tensor(Tensor(a -> *) self, SymInt split_size, int dim=0) -> Tensor(a)[]
+  self: split_backward(grads, split_size, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
-  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+- name: unsafe_split.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
+  self: split_backward(grads, split_size, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+- name: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+- name: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
 - name: sqrt(Tensor self) -> Tensor
@@ -1870,15 +1868,15 @@
   self: multilabel_margin_loss_backward(grad, self, target, reduction, is_target)
   target: non_differentiable
 
-- name: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
-  self: nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
+- name: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index) -> (Tensor output, Tensor total_weight)
+  self: nll_loss_backward_symint(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable
-  output: std::get<0>(nll_loss_forward(self_t, target, weight, reduction, ignore_index))
+  output: std::get<0>(nll_loss_forward_symint(self_t, target, weight, reduction, ignore_index))
 
-- name: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
-  self: nll_loss2d_backward(grad, self, target, weight, reduction, ignore_index, total_weight)
+- name: nll_loss2d_forward(Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index) -> (Tensor output, Tensor total_weight)
+  self: nll_loss2d_backward_symint(grad, self, target, weight, reduction, ignore_index, total_weight)
   target: non_differentiable
-  output: std::get<0>(nll_loss2d_forward(self_t, target, weight, reduction, ignore_index))
+  output: std::get<0>(nll_loss2d_forward_symint(self_t, target, weight, reduction, ignore_index))
 
 - name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
   self: smooth_l1_loss_backward(grad, self, target, reduction, beta)
@@ -2377,13 +2375,13 @@
            + mse_loss_backward(grad_output_t, self_p, target_p, reduction)
           "
 
-- name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
-  grad_output: nll_loss(grad, target, weight, reduction, ignore_index)
+- name: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index, Tensor total_weight) -> Tensor
+  grad_output: nll_loss_symint(grad, target, weight, reduction, ignore_index)
   self: zeros_like(grad)
   target: non_differentiable
 
-- name: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
-  grad_output: nll_loss2d(grad, target, weight, reduction, ignore_index)
+- name: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index, Tensor total_weight) -> Tensor
+  grad_output: nll_loss2d_symint(grad, target, weight, reduction, ignore_index)
   self: zeros_like(grad)
   target: non_differentiable
 

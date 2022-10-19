@@ -263,7 +263,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
 def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     def convert(x):
         if isinstance(x, variables.TensorVariable):
-            return x.proxy.node.meta["example_value"]
+            return x.get_real_value()
         return x.as_python_constant()
 
     args = [convert(x) for x in args]
@@ -323,7 +323,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.as_python_constant()
         if self.annotations:
-            func.__annotations__ = self.annotations.as_python_constant()
+            annotations = self.annotations.as_python_constant()
+            if isinstance(annotations, tuple):
+                from itertools import pairwise
+
+                annotations = dict(pairwise(annotations))
+
+            # TypeError: __annotations__ must be set to a dict object
+            assert isinstance(annotations, dict)
+            func.__annotations__ = annotations
         return func
 
     def has_closure(self):
