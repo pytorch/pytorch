@@ -220,6 +220,8 @@ test_python() {
 
 
 test_dynamo_shard() {
+  install_filelock
+  
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
