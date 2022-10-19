@@ -344,11 +344,11 @@ class BackendPatternConfig:
         Set how observers should be inserted in the graph for this pattern.
         There are two observation types:
 
-          * `OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` (default): the output observer instance will be
-          different from the input. This is the most common observation type.
+            `OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT` (default): the output observer instance will be
+            different from the input. This is the most common observation type.
 
-          * `OUTPUT_SHARE_OBSERVER_WITH_INPUT`: the output observer instance will be the same as the input.
-          This is useful for operators like `cat`.
+            `OUTPUT_SHARE_OBSERVER_WITH_INPUT`: the output observer instance will be the same as the input.
+            This is useful for operators like `cat`.
 
         Note: This will be renamed in the near future, since we will soon insert QuantDeQuantStubs with
         observers (and fake quantizes) attached instead of observers themselves.
