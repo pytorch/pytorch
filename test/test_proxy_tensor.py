@@ -1354,7 +1354,10 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
-    def f(args, kwargs):
+    def f(args, kwargs, extra_args):
+        if extra_args:
+            for i, t in extra_args:
+                args[i] = t.size()
         return op.op(*args, **kwargs)
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
     new_f = None
@@ -1364,18 +1367,30 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
         args = [sample_input.input] + list(sample_input.args)
         kwargs = sample_input.kwargs
 
+        # If any argument is a torch.Size(), maybe get dynamic shapes for it by:
+        # - Create a temporary Tensor whose size is the torch.Size() we want. Note that
+        #   we use an expanded Tensor as we cannot pass "meta" Tensors to make_fx.
+        # - Pass it to make_fx such that it is is converted to a proxy Tensor
+        # - Unpack the size in the wrapper to get a torch.Size with dynamic shapes (in
+        #   symbolic mode, a no-op otherwise)
+        extra_args = []
+        for i, arg in enumerate(args):
+            if isinstance(arg, torch.Size):
+                extra_args.append((i, torch.empty((), device="cpu").expand(arg)))
+        # TODO: support kwargs
+
         try:
-            new_f = make_fx(f, tracing_mode=tracing_mode)(args, kwargs)
+            new_f = make_fx(f, tracing_mode=tracing_mode)(args, kwargs, extra_args)
         except DynamicOutputShapeException as e:
             self.skipTest("Dynamic output shape operation in trace")
         for arg in args:
             if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                 arg.uniform_(0, 1)
         try:
-            old_out = f(args, kwargs)
+            old_out = f(args, kwargs, extra_args)
         except Exception:
             continue
-        new_out = wrapper_set_seed(new_f, args, kwargs)
+        new_out = wrapper_set_seed(new_f, args, kwargs, extra_args)
         self.assertEqual(new_out, old_out)
 
 class TestProxyTensorOpInfo(TestCase):
