@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import collections
 import copy
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import torch
 from torch.ao.quantization import QConfigMapping
+from torch.ao.quantization.qconfig import QConfigAny
 
 _QCONFIG_STYLE_ORDER: List[str] = [
     "global_qconfig",
@@ -132,9 +132,7 @@ class QConfigMultiMapping:
             set_method = getattr(qconfig_mapping, method_name)
             set_method(*args, qconfig)
 
-    def set_global(
-        self, global_qconfig_list: List[QConfigAny]
-    ) -> QConfigMultiMapping:
+    def set_global(self, global_qconfig_list: List[QConfigAny]) -> QConfigMultiMapping:
         """
         Set global QConfigs
         see :func:`~torch.ao.quantization.QConfigMapping.set_global()` for more info
