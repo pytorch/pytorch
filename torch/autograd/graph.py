@@ -368,7 +368,6 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
                         ctx.cloned[handle] = ctx.original[handle].clone()
                         del ctx.original[handle]
 
-
         rs = func(*args, **kwargs)
         return rs
 

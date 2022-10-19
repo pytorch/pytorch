@@ -16,7 +16,7 @@ dnnl::graph::engine& Engine::getEngine() {
 }
 
 dnnl::graph::stream& Stream::getStream() {
-  static dnnl::graph::stream cpu_stream{Engine::getEngine(), nullptr};
+  static dnnl::graph::stream cpu_stream{Engine::getEngine()};
   return cpu_stream;
 }
 
@@ -76,7 +76,7 @@ dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor) {
 
 using data_type = dnnl::graph::logical_tensor::data_type;
 
-data_type getLlgaDataType(at::ScalarType dt) {
+data_type LlgaTensorDesc::getLlgaDataType(at::ScalarType dt) const {
   switch (dt) {
     case at::ScalarType::Float:
       return data_type::f32;
@@ -89,7 +89,12 @@ data_type getLlgaDataType(at::ScalarType dt) {
     case at::ScalarType::QUInt8:
       return data_type::u8;
     default:
-      TORCH_CHECK(false, "Not support data type ", dt);
+      // If a dtype is unsupported, oneDNN Graph will make that op a wildcard in
+      // the graph construction stage. Then when we would execute oneDNN Graph
+      // kernels pertaining to oneDNN Graph partitions, such an op would not be
+      // inside a oneDNN Graph partition, so we would not encounter inputs with
+      // unsupported dtypes at the time of executing compiled partitions.
+      return data_type::undef;
   }
 }
 

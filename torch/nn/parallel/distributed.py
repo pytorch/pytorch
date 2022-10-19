@@ -241,13 +241,13 @@ class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
 
-    This container parallelizes the application of the given module by
-    splitting the input across the specified devices by chunking in the batch
-    dimension. The module is replicated on each machine and each device, and
-    each such replica handles a portion of the input. During the backwards
-    pass, gradients from each node are averaged.
-
-    The batch size should be larger than the number of GPUs used locally.
+    This container provides data parallelism by synchronizing gradients
+    across each model replica. The devices to synchronize across are
+    specified by the input ``process_group``, which is the entire world
+    by default. Note that ``DistributedDataParallel`` does not chunk or
+    otherwise shard the input across participating GPUs; the user is
+    responsible for defining how to do so, for example through the use
+    of a :class:`DistributedSampler`.
 
     See also: :ref:`distributed-basics` and :ref:`cuda-nn-ddp-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
@@ -330,15 +330,6 @@ class DistributedDataParallel(Module, Joinable):
         :class:`torch.distributed.optim.DistributedOptimizer` for optimizing
         parameters.
 
-    .. note::
-        DistributedDataParallel currently offers limited support for gradient
-        checkpointing with :meth:`torch.utils.checkpoint`. DDP will work as
-        expected when there are no unused parameters in the model and each layer
-        is checkpointed at most once (make sure you are not passing
-        `find_unused_parameters=True` to DDP). We currently do not support the
-        case where a layer is checkpointed multiple times, or when there unused
-        parameters in the checkpointed model.
-
         Example::
 
             >>> # xdoctest: +SKIP("undefined variables")
@@ -371,6 +362,15 @@ class DistributedDataParallel(Module, Joinable):
             >>>     loss = loss_func(pred, target)
             >>>     dist_autograd.backward(context_id, [loss])
             >>>     dist_optim.step(context_id)
+
+    .. note::
+        DistributedDataParallel currently offers limited support for gradient
+        checkpointing with :meth:`torch.utils.checkpoint`. DDP will work as
+        expected when there are no unused parameters in the model and each layer
+        is checkpointed at most once (make sure you are not passing
+        `find_unused_parameters=True` to DDP). We currently do not support the
+        case where a layer is checkpointed multiple times, or when there unused
+        parameters in the checkpointed model.
 
     .. note::
         To let a non-DDP model load a state dict from a DDP model,
