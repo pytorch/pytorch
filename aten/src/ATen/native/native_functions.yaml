@@ -3428,7 +3428,7 @@
   variants: function
   dispatch:
     CPU: decomposed_dequantize_per_tensor
-  autogen: decomposed_dequantize_per_tensor.out    
+  autogen: decomposed_dequantize_per_tensor.out
     
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
 # are namespacing issues in C++

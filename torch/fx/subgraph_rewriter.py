@@ -8,7 +8,7 @@ import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
 
-__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filter']
+__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters']
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
