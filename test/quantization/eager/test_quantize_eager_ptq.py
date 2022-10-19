@@ -71,7 +71,6 @@ hu.assert_deadline_disabled()
 
 # Standard library
 from typing import Tuple
-import io
 import unittest
 import numpy as np
 
