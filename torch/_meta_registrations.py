@@ -119,11 +119,7 @@ def meta_unsqueeze_(self, dim):
     # new size
     size = list(self.size())
     size.insert(dim, 1)
-    # return self.as_strided_(size, strides)
-    # This is incorrect and self.as_strided_(...) should be returned.
-    # However, as_strided_ doesn't have a meta impl and there's no straightforward way
-    # to inplace modify the strides from python.
-    return self.as_strided(size, strides)
+    return torch.ops.aten.as_strided_(self, size, strides)
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py

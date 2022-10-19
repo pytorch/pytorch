@@ -815,7 +815,7 @@
   device_guard: False
   tags: inplace_view
   dispatch:
-    CompositeExplicitAutogradNonFunctional: as_strided_
+    CompositeExplicitAutogradNonFunctional: as_strided__symint
 
 - func: asin(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
