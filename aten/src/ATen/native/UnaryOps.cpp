@@ -330,7 +330,7 @@ static inline Tensor unary_op_impl_with_complex_to_float(const Tensor& self, Out
     return out_impl(result, self);
   }
 
-  Tensor result = at::empty({0}, self.options());
+  Tensor result =  at::empty_like(self, self.options());
   return out_impl(result, self);
 }
 

@@ -640,6 +640,12 @@ class FakeTensorOperatorInvariants(TestCase):
                 has_kwarg_device or op == torch.ops.aten._list_to_tensor.default
             )
 
+    # Remove once opinfos have permutted unary op infos
+    def test_abs(self):
+        with torch._subclasses.CrossRefFakeMode():
+            x = torch.empty_strided([2, 80, 80, 36], (230400, 80, 1, 6400), device="meta")
+            x.abs()
+
     @unittest.expectedFailure
     def test_sparse_new(self):
         with FakeTensorMode():
