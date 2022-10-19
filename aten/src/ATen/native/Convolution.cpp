@@ -1,16 +1,17 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
-#include <ATen/Config.h>
 #include <c10/macros/Macros.h>
 
 #include <limits>
@@ -21,6 +22,60 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_conv_depthwise2d.h>
+#include <ATen/ops/_convolution.h>
+#include <ATen/ops/_convolution_double_backward_native.h>
+#include <ATen/ops/_convolution_mode.h>
+#include <ATen/ops/_convolution_mode_native.h>
+#include <ATen/ops/_convolution_native.h>
+#include <ATen/ops/_mps_convolution.h>
+#include <ATen/ops/_mps_convolution_transpose.h>
+#include <ATen/ops/_nnpack_available.h>
+#include <ATen/ops/_nnpack_spatial_convolution.h>
+#include <ATen/ops/_slow_conv2d_backward.h>
+#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/conv1d_native.h>
+#include <ATen/ops/conv2d_native.h>
+#include <ATen/ops/conv3d_native.h>
+#include <ATen/ops/conv_depthwise3d.h>
+#include <ATen/ops/conv_transpose1d_native.h>
+#include <ATen/ops/conv_transpose2d_native.h>
+#include <ATen/ops/conv_transpose3d_native.h>
+#include <ATen/ops/convolution.h>
+#include <ATen/ops/convolution_backward_native.h>
+#include <ATen/ops/convolution_backward_overrideable.h>
+#include <ATen/ops/convolution_backward_overrideable_native.h>
+#include <ATen/ops/convolution_native.h>
+#include <ATen/ops/convolution_overrideable.h>
+#include <ATen/ops/convolution_overrideable_native.h>
+#include <ATen/ops/cudnn_convolution.h>
+#include <ATen/ops/cudnn_convolution_transpose.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/miopen_convolution.h>
+#include <ATen/ops/miopen_convolution_transpose.h>
+#include <ATen/ops/miopen_depthwise_convolution.h>
+#include <ATen/ops/mkldnn_convolution.h>
+#include <ATen/ops/mps_convolution_backward.h>
+#include <ATen/ops/mps_convolution_transpose_backward.h>
+#include <ATen/ops/slow_conv3d.h>
+#include <ATen/ops/slow_conv_dilated2d.h>
+#include <ATen/ops/slow_conv_dilated3d.h>
+#include <ATen/ops/slow_conv_transpose2d.h>
+#include <ATen/ops/slow_conv_transpose3d.h>
+#include <ATen/ops/thnn_conv2d.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 constexpr int MIOPEN_DIM_MAX = 5;
@@ -1011,8 +1066,14 @@ at::Tensor conv_transpose2d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
-  auto output = at::convolution(
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  } else {
+    output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
