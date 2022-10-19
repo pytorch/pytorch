@@ -3531,9 +3531,9 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
-    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-               requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
-    return tensors
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       requires_grad=requires_grad, low=-5, high=5)
+    return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
 
 def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
@@ -4710,21 +4710,19 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     tensor_1d = partial(make_tensor, (S,), device=device, dtype=dtype,
                         requires_grad=requires_grad)
 
-    return [
-        SampleInput(tensor_nd()),
-        SampleInput(tensor_nd(), dim=1),
-        SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False),
+    yield SampleInput(tensor_nd())
+    yield SampleInput(tensor_nd(), dim=1)
+    yield SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False)
 
-        SampleInput(tensor_nd(), dim=(1,), correction=S // 2),
-        SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True),
+    yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
+    yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
+    yield SampleInput(tensor_nd(), dim=None, correction=None)
 
-        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-        SampleInput(tensor_nd(), True),
-        SampleInput(tensor_nd(), False),
-        SampleInput(tensor_nd(), dim=None, correction=None),
-    ]
+    # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+    yield SampleInput(tensor_nd(), True)
+    yield SampleInput(tensor_nd(), False)
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
@@ -5271,7 +5269,6 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
         (shape, dict(ignore_index=1)),
     ]
 
-    sample_inputs = []
     for (input_shape, kwargs), probabilities_target in itertools.product(input_shape_and_kwargs, (False, True)):
         input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5301,9 +5298,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 # make sure at least one item in target is not ignored
                 target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
 
-        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
-
-    return sample_inputs
+        yield SampleInput(input, target, **kwargs)
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -5409,6 +5404,8 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S)))
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
+                       high=None, requires_grad=requires_grad)
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5423,15 +5420,13 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
-    sample_inputs = []
     for lhs_shape, rhs_shape in test_cases:
-        lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-        rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        lhs = make_arg(lhs_shape)
+        rhs = make_arg(rhs_shape)
         if not is_rmatmul:
-            sample_inputs.append(SampleInput(lhs, args=(rhs,)))
+            yield SampleInput(lhs, rhs)
         else:
-            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
-    return tuple(sample_inputs)
+            yield SampleInput(rhs, lhs)
 
 
 def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
@@ -9979,7 +9974,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
@@ -9987,7 +9986,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
            ref=np.meshgrid,
@@ -10755,6 +10758,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-3, rtol=1e-3)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda',
                ),
            ),
            skips=(
@@ -15483,6 +15490,10 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_out",
                 device_type="meta",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-3)}),
+                'TestInductorOpInfo', 'test_comprehensive', device_type='cuda',
             ),
         ),
     ),
