@@ -94,6 +94,13 @@ def sym_float(a):
         return a
     return float(a)
 
+def sym_int(a):
+    if hasattr(a, '__sym_int__'):
+        return a.__sym_int__()
+    elif isinstance(a, torch._C.SymIntNode):
+        return a
+    return int(a)
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
