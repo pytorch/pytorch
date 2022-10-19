@@ -29,13 +29,41 @@ def register_meta(op, register_dispatcher=True):
     def wrapper(f):
         def add_func(op):
             meta_table[op] = f
-            if register_dispatcher:
-                name = (
-                    op.__name__
-                    if op._overloadname != "default"
-                    else op.overloadpacket.__name__
-                )
-                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+
+            overloads = []
+            if isinstance(op, torch._ops.OpOverload):
+                overloads.append(op)
+            else:
+                assert isinstance(op, torch._ops.OpOverloadPacket)
+                for ol in op.overloads():
+                    overloads.append(getattr(op, ol))
+
+            for op_overload in overloads:
+                name = op_overload._schema.name
+                if op_overload._schema.overload_name:
+                    name += "." + op_overload._schema.overload_name
+
+                if (
+                    # TorchScript dumps a bunch of extra nonsense overloads
+                    # which don't have corresponding dispatcher entries, we need
+                    # to filter those out
+                    torch._C._dispatch_has_kernel(name)
+                    # Don't register a python meta kernel to any operator that has
+                    # should already work with meta tensors today.
+                    # We can check that by seeing if the "computed table" for the operator
+                    # has a registration to Meta;
+                    # either through a direct registration, or an indirect one through
+                    # an alias dispatch key (e.g. CompositeImplicitAutograd)
+                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                        name, "Meta"
+                    )
+                ):
+                    assert register_dispatcher == True
+                    _meta_lib_dont_use_me_use_register_meta.impl(op_overload, f)
+
+                else:
+                    if register_dispatcher:
+                        print(f"WARNING: {name} has c++ meta impl, but register_dispatcher is {register_dispatcher}")
 
             op.py_impl(torch._C.DispatchKey.Meta)(f)
 
