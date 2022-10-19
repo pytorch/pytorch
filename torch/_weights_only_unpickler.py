@@ -1,10 +1,20 @@
-# Very restricted unpickler
+# Unpickler restricted to loading only state dicts
+# Restrict constructing types to a list defined in _get_allowed_globals()
+# Restrict BUILD operation to `Tensor`, `Parameter` and `OrderedDict` types only
+# Restrict APPEND/APPENDS to `list`
+# In `GLOBALS` operation do not do class lookup by name, but rather rely on dictionary
+# defined by `_get_allowed_globals()` method, that contains:
+# - torch types (Storage, dtypes, Tensor, `torch.Size`),
+# - `torch._utils._rebuild` functions.
+# - `torch.nn.Parameter`
+# - `collections.OrderedDict`
+
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
 # For example:
 # data = urllib.request.urlopen('https://download.pytorch.org/models/resnet50-0676ba61.pth').read()
 # buf = io.BytesIO(data)
-# weights = torch.load(buf, pickle_module=WeightsUnpickler)
+# weights = torch.load(buf, weights_only = True)
 
 import functools as _functools
 from collections import OrderedDict
@@ -58,31 +68,16 @@ import torch
 def _get_allowed_globals():
     rc: Dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
-        "torch.Tensor": torch.Tensor,
-        "torch.CharTensor": torch.CharTensor,
-        "torch.CharStorage": torch.CharStorage,
-        "torch.ShortTensor": torch.ShortTensor,
-        "torch.ShortStorage": torch.ShortStorage,
-        "torch.ByteTensor": torch.ByteTensor,
-        "torch.ByteStorage": torch.ByteStorage,
-        "torch.BoolTensor": torch.BoolTensor,
-        "torch.BoolStorage": torch.BoolStorage,
-        "torch.BFloat16Storage": torch.BFloat16Storage,
-        "torch.HalfStorage": torch.HalfStorage,
-        "torch.HalfTensor": torch.HalfTensor,
-        "torch.ComplexFloatStorage": torch.ComplexFloatStorage,
-        "torch.ComplexDoubleStorage": torch.ComplexDoubleStorage,
-        "torch.FloatStorage": torch.FloatStorage,
-        "torch.DoubleStorage": torch.DoubleStorage,
-        "torch.IntStorage": torch.IntStorage,
-        "torch.LongStorage": torch.LongStorage,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
-        "torch._tensor._rebuild_from_type_v2": torch._tensor._rebuild_from_type_v2,
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
+        "torch.Tensor": torch.Tensor,
     }
     # dtype
     for t in [
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
         torch.float16,
         torch.float32,
         torch.float64,
@@ -92,14 +87,12 @@ def _get_allowed_globals():
         torch.int64,
     ]:
         rc[str(t)] = t
-    # Typed tensors
-    for tt in [
-        torch.FloatTensor,
-        torch.DoubleTensor,
-        torch.IntTensor,
-        torch.LongTensor,
-    ]:
-        rc[f"torch.{tt.__name__}"] = tt
+    # Tensor classes
+    for tt in torch._tensor_classes:
+        rc[f"{tt.__module__}.{tt.__name__}"] = tt
+    # Storage classes
+    for ts in torch._storage_classes:
+        rc[f"{ts.__module__}.{ts.__name__}"] = ts
     # Rebuild functions
     for f in [
         torch._utils._rebuild_parameter,
@@ -140,9 +133,8 @@ class Unpickler:
                 module = readline()[:-1].decode("utf-8")
                 name = readline()[:-1].decode("utf-8")
                 full_path = f"{module}.{name}"
-                ALLOWED_GLOBALS = _get_allowed_globals()
-                if full_path in ALLOWED_GLOBALS:
-                    self.append(ALLOWED_GLOBALS[full_path])
+                if full_path in _get_allowed_globals():
+                    self.append(_get_allowed_globals()[full_path])
                 else:
                     raise RuntimeError(f"Unsupported class {full_path}")
             elif key[0] == NEWOBJ[0]:
@@ -154,7 +146,7 @@ class Unpickler:
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if func not in ALLOWED_GLOBALS.values():
+                if func not in _get_allowed_globals().values():
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
@@ -162,7 +154,10 @@ class Unpickler:
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
-                if type(inst) is torch.nn.Parameter or type(inst) is torch.Tensor:
+                if type(inst) is torch.Tensor:
+                    # Legacy unpickling
+                    inst.set_(*state)
+                elif type(inst) is torch.nn.Parameter:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)

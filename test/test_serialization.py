@@ -148,17 +148,17 @@ class SerializationMixin(object):
 
         test(io.BytesIO())
 
-    def test_serialization(self):
+    def _test_serialization(self, weights_only):
         # Test serialization with a real file
         b = self._test_serialization_data()
         with tempfile.NamedTemporaryFile() as f:
             torch.save(b, f)
             f.seek(0)
-            c = torch.load(f)
+            c = torch.load(f, weights_only=weights_only)
             self._test_serialization_assert(b, c)
         with TemporaryFileName() as fname:
             torch.save(b, fname)
-            c = torch.load(fname)
+            c = torch.load(fname, weights_only=weights_only)
             self._test_serialization_assert(b, c)
         # test non-ascii encoding of bytes arrays/strings
         # The following bytes are produced by serializing
@@ -180,11 +180,17 @@ class SerializationMixin(object):
         buf = io.BytesIO(serialized)
         utf8_bytes = b'\xc5\xbc\xc4\x85\xc4\x85\xc3\xb3\xc5\xbc\xc4\x85\xc5\xbc'
         utf8_str = utf8_bytes.decode('utf-8')
-        loaded_utf8 = torch.load(buf, encoding='utf-8')
+        loaded_utf8 = torch.load(buf, weights_only=weights_only, encoding='utf-8')
         self.assertEqual(loaded_utf8, [utf8_str, torch.zeros(1, dtype=torch.float), 2])
         buf.seek(0)
-        loaded_bytes = torch.load(buf, encoding='bytes')
+        loaded_bytes = torch.load(buf, weights_only=weights_only, encoding='bytes')
         self.assertEqual(loaded_bytes, [utf8_bytes, torch.zeros(1, dtype=torch.float), 2])
+
+    def test_serialization(self):
+        self._test_serialization(False)
+
+    def test_serialization_safe(self):
+        self._test_serialization(True)
 
     def test_serialization_filelike(self):
         # Test serialization (load and save) with a filelike object
@@ -680,24 +686,30 @@ class serialization_method(object):
     def __exit__(self, *args, **kwargs):
         torch.save = self.torch_save
 
+@unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_new_format_old_format_compat(self, device):
+    def _test_serialization_new_format_old_format_compat(self, device, weights_only):
         x = [torch.ones(200, 200, device=device) for i in range(30)]
 
         def test(f_new, f_old):
             torch.save(x, f_new, _use_new_zipfile_serialization=True)
             f_new.seek(0)
-            x_new_load = torch.load(f_new)
+            x_new_load = torch.load(f_new, weights_only=weights_only)
             self.assertEqual(x, x_new_load)
 
             torch.save(x, f_old, _use_new_zipfile_serialization=False)
             f_old.seek(0)
-            x_old_load = torch.load(f_old)
+            x_old_load = torch.load(f_old, weights_only=weights_only)
             self.assertEqual(x_old_load, x_new_load)
 
         with tempfile.NamedTemporaryFile() as f_new, tempfile.NamedTemporaryFile() as f_old:
             test(f_new, f_old)
+
+    def test_serialization_new_format_old_format_compat(self, device):
+        self._test_serialization_new_format_old_format_compat(device, False)
+
+    def test_serialization_new_format_old_format_compat_safe(self, device):
+        self._test_serialization_new_format_old_format_compat(device, True)
 
 
 class TestOldSerialization(TestCase, SerializationMixin):
@@ -727,8 +739,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEqual(len(w), 1)
-                    self.assertTrue(w[0].category, 'WarningMessage')
+                    self.assertEqual(len(w), 0)
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -739,9 +750,8 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEqual(len(w), 2)
-                    self.assertTrue(w[0].category, 'WarningMessage')
-                    self.assertTrue(w[1].category, 'SourceChangeWarning')
+                    self.assertEqual(len(w), 1)
+                    self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):
         self._test_serialization_container('file', tempfile.NamedTemporaryFile)
@@ -773,7 +783,8 @@ class TestOldSerialization(TestCase, SerializationMixin):
         self.assertEqual(i, i_loaded)
         self.assertEqual(j, j_loaded)
 
-    def test_serialization_offset_filelike(self):
+    @parametrize('weights_only', (True, False))
+    def test_serialization_offset_filelike(self, weights_only):
         a = torch.randn(5, 5)
         b = torch.randn(1024, 1024, 512, dtype=torch.float32)
         i, j = 41, 43
@@ -785,9 +796,9 @@ class TestOldSerialization(TestCase, SerializationMixin):
             self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
             f.seek(0)
             i_loaded = pickle.load(f)
-            a_loaded = torch.load(f)
+            a_loaded = torch.load(f, weights_only=weights_only)
             j_loaded = pickle.load(f)
-            b_loaded = torch.load(f)
+            b_loaded = torch.load(f, weights_only=weights_only)
         self.assertTrue(torch.equal(a, a_loaded))
         self.assertTrue(torch.equal(b, b_loaded))
         self.assertEqual(i, i_loaded)
@@ -799,7 +810,8 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
 
 class TestSerialization(TestCase, SerializationMixin):
-    def test_serialization_zipfile(self):
+    @parametrize('weights_only', (True, False))
+    def test_serialization_zipfile(self, weights_only):
         data = self._test_serialization_data()
 
         def test(name_or_buffer):
@@ -808,7 +820,7 @@ class TestSerialization(TestCase, SerializationMixin):
             if hasattr(name_or_buffer, 'seek'):
                 name_or_buffer.seek(0)
 
-            result = torch.load(name_or_buffer)
+            result = torch.load(name_or_buffer, weights_only=weights_only)
             self.assertEqual(result, data)
 
         with tempfile.NamedTemporaryFile() as f:
@@ -834,21 +846,23 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             state = torch.load(f)
 
-    def test_pathlike_serialization(self):
+    @parametrize('weights_only', (True, False))
+    def test_pathlike_serialization(self, weights_only):
         model = torch.nn.Conv2d(20, 3200, kernel_size=3)
 
         with TemporaryFileName() as fname:
             path = pathlib.Path(fname)
             torch.save(model.state_dict(), path)
-            torch.load(path)
+            torch.load(path, weights_only=weights_only)
 
-    def test_meta_serialization(self):
+    @parametrize('weights_only', (True, False))
+    def test_meta_serialization(self, weights_only):
         big_model = torch.nn.Conv2d(20000, 320000, kernel_size=3, device='meta')
 
         with BytesIOContext() as f:
             torch.save(big_model.state_dict(), f)
             f.seek(0)
-            state = torch.load(f)
+            state = torch.load(f, weights_only=weights_only)
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
 
@@ -985,6 +999,8 @@ class TestSubclassSerialization(TestCase):
 
 instantiate_device_type_tests(TestBothSerialization, globals())
 instantiate_parametrized_tests(TestSubclassSerialization)
+instantiate_parametrized_tests(TestOldSerialization)
+instantiate_parametrized_tests(TestSerialization)
 
 if __name__ == '__main__':
     run_tests()

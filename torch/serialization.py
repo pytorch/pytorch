@@ -654,6 +654,7 @@ def load(
     f: FILE_LIKE,
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
+    *,
     weights_only: bool = False,
     **pickle_load_args: Any
 ) -> Any:
@@ -662,7 +663,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=None, weights_load_only = False, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -709,10 +710,11 @@ def load(
             :attr:`errors=...`.
 
     .. warning::
-        :func:`torch.load()` uses ``pickle`` module implicitly, which is known to be insecure.
+        :func:`torch.load()` unless `weights_only` parameter is set to `True`,
+        uses ``pickle`` module implicitly, which is known to be insecure.
         It is possible to construct malicious pickle data which will execute arbitrary code
         during unpickling. Never load data that could have come from an untrusted
-        source, or that could have been tampered with. **Only load data you trust**.
+        source in an unsafe mode, or that could have been tampered with. **Only load data you trust**.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
@@ -747,14 +749,20 @@ def load(
         >>> torch.load('module.pt', encoding='ascii')
     """
     UNSAFE_MESSAGE = (
-        "*WARNING* Safe load failed, defaulting to standard Python pickle module, "
-        " which can result in arbitrary code execution. To avoid this please ivoke load"
-        " method with weights_only argument set to True"
+        "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
+        " will likely succeede but it can result in arbitrary code execution."
+        "Do it only if you get the file from a trusted source."
     )
+    # Add ability to force safe only weight loads via environment variable
+    if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:
+        weights_only = True
+
     if weights_only:
         if pickle_module is not None:
             raise RuntimeError("Can not safely load weights when expiclit picke_module is specified")
-        picke_module = _weights_only_unpickler
+    else:
+        pickle_module = pickle
+
     _check_dill_version(pickle_module)
 
     if 'encoding' not in pickle_load_args.keys():
@@ -773,28 +781,17 @@ def load(
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
-                if pickle_module is None:
+                if weights_only:
                     try:
                         return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
                     except RuntimeError:
-                        # Rethrow the exception if only safe unpickler is allowed
-                        if weights_only:
-                            raise
-                        warnings.warn(UNSAFE_MESSAGE)
-                        opened_file.seek(orig_position)
-                        return _load(opened_zipfile, map_location, pickle, **pickle_load_args)
+                        raise pickle.UnpicklingError(UNSAFE_MESSAGE)
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
-        if pickle_module is None:
-            orig_position = opened_file.tell()
+        if weights_only:
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
             except RuntimeError:
-                # Rethrow the exception if only safe unpickler is allowed
-                if weights_only:
-                    raise
-                warnings.warn(UNSAFE_MESSAGE)
-                opened_file.seek(orig_position)
-                return _legacy_load(opened_file, map_location, pickle, **pickle_load_args)
+                raise pickle.UnpicklingError(UNSAFE_MESSAGE)
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 
