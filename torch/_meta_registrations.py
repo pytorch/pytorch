@@ -1481,22 +1481,6 @@ def scatter_value(self, dim, index, value):
     return self.new_empty(self.shape)
 
 
-# hacky: Please remove after math.ceil works with arange
-@register_meta(aten.arange.default)
-def arange(end, **kwargs):
-    if isinstance(end, float):
-        end = math.ceil(end)
-
-    def is_integral(x):
-        return isinstance(x, int) or isinstance(x, bool)
-
-    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
-    if set_to_integral_dtype:
-        kwargs["dtype"] = torch.int64
-
-    return aten.empty([end], **kwargs)
-
-
 @register_meta(aten.arange.start)
 def arange_start(start, end, **kwargs):
     return aten.arange(end - start, **kwargs)
