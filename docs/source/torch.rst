@@ -86,6 +86,7 @@ Indexing, Slicing, Joining, Mutating Ops
     argwhere
     cat
     concat
+    concatenate
     conj
     chunk
     dsplit
@@ -102,6 +103,7 @@ Indexing, Slicing, Joining, Mutating Ops
     movedim
     moveaxis
     narrow
+    narrow_copy
     nonzero
     permute
     reshape
@@ -558,7 +560,6 @@ BLAS and LAPACK Operations
     cholesky_inverse
     cholesky_solve
     dot
-    eig
     geqrf
     ger
     inner
@@ -566,13 +567,11 @@ BLAS and LAPACK Operations
     det
     logdet
     slogdet
-    lstsq
     lu
     lu_solve
     lu_unpack
     matmul
     matrix_power
-    matrix_rank
     matrix_exp
     mm
     mv
@@ -632,3 +631,14 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+
+.. automodule:: torch.autograd
+.. currentmodule:: torch.autograd
+
+Engine Configuration
+----------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_multithreading_enabled

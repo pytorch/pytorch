@@ -1,11 +1,17 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
+from types import MappingProxyType
 from warnings import warn
 
 import torch
 import torch.overrides
-from torch._prims_common import getnvFuserDtype, Number, number_type
+from torch._prims_common import (
+    _torch_dtype_to_nvfuser_dtype_map,
+    getnvFuserDtype,
+    Number,
+    number_type,
+)
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
@@ -20,6 +26,12 @@ if torch.cuda.is_available():
 else:
     DataType = None
 
+DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
+    {
+        "use_python_fusion_cache": True,
+        "allow_single_op_fusion": True,
+    }
+)
 
 # nvFuserTensorTemplate and nvFuserScalarTemplate are helper objects
 # for cached construction of the nvFuser's Fusion
@@ -124,6 +136,18 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     args = [args[0], original_shape, args[1]]
                     return self.call_function(node.target, args, node.kwargs)
+
+                if node.target in [
+                    torch.ops.nvprims.native_batch_norm,
+                    torch.ops.nvprims.native_batch_norm.default,
+                ]:
+                    args, kwargs = self.fetch_args_kwargs_from_env(node)
+                    assert len(args) == 8
+                    training = args[5]
+                    args6_end = tuple(map(_to_nvfuser_constant, args[6:]))
+                    args = args[:5] + (training,) + args6_end
+                    return node.target.impl_nvfuser(fd, *args, **kwargs)
+
                 return super().run_node(node)
 
             def call_function(self, target, args, kwargs):
@@ -156,7 +180,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     return fusion, unflatten_spec
 
 
-def nvfuser_execute(gm: GraphModule, *args):
+def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
+    executor_parameters = executor_parameters or DEFAULT_NVFUSER_PYTHON_CONFIG
     flat_args, _ = tree_flatten(args)
 
     # check for cuda only fusion
@@ -172,7 +197,14 @@ def nvfuser_execute(gm: GraphModule, *args):
         # Construction of the fusion is expensive and cached based on the GraphModule
         # and symbolic nvFuser args.
         nv_template_args = to_nvfuser_template_args(flat_args)
-        fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
+        use_cache = executor_parameters.get(
+            "use_python_fusion_cache",
+            DEFAULT_NVFUSER_PYTHON_CONFIG["use_python_fusion_cache"],
+        )
+        if use_cache:
+            fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
+        else:
+            fusion, unflatten_spec = make_nvfuser_fusion.__wrapped__(gm, *nv_template_args)  # type: ignore[misc]
 
         # Inputs to fusion.execute correspond to the same template/symbolic inputs
         # marked with `define_tensor/scalar`
@@ -193,6 +225,18 @@ def nvfuser_execute(gm: GraphModule, *args):
 
 class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+        # special case to stop lowering to nvprim when converting to an unsupported type
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.nvprims.convert_element_type.default
+        ):
+            return (
+                _torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None
+                and _torch_dtype_to_nvfuser_dtype_map.get(
+                    node.args[0].meta["tensor_meta"].dtype  # type: ignore[union-attr]
+                )
+                is not None
+            )
         return (
             node.op == "call_function"
             and getattr(node.target, "impl_nvfuser", None) is not None
@@ -213,17 +257,50 @@ class PartitionedInterpreter(torch.fx.Interpreter):
 
 
 class NvfuserGraphModule(torch.nn.Module):
-    def __init__(self, gm):
+    def __init__(self, gm, use_python_fusion_cache):
         super().__init__()
         self.gm = gm
+        self.executor_parameters = {"use_python_fusion_cache": use_python_fusion_cache}
 
     def __call__(self, *args):
-        return nvfuser_execute(self.gm, *args)
+        return nvfuser_execute(
+            self.gm, *args, executor_parameters=self.executor_parameters
+        )
+
+
+def _remove_empty_like_fill(gm: GraphModule):
+    # Remove empty_like + fill nodes that prevent lowering to nvprims
+    # This is a workaround for nonoptimal traces of C++ code `(1 - tensor)`
+    # https://github.com/pytorch/pytorch/issues/86612
+
+    # Here when we see a `sub` node, we check if the first input is a result of
+    # filling a tensor with a scalar
+    # If so, we replace the first argument of the `sub` node with a scalar
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if node.target == torch.ops.nvprims.sub.default:
+                # check if the first argument is a fill
+                if (
+                    isinstance(node.args[0], torch.fx.Node)
+                    and node.args[0].op == "call_function"
+                    and node.args[0].target == torch.ops.aten.fill.Scalar
+                ):
+                    # Replace the first argument with the second argument of fill
+                    # aten.fill.Scalar(tensor, scalar)
+                    fill_node = node.args[0]
+                    scalar = fill_node.args[1]
+                    node.args = (scalar, *node.args[1:])
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return gm
 
 
 # MyPy bug: https://github.com/python/mypy/issues/5107
-@lru_cache()  # type: ignore[arg-type]
-def maybe_partition_graph(gm: GraphModule):
+@lru_cache(maxsize=1024)  # type: ignore[arg-type]
+def maybe_partition_graph(
+    gm: GraphModule, allow_single_op_fusion: bool, use_python_fusion_cache: bool
+):
+    gm = _remove_empty_like_fill(gm)
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = list(
         filter(lambda n: n.op == "call_function", gm.graph.nodes)
@@ -248,7 +325,7 @@ def maybe_partition_graph(gm: GraphModule):
         # CapabilityBasedPartitioner modifies the graph in-place so we need to make a copy of the graph
         gm = deepcopy(gm)
         partitioner = CapabilityBasedPartitioner(
-            gm, supported_ops, allows_single_node_partition=True
+            gm, supported_ops, allows_single_node_partition=allow_single_op_fusion
         )
         partitions = partitioner.propose_partitions()
         if len(partitions) == 0:
@@ -268,18 +345,35 @@ def maybe_partition_graph(gm: GraphModule):
             if node.op == "call_module" and "fused_" in node.name:
                 nvfuser_submodule = getattr(partitioned_graph, node.name)
                 partitioned_graph.delete_submodule(node.target)
-                gm.add_submodule(node.target, NvfuserGraphModule(nvfuser_submodule))
+                gm.add_submodule(
+                    node.target,
+                    NvfuserGraphModule(nvfuser_submodule, use_python_fusion_cache),
+                )
 
         return partitioned_graph, any_unsupported
     else:
         return gm, any_unsupported
 
 
-def nvfuser_execute_partitioned(gm: GraphModule, *args):
+def nvfuser_execute_partitioned(gm: GraphModule, *args, executor_parameters=None):
+    executor_parameters = executor_parameters or DEFAULT_NVFUSER_PYTHON_CONFIG
+    # maybe_partition_graph function is cached so we can't use non-hashable arguments
+    allow_single_op_fusion = executor_parameters.get(
+        "allow_single_op_fusion",
+        DEFAULT_NVFUSER_PYTHON_CONFIG["allow_single_op_fusion"],
+    )
+    use_python_fusion_cache = executor_parameters.get(
+        "use_python_fusion_cache",
+        DEFAULT_NVFUSER_PYTHON_CONFIG["use_python_fusion_cache"],
+    )
     # When possible it's better to use nvfuser_execute directly
-    # because it avoids PartitionedInterpreter's overhead
-    gm, is_partitioned = maybe_partition_graph(gm)
+    # because it avoids GraphModule's overhead
+    gm, is_partitioned = maybe_partition_graph(
+        gm,
+        allow_single_op_fusion=allow_single_op_fusion,
+        use_python_fusion_cache=use_python_fusion_cache,
+    )
     if is_partitioned:
         return gm(*args)
     else:
-        return nvfuser_execute(gm, *args)
+        return nvfuser_execute(gm, *args, executor_parameters=executor_parameters)

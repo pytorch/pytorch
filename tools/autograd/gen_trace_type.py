@@ -535,7 +535,8 @@ def gen_trace_type(
         [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],
         key_fn=lambda fn: fn.root_name,
         base_env={
-            "generated_comment": f"@generated from {template_path}/TraceType.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/TraceType.cpp",
         },
         env_callable=gen_trace_type_func,
         num_shards=5,

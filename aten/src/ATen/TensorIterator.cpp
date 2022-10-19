@@ -1241,7 +1241,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
 
 void TensorIteratorBase::compute_strides(const TensorIteratorConfig& config) {
   for (auto& op : operands_) {
-    if (op.tensor_base().defined()) {
+    if (op.tensor_base().defined() && !op.will_resize) {
       IntArrayRef original_shape = config.static_shape_ ? shape_ : op.tensor_base().sizes();
       auto original_stride = op.tensor_base().strides();
       auto element_size_in_bytes = op.tensor_base().element_size();
@@ -1491,10 +1491,19 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   if (is_meta_) return;
 
+  auto has_storage = true;
+  for (auto& op : operands_) {
+    has_storage &= op.tensor_base().has_storage();
+  }
+  auto privateuse1_without_storage =
+     common_device_.type() == DeviceType::PrivateUse1 &&
+     !has_storage;
+
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
-  if (common_device_.type() == DeviceType::XLA  ||
+  if (privateuse1_without_storage  ||
+      common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
       common_device_.type() == DeviceType::ORT  ||

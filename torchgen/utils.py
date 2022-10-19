@@ -293,6 +293,14 @@ class FileManager:
         )
         self._write_if_changed(filename, content)
 
+    def template_dir_for_comments(self) -> str:
+        """
+        This needs to be deterministic. The template dir is an absolute path
+        that varies across builds. So, just use the path relative to this file,
+        which will point to the codegen source but will be stable.
+        """
+        return os.path.relpath(self.template_dir, os.path.dirname(__file__))
+
 
 # Helper function to generate file manager
 def make_file_manager(

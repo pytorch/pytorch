@@ -19,6 +19,7 @@ from torchgen.api.types import (
     deviceT,
     DispatcherSignature,
     kernel_signature,
+    NativeSignature,
     OptionalCType,
     VectorCType,
 )
@@ -27,6 +28,7 @@ from torchgen.dest.lazy_ts_lowering import ts_lowering_body
 from torchgen.model import (
     Argument,
     BackendIndex,
+    BackendMetadata,
     BaseTy,
     BaseType,
     FunctionSchema,
@@ -77,7 +79,10 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
         if isinstance(arg.orig_type, ListType) and arg.orig_type.elem == BaseType(
             BaseTy.SymInt
         ):
-            return f"GetSymIntArrayRefValue({arg.name})"
+            if arg.symint:
+                return f"GetSymIntArrayRefValue({arg.name})"
+            else:
+                return f"std::vector<int64_t>({arg.name}.begin(), {arg.name}.end())"
         elif isinstance(arg.lazy_type, VectorCType) and isinstance(
             arg.lazy_type.elem, BaseCType
         ):
@@ -102,13 +107,17 @@ def node_ctor_inputs(schema: LazyIrSchema) -> str:
     return ", ".join(node_ctor_values)
 
 
-def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
+def gen_fallback_code(
+    schema: LazyIrSchema,
+    sig: Union[DispatcherSignature, NativeSignature],
+    overload_name: str,
+) -> str:
     """
     Generate code that falls back to eager conditioned on a predicate
     """
-    fallback_args = ",\n                ".join(
-        [str(arg.name) for arg in schema.filtered_args(generator=True)]
-    )
+    dispatcher_sig = DispatcherSignature.from_schema(schema.func)
+    exprs = translate(sig.arguments(), dispatcher_sig.arguments())
+    fallback_args = ",\n                ".join([a.expr for a in exprs])
     if len(overload_name):
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
@@ -119,7 +128,7 @@ def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
         or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
         if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
-            return at::native::call_fallback_fn<&ltc_eager_fallback, {aten_op_str}>::call(
+            return at::native::call_fallback_fn_symint<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
         }}
@@ -167,7 +176,12 @@ class GenLazyIR(ABC):
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
-        schema = LazyIrSchema(func)
+        metadata = self.backend_index.get_kernel(
+            f.functional if isinstance(f, NativeFunctionsGroup) else f
+        )
+        schema = LazyIrSchema(
+            func, symint=metadata is not None and metadata.supports_symint()
+        )
         return self.gen(schema)
 
     # there is no lowering functionality generated unless this IR base class is subclassed and
@@ -444,9 +458,17 @@ class GenLazyNativeFuncDefinition:
                 )
         return ("\n        ").join(lazy_tensor_decls)
 
-    def force_eager_fallback(self, func: NativeFunction, schema: LazyIrSchema) -> str:
+    def force_eager_fallback(
+        self,
+        func: NativeFunction,
+        schema: LazyIrSchema,
+        metadata: BackendMetadata,
+        sig: Union[DispatcherSignature, NativeSignature],
+    ) -> str:
         if self.gen_forced_fallback_code:
-            return gen_fallback_code(schema, overload_name=func.func.name.overload_name)
+            return gen_fallback_code(
+                schema, sig, overload_name=func.func.name.overload_name
+            )
         return ""
 
     def metrics(self, func: NativeFunction, schema: LazyIrSchema) -> str:
@@ -518,14 +540,16 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 dispatch_ns = "meta"
             aten_name = schema.aten_name
             # TODO: this is trolling
-            if func.func.has_symint():
+            if func.func.has_symint() and metadata.supports_symint():
                 aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}
         auto out_meta = at::{dispatch_ns}::{aten_name}({', '.join(meta_call_args)});
         {meta_out}"""
         else:
-            shape_sig = ComputeShapeSignature(metadata.kernel, func)
+            shape_sig = ComputeShapeSignature(
+                metadata.kernel, func, symint=metadata.supports_symint()
+            )
             shape_str = f"""
             auto shapes = {shape_sig.shape_call};"""
 
@@ -598,11 +622,11 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         sig = kernel_signature(func, self.backend_index)
         metadata = self.backend_index.get_kernel(func)
         assert metadata is not None
-        schema = LazyIrSchema(func.func)
+        schema = LazyIrSchema(func.func, symint=metadata.supports_symint())
         return [
             f"""\
     {sig.decl(name=f"{self.class_method_name}::{metadata.kernel}")} {{
-        {self.force_eager_fallback(func, schema)}
+        {self.force_eager_fallback(func, schema, metadata, sig)}
         {self.metrics(func, schema)}
         {self.get_device(func, schema)}
         {self.lazy_tensor_decls(func, schema)}
@@ -618,10 +642,10 @@ class ComputeShapeSignature:
     Here we use the base name as the suffix of the signature to avoid generating for in-place variants.
     """
 
-    def __init__(self, kernel_name: str, f: NativeFunction):
-        self.__schema = LazyIrSchema(f.func)
+    def __init__(self, kernel_name: str, f: NativeFunction, *, symint: bool):
+        self.__schema = LazyIrSchema(f.func, symint=symint)
         self.__dispatch_args = ", ".join(
-            [a.decl() for a in dispatcher.arguments(f.func)]
+            [a.decl() for a in dispatcher.arguments(f.func, symint=symint)]
         )
         self.__call_args = ", ".join(
             [f"{arg.name}" for arg in self.__schema.filtered_args(generator=True)]
@@ -660,7 +684,9 @@ class GenLazyShapeInferenceDefinition:
         if is_structured or is_view_copy_op:
             return []
         else:
-            shape_sig = ComputeShapeSignature(metadata.kernel, f)
+            shape_sig = ComputeShapeSignature(
+                metadata.kernel, f, symint=metadata.supports_symint()
+            )
             return ["\n".join([f"{shape_sig.shape_decl};"])]
 
 
@@ -675,7 +701,8 @@ def generate_non_native_lazy_ir_nodes(
         for p in op.get("properties", []):
             setattr(properties, p, True)
 
-        schema = LazyIrSchema(FunctionSchema.parse(op["func"]), properties)
+        # non-native is assumed to want symint bindings if you wrote symint
+        schema = LazyIrSchema(FunctionSchema.parse(op["func"]), properties, symint=True)
         schema.opkind = op.get("opkind")
         nodes.append(gen_lazy_ir.gen(schema)[0])
 

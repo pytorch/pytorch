@@ -16,6 +16,7 @@
     - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
+- [Merging your Change](#merging-your-change)
 - [Writing documentation](#writing-documentation)
   - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
@@ -434,6 +435,17 @@ ghstack submit
 **NB**: It is not recommended to use this workflow unless you are also using
 [`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
 of very low signal to reviewers.
+
+## Merging your Change
+If you know the right people or team that should approve your PR (and you have the required permisssions to do so), add them to the Reviewers list.
+
+If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
+
+Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get any response from the reviewer for 4 business days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.
+
+If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Contact-Pytorch-Dev-Infra-Office)
+
+Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
 ## Writing documentation
 
@@ -1245,13 +1257,6 @@ but we haven’t gotten around to it.
 In 2018, we merged Caffe2 into the PyTorch source repository. While the
 steady state aspiration is that Caffe2 and PyTorch share code freely,
 in the meantime there will be some separation.
-
-If you submit a PR to only PyTorch or only Caffe2 code, CI will only
-run for the project you edited. The logic for this is implemented
-in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
-can look at this to see what path prefixes constitute changes.
-This also means if you ADD a new top-level path, or you start
-sharing code between projects, you need to modify these files.
 
 There are a few "unusual" directories which, for historical reasons,
 are Caffe2/PyTorch specific. Here they are:

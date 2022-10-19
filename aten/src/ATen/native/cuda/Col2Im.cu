@@ -16,7 +16,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/col2im_native.h>
-#include <ATen/ops/col2im_backward_native.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/im2col_native.h>
 #endif
@@ -105,7 +104,7 @@ void col2im_out_cuda_template(
   output.zero_();
   int64_t output_batch_stride = output.stride(0);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "col2im_out_cuda", [&] {
     int64_t height_col = (output_height + 2 * pad_height -
                           (dilation_height * (kernel_height - 1) + 1)) /
@@ -143,18 +142,6 @@ void col2im_out_cuda_template(
   });
 }
 
-void col2im_backward_out_cuda_template(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  // im2col_out_cuda checks size of kernel_size, dilation, padding and stride
-  at::native::im2col_out_cuda(
-      grad_output, kernel_size, dilation, padding, stride, grad_input);
-}
-
 } // namespace
 
 Tensor& col2im_out_cuda(const Tensor& input,
@@ -181,30 +168,6 @@ Tensor col2im_cuda(
   col2im_out_cuda_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
   return output;
-}
-
-Tensor& col2im_backward_out_cuda(const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    Tensor& grad_input) {
-  col2im_backward_out_cuda_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
-}
-
-Tensor col2im_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  col2im_backward_out_cuda_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
 }
 
 } // namespace native

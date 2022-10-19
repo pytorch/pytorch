@@ -17,7 +17,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   checkInvariants();
 
   const auto public_dims = value_.dim() - bdims_.size();

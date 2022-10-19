@@ -40,32 +40,24 @@ if TEST_SCIPY:
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
 def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
-
-    samples = (
-        SampleInput(
-            make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad)
-        ),
-        SampleInput(
-            make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad)
-        ),
+    exclude_zero = requires_grad and op_info.op == torch.special.i0e
+    make_arg = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        exclude_zero=exclude_zero,
     )
+    yield SampleInput(make_arg((S,)))
+    yield SampleInput(make_arg(()))
 
-    if requires_grad and op_info.op == torch.special.i0e:
-        # NOTE: `i0e`'s first-order gradient is not continous
-        # at `0`, hence we don't test `i0e` with any input being `0`.
-        # TODO: Remove this when `make_tensor` supports excluding `0`.
-        for sample in samples:
-            t = sample.input
-            t[t == 0] = torch.finfo(dtype).eps  # type: ignore[index]
-    elif requires_grad and op_info.op != torch.special.i0e:
+    if requires_grad and not exclude_zero:
         # Special Case for gradient
         # Sample with `0` in the input
-        t = make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad)
+        t = make_arg((S,))
         t[0] = 0
 
-        samples += (SampleInput(t),)  # type: ignore[assignment]
-
-    return samples
+        yield SampleInput(t)
 
 
 def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
@@ -99,18 +91,11 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
     if requires_grad:
         low = 0 + op_info._domain_eps
 
-    return (
-        SampleInput(
-            make_tensor(
-                (L,), dtype=dtype, device=device, low=low, requires_grad=requires_grad
-            )
-        ),
-        SampleInput(
-            make_tensor(
-                (), dtype=dtype, device=device, low=low, requires_grad=requires_grad
-            )
-        ),
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, low=low, requires_grad=requires_grad
     )
+    yield SampleInput(make_arg((L,)))
+    yield SampleInput(make_arg(()))
 
 
 op_db: List[OpInfo] = [
@@ -654,6 +639,30 @@ python_ref_db: List[OpInfo] = [
     # Elementwise Unary Special OpInfos
     #
     ElementwiseUnaryPythonRefInfo(
+        "_refs.special.bessel_j0",
+        torch_opinfo_name="special.bessel_j0",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.bessel_j1",
+        torch_opinfo_name="special.bessel_j1",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.entr",
+        torch_opinfo_name="special.entr",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.erfcx",
+        torch_opinfo_name="special.erfcx",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
         supports_nvfuser=False,
@@ -668,6 +677,30 @@ python_ref_db: List[OpInfo] = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.log_ndtr",
+        torch_opinfo_name="special.log_ndtr",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.ndtr",
+        torch_opinfo_name="special.ndtr",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.ndtri",
+        torch_opinfo_name="special.ndtri",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.spherical_bessel_j0",
+        torch_opinfo_name="special.spherical_bessel_j0",
         supports_nvfuser=False,
         op_db=op_db,
     ),
