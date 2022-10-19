@@ -74,11 +74,10 @@ using StorageImplData = strong::type<
 // handle ABA for TensorImpl as those allocations are not instrumented.)
 using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
 
-struct TORCH_API RawTensorMetadata {
-  RawTensorMetadata() = default;
-  RawTensorMetadata(const RawTensorMetadata&) = default;
-  explicit RawTensorMetadata(const at::Tensor& t);
-  TensorImplAddress impl_;
+struct TORCH_API RawTensorMetadataBase {
+  RawTensorMetadataBase() = default;
+  explicit RawTensorMetadataBase(const at::Tensor& t);
+
   StorageImplData data_;
 
   // Device is separated into DeviceType and DeviceIndex as Device
@@ -91,13 +90,27 @@ struct TORCH_API RawTensorMetadata {
   uint32_t dim_;
 };
 
-struct TensorMetadata : public RawTensorMetadata {
-  explicit TensorMetadata(const RawTensorMetadata& r) : RawTensorMetadata(r) {}
-  explicit TensorMetadata(const at::Tensor& t) : RawTensorMetadata(t) {}
+struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
+  RawTensorMetadata() = default;
+  RawTensorMetadata(const RawTensorMetadata&) = default;
+  explicit RawTensorMetadata(const at::Tensor& t)
+      : RawTensorMetadataBase(t),
+        weak_self_(
+            c10::weak_intrusive_ptr<c10::TensorImpl>(t.getIntrusivePtr())){};
+
+  // Wrap in `c10::optional` to make `weak_self_` default constructable.
+  c10::optional<c10::weak_intrusive_ptr<c10::TensorImpl>> weak_self_;
+};
+
+struct TensorMetadata : public RawTensorMetadataBase {
+  explicit TensorMetadata(const RawTensorMetadata& r)
+      : RawTensorMetadataBase(r), impl_{r.weak_self_->_unsafe_get_target()} {}
+
   c10::Device device() const {
     return {device_type_, device_index_};
   }
 
+  TensorImplAddress impl_;
   c10::optional<TensorID> id_;
 };
 

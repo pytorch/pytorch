@@ -1408,9 +1408,6 @@ class TestTorchTidyProfiler(TestCase):
     def test_tensorimpl_invalidation_set_breaking(self) -> None:
         with profile(profile_memory=True, record_shapes=True) as p:
             x = torch.ones((1,))
-
-            # This call breaks the chain by freeing the old storage before the
-            # new one is allocated. (And so they should not share an ID.)
             x.set_()
 
             x.set_(torch.ones((1,)).storage())
@@ -1424,8 +1421,8 @@ class TestTorchTidyProfiler(TestCase):
             """\
                 0      Allocation
                 0      Free
-                1      Allocation
-                1      Free"""
+                0      Allocation
+                0      Free"""
         )
 
     def test_tensorimpl_invalidation_keep_alive(self) -> None:
@@ -1479,9 +1476,6 @@ class TestTorchTidyProfiler(TestCase):
             for _ in range(3):
                 x.set_()
                 x.set_(torch.ones((1,)).storage())
-
-                # This keeps the StorageImpls alive and preserves the chain.
-                # (Despite the `set_()` call.)
                 x_storages.append(x.storage())
             x.view_as(x)
 
@@ -1490,7 +1484,10 @@ class TestTorchTidyProfiler(TestCase):
                 x_storages.pop()
                 gc.collect()
 
+            # All storage associated with `x` has been freed, but the
+            # TensorImpl is still live.
             x.set_()
+
             for _ in range(3):
                 x.set_(torch.ones((1,)).storage())
             x.view_as(x)
@@ -1509,12 +1506,12 @@ class TestTorchTidyProfiler(TestCase):
                 0      Free
                 0      Free
                 0      Free
-                1      Allocation
-                1      Allocation
-                1      Free
-                1      Allocation
-                1      Free
-                1      Free"""
+                0      Allocation
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Free"""
         )
 
     def test_tensorimpl_invalidation_full(self) -> None:
@@ -1563,18 +1560,18 @@ class TestTorchTidyProfiler(TestCase):
                 0      Allocation
                 0      Free
                 0      Free
-                1      Allocation
-                1      Free
-                2      Allocation
-                2      Free
-                3      Allocation
-                3      Allocation
-                3      Free
-                3      Allocation
-                3      Free
-                3      Allocation
-                3      Free
-                3      Free"""
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Allocation
+                0      Free
+                0      Free"""
         )
 
     def test_tensorimpl_invalidation_scalar_args(self) -> None:
@@ -1764,6 +1761,23 @@ class TestTorchTidyProfiler(TestCase):
             lambda: (x + 1).relu_(),
             lambda: torch.zeros((1,)).cos()
         )
+
+    def test_impl_reuse(self) -> None:
+        repeats = 1_000
+        with profile(profile_memory=True, record_shapes=True) as p:
+            for _ in range(repeats):
+                torch.ones((1,))
+                gc.collect()
+
+        roots = p.profiler.kineto_results.experimental_event_tree()
+        tensor_impls = tuple(
+            e.extra_fields.inputs.tensor_metadata[0].impl_ptr
+            for e in _utils.traverse_dfs(roots)
+            if e.name == "aten::fill_"
+        )
+
+        self.assertEqual(len(tensor_impls), repeats)
+        self.assertEqual(len(set(tensor_impls)), repeats)
 
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
