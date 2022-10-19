@@ -11,6 +11,7 @@ from gitutils import (
     GitRepo,
 )
 from trymerge import (
+    _fetch_url,
     gh_post_pr_comment,
     GitHubPR,
 )
@@ -24,6 +25,11 @@ ERR_MSG = ("This PR needs a label. If your changes are user facing and intended 
 
 def get_release_notes_labels() -> List[str]:
     return [label for label in get_pytorch_labels() if label.lstrip().startswith("release notes:")]
+
+
+def delete_comment(comment_id: int) -> None:
+    url = f"https://api.github.com/repos/pytorch/pytorch/issues/comments/{comment_id}"
+    _fetch_url(url, method="DELETE")
 
 
 def check_labels(pr: GitHubPR) -> bool:
@@ -42,6 +48,8 @@ def check_labels(pr: GitHubPR) -> bool:
             ts = datetime.strptime(comment.created_at, "%Y-%m-%dT%H:%M:%SZ")
             if (datetime.utcnow() - ts).total_seconds() < 3600:
                 return True
+            delete_comment(comment.database_id)
+            break
 
     return any(label.strip() in get_release_notes_labels() for label in pr_labels)
 
