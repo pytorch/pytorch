@@ -7,7 +7,10 @@ import io
 import itertools
 import unittest
 import unittest.mock
+import warnings
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+
+import numpy as np
 
 import onnx
 import onnx.numpy_helper
@@ -19,8 +22,7 @@ from torch.onnx import symbolic_helper, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import registration
 from torch.testing._internal import common_utils, jit_utils
-import numpy as np
-import warnings
+
 
 def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
@@ -428,7 +430,11 @@ class TestONNXExport(common_utils.TestCase):
         onnx_model = export_to_onnx(
             MyClip(),
             torch.randn(3, 4, requires_grad=True),
-            custom_ops=[common_utils.custom_op("aten::clamp", bad_clamp, GLOBALS.export_onnx_opset_version)],
+            custom_ops=[
+                common_utils.custom_op(
+                    "aten::clamp", bad_clamp, GLOBALS.export_onnx_opset_version
+                )
+            ],
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
@@ -797,6 +803,7 @@ class TestONNXExport(common_utils.TestCase):
 
     def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
         T, B, C = 3, 5, 7
 
         class PadPackedWrapper(torch.nn.Module):
@@ -813,12 +820,18 @@ class TestONNXExport(common_utils.TestCase):
         # set padding value so we can test equivalence
         for b in range(B):
             if seq_lens[b] < T:
-                x[seq_lens[b]:, b, :] = 0
+                x[seq_lens[b] :, b, :] = 0
         seq_lens = torch.from_numpy(seq_lens)
         x = torch.autograd.Variable(torch.from_numpy(x), requires_grad=True)
 
         m = PadPackedWrapper()
-        m_traced = torch.jit.trace(m, (x, seq_lens,))
+        m_traced = torch.jit.trace(
+            m,
+            (
+                x,
+                seq_lens,
+            ),
+        )
 
         y = m(x, seq_lens)
         loss = torch.sum(y)
@@ -842,18 +855,25 @@ class TestONNXExport(common_utils.TestCase):
     @common_utils.suppress_warnings
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
         num_layers = 3
         T, B, C = 11, 5, 7
 
         class RNNTraceWrapper(torch.nn.Module):
             def __init__(self, cell_type):
                 super(RNNTraceWrapper, self).__init__()
-                if cell_type == 'RNN':
-                    self.rnn = torch.nn.RNN(input_size=C, hidden_size=C, num_layers=num_layers)
-                elif cell_type == 'LSTM':
-                    self.rnn = torch.nn.LSTM(input_size=C, hidden_size=C, num_layers=num_layers)
-                elif cell_type == 'GRU':
-                    self.rnn = torch.nn.GRU(input_size=C, hidden_size=C, num_layers=num_layers)
+                if cell_type == "RNN":
+                    self.rnn = torch.nn.RNN(
+                        input_size=C, hidden_size=C, num_layers=num_layers
+                    )
+                elif cell_type == "LSTM":
+                    self.rnn = torch.nn.LSTM(
+                        input_size=C, hidden_size=C, num_layers=num_layers
+                    )
+                elif cell_type == "GRU":
+                    self.rnn = torch.nn.GRU(
+                        input_size=C, hidden_size=C, num_layers=num_layers
+                    )
 
             def forward(self, x, seq_lens):
                 x = pack_padded_sequence(x, seq_lens)
@@ -861,12 +881,18 @@ class TestONNXExport(common_utils.TestCase):
                 x, _ = pad_packed_sequence(x)
                 return x
 
-        for cell_type in ['RNN', 'LSTM', 'GRU']:
+        for cell_type in ["RNN", "LSTM", "GRU"]:
             x = torch.ones(T, B, C, requires_grad=True)
             seq_lens = torch.from_numpy(np.array([11, 3, 2, 2, 1], dtype=np.int32))
 
             m = RNNTraceWrapper(cell_type)
-            m_traced = torch.jit.trace(m, (x, seq_lens,))
+            m_traced = torch.jit.trace(
+                m,
+                (
+                    x,
+                    seq_lens,
+                ),
+            )
 
             y = m(x, seq_lens)
             loss = torch.sum(y)
@@ -904,8 +930,7 @@ class TestONNXExport(common_utils.TestCase):
             def forward(self, x, w):
                 return torch.matmul(x, w).detach()
 
-        torch.onnx.export_to_pretty_string(
-            Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
+        torch.onnx.export_to_pretty_string(Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
 
     def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.ao.quantization.default_qconfig
@@ -923,10 +948,17 @@ class TestONNXExport(common_utils.TestCase):
 
             model = torch.jit.load(buf)
             f = io.BytesIO()
-            torch.onnx.export(model, input, f, input_names=input_names,
-                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
-                              opset_version=9)
+            torch.onnx.export(
+                model,
+                input,
+                f,
+                input_names=input_names,
+                operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
+                opset_version=9,
+            )
+
         _export_to_onnx(model, data, input_names)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
