@@ -41,7 +41,15 @@ def signature_of(arg):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
-        return JITFunction._type_of(arg.dtype)
+        tye = JITFunction._type_of(arg.dtype)
+        if V.graph.is_unspec_arg(arg.buffer):
+            new_tye = tye.lstrip("*")
+            if new_tye in ["fp16", "bf16"]:
+                return "fp32"
+            else:
+                return new_tye
+        else:
+            return tye
     if isinstance(arg, SizeArg):
         return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
@@ -796,9 +804,8 @@ class TritonKernel(Kernel):
             line = var
         else:
             line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-
-        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
-            line += ".to(tl.float32)"
+            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+                line += ".to(tl.float32)"
 
         if (
             self.inside_reduction
