@@ -676,7 +676,7 @@ Tensor fft_c2r_backward(
     const Tensor& grad,
     IntArrayRef dim,
     int64_t normalization);
-Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
+Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x,
     const Tensor& self,

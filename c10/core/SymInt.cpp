@@ -196,4 +196,12 @@ std::ostream& operator<<(std::ostream& os, SymInt s) {
   return os;
 }
 
+SymInt operator-(SymInt s) {
+  if (s.is_symbolic()) {
+    return SymInt::toSymInt(s.toSymIntNodeImpl()->neg());
+  } else {
+    return SymInt(-s.as_int_unchecked());
+  }
+}
+
 } // namespace c10

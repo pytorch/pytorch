@@ -239,4 +239,5 @@ inline c10::SymInt multiply_integers(const C& container) {
 }
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
+C10_API SymInt operator-(SymInt s);
 } // namespace c10

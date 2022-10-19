@@ -258,6 +258,10 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return dispatch_common_(__FUNCTION__);
   }
 
+  virtual SymIntNode neg() override {
+    return dispatch_common_(__FUNCTION__);
+  }
+
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
   }
@@ -1509,6 +1513,9 @@ void initJITBindings(PyObject* module) {
           .def(
               "__ceil__",
               [](c10::SymIntNode a) -> c10::SymIntNode { return a->ceil(); })
+          .def(
+              "__neg__",
+              [](c10::SymIntNode a) -> c10::SymIntNode { return a->neg(); })
           .def(
               "__min__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {

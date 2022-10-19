@@ -852,6 +852,21 @@ def forward(self, a_1):
     detach = torch.ops.aten.detach.default(empty);  empty = None
     return detach""")
 
+
+    def test_neg_shape(self):
+        def f(a):
+            return torch.empty(-a.shape[0] + 10)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(1)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
+    neg = -sym_size;  sym_size = None
+    add = neg + 10;  neg = None
+    empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
+    detach = torch.ops.aten.detach.default(empty);  empty = None
+    return detach""")
+
     def test_sqrt_size(self):
         def f(a):
             return a / a.size(-1) ** 0.5
@@ -1240,7 +1255,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
     xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
-    xfail('nn.functional.pad', 'circular'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta function/decompo...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
