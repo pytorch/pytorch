@@ -30,9 +30,8 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
-    : impl_{t.unsafeGetTensorImpl()},
-      data_{t.has_storage() ? t.storage().data() : nullptr},
+RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
+    : data_{t.has_storage() ? t.storage().data() : nullptr},
       device_type_{t.device().type()},
       device_index_{t.device().index()},
       dtype_{t.scalar_type()},
