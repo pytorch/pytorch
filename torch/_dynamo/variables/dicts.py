@@ -4,14 +4,12 @@ import functools
 import inspect
 from typing import Dict, List
 
-import torch
-
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
-from ..utils import global_key_name
+from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
@@ -31,7 +29,7 @@ class ConstDictVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         for key, value in self.items.items():
-            if isinstance(key, torch.nn.Parameter):
+            if istensor(key):
                 codegen.extend_output(
                     [
                         codegen.create_load_global(global_key_name(key), add=True),
@@ -110,7 +108,7 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             k = ConstDictVariable.get_key(args[0])
 
-            if isinstance(k, torch.nn.Parameter):
+            if istensor(k):
                 tx.store_dict_key(global_key_name(k), k)
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
@@ -173,8 +171,8 @@ class ConstDictVariable(VariableTracker):
 
     @classmethod
     def get_key(cls, arg: VariableTracker):
-        if isinstance(arg, TensorVariable) and arg.parameter_value is not None:
-            return arg.parameter_value
+        if isinstance(arg, TensorVariable) and arg.specialized_value is not None:
+            return arg.specialized_value
         else:
             return arg.as_python_constant()
 
@@ -183,14 +181,14 @@ class ConstDictVariable(VariableTracker):
         return (
             key.is_python_constant()
             or isinstance(key, TensorVariable)
-            and key.parameter_value is not None
+            and key.specialized_value is not None
         )
 
     @classmethod
     def _key_to_var(cls, tx, key, **options):
         from .builder import VariableBuilder
 
-        if isinstance(key, torch.nn.Parameter):
+        if istensor(key):
             return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(key)))(key)
         else:
             assert ConstantVariable.is_literal(key)
@@ -223,7 +221,7 @@ class DefaultDictVariable(ConstDictVariable):
                 if self.default_factory is None:
                     raise KeyError(f"{k}")
                 else:
-                    if isinstance(k, torch.nn.Parameter):
+                    if istensor(k):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
                     if self.default_factory is list:

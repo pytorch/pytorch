@@ -25,6 +25,7 @@ from ..source import (
     GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
+    LocalSource,
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
@@ -228,7 +229,7 @@ class VariableBuilder:
         ) and all(
             map(
                 lambda k: ConstantVariable.is_literal(k)
-                or isinstance(k, torch.nn.Parameter),
+                or self.tensor_can_be_dict_key(k),
                 value.keys(),
             )
         ):
@@ -236,11 +237,11 @@ class VariableBuilder:
 
             # store key variables in global location for reconstruction
             for key in value.keys():
-                if isinstance(key, torch.nn.Parameter):
+                if self.tensor_can_be_dict_key(key):
                     self.tx.store_dict_key(global_key_name(key), key)
 
             def index_source(key):
-                if isinstance(key, torch.nn.Parameter):
+                if self.tensor_can_be_dict_key(key):
                     return GlobalWeakRefSource(global_key_name(key))
                 else:
                     return key
@@ -460,6 +461,35 @@ class VariableBuilder:
                 self.source, value, result
             )
 
+    def tensor_can_be_dict_key(self, value):
+        # only allow Parameter and another specific Tensor can be used as dict key
+        return (
+            isinstance(value, torch.nn.Parameter)
+            or isinstance(self.source, AttrSource)
+            and self.source.member == "state"
+            and isinstance(self.source.base, LocalSource)
+        )
+
+    def tensor_should_specialize(self):
+        return (
+            self.source
+            and isinstance(self.source, GetItemSource)
+            and isinstance(self.source.base, GetItemSource)
+            and self.source.base.index == "params"
+            and isinstance(self.source.base.base, GetItemSource)
+            and isinstance(self.source.base.base.base, AttrSource)
+            and self.source.base.base.base.member == "param_groups"
+            and isinstance(self.source.base.base.base.base, LocalSource)
+            and (
+                isinstance(
+                    self.tx.f_locals[self.source.base.base.base.base.local_name],
+                    torch.optim.Optimizer,
+                )
+                if self.source.base.base.base.base.local_name in self.tx.f_locals.keys()
+                else True
+            )
+        )
+
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
             return self.tx.output.register_attr_or_module(
@@ -491,6 +521,7 @@ class VariableBuilder:
                     ),
                     example_value=value,
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+                    should_specialize=self.tensor_should_specialize(),
                 )
             if torch.overrides.has_torch_function_unary(value):
                 subclass_torch_function__func = value.__torch_function__.__func__
