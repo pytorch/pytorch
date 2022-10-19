@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: jit"]
 
-import io
 import os
 import sys
 
