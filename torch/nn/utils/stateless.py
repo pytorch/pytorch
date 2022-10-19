@@ -37,7 +37,7 @@ def _change_class(module, params_and_buffers) -> None:
     module._orig_class = cls
 
 
-def check_tied_val_already_replaced(old_val, new_val, replaced_tensors_map):
+def _check_tied_val_already_replaced(old_val, new_val, replaced_tensors_map):
     if old_val not in replaced_tensors_map:
         replaced_tensors_map[old_val] = new_val
     elif replaced_tensors_map[old_val] is not new_val:
@@ -51,7 +51,7 @@ def _create_swap_params(params_and_buffers, replaced_tensors_map):
         # that looks for the reparametrized tensor
         if hasattr(module, tensor_name):
             old_val = getattr(module, tensor_name)
-            check_tied_val_already_replaced(old_val, tensor, replaced_tensors_map)
+            _check_tied_val_already_replaced(old_val, tensor, replaced_tensors_map)
         if hasattr(module, "_attr_to_path"):
             module._attr_to_path[tensor_name] = full_path
         else:
