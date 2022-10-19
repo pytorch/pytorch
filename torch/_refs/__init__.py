@@ -3485,9 +3485,11 @@ def diagonal_scatter(
 ) -> TensorLikeType:
     out = input.clone()
     diag = out.diagonal(offset, dim1, dim2)
-    check(diag.shape == src.shape,
-          lambda: "expected src to have a size equal to the diagonal of the input."
-                  f"Got {src.shape} for a diagonal of shape {diag.shape}")
+    check(
+        diag.shape == src.shape,
+        lambda: "expected src to have a size equal to the diagonal of the input."
+        f"Got {src.shape} for a diagonal of shape {diag.shape}",
+    )
     prims.copy_to(diag, src)
     return out
 
