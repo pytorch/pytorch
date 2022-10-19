@@ -18,7 +18,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     convert_to_reference_fx,
-    _convert_to_reference_decomposed_qtensor_fx,
+    _convert_to_reference_decomposed_fx,
     prepare_qat_fx,
     fuse_fx,
 )
@@ -5193,7 +5193,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # make sure this runs
         m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=backend_config)
 
-    def test__convert_to_reference_decomposed_qtensor_fx(self):
+    def test__convert_to_reference_decomposed_fx(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -5206,10 +5206,10 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping = get_default_qconfig_mapping("fbgemm")
         example_inputs = (torch.randn(1, 5),)
         m = prepare_fx(m, qconfig_mapping, example_inputs)
-        m = _convert_to_reference_decomposed_qtensor_fx(m)
+        m = _convert_to_reference_decomposed_fx(m)
         expected_occurrence = {
-            ns.call_function(torch.decomposed_quantize_per_tensor): 2,
-            ns.call_function(torch.decomposed_dequantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
         }
         self.checkGraphModuleNodes(
             m,
