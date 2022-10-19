@@ -131,7 +131,7 @@ Tensor with fewer elements. Here's an example of how this can occur:
 
   def f(x, y):
     x.add_(y)
-  return x
+    return x
 
   x = torch.randn(1)
   y = torch.randn(3)

@@ -291,6 +291,42 @@ TEST(CustomAutogradTest, CustomFunction) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}) * 2);
 }
 
+TEST(CustomAutogradTest, CustomFunctionWithTensorList) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext* ctx, at::TensorList tensors) {
+      torch::autograd::variable_list vars;
+      for (const at::Tensor& tensor : tensors) {
+        vars.push_back(tensor);
+      }
+      ctx->save_for_backward(vars);
+      return tensors[0] + tensors[1] + tensors[0] * tensors[1];
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      auto saved = ctx->get_saved_variables();
+      auto var1 = saved[0];
+      auto var2 = saved[1];
+      variable_list output = {
+          grad_output[0] + grad_output[0] * var2,
+          grad_output[0] + grad_output[0] * var1};
+      return output;
+    }
+  };
+
+  at::Tensor x = torch::randn({5, 5}, torch::requires_grad());
+  at::Tensor y = torch::randn({5, 5}, torch::requires_grad());
+  torch::autograd::variable_list variables = {x, y};
+  at::TensorList tensors = variables;
+  auto res = MyFunction::apply(tensors);
+  auto go = torch::ones({}, torch::requires_grad());
+  res.sum().backward(go, false, true);
+
+  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5, 5}));
+  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}));
+}
+
 TEST(CustomAutogradTest, GraphTaskTrimEdges) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(
@@ -1118,7 +1154,7 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
 }
 
 TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
-  c10::Warning::WarnAlways guard(true);
+  c10::WarningUtils::WarnAlways guard(true);
 
   torch::Tensor x = torch::randn({5, 5}).set_requires_grad(true);
   auto z = x * x;
@@ -1214,19 +1250,19 @@ std::tuple<torch::Tensor, torch::Tensor, int64_t> ret_tuple_non_tensor(
 }
 
 torch::Tensor view_op(const torch::Tensor& self) {
-  return self;
+  return self.alias();
 }
 
 torch::Tensor view_op_with_extra_arg(
     const torch::Tensor& self,
     const torch::Tensor& other) {
-  return self;
+  return self.alias();
 }
 
 std::vector<torch::Tensor> ret_tensor_vector_view(
     const torch::Tensor& self,
     const torch::Tensor& other) {
-  return {self, self};
+  return {self.alias(), self.alias()};
 }
 
 std::vector<at::Tensor> ret_tensor_vector(

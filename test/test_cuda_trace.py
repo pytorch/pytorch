@@ -82,6 +82,34 @@ class TestCudaTrace(TestCase):
         torch.cuda.Stream()
         self.mock.assert_called()
 
+    def test_device_synchronization_callback(self):
+        cuda_trace.register_callback_for_cuda_device_synchronization(self.mock)
+
+        torch.cuda.synchronize()
+        self.mock.assert_called()
+
+    def test_stream_synchronization_callback(self):
+        cuda_trace.register_callback_for_cuda_stream_synchronization(self.mock)
+
+        stream = torch.cuda.Stream()
+        stream.synchronize()
+        self.mock.assert_called_once_with(stream.cuda_stream)
+
+    def test_event_synchronization_callback(self):
+        cuda_trace.register_callback_for_cuda_event_synchronization(self.mock)
+
+        event = torch.cuda.Event()
+        event.record()
+        event.synchronize()
+        self.mock.assert_called_once_with(event._as_parameter_.value)
+
+    def test_memcpy_synchronization(self):
+        cuda_trace.register_callback_for_cuda_stream_synchronization(self.mock)
+
+        tensor = torch.rand(5, device="cuda")
+        tensor.nonzero()
+        self.mock.assert_called_once_with(torch.cuda.default_stream().cuda_stream)
+
     def test_all_trace_callbacks_called(self):
         other = unittest.mock.MagicMock()
         cuda_trace.register_callback_for_cuda_memory_allocation(self.mock)

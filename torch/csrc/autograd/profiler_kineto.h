@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
@@ -20,7 +21,9 @@ namespace profiler {
 using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 
 struct TORCH_API KinetoEvent {
-  explicit KinetoEvent(std::shared_ptr<const torch::profiler::impl::Result>);
+  KinetoEvent(
+      std::shared_ptr<const torch::profiler::impl::Result>,
+      const bool verbose);
 
   uint64_t startThreadId() const;
   uint64_t endThreadId() const;

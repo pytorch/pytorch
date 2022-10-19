@@ -1,11 +1,15 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/Config.h>
+#include <ATen/core/List.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
-#include <ATen/ATen.h>
-#include <vector>
 #include <cpuinfo.h>
+#include <vector>
 
+#if AT_MKLDNN_ENABLED()
+#include <ideep/tensor.hpp>
+#endif // AT_MKLDNN_ENABLED()
 
 namespace at { namespace native {
 
@@ -22,11 +26,39 @@ std::vector<int64_t> pool_output_sizes(
     IntArrayRef padding_r,
     IntArrayRef dilation,
     bool ceil_mode);
+
+void check_mkldnn_binary_fusion_inputs(
+    const Tensor& input,
+    const Tensor& other,
+    const Tensor& weight,
+    const Tensor& bias);
+
+#if AT_MKLDNN_ENABLED()
+
+using AttrFunction = std::function<ideep::attr_t(
+    torch::List<c10::optional<at::Scalar>>,
+    c10::optional<c10::string_view>)>;
+
+const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map();
+
+const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
+
+#endif // AT_MKLDNN_ENABLED()
 };
 
 inline bool mkldnn_bf16_device_check() {
-  return cpuinfo_initialize() && cpuinfo_has_x86_avx512bw()
-      && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq();
+  return cpuinfo_initialize() && ((cpuinfo_has_x86_avx512bw()
+     && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq()) || (cpuinfo_has_arm_bf16()));
 }
+
+#if defined(__aarch64__)
+inline bool mkldnn_bf16_device_check_arm() {
+  return (cpuinfo_initialize() && cpuinfo_has_arm_bf16());
+}
+#else
+constexpr bool mkldnn_bf16_device_check_arm() {
+  return false;
+}
+#endif
 
 }

@@ -11,7 +11,7 @@ from functools import reduce
 import numpy as np
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, dtypes, dtypesIfCPU, dtypesIfCUDA,
     onlyNativeDeviceTypes)
@@ -881,6 +881,31 @@ class TestIndexing(TestCase):
 
             self.assertEqual(output, input_list)
 
+    @onlyNativeDeviceTypes
+    def test_index_ind_dtype(self, device):
+        x = torch.randn(4, 4, device=device)
+        ind_long = torch.randint(4, (4,), dtype=torch.long, device=device)
+        ind_int = ind_long.int()
+        src = torch.randn(4, device=device)
+        ref = x[ind_long, ind_long]
+        res = x[ind_int, ind_int]
+        self.assertEqual(ref, res)
+        ref = x[ind_long, :]
+        res = x[ind_int, :]
+        self.assertEqual(ref, res)
+        ref = x[:, ind_long]
+        res = x[:, ind_int]
+        self.assertEqual(ref, res)
+        # no repeating indices for index_put
+        ind_long = torch.arange(4, dtype=torch.long, device=device)
+        ind_int = ind_long.int()
+        for accum in (True, False):
+            inp_ref = x.clone()
+            inp_res = x.clone()
+            torch.index_put_(inp_ref, (ind_long, ind_long), src, accum)
+            torch.index_put_(inp_res, (ind_int, ind_int), src, accum)
+            self.assertEqual(inp_ref, inp_res)
+
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
@@ -1492,7 +1517,6 @@ class NumpyTests(TestCase):
         self.assertEqual(torch.ones(1, 2, device=device), a[true, [0, 1], true, true, [1], [[2]]])
         self.assertRaises(IndexError, lambda: a[false, [0, 1], ...])
 
-    @skipIfTorchDynamo("Waiting on https://github.com/pytorch/pytorch/pull/83567")
     def test_boolean_indexing_alldims(self, device):
         true = torch.tensor(True, device=device)
         a = torch.ones((2, 3), device=device)
