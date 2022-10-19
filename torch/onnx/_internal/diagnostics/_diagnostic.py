@@ -1,6 +1,7 @@
 """Diagnostic components for PyTorch ONNX export."""
 
 import contextlib
+import inspect
 from typing import Any, Optional, Tuple, TypeVar
 
 import torch
@@ -27,6 +28,11 @@ class ExportDiagnostic(infra.Diagnostic):
         **kwargs,
     ) -> None:
         super().__init__(rule, level, message_args, **kwargs)
+        self._record_current_frame()
+
+    def _record_current_frame(self) -> None:
+        """Records the current frame as a source location."""
+        stack = inspect.stack()
 
     def with_cpp_stack(self: _ExportDiagnostic) -> _ExportDiagnostic:
         # TODO: Implement this.

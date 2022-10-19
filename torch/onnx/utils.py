@@ -1861,6 +1861,7 @@ def _run_symbolic_function(
         symbolic_function_group = registration.registry.get_function_group(
             symbolic_function_name
         )
+        s = inspect.stack()
         if symbolic_function_group is not None:
             symbolic_fn = symbolic_function_group.get(opset_version)
             if symbolic_fn is not None:
