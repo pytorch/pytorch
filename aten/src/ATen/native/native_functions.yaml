@@ -144,6 +144,9 @@
   dispatch:
     CompositeExplicitAutograd: _has_same_storage_numel
 
+- func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+  variants: function
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   tags: inplace_view

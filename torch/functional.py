@@ -21,6 +21,7 @@ __all__ = [
     'atleast_2d',
     'atleast_3d',
     'align_tensors',
+    'attn',
     'broadcast_shapes',
     'broadcast_tensors',
     'cartesian_prod',
@@ -40,6 +41,10 @@ __all__ = [
     'unique',
     'unique_consecutive',
 ]
+
+
+def attn(q, k, v):
+    return _VF.attn(q, k, v)
 
 
 def broadcast_tensors(*tensors):

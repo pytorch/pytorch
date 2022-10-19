@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace at { namespace native {
@@ -753,6 +754,18 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
+}
+
+std::tuple<Tensor, Tensor> attn(const Tensor &q, const Tensor &k, const Tensor &v) {
+  TORCH_CHECK(q.sizes().size() == 2, "input q must be 2D but instead has ", q.sizes().size(), " dims");
+  TORCH_CHECK(k.sizes().size() == 2, "input k must be 2D but instead has ", k.sizes().size(), " dims");
+  TORCH_CHECK(v.sizes().size() == 2, "input v must be 2D but instead has ", v.sizes().size(), " dims");
+  TORCH_CHECK(q.size(0) == k.size(0) && k.size(0) == v.size(0), "all inputs must have the same first dimension");
+  TORCH_CHECK(q.size(1) == k.size(1), "q and k must share the same size for their second dimension");
+
+  Tensor a = at::tanh(at::matmul(q, k.transpose(0, 1)));
+  Tensor o = at::matmul(a, v);
+  return std::tuple<Tensor, Tensor>(o, a);
 }
 
 }}  // namespace at::native

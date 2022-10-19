@@ -5397,6 +5397,19 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S)))
     yield SampleInput(make_arg((S, S, S)))
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases = (((S, S), (S, S), (S, S)),
+                  ((S, S), (S, S), (S, M)),
+                  ((M, S), (M, S), (M, M)),
+                  ((S, M), (S, M), (S, S)))
+    sample_inputs = []
+    for qs, ks, vs in test_cases:
+        q = make_tensor(qs, dtype=dtype, device=device, requires_grad=requires_grad)
+        k = make_tensor(ks, dtype=dtype, device=device, requires_grad=requires_grad)
+        v = make_tensor(vs, dtype=dtype, device=device, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(q, k, v))
+    return tuple(sample_inputs)
+
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
                        high=None, requires_grad=requires_grad)
@@ -13261,6 +13274,16 @@ op_db: List[OpInfo] = [
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            )),
+    OpInfo('attn',
+           op=torch.attn,
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_attn,
+           decorators=[DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-05, rtol=3e-06)}),
+                                    'TestCommon', 'test_noncontiguous_samples')],
+           ),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
