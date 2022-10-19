@@ -242,7 +242,6 @@ dist_backend = Backend
 DENY_LIST = ("PREMUL_SUM", )
 for _red_op_name, _red_op_value in ReduceOp.RedOpType.__members__.items():
     setattr(ReduceOp, _red_op_name, _red_op_value if _red_op_name in DENY_LIST else ReduceOp(_red_op_value))
-ReduceOp.__members__ = ReduceOp.RedOpType.__members__
 
 
 class _reduce_op(object):

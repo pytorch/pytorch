@@ -530,13 +530,15 @@ and only for NCCL versions 2.10 or later.
 ``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
 ``PREMUL_SUM`` is only available with the ``NCCL`` backend,
 and only available for NCCL versions 2.11 or later. Users are supposed to
-use ``torch.distributed._make_nccl_premul_sum`` to create a ReduceOp object.
+use ``torch.distributed._make_nccl_premul_sum``.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.)");
+:func:`reduce`, :func:`all_reduce_multigpu`, etc.
+
+This class does not support ``__members__`` property.)");
 
   reduce_op.def(py::init<::c10d::ReduceOp::RedOpType>())
       .def_readwrite("op", &::c10d::ReduceOp::op_);
@@ -558,6 +560,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           })
       .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
 
+  // note(crcrpar): Deliberately skip [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
+  // here and manually set values in Python side. See note "ReduceOp static class attributes to support `isinstance`"
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
       .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
