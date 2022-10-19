@@ -1881,6 +1881,7 @@ class TestOpInfos(TestCase):
         self.assertEqual(s2.name, "foo")
 
 
+# Tests that validate the various sample generating functions on each OpInfo.
 class TestOpInfoSampleFunctions(TestCase):
 
     def _assert_is_generator_or_singleton(self, item, property_name):
@@ -1894,16 +1895,19 @@ class TestOpInfoSampleFunctions(TestCase):
 
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_opinfo_sample_generators(self, device, dtype, op):
+        # Test op.sample_inputs doesn't generate multiple samples when called
         samples = op.sample_inputs(device, dtype)
         self._assert_is_generator_or_singleton(samples, "sample_inputs_func")
 
     @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
     def test_opinfo_reference_generators(self, device, dtype, op):
+        # Test op.reference_inputs doesn't generate multiple samples when called
         samples = op.reference_inputs(device, dtype)
         self._assert_is_generator_or_singleton(samples, "reference_inputs_func")
 
     @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     def test_opinfo_error_generators(self, device, op):
+        # Test op.error_inputs doesn't generate multiple inputs when called
         samples = op.error_inputs(device)
         self._assert_is_generator_or_singleton(samples, "error_inputs_func")
 
