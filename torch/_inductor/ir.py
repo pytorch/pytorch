@@ -3124,7 +3124,7 @@ class Convolution(ExternKernelAlloc):
             valid_cudnn = False
             if (
                 torch.backends.cudnn.is_available()
-                and torch.backends.cudnn.version() > 7603
+                and torch.backends.cudnn.version() >= 7603
             ):
                 valid_cudnn = True
 
