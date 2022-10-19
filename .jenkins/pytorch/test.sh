@@ -269,9 +269,13 @@ test_inductor_huggingface_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  python benchmarks/dynamo/huggingface.py --ci --training --accuracy -d cuda --inductor --float32 \
-    --total-partitions 2 --partition-id "$1" --output=inductor_huggingface_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f inductor_huggingface_"$1".csv
+  TEST_REPORTS_DIR=test/test-reports/inductor
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
 }
 
 test_inductor_timm_shard() {
@@ -279,9 +283,10 @@ test_inductor_timm_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  python benchmarks/dynamo/timm_models.py --ci --training --accuracy -d cuda --inductor --float32 \
-    --total-partitions 3 --partition-id "$1" --output=inductor_timm_"$1".csv
-  python benchmarks/dynamo/check_csv.py -f inductor_timm_"$1".csv
+  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
 
 test_python_gloo_with_tls() {
@@ -746,26 +751,26 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 3 && $NUM_TEST_SH
   install_torchvision
   install_filelock
   install_triton
-  install_huggingface
-  test_inductor_huggingface_shard 1
+  install_timm
+  test_inductor_timm_shard 0
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 4 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
-  test_inductor_timm_shard 0
+  test_inductor_timm_shard 1
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 5 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
-  test_inductor_timm_shard 1
+  test_inductor_timm_shard 2
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 6 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
-  test_inductor_timm_shard 2
+  test_inductor_timm_shard 3
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
