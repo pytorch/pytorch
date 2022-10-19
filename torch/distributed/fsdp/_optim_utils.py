@@ -114,6 +114,7 @@ def _unflatten_optim_state(
         otherwise. The final optimizer state dict will need to map these
         entries using the proper unflattened parameter IDs.
     """
+    fsdp_module._clear_grads_if_needed()
     consolidated_state = _communicate_optim_state(
         flat_param,
         flat_param_state,
@@ -298,7 +299,7 @@ def _flatten_optim_state_dict(
     for param, unflat_param_names in param_to_unflat_param_names.items():
         if isinstance(param, FlatParameter):  # flatten FSDP parameters' states
             assert param in flat_param_to_fsdp_module, (
-                "Check the `flat_param_to_fsdp_module` construction\n" f"param: {param}"
+                f"Check the `flat_param_to_fsdp_module` construction\nparam: {param}"
             )
             fsdp_module = flat_param_to_fsdp_module[param]
             flat_state = _flatten_optim_state(
