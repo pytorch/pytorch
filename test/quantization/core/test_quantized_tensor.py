@@ -1473,7 +1473,9 @@ class TestQuantizedTensor(TestCase):
         quant_min, quant_max = 0, 255
 
         quantized_X = torch.quantize_per_tensor(X, scale, zero_point, qdtype)
-        quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor(X, scale, zero_point, quant_min, quant_max, dtype)
+        quantized_decomposed_X = \
+            torch.ops.quantized_decomposed.quantize_per_tensor(
+                X, scale, zero_point, quant_min, quant_max, dtype)
         self.assertEqual(quantized_decomposed_X.dtype, dtype)
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
 
