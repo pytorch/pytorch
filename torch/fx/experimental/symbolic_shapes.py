@@ -223,12 +223,14 @@ magic_methods = {
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
     'ceil': lambda a: Ceil(a),
+    'floor': lambda a: sympy.floor(a),
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
 }
 
 unary_magic_methods = {
-    'ceil'
+    'ceil',
+    'floor'
 }
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
