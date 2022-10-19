@@ -1603,7 +1603,7 @@ def meta_gather(self, dim, index, sparse_grad=False):
     if not is_index_empty:
         check(
             index.dtype == torch.long,
-            lambda: "gather(): Expected dtype int64 for index",
+            lambda: f"gather(): Expected dtype int64 for index, but got {index.dtype}",
         )
         gather_shape_check(self, wrapped_dim, index)
     return self.new_empty(index.shape)
