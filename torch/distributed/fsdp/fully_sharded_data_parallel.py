@@ -360,13 +360,6 @@ class ShardedStateDictConfig(StateDictConfig):
     pass
 
 
-_state_dict_type_to_config = {
-    StateDictType.FULL_STATE_DICT: FullStateDictConfig,
-    StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
-    StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
-}
-
-
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
     PARAM_ID = auto()
@@ -2113,17 +2106,16 @@ class FullyShardedDataParallel(nn.Module):
         return next(iter(training_states))
 
     @staticmethod
-    @contextlib.contextmanager
-    def state_dict_type(
+    def set_state_dict_type(
         module: nn.Module,
         state_dict_type: StateDictType,
         state_dict_config: Optional[StateDictConfig] = None,
-    ) -> Generator:
+    ) -> Tuple[StateDictType, StateDictConfig]:
         """
-        A context manager to set the ``state_dict_type`` of all the descendant
-        FSDP modules of the target module. The target module does not have to
-        be a FSDP module. If the target module is a FSDP module, its
-        ``state_dict_type`` will also be changed.
+        Set the ``state_dict_type`` and the corresponding (optional)
+        configurations of all the descendant FSDP modules of the target module.
+        The target module does not have to be a FSDP module. If the target
+        module is a FSDP module, its ``state_dict_type`` will also be changed.
 
         .. note:: This API should be called for only the top-level (root)
             module.
@@ -2131,24 +2123,36 @@ class FullyShardedDataParallel(nn.Module):
         .. note:: This API enables users to transparently use the conventional
             ``state_dict`` API to take model checkpoints in cases where the
             root FSDP module is wrapped by another ``nn.Module``. For example,
-            the following will ensure ``state_dict``  is called on all non-FSDP
-            instances, while dispatching into `local_state_dict` implementation
+            the following will ensure ``state_dict`` is called on all non-FSDP
+            instances, while dispatching into `sharded_state_dict` implementation
             for FSDP:
 
         Example::
 
             >>> # xdoctest: +SKIP("undefined variables")
             >>> model = DDP(FSDP(...))
-            >>> with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
-            >>>     checkpoint = model.state_dict()
+            >>> FSDP.set_state_dict_type(
+            >>>     model,
+            >>>     StateDictType.SHARDED_STATE_DICT,
+            >>>     ShardedStateDictConfig(offload_to_cpu=True),
+            >>> )
+            >>> checkpoint = model.state_dict()
 
         Args:
             module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
+            state_dict_config (Optional[StateDictConfig]): the configuration for the
+                target ``state_dict_type``.
         """
+        _state_dict_type_to_config = {
+            StateDictType.FULL_STATE_DICT: FullStateDictConfig,
+            StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
+            StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
+        }
+
         prev_state_dict_type = None
         prev_state_dict_config = None
-        # Use default config a state_dict config is not set.
+        # Use the default config if a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
         for submodule in FullyShardedDataParallel.fsdp_modules(module):
@@ -2166,18 +2170,62 @@ class FullyShardedDataParallel(nn.Module):
             expected_state_dict_config_type = _state_dict_type_to_config[state_dict_type]
             if expected_state_dict_config_type != type(state_dict_config):
                 raise RuntimeError(
-                    f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
+                    f"Expected state_dict_config of type {expected_state_dict_config_type} "
+                    f"but got {type(state_dict_config)}"
                 )
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
+
+        return prev_state_dict_type, prev_state_dict_config
+
+    @staticmethod
+    @contextlib.contextmanager
+    def state_dict_type(
+        module: nn.Module,
+        state_dict_type: StateDictType,
+        state_dict_config: Optional[StateDictConfig] = None,
+    ) -> Generator:
+        """
+        A context manager to set the ``state_dict_type`` of all the descendant
+        FSDP modules of the target module. This context manager has the same
+        functions as :meth:`set_state_dict_type`. Read the document of
+        :meth:`set_state_dict_type` for the detail.
+
+        Example::
+
+            >>> # xdoctest: +SKIP("undefined variables")
+            >>> model = DDP(FSDP(...))
+            >>> with FSDP.state_dict_type(
+            >>>     model,
+            >>>     StateDictType.SHARDED_STATE_DICT,
+            >>> ):
+            >>>     checkpoint = model.state_dict()
+
+        Args:
+            module (torch.nn.Module): Root module.
+            state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
+            state_dict_config (Optional[StateDictConfig]): the configuration for the
+                target ``state_dict_type``.
+        """
+        prev_state_dict_type = None
+        prev_state_dict_config = None
         try:
+            prev_state_dict_type, prev_state_dict_config = (
+                FullyShardedDataParallel.set_state_dict_type(
+                    module, state_dict_type, state_dict_config
+                )
+            )
             yield
+        except Exception as e:
+            raise e
+        else:
+            assert prev_state_dict_type is not None
+            assert prev_state_dict_config is not None
         finally:
-            assert prev_state_dict_type is not None  # Avoid mypy warning
-            assert prev_state_dict_config is not None  # Avoid mypy warning
-            for submodule in FullyShardedDataParallel.fsdp_modules(module):
-                submodule._state_dict_type = prev_state_dict_type
-                submodule._state_dict_config = prev_state_dict_config
+            if prev_state_dict_type is not None and prev_state_dict_config is not None:
+                FullyShardedDataParallel.set_state_dict_type(
+                    module, prev_state_dict_type, prev_state_dict_config
+                )
 
     def _convert_to_wrapped_module_name(self, module_name: str) -> str:
         module_name = module_name.replace(f"{FPW_MODULE}.", "")
@@ -2524,7 +2572,7 @@ class FullyShardedDataParallel(nn.Module):
         (e.g., DPP, model parallelism, and single trainer) after a valid
         resharding.
         """
-        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+        with self.state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.state_dict(self, *args, **kwargs)
 
     def _full_pre_load_state_dict_hook(
@@ -2760,7 +2808,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Load states from a unflattened, sharded state dictionary.
         """
-        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+        with self.state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.load_state_dict(state_dict, strict)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
