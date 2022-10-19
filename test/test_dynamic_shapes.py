@@ -3,6 +3,7 @@
 
 from torch._C import _disabled_torch_function_impl
 import torch.fx
+import torch._refs
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 import unittest
@@ -321,6 +322,13 @@ class TestPySymInt(TestCase):
         a0 = create_symint(shape_env, 2)
         r = torch.empty(a0, device='meta')
         self.assertIsInstance(r.shape[0], CPP_SYMINT_CLASS)
+
+    @skipIfNoSympy
+    def test_arange_dtype(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        r = torch._refs.arange(a0, device='meta')
+        self.assertIs(r.dtype, torch.int64)
 
     @skipIfNoSympy
     def test_guard_int(self):
