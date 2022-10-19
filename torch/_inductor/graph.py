@@ -46,6 +46,7 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [
             i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in stride
         ]
+        print(size, stride)
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
