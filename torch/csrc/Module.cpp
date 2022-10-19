@@ -1,3 +1,4 @@
+#include <c10/util/Optional.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
 
@@ -1291,30 +1292,87 @@ Call this whenever a new thread is created in order to propagate values from
       .value("SlowTranspose3d", at::native::ConvBackend::SlowTranspose3d)
       .value(
           "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
-      .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d);
+      .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d)
+      .value("Mps", at::native::ConvBackend::Mps)
+      .value("MpsTranspose,", at::native::ConvBackend::MpsTranspose);
 
   py_module.def(
       "_select_conv_backend",
       [](const at::Tensor& input,
          const at::Tensor& weight,
-         const c10::optional<at::Tensor>& bias_opt,
+         const c10::optional<at::Tensor>& bias,
          at::IntArrayRef stride_,
          at::IntArrayRef padding_,
          at::IntArrayRef dilation_,
          bool transposed_,
          at::IntArrayRef output_padding_,
          int64_t groups_) {
+        
         return at::native::select_conv_backend(
             input,
             weight,
-            bias_opt,
+            bias,
             stride_,
             padding_,
             dilation_,
             transposed_,
             output_padding_,
-            groups_);
-      });
+            groups_,
+            c10::nullopt);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("stride"),
+      py::arg("padding"),
+      py::arg("dilation"),
+      py::arg("transposed"),
+      py::arg("output_padding"),
+      py::arg("groups"));
+
+  py_module.def(
+      "_select_conv_backend",
+      [](const at::Tensor& input,
+         const at::Tensor& weight,
+         const c10::optional<at::Tensor>& bias,
+         at::IntArrayRef stride_,
+         at::IntArrayRef padding_,
+         at::IntArrayRef dilation_,
+         bool transposed_,
+         at::IntArrayRef output_padding_,
+         int64_t groups_,
+         c10::optional<std::vector<int64_t>> bias_sizes_opt) {
+        
+        c10::OptionalArrayRef<long int> ref = c10::nullopt;
+        if (bias_sizes_opt) {
+          ref = (*bias_sizes_opt);
+        } 
+        return at::native::select_conv_backend(
+            input,
+            weight,
+            bias,
+            stride_,
+            padding_,
+            dilation_,
+            transposed_,
+            output_padding_,
+            groups_,
+            ref);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("stride"),
+      py::arg("padding"),
+      py::arg("dilation"),
+      py::arg("transposed"),
+      py::arg("output_padding"),
+      py::arg("groups"),
+      py::arg("bias_sizes_opt")); // overload for bias_sizes_opt TODO: figure out default value
+
+  py_module.def(
+      "_conv_determine_backend_memory_format",
+      at::native::_determine_backend_memory_format);
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
