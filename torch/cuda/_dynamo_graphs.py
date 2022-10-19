@@ -151,7 +151,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
     return aot_module_simplified(model, **kwargs)
 
 
-class AOTAutogradCudaGraphs(AOTAutogradStrategy):
+class AOTAutogradCudaGraphs(AotAutogradStrategy):
     def candidate(self):
         return raw_aot_autograd_cudagraphs(self.gm, self.example_inputs)
 
