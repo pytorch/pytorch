@@ -29,7 +29,7 @@ class CIFlowConfig:
     run_on_canary: bool = False
     labels: Set[str] = field(default_factory=set)
     # Certain jobs might not want to be part of the ciflow/[all,trunk] workflow
-    isolated_workflow: bool = False
+    isolated_workflow: bool = True
 
     def __post_init__(self) -> None:
         if not self.isolated_workflow:
