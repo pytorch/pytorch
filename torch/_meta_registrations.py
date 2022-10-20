@@ -1773,6 +1773,65 @@ def argmax_meta(self, dim=None, keepdim=False):
     shape = _compute_reduction_shape(self, dims, keepdim)
     return self.new_empty(shape, dtype=torch.int64)
 
+# Pulled directly from aten/src/ATen/ExpandUtils.cpp
+def infer_dense_strides(tensor_sizes, tensor_strides):
+    check(
+        len(tensor_sizes) == len(tensor_strides),
+        lambda: f"Input sizes and strides should have same size but got {len(tensor_sizes)} and {len(tensor_strides)}",
+        )
+    ndim = len(tensor_sizes)
+    if ndim == 0:
+        return ()
+    if ndim == 1:
+        return (1,)
+    perm = [x for x in range(ndim)]
+
+    def should_swap(dim0, dim1):
+        stride0 = tensor_strides[dim0]
+        stride1 = tensor_strides[dim1]
+        if stride0 == 0 or stride1 == 0:
+            return 0
+        if stride0 < stride1:
+            return -1
+        if stride0 > stride1:
+            return 1
+        if tensor_sizes[dim0] > tensor_sizes[dim1]:
+            return 1
+        return 0
+
+    for i in range(1, ndim):
+        dim1 = i
+        for j in range(1, i + 1):
+            dim0 = i - j
+            comparison = should_swap(perm[dim0], perm[dim1])
+            if comparison > 0:
+                # swap dim0 and dim1
+                tmp = perm[dim0]
+                perm[dim0] = perm[dim1]
+                perm[dim1] = tmp
+                dim1 = dim0
+            elif comparison < 0:
+                break
+
+    out_strides = [0] * ndim
+    curr_stride = 1
+    for i in range(ndim):
+        idx = perm[i]
+        out_strides[idx] = curr_stride
+        if tensor_sizes[idx] > 1:
+            curr_stride *= tensor_sizes[idx]
+    return out_strides
+
+@register_meta(aten.sort.default, register_dispatcher=False)
+def sort_meta(self, dim=-1, descending=False):
+    if utils.is_non_overlapping_and_dense(self):
+        strides = self.stride()
+    else:
+        strides = infer_dense_strides(self.shape, self.stride())
+    values = self.new_empty_strided(self.shape, strides)
+    indices = self.new_empty_strided(self.shape, strides, dtype=torch.long)
+    return (values, indices)
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
