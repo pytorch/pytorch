@@ -233,27 +233,54 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+    
+    def needed_bytes(x):
+        size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        ) * x.element_size()
+        return size if size % 16 == 0 else (size + (16 - (size % 16)))
 
-    def static_input(x):
+    def get_static_inputs(ten_list):
         """
         Copy and input while preserving strides
         """
-        # TODO(jansel): figure out why this version doesn't work:
-        # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-        needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        total_bytes = 0
+        for x in ten_list:
+            total_bytes += needed_bytes(x)
+
+        ten_storage = torch.zeros(
+            (total_bytes,), dtype=torch.int8, device="cuda"
         )
-        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
-        return torch.as_strided(buffer, x.size(), x.stride())
+
+        byte_offset = 0
+        outputs = []
+        for x in ten_list:
+            buffer = torch.empty((), dtype=x.dtype, device=x.device)
+            buffer.set_(
+                source=ten_storage.view(x.dtype).storage(),
+                storage_offset=byte_offset // x.element_size(),
+                size=x.size(),
+                stride=x.stride(),
+            )
+            outputs.append(buffer)
+            byte_offset += needed_bytes(x)
+
+        return outputs
 
     assert isinstance(inputs, (list, tuple))
     # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
     inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
 
-    static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x.detach()
-        for idx, x in enumerate(inputs)
-    ]
+    non_static_inputs = get_static_inputs([x for idx, x in enumerate(inputs) if idx not in static_input_idxs])
+
+    non_static_idx = 0
+    static_inputs = []
+    for idx, x in enumerate(inputs):
+        if idx not in static_input_idxs:
+            static_inputs.append(non_static_inputs[non_static_idx])
+            non_static_idx += 1
+        else:
+            static_inputs.append(x)
 
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
