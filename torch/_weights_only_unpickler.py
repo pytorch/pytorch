@@ -142,7 +142,7 @@ class Unpickler:
                 cls = self.stack.pop()
                 if cls is not torch.nn.Parameter:
                     raise RuntimeError(f"Trying to instantiate unsupported class {cls}")
-                self.append(cls.__new__(cls, *args))
+                self.append(torch.nn.Parameter(*args))
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
