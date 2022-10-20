@@ -866,6 +866,20 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
 
+    def test_weights_only_assert(self):
+        class HelloWorld:
+            def __reduce__(self):
+                return (print, ("Hello World!",))
+
+        with BytesIOContext() as f:
+            torch.save(HelloWorld(), f)
+            f.seek(0)
+            # Unsafe load should work
+            self.assertIsNone(torch.load(f, weights_only=False))
+            f.seek(0)
+            # Safe load should assert
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
+                torch.load(f, weights_only=True)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

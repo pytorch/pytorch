@@ -750,8 +750,8 @@ def load(
     """
     UNSAFE_MESSAGE = (
         "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
-        " will likely succeede but it can result in arbitrary code execution."
-        "Do it only if you get the file from a trusted source."
+        " will likely succeed, but it can result in arbitrary code execution."
+        "Do it only if you get the file from a trusted source. WeightsUnpickler error: "
     )
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:
@@ -784,14 +784,14 @@ def load(
                 if weights_only:
                     try:
                         return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
-                    except RuntimeError:
-                        raise pickle.UnpicklingError(UNSAFE_MESSAGE)
+                    except RuntimeError as e:
+                        raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         if weights_only:
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
-            except RuntimeError:
-                raise pickle.UnpicklingError(UNSAFE_MESSAGE)
+            except RuntimeError as e:
+                raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 
