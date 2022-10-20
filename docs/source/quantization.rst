@@ -1011,7 +1011,7 @@ Frequently Asked Questions
    You can open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
    or reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
 
-3. How can use quantization with LSTM's?:
+3. How can I use quantization with LSTM's?:
 
    LSTM is supported through our custom module api in both eager mode and fx graph mode quantization. Examples can be found at
    Eager Mode: `pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm <https://github.com/pytorch/pytorch/blob/master/test/quantization/core/test_quantized_op.py#L2782>`_
