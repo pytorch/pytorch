@@ -54,7 +54,6 @@ from torch.testing._internal.common_device_type import (
     ops,
     onlyCUDA,
     onlyCPU,
-    onlyMPS,
     onlyNativeDeviceTypes,
     OpDTypes,
     skipCUDAIfRocm,
@@ -172,24 +171,6 @@ class TestCommon(TestCase):
                 )
         finally:
             torch.set_default_dtype(cur_default)
-
-    # Same as above `test_numpy_ref`, but with different settings required for the MPS backend
-    # When MPS becomes more consistent, this can probably be merged with the above using
-    # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyMPS
-    @suppress_warnings
-    # MPS only supports float32
-    @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
-    def test_numpy_ref_mps(self, device, dtype, op):
-        # Unlike above, this test compares in `float32` since at the time of this test's creation MPS does
-        # not support float64 Tensors.
-        # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
-        # get patched up and this workaround removed.
-        broken_on_ref_inputs = op.name in ['cat', 'clamp', 'where']
-        inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
-        for sample_input in inputs:
-            self.compare_with_reference(op, op.ref, sample_input)
 
     # Tests that the cpu and gpu results are consistent
     @onlyCUDA
@@ -2045,7 +2026,7 @@ class TestFakeTensor(TestCase):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
 
-instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
+instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
