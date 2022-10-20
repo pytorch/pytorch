@@ -1031,8 +1031,7 @@ class MultiheadAttention(Module):
             to ignore for the purpose of attention (i.e. treat as "padding"). For unbatched `query`, shape should be :math:`(S)`.
             Binary and byte masks are supported.
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
-            the purpose of attention. For a byte mask, a non-zero value indicates that the corresponding ``key``
-            value will be ignored.
+            the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
             Default: ``True``.
         attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
@@ -1062,6 +1061,11 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
+        if key_padding_mask is not None:
+            _kpm_dtype = key_padding_mask.dtype
+            if _kpm_dtype != torch.bool and not torch.is_floating_point(key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"

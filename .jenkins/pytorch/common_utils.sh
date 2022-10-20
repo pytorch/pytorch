@@ -171,15 +171,30 @@ function test_torch_deploy(){
 }
 
 function install_huggingface() {
+  local commit
+  commit=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
-  pip_install git+https://github.com/huggingface/transformers.git#egg=transformers
+  pip_install "git+https://github.com/huggingface/transformers.git@${commit}#egg=transformers"
 }
 
 function install_timm() {
+  local commit
+  commit=$(get_pinned_commit timm)
   pip_install pandas
   pip_install scipy
-  pip_install git+https://github.com/rwightman/pytorch-image-models
+  pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
+}
+
+function checkout_install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
+  git checkout "${commit}"
+  python install.py
+  pip_install gym==0.25.2  # workaround issue in 0.26.0
+  popd
 }
 
 function test_functorch() {
