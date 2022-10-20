@@ -1004,7 +1004,7 @@ Frequently Asked Questions
 1. How can I do quantized inference on GPU?:
 
    We don't have official GPU support yet, but this is an area of active development, you can find more information
-   at `Torch-TensorRT <https://pytorch.org/TensorRT/#getting-started>`_
+   `here <https://github.com/pytorch/pytorch/issues/87395>`_
 
 2. Where can I get ONNX support for my quantized model?:
 
@@ -1014,8 +1014,8 @@ Frequently Asked Questions
 3. How can I use quantization with LSTM's?:
 
    LSTM is supported through our custom module api in both eager mode and fx graph mode quantization. Examples can be found at
-   Eager Mode: `pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm <https://github.com/pytorch/pytorch/blob/master/test/quantization/core/test_quantized_op.py#L2782>`_
-   FX Graph Mode: `pytorch/test_quantize_fx.py <https://github.com/pytorch/pytorch/blob/master/test/quantization/fx/test_quantize_fx.py#L4102>`_
+   Eager Mode: `pytorch/test_quantized_op.py TestQuantizedOps.test_custom_module_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/core/test_quantized_op.py#L2782>`_
+   FX Graph Mode: `pytorch/test_quantize_fx.py TestQuantizeFx.test_static_lstm <https://github.com/pytorch/pytorch/blob/9b88dcf248e717ca6c3f8c5e11f600825547a561/test/quantization/fx/test_quantize_fx.py#L4116>`_
 
 Common Errors
 ---------------------------------------
