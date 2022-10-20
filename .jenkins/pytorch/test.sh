@@ -752,24 +752,28 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SH
   install_huggingface
   test_inductor_huggingface_shard 0
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # TODO: timm model tests are not enabled yet. Downloading pretained models takes too long.
   install_torchvision
   install_filelock
   install_triton
   install_timm
   test_inductor_timm_shard 0
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 4 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # TODO: timm model tests are not enabled yet. Downloading pretained models takes too long.
   install_torchvision
   install_filelock
   install_triton
   install_timm
   test_inductor_timm_shard 1
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 5 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # TODO: timm model tests are not enabled yet. Downloading pretained models takes too long.
   install_torchvision
   install_filelock
   install_triton
   install_timm
   test_inductor_timm_shard 2
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 6 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  # TODO: timm model tests are not enabled yet. Downloading pretained models takes too long.
   install_torchvision
   install_filelock
   install_triton
