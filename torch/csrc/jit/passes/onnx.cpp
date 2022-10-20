@@ -427,7 +427,12 @@ void NodeToONNX(
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*g, n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        g, new_block, n, py_inputs, env, operator_export_type);
+        g->shared_from_this(),
+        new_block,
+        n,
+        py_inputs,
+        env,
+        operator_export_type);
 
     // Find new nodes that have been created by _run_symbolic_function and
     // propagate metadata
@@ -529,7 +534,7 @@ void NodeToONNX(
               pyobj.attr("symbolic"),
               /* custom */ true);
       py::object raw_output = onnx.attr("_run_symbolic_method")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           op->name(),
           pyobj.attr("symbolic"),
           py_symbolic_args);
@@ -541,7 +546,7 @@ void NodeToONNX(
       n->s_(attr::name, op->name());
       // Call symbolic function
       py::object raw_output = onnx.attr("_run_symbolic_function")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           new_block,
           n,
           py_symbolic_args,

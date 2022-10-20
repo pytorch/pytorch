@@ -1163,7 +1163,7 @@ struct Block {
   std::shared_ptr<Wrap<Block>> wrap_;
 };
 
-struct Graph {
+struct Graph : std::enable_shared_from_this<Graph> {
   TH_DISALLOW_COPY_AND_ASSIGN(Graph);
   friend struct Node;
   friend struct Value;
