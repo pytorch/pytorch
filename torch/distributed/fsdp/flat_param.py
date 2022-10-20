@@ -821,11 +821,12 @@ class FlatParamHandle:
             unsharded_size
         )  # this `.view()` is not autograd visible
         in_forward = self._training_state == HandleTrainingState.FORWARD
+        in_computation = in_forward or self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
-            # NOTE: When not in the forward, `as_params=True` suffices since we
-            # only need to restore the tensor *values* for backward computation
-            # and do not fresh `Tensor` views.
-            self._use_unsharded_views(as_params=(not in_forward))
+            # We use `Tensor` views in the forward so that they are tracked by
+            # autograd, and we use them in the pre-backward to ensure that
+            # post-backward hooks run when using activation checkpointing.
+            self._use_unsharded_views(as_params=(not in_computation))
         elif in_forward:
             self._use_unsharded_views(as_params=False)
 
