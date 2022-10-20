@@ -998,9 +998,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
                 signature.append(sizearg)
-                triton_meta["signature"][len(argdefs)] = signature_of(
-                    sizearg
-                )
+                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
