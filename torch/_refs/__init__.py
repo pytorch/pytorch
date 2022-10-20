@@ -81,6 +81,7 @@ __all__ = [
     "isnan",
     "isreal",
     "i0",
+    "lerp",
     "lgamma",
     "log",
     "log1p",
@@ -1978,18 +1979,17 @@ def _reduction(
 
 
 def _make_copy_from_view(fn):
-    # Does not handle multiple outputs, but I think we don't have any such an op
+    """
+    Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
+    """
     name = fn.__name__
     fn = out_wrapper()(fn)
 
     def _fn(*args, out=None, **kwargs):
-        result = fn(*args, **kwargs)
+        result = fn(*args, out=out, **kwargs)
         if out is None:
             return result.clone()
-        else:
-            _maybe_resize_out(out, result.shape)
-            _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=False)  # type: ignore[arg-type]
-            return out
+        return result
 
     copy_name = f"{name}_copy"
     _fn.__name__ = copy_name
@@ -4024,6 +4024,29 @@ def arange(
         # pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
+
+
+@register_decomposition(torch.ops.aten.lerp)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("start", "end", "weight"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    check(start.dtype == end.dtype, lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}")
+    if isinstance(weight, Number):
+        weight = start.new_full((), weight)
+    else:
+        check(start.dtype == weight.dtype, lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}")
+    # We implement it this way for numerical stability. We assume (in the stability optimisation)
+    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
+    # We want to do operations near zero, which is where floating points are most precise
+    # If weight.abs() >= 0.5:
+    #    return (1 - weight) * (start - end) + end
+    mask = weight.abs() >= 0.5
+    coeff = torch.where(mask, weight - 1, weight)
+    base = torch.where(mask, end, start)
+    return coeff * (end - start) + base
 
 
 @register_decomposition(torch.ops.aten.linspace)
