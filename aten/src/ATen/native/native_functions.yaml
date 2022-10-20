@@ -1174,7 +1174,8 @@
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
-    NestedTensorCPU, NestedTensorCUDA: bmm_nested
+    NestedTensorCPU: bmm_nested
+    NestedTensorCUDA: bmm_nested_cuda
   tags: canonical
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
@@ -2214,6 +2215,7 @@
     QuantizedCPU, QuantizedCUDA: empty_like_quantized
     SparseCPU, SparseCUDA, SparseMeta: empty_like_sparse_coo
     SparseCsrCPU, SparseCsrCUDA: empty_like_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: empty_like_nested
   autogen: empty_like.out
 
 - func: empty_strided(SymInt[] size, SymInt[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -6738,6 +6740,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: _to_copy
+    NestedTensorCPU, NestedTensorCUDA: _to_copy_nested
   autogen: _to_copy.out
   tags: canonical
 

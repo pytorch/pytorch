@@ -985,6 +985,8 @@ symbolic_aot_autograd_failures = {
     xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('cdouble'),  # RuntimeError: aten.view_as_real.default - couldn't find symbolic meta function/decomposition
+    xfail('cfloat'),  # RuntimeError: aten.view_as_real.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel
@@ -1158,7 +1160,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.pad', 'circular'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta fu...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta...
     xfail('nn.functional.pairwise_distance', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1175,6 +1176,7 @@ symbolic_aot_autograd_failures = {
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('outer', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('pca_lowrank', ''),  # could not find kernel
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomp...

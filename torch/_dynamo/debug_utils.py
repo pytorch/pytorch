@@ -382,8 +382,11 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
 
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
+        from torch._subclasses import FakeTensorMode
+
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
+        inner_compiled_fn = None
 
         def deferred_for_real_inputs(real_inputs):
             """
@@ -393,6 +396,15 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             should be called with real tensors. Therefore, the actual invocation
             is deffered.
             """
+            # Avoid re-compiling when we call the compiled function twice. This happens
+            # when we run the model inference or training in a for loop like here
+            # https://github.com/pytorch/torchdynamo/issues/1687#issuecomment-1280040633
+            nonlocal inner_compiled_fn
+            # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
+            # because inductor clears the tensor list in its codegen. And example_inputs
+            # are available only for the first invocation.
+            fake_mode = FakeTensorMode()
+            copy_tensor_attrs = [fake_mode.from_tensor(x) for x in real_inputs]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
@@ -404,41 +416,43 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                if inner_compiled_fn is None:
+                    inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
-                        example_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
-                        example_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     raise ValueError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return compiled_fn(real_inputs)
+                    return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
-                    compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                    if inner_compiled_fn is None:
+                        inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                     # Call the compiled function with real inputs
-                    return compiled_fn(real_inputs)
+                    return inner_compiled_fn(real_inputs)
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),
-                            example_inputs,
+                            copy_tensor_attrs,
                             compiler_name,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
                             fx.GraphModule(gm, orig_graph),
-                            example_inputs,
+                            copy_tensor_attrs,
                             compiler_name,
                         )
                     raise e

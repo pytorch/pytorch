@@ -66,6 +66,9 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymIntNode floor() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymIntNode neg() {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymIntNode min(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
@@ -91,9 +94,6 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   virtual std::string str() {
-    TORCH_CHECK(false, "NYI");
-  };
-  virtual SymIntNode neg() {
     TORCH_CHECK(false, "NYI");
   };
   std::ostream& operator<<(std::ostream& os) {
