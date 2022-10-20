@@ -4295,16 +4295,21 @@ if HAS_CUDA:
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_ops.autotune import CachingAutotuner
 
-        class SaveGraph:
+        class NoOpCompilerBackend:
             def __init__(self):
                 self.example_args = None
                 self.model = None
 
-            def fx_extractor(
+            def noop_backend(
                 self,
                 model_: torch.fx.GraphModule,
                 example_inputs_: typing.List[torch.Tensor],
             ):
+                """
+                The Noop backend does not compile the fx graph it is given.
+                Instead, it transforms the fx graph so that its functions are
+                aten operations. It then saves this graph.
+                """
                 from functorch._src.aot_autograd import Interpreter
                 from torch._inductor.decomposition import select_decomp_table
                 from torch._subclasses import FakeTensorMode
@@ -4325,16 +4330,15 @@ if HAS_CUDA:
                 self.example_args = fake_flat_tensor_args
                 return lambda x: example_inputs_
 
-        def get_kernel_modules(self, fn, args) -> typing.List[CachingAutotuner]:
+        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
             from torch._dynamo.eval_frame import OptimizeContext
             from torch._inductor.debug import DebugContext
             from torch._inductor.graph import GraphLowering
             from torch._inductor.virtualized import V
 
-            cxt = TritonCodeGenTests.SaveGraph()
-            torch._dynamo.optimize(cxt.fx_extractor)(fn)(*args)
-            fx_graph = cxt.model
-            graph = GraphLowering(fx_graph)
+            cxt = TritonCodeGenTests.NoOpCompilerBackend()
+            torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
+            graph = GraphLowering(cxt.model)
             args = cxt.example_args
             kernels = []
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
@@ -4354,9 +4358,7 @@ if HAS_CUDA:
             def fn(a: torch.Tensor) -> torch.Tensor:
                 return torch.sum(a)
 
-            kernels = self.get_kernel_modules(
-                fn, [torch.randn([256, 256], device="cuda")]
-            )
+            kernels = self.get_kernels(fn, [torch.randn([256, 256], device="cuda")])
             self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
 
             # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
