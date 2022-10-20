@@ -150,6 +150,7 @@ inductor_skips["cuda"] = {
     "max.reduction_with_dim": {i32, i64},
     "min.reduction_with_dim": {i32, i64},
     "linalg.lu": {f32, f64},
+    "lu_unpack": {f32, f64},
     # Issues on sm86 periodic job (complex numbers)
     "cdouble": {b8, f16, f32, f64, i32, i64},
     "cfloat": {b8, f16, f32, f64, i32, i64},
