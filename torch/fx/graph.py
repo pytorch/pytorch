@@ -1134,7 +1134,7 @@ class Graph:
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
         result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
-        result_node.meta = copy.copy(node.meta)
+        result_node.meta = copy.deepcopy(node.meta)
         return result_node
 
     @compatibility(is_backward_compatible=True)
