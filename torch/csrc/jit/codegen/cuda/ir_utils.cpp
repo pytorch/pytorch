@@ -1050,7 +1050,7 @@ bool isSqueezeInput(const TensorView* tv) {
 }
 
 bool isSqueezedID(const TensorView* tv, const IterDomain* id) {
-  auto root_dom = tv->getMaybeRFactorDomain();
+  auto root_dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
   auto squeezes = ir_utils::filterByType<SqueezeOp>(tv->uses());
   for (auto i : c10::irange(root_dom.size())) {
     if (root_dom[i] != id) {

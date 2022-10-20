@@ -89,17 +89,16 @@ TensorView* view(
 
   auto view_analysis = analyzeView(x, original_sizes, new_sizes);
 
-  // TODO: replace with squeeze
-  auto reduction = (!view_analysis.trivial_reduction_axes.empty())
-      ? sum(x,
-            view_analysis.trivial_reduction_axes,
-            false /* keep_dim */,
-            x->getDataType().value())
+  auto squeezed = std::any_of(
+                      view_analysis.squeeze_axes.begin(),
+                      view_analysis.squeeze_axes.end(),
+                      [](bool s) { return s; })
+      ? squeeze(x, view_analysis.squeeze_axes)
       : x;
 
   auto view = view_analysis.transforms.empty()
-      ? reduction
-      : applyViewTransforms(x, reduction, view_analysis);
+      ? squeezed
+      : applyViewTransforms(x, squeezed, view_analysis);
 
   auto bcasted = std::any_of(
                      view_analysis.broadcast_axes.begin(),

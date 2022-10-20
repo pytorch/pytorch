@@ -21,10 +21,10 @@ namespace cuda {
 //!   (as is expected since we're trying to generate the output of the
 //!   operations).
 //!
-//! Trivially reduced domain:
-//!   Predicting which operations are trivial reduced are not trivial. If a
-//!   broadcast is between two iter domains in the original domain that must be
-//!   merged for the view transform:
+//! Squeezed domain:
+//!   Predicting which operations are squeezed are not trivial. If a broadcast
+//!   is between two iter domains in the original domain that must be merged for
+//!   the view transform:
 //!     - If the broadcast domain lines up with a broadcast domain in the final
 //!       tensor domain keep it.
 //!     - If the domain is size-1 but not marked as a broadcast domain (runtime
@@ -32,25 +32,25 @@ namespace cuda {
 //!       Note: This isn't something we generally support consistently
 //!     - If the broadcast domain is marked as a compile time broadcast domain,
 //!       and doesn't line up with a broadcast domain in the final result.
-//!       Trivially reduce it.
+//!       squeeze it.
 //!   The index for these transformations is marked as the index of the original
-//!   domain, as that's the input for the trivial reduction. This produces the
-//!   trivially reduced domain.
+//!   domain, as that's the input for the squeeze. This produces the squeezed
+//!   domain.
 //!
 //! Post-view Domain:
-//!   This domain is the original domain after the trivial reductions and all
+//!   This domain is the original domain after the squeeze and all
 //!   transformations. This domain holds the rfactor domains determined by
 //!   merge/split operations of the find transformations pass. It is the final
 //!   domain without all the broadcast operations (can have some that were
 //!   preserved through the transformations).
 //!       For example: {1, 2, 1, 4} -> {1, 2, 1, 2, 2} doesn't have any
 //!         conflicts of the view transformation and the broadcast dimensions,
-//!         so they won't be trivial reduced, they will simply be propagated
+//!         so they won't be squeezed, they will simply be propagated
 //!         through the view.
 //!         {1, 2, 1, 4} -> {1, 8, 1} does have the second 1 dimension in
 //!         between the 2 and 8 that have to be merged. The first broadcast axis
 //!         will be propagated through the domains unafected, yet the second
-//!         braodcast axis will be trivially reduced, then rebroadcasted.
+//!         braodcast axis will be squeezed, then rebroadcasted.
 //!  The transformation index marked for the splits/merges to produce this
 //!  domain are done based on an "in progress" tensor view (called transform
 //!  view index in the find transformation pass). This allows us to simply apply
@@ -66,8 +66,7 @@ namespace cuda {
 //!   2) AnalyzeView is called Which will figure out what series of
 //!      transformations is required from the input tensor to the output tensor.
 //!      These transformations are recorded.
-//!   3) Sum operation is called on the trivial reduction axes from the
-//!      analysis.
+//!   3) Squeeze operation is called on the squeezed axes from the analysis.
 //!   4) applyViewTransforms will generate the output domain of the view
 //!      operation.
 //!        Calls TensorDomain::view(view_analysis) which returns the rfactored
@@ -286,7 +285,7 @@ class SplitTransform final : public ViewTransform {
 };
 
 //! For any singleton dimensions in the new view, we create an implicit
-//! broadcast dimension. We apply these transforms after the trivial reduction
+//! broadcast dimension. We apply these transforms after the squeeze
 //! and view transformation steps.
 class BroadcastTransform final : public Transform {
  public:
@@ -300,14 +299,14 @@ class BroadcastTransform final : public Transform {
 };
 
 //! For any implicit broadcast dimensions in the original view, we remove
-//! them using a trivial reduction.
-class TrivialReductionTransform final : public Transform {
+//! them using squeeze.
+class SqueezeTransform final : public Transform {
  public:
-  TrivialReductionTransform(int64_t index) : Transform(index) {}
+  SqueezeTransform(int64_t index) : Transform(index) {}
 
   virtual std::string toString() const override {
     std::stringstream ss;
-    ss << "Trivial reduction at: " << index_ << std::endl;
+    ss << "Squeeze at: " << index_ << std::endl;
     return ss.str();
   }
 };
@@ -359,8 +358,8 @@ class AnalyzeViewTransformation {
       }
     }
 
-    for (auto trivial_reduce : trivial_reduction_transforms_) {
-      constraint.trivial_reduction_string.push_back(trivial_reduce->index());
+    for (auto squeeze : squeeze_transforms_) {
+      constraint.squeeze_string.push_back(squeeze->index());
     }
 
     for (auto broadcast : broadcast_transforms_) {
@@ -394,11 +393,11 @@ class AnalyzeViewTransformation {
     // final output of the view operations.
     findTransformation();
 
-    auto trivial_reduction_axes = generateTrivialReductionAxes();
+    auto squeeze_axes = generateSqueezeAxes();
     auto broadcast_axes = generateBroadcastAxes();
 
     // Move data to AnalyzeViewResult and return it.
-    return {broadcast_axes, trivial_reduction_axes, view_transforms_};
+    return {broadcast_axes, squeeze_axes, view_transforms_};
   }
 
  private:
@@ -412,14 +411,14 @@ class AnalyzeViewTransformation {
     return broadcast_axes;
   }
 
-  // Returns the positions for the trivial reductions to be performed before the
-  // view operation
-  std::vector<int> generateTrivialReductionAxes() {
-    std::vector<int> reduction_axes;
-    for (auto& tred : trivial_reduction_transforms_) {
-      reduction_axes.push_back(tred->index());
+  // Returns the positions for the squeeze to be performed before the view
+  // operation
+  std::vector<bool> generateSqueezeAxes() {
+    std::vector<bool> squeeze_axes(original_view_.size(), false);
+    for (auto& sq : squeeze_transforms_) {
+      squeeze_axes.at(sq->index()) = true;
     }
-    return reduction_axes;
+    return squeeze_axes;
   }
 
   std::string toString() {
@@ -439,8 +438,8 @@ class AnalyzeViewTransformation {
     output << std::endl;
 
     output << "===============================" << std::endl;
-    for (auto& trivial_reduction : trivial_reduction_transforms_) {
-      output << trivial_reduction->toString() << "\n";
+    for (auto& squeeze : squeeze_transforms_) {
+      output << squeeze->toString() << "\n";
     }
     for (auto& split_or_merge : view_transforms_) {
       output << split_or_merge->toString() << "\n";
@@ -474,7 +473,7 @@ class AnalyzeViewTransformation {
     //      domain in original view that we added to current_size.
     //   2) transform_view_index which is the index of the transformations as
     //      we're virtually "developing" the output tensor domain (split/merge
-    //      transformations post trivial reductions).
+    //      transformations post squeeze).
     //   3) The new_view_index which is directly associated with the new_view
     //      and the dimension in new_view we're currently trying to create.
 
@@ -565,9 +564,9 @@ class AnalyzeViewTransformation {
       if (current_size == 1 && isImplicitBroadcast(original_view_index)) {
         // Original view has a compile time size 1 dimension, and it's not found
         // in the new_view_ (otherwise would have been caught in a branch
-        // above). Do a trivial reduction.
-        trivial_reduction_transforms_.push_back(
-            std::make_shared<TrivialReductionTransform>(original_view_index));
+        // above). Do a squeeze.
+        squeeze_transforms_.push_back(
+            std::make_shared<SqueezeTransform>(original_view_index));
         ++original_view_index;
 
         // Update original position and current size.
@@ -583,10 +582,10 @@ class AnalyzeViewTransformation {
       if (original_view_index + 1 < original_view_.size() &&
           isImplicitBroadcast(original_view_index + 1)) {
         // Original view has a compile time size 1 dimension, and it's
-        // interfering with necessary transformations. Do a trivial reduction.
+        // interfering with necessary transformations. Do a squeeze.
         ++original_view_index;
-        trivial_reduction_transforms_.push_back(
-            std::make_shared<TrivialReductionTransform>(original_view_index));
+        squeeze_transforms_.push_back(
+            std::make_shared<SqueezeTransform>(original_view_index));
 
         continue;
       }
@@ -626,8 +625,7 @@ class AnalyzeViewTransformation {
  private:
   std::vector<std::shared_ptr<ViewTransform>> view_transforms_;
   std::vector<std::shared_ptr<BroadcastTransform>> broadcast_transforms_;
-  std::vector<std::shared_ptr<TrivialReductionTransform>>
-      trivial_reduction_transforms_;
+  std::vector<std::shared_ptr<SqueezeTransform>> squeeze_transforms_;
 
   // If root domain isn't provided always assume size-1 dimensions are
   // compile-time dimensions. TODO: Remove runtime size-1 dimension support.
@@ -651,22 +649,16 @@ TensorDomain* createViewDomain(
   TORCH_INTERNAL_ASSERT(!view_analysis.transforms.empty());
 
   std::vector<IterDomain*> new_root_domain;
-  auto orig_root_domain = original_domain->getMaybeRFactorDomain();
+  auto orig_root_domain =
+      TensorDomain::noReductions(original_domain->getMaybeRFactorDomain());
 
-  // Apply trivial reductions.
+  // Apply squeeze.
   for (auto id_i : c10::irange(orig_root_domain.size())) {
-    auto id = orig_root_domain[id_i];
-    if (id->isReduction()) {
+    if (!view_analysis.squeeze_axes.at(id_i)) {
+      auto id = orig_root_domain[id_i];
+      new_root_domain.push_back(id->cloneWithoutRFactor());
       continue;
     }
-    if (std::find(
-            view_analysis.trivial_reduction_axes.begin(),
-            view_analysis.trivial_reduction_axes.end(),
-            (int)id_i) != view_analysis.trivial_reduction_axes.end()) {
-      continue;
-    }
-
-    new_root_domain.push_back(id->cloneWithoutRFactor());
   }
 
   std::vector<IterDomain*> new_rfactor_domain(
