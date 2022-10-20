@@ -560,8 +560,10 @@ This class does not support ``__members__`` property.)");
           })
       .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
 
-  // note(crcrpar): Deliberately skip [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
-  // here and manually set values in Python side. See note "ReduceOp static class attributes to support `isinstance`"
+  // note(crcrpar): Deliberately skip
+  // [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
+  // here and manually set values in Python side. See note "ReduceOp static
+  // class attributes to support `isinstance`"
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
       .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
