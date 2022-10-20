@@ -4043,6 +4043,27 @@ if HAS_CUDA:
             compiled = compile_fx_inner(mod, inps)
             compiled(inps)
 
+        # https://github.com/pytorch/torchdynamo/issues/1681#issuecomment-1283433527
+        @requires_cuda()
+        def test_unspec_inputs_interop(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, x, y):
+                    unsqueeze = torch.ops.aten.unsqueeze.default(x, 4)
+                    permute = torch.ops.aten.permute.default(unsqueeze, [0, 1, 2, 4, 3])
+                    add = torch.ops.aten.add.Tensor(y, 1)
+                    return [permute, add]
+
+            inps = [
+                rand_strided((12, 3, 512, 64), (64, 196608, 768, 1), torch.float32, 'cuda'),
+                rand_strided((), (), torch.int64, 'cpu'),
+            ]
+            mod = make_fx(Repro().to(device="cuda"))(*inps)
+            compiled = compile_fx_inner(mod, inps)
+            compiled(inps)
+
         @patch.object(config, "fallback_random", True)
         def test_dtype_factory_issue(self):
             def forward():
