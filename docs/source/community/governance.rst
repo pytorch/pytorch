@@ -266,7 +266,7 @@ General Project Policies
 
 PyTorch has been established as PyTorch a Series of LF Projects, LLC.
 Policies applicable to PyTorch and participants in PyTorch, including
-guidelines on the usage of trademarks, are located at `www.lfprojects.org/policies/ <www.lfprojects.org/policies/>`__.
+guidelines on the usage of trademarks, are located at `www.lfprojects.org/policies/ <https://www.lfprojects.org/policies/>`__.
 
 PyTorch participants acknowledge that the copyright in all new contributions
 will be retained by the copyright holder as independent works of authorship
