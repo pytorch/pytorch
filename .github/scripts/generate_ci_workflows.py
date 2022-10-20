@@ -90,7 +90,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.LINUX),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -99,7 +98,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.LINUX),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -111,7 +109,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -123,7 +120,6 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
 ]
@@ -169,7 +165,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.WINDOWS),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -178,7 +173,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.WINDOWS),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -190,7 +184,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -202,7 +195,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
 ]
@@ -238,7 +230,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(OperatingSystem.MACOS),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -247,7 +238,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.MACOS),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -259,7 +249,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -271,7 +260,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -281,7 +269,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         cross_compile_arm64=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
-            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -291,7 +278,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.MACOS_ARM64),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            isolated_workflow=True,
         ),
     ),
 ]
