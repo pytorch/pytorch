@@ -659,12 +659,6 @@ test_vec256() {
   fi
 }
 
-test_dynamo() {
-  pushd ../torchdynamo
-  pytest test
-  popd
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
@@ -678,7 +672,6 @@ if [[ "${TEST_CONFIG}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
-  install_torchdynamo
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -687,33 +680,38 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_torchdynamo
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "$TEST_CONFIG" == deploy ]]; then
+  checkout_install_torchdeploy
+  test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  install_triton
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
+  install_filelock
+  install_triton
   test_dynamo_shard 2
-  # Skip running test in the dynamo repo to unblock the dynamo pin update
-  # test_dynamo
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -722,7 +720,9 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -740,7 +740,9 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  install_torchdynamo
+  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
+    install_triton
+  fi
   install_monkeytype
   test_python
   test_aten

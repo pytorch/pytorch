@@ -1,14 +1,18 @@
 #include <ATen/native/nested/NestedTensorMath.h>
 
-#include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NamedTensorUtils.h>
-#include <ATen/WrapDimUtils.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <ATen/native/layer_norm.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
-#include <c10/core/DispatchKey.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+
 #include <tuple>
 
 namespace at {
@@ -112,6 +116,18 @@ Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
       [approximate](const Tensor& buffer) {
         return at::gelu(buffer, approximate);
       });
+}
+
+Tensor& NestedTensor_tanh_(Tensor& self) {
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
+  at::tanh_(buffer);
+  return self;
+}
+
+Tensor NestedTensor_tanh(const Tensor& self) {
+  return map_nt(self, at::tanh);
 }
 
 Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, bool mask_check) {
@@ -1028,6 +1044,73 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   return create_nested_view_tensor(
       self, sizemat_transposed, stridemat_transposed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
 }
+
+Tensor squeeze_nested(const Tensor& self) {
+  TORCH_CHECK(false,
+  "squeeze(): For nested tensors, squeeze without the dim argument is not supported ",
+  "at the moment, however you can use squeeze(Tensor self, int dim) instead ",
+  "if you need this feature, please open an issue on github describing your use case.");
+  return self;
+}
+
+Tensor squeeze_dim_nested(const Tensor& self, int64_t dim) {
+  auto self_ptr = get_nested_tensor_impl(self);
+  int64_t ndim = self_ptr->dim();
+  int64_t wrapped_dim = at::maybe_wrap_dim(dim, ndim);
+  TORCH_CHECK(wrapped_dim > 0,
+  "squeeze(): For nested tensors, squeezing dimension 0 is not supported at the moment ",
+  "if you need this feature, please open an issue on github describing your use case.");
+  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  const Tensor& stridemat = self_ptr->get_nested_stride_tensor();
+  // if tensor.size(dim) != 1 torch.squeeze will return the result, we do the same here
+  c10::optional<int64_t> size_dim = self_ptr->opt_size(dim);
+  if (!(size_dim.has_value() && size_dim.value() == 1)) {
+    // detach to avoid triggering throw_error_if_base_and_tensor_are_same
+    return self.detach();
+  }
+  // if ndim == 2 and we pass the above if statement we should have a
+  // nested tensor of singleton tensors
+  TORCH_CHECK(ndim != 2,
+  "squeeze(): For nested tensors, squeezing a nested tensor of singleton tensors is not ",
+  "supported at the moment, if you need this feature, please open an issue on github",
+  "describing your use case.");
+  auto column_indices = sizemat.new_empty(ndim - 2);
+  int64_t* column_indices_ptr = column_indices.data_ptr<int64_t>();
+  std::iota(column_indices_ptr, column_indices_ptr + wrapped_dim - 1, 0);
+  std::iota(column_indices_ptr + wrapped_dim - 1, column_indices_ptr + ndim - 2, wrapped_dim);
+  auto sizemat_squeezed = at::index_select(sizemat, 1, column_indices);
+  auto stridemat_squeezed = at::index_select(stridemat, 1, column_indices);
+  return create_nested_view_tensor(
+      self, sizemat_squeezed, stridemat_squeezed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
+}
+
+Tensor unsqueeze_nested(const Tensor& self, int64_t dim) {
+  auto self_ptr = get_nested_tensor_impl(self);
+  int64_t ndim = self_ptr->dim();
+  int64_t wrapped_dim = at::maybe_wrap_dim(dim, ndim + 1);
+  TORCH_CHECK(wrapped_dim > 0,
+  "unsqueeze(): For nested tensors, unsqueezing dimension 0 is not supported at the moment ",
+  "if you need this feature, please open an issue on github describing your use case.");
+  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  const Tensor& stridemat = self_ptr->get_nested_stride_tensor();
+  auto mat_dim = wrapped_dim - 1;
+  Tensor new_size = sizemat.new_ones({sizemat.size(0), 1});
+  Tensor sizemat_unsqueezed = at::cat({sizemat.slice(1, 0, mat_dim),
+                                       new_size,
+                                       sizemat.slice(1, mat_dim, ndim)}, 1);
+  Tensor new_stride;
+  if (wrapped_dim == ndim) {
+    new_stride = stridemat.new_ones({stridemat.size(0), 1});
+  } else {
+    new_stride = (stridemat.select(1, mat_dim - 1) * sizemat.select(1, mat_dim - 1)).unsqueeze(-1);
+  }
+  Tensor stridemat_unsqueezed = at::cat({stridemat.slice(1, 0, mat_dim),
+                                         new_stride,
+                                         stridemat.slice(1, mat_dim, ndim)}, 1);
+  return create_nested_view_tensor(
+      self, sizemat_unsqueezed, stridemat_unsqueezed, std::vector<int64_t>(self_ptr->get_storage_offsets()));
+}
+
 
 // utilities supporting `view_nested` and `reshape_nested`
 namespace {
