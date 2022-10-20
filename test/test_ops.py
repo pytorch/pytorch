@@ -192,7 +192,10 @@ class TestCommon(TestCase):
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
             torch.set_default_dtype(torch.double)
-            for sample_input in op.reference_inputs(device, dtype):
+            # TODO: This currently uses `sample_inputs` instead of `reference_inputs` because almost all of
+            # `reference_inputs` fails on MPS since many of them test handling of tensors of different fp types
+            # which MPS does not yet handle.
+            for sample_input in op.sample_inputs(device, dtype):
                 self.compare_with_reference(
                     op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
                 )
