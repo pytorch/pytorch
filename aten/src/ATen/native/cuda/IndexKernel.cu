@@ -205,8 +205,7 @@ static void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
     iter.dtype(), "index_fill_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     auto fill_val = source.to<scalar_t>();
