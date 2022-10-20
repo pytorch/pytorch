@@ -93,6 +93,14 @@ class TORCH_CUDA_CU_API IterDomainGraph {
 
   void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
 
+  // Returns if first and second are expressions with inputs match through exact
+  // map (if forward), or outputs match (if not forward).
+  bool exprsMap(Expr* first, Expr* second, bool forward);
+
+  // Checks if exprsMap then if forward will map outputs else inputs in exact
+  // and permissive map.
+  void mapThroughExpr(Expr* first, Expr* second, bool forward);
+
   DisjointSets<IterDomain*> permissive_nodes_;
   DisjointSets<IterDomain*> exact_nodes_;
   DisjointSets<IterDomain*> loop_nodes_;

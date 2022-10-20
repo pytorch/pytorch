@@ -49,8 +49,7 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
       std::copy_n(base, 2, data.data());
       const int64_t *outer_strides = &strides[2];
 
-      for (const auto it : c10::irange(size1)) {
-        (void)it;
+      for (const auto it C10_UNUSED : c10::irange(size1)) {
         Vecd dst_s;
         if (strides_in[0] == 0) {
           dst_s = Vecd(dest_t(*((scalar_t*)data[1])));
@@ -119,8 +118,7 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
       std::copy_n(base, 2, data.data());
       const int64_t *outer_strides = &strides[2];
 
-      for (const auto it : c10::irange(size1)) {
-        (void)it;
+      for (const auto it C10_UNUSED : c10::irange(size1)) {
         Vecd dst_s;
         if (strides_in[0] == 0) {
           dst_s = Vecd(dest_t(*((scalar_t*)data[1])));

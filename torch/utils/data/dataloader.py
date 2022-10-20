@@ -11,10 +11,8 @@ import logging
 import os
 import queue
 import threading
-import time
 import warnings
 
-from datetime import timedelta
 from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
@@ -108,8 +106,10 @@ def _get_distributed_settings():
 def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
+    assert info is not None
     total_workers = info.num_workers
     datapipe = info.dataset
+    assert isinstance(datapipe, (IterDataPipe, MapDataPipe))
     # To distribute elements across distributed process evenly, we should shard data on distributed
     # processes first then shard on worker processes
     total_workers *= world_size
@@ -117,6 +117,13 @@ def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
+
+
+def _share_dist_seed(generator, pg):
+    _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=generator)
+    if isinstance(pg, dist.ProcessGroup):
+        dist.broadcast(_shared_seed, src=0, group=pg)
+    return _shared_seed.item()
 
 
 class DataLoader(Generic[T_co]):
@@ -249,26 +256,12 @@ class DataLoader(Generic[T_co]):
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
 
-        # Adds several forward compatibilities so classic DataLoader can work with DataPipes
-        # 1. _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
-        # 2. Additional worker init function will take care of sharding in MP and Distributed
+        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
+        #   _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
         if isinstance(self.dataset, IterDataPipe):
             self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
-            ws, rank = _get_distributed_settings()
-            if num_workers > 0:
-                self.worker_init_fn = functools.partial(
-                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
-            else:
-                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
-            ws, rank = _get_distributed_settings()
-            if num_workers > 0:
-                self.worker_init_fn = functools.partial(
-                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
-            else:
-                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
-
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
@@ -565,63 +558,16 @@ class DataLoader(Generic[T_co]):
                 self.num_workers,
                 cpuset_checked))
 
-    def _get_shared_seed(self):
-        if isinstance(self.dataset, IterDataPipe):
-            _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator).item()
-            if dist.is_available() and dist.is_initialized():
-                rank = dist.get_rank()
-                ws = dist.get_world_size()
-                store = dist.distributed_c10d._get_default_store()
-                if rank == 0:
-                    _shared_seed_str = str(_shared_seed)
-                    store.set(_utils.DATAPIPE_SHARED_SEED, _shared_seed_str)
-                    logger.info(f"Shared seed ({_shared_seed_str}) sent to store on rank 0")
-                    # Use 'add' instead of 'get' since for some store implementations 'add'
-                    # doesn't work well with 'get'.
-                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
-                    start = time.time()
-                    while _shared_seed_recv_cnt < ws:
-                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
-                        _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
-                        if timedelta(seconds=(time.time() - start)) > \
-                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
-                            raise RuntimeError("Timed out receiving the signal from the distribtued store on "
-                                               "Rank 0 that all other Ranks have received the shared seed. "
-                                               f"(world_size={ws}, received={_shared_seed_recv_cnt}, "
-                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
-                    # Reset after all distributed processes have received the shared seed
-                    store.set(_utils.DATAPIPE_SHARED_SEED, "")
-                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, -ws)
-                    assert _shared_seed_recv_cnt == 0
-                else:
-                    _shared_seed_str = ""
-                    start = time.time()
-                    while len(_shared_seed_str) == 0:
-                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
-                        _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
-                        if timedelta(seconds=(time.time() - start)) > \
-                                timedelta(seconds=_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT):
-                            raise RuntimeError("Timed out receiving the shared seed from the distribtued store "
-                                               f"on Rank {rank}. (world_size={ws}, "
-                                               f"timeout={_utils.DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT})")
-                    logger.info(f"Shared seed ({_shared_seed_str}) received from store on rank {rank}")
-                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
-                    # Exit only when all ranks received seed, otherwise we are at risk that current rank
-                    # will reach same section of the code again while rank zero still in the previous iteration
-                    while _shared_seed_recv_cnt > 0:
-                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
-                        _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
-                    _shared_seed = int(_shared_seed_str)
-            return _shared_seed
-        else:
-            return None
-
 
 class _BaseDataLoaderIter(object):
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
-        self._shared_seed = loader._get_shared_seed()
+        self._shared_seed = None
+        self._pg = None
         if isinstance(self._dataset, IterDataPipe):
+            if dist.is_available() and dist.is_initialized():
+                self._pg = dist.new_group(backend="gloo")
+            self._shared_seed = _share_dist_seed(loader.generator, self._pg)
             shared_rng = torch.Generator()
             shared_rng.manual_seed(self._shared_seed)
             self._dataset = torch.utils.data.graph_settings.apply_random_seed(self._dataset, shared_rng)
@@ -631,6 +577,9 @@ class _BaseDataLoaderIter(object):
         self._drop_last = loader.drop_last
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
+        ws, rank = _get_distributed_settings()
+        self._world_size = ws
+        self._rank = rank
         self._prefetch_factor = loader.prefetch_factor
         # for other backends, pin_memory_device need to set. if not set
         # default behaviour is CUDA device. if pin_memory_device is selected
@@ -661,8 +610,8 @@ class _BaseDataLoaderIter(object):
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
         self._IterableDataset_len_called = loader._IterableDataset_len_called
-        self._shared_seed = loader._get_shared_seed()
         if isinstance(self._dataset, IterDataPipe):
+            self._shared_seed = _share_dist_seed(loader.generator, self._pg)
             shared_rng = torch.Generator()
             shared_rng.manual_seed(self._shared_seed)
             self._dataset = torch.utils.data.graph_settings.apply_random_seed(self._dataset, shared_rng)
@@ -710,6 +659,11 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         super(_SingleProcessDataLoaderIter, self).__init__(loader)
         assert self._timeout == 0
         assert self._num_workers == 0
+
+        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
+        #   Taking care of distributed sharding
+        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
+            torch.utils.data.graph_settings.apply_sharding(self._dataset, self._world_size, self._rank)
 
         self._dataset_fetcher = _DatasetKind.create_fetcher(
             self._dataset_kind, self._dataset, self._auto_collation, self._collate_fn, self._drop_last)
@@ -1044,6 +998,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             multiprocessing_context = loader.multiprocessing_context
 
         self._worker_init_fn = loader.worker_init_fn
+
+        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
+        #   Additional worker init function will take care of sharding in MP and Distributed
+        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
+            self._worker_init_fn = functools.partial(
+                _sharding_worker_init_fn, self._worker_init_fn, self._world_size, self._rank)
+
         # No certainty which module multiprocessing_context is
         self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
         self._worker_pids_set = False
@@ -1081,10 +1042,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
+            if self._pin_memory_device == "xpu":
+                current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
+            else:
+                current_device = torch.cuda.current_device()  # choose cuda for default
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self._worker_result_queue, self._data_queue,
-                      torch.cuda.current_device(),
+                      current_device,
                       self._pin_memory_thread_done_event, self._pin_memory_device))
             pin_memory_thread.daemon = True
             pin_memory_thread.start()

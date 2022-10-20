@@ -135,6 +135,64 @@ size_t merge_3d(
   }
 }
 
+void splitDims(
+    TensorView* tv,
+    std::vector<std::pair<size_t, size_t>> to_split, // (dim, size)
+    std::vector<size_t>& to_update) {
+  std::stable_sort(
+      to_split.begin(),
+      to_split.end(),
+      [](const std::pair<size_t, size_t>& p1,
+         const std::pair<size_t, size_t>& p2) { return p1.first < p2.first; });
+  size_t dim_offset = 0;
+  size_t pending_dim_offset = 0;
+  int64_t prev_dim = -1;
+  for (auto entry : to_split) {
+    size_t dim = entry.first;
+    size_t size = entry.second;
+    if (dim != prev_dim) {
+      dim_offset += pending_dim_offset;
+      pending_dim_offset = 0;
+    }
+    size_t actual_dim = dim_offset + dim;
+    tv->split(actual_dim, size);
+    pending_dim_offset++;
+    for (auto& i : to_update) {
+      if (i > actual_dim) {
+        i++;
+      }
+    }
+    prev_dim = dim;
+  }
+}
+
+c10::optional<size_t> mergeDims(
+    TensorView* tv,
+    std::vector<size_t> to_merge,
+    std::vector<size_t>& to_update) {
+  if (to_merge.empty()) {
+    return c10::nullopt;
+  }
+  if (to_merge.size() == 1) {
+    return to_merge[0];
+  }
+  std::sort(to_merge.begin(), to_merge.end());
+  size_t left = to_merge[0];
+  int64_t offset = 0;
+  for (auto right = to_merge.begin() + 1; right != to_merge.end(); right++) {
+    auto actual_right = offset-- + *right;
+    tv->merge(left, actual_right);
+    for (auto& i : to_update) {
+      if (i == actual_right) {
+        i = left;
+      } else if (i > actual_right) {
+        i--;
+      }
+    }
+  }
+  return left;
+}
+
 size_t mergeReduction(
     TensorView* tv,
     const std::unordered_set<IterDomain*>& dont_merge) {
@@ -566,7 +624,7 @@ TvProperties getProperties(
       TORCH_INTERNAL_ASSERT(
           inferred_val.has_value(), "Error inferring reduction size.");
       inner_most_dimension_numel =
-          inner_most_dimension_numel * inferred_val.value().as<int64_t>();
+          inner_most_dimension_numel * inferred_val->as<int64_t>();
       inner_most_dimension_ndims++;
     }
   }
@@ -583,9 +641,9 @@ TvProperties getProperties(
         inferred_val.has_value(),
         "Error inferring dimensions of reduction fusion.");
     if (id->isReduction()) {
-      total_reduction_numel *= inferred_val.value().as<int64_t>();
+      total_reduction_numel *= inferred_val->as<int64_t>();
     } else {
-      total_iteration_numel *= inferred_val.value().as<int64_t>();
+      total_iteration_numel *= inferred_val->as<int64_t>();
     }
   }
 
@@ -598,51 +656,6 @@ TvProperties getProperties(
   properties.dimensionality = dimensionality;
 
   return properties;
-}
-
-void computeAtBetween(
-    const std::vector<TensorView*>& producers,
-    const std::vector<TensorView*>& overall_consumers,
-    int pos,
-    ComputeAtMode mode,
-    std::unordered_set<IterDomain*> mapped_to_trivial_reduction) {
-  for (auto producer : producers) {
-    // Figure out what's between producer and overall_consumers, will not give
-    // back any consumers that are not downstream from producer
-    auto all_vals_between = DependencyCheck::getAllValsBetween(
-        {producer}, {overall_consumers.begin(), overall_consumers.end()});
-
-    std::unordered_set<Val*> all_vals_between_set(
-        all_vals_between.begin(), all_vals_between.end());
-
-    for (auto consumer : overall_consumers) {
-      if (all_vals_between_set.count(consumer)) {
-        // The way we generate producers and consumers is that we inch away from
-        // inputs/outputs. There's a chance we could meet in the middle.
-        if (producer == consumer) {
-          continue;
-        }
-
-        auto pos_it = std::find_if(
-            consumer->domain()->domain().begin(),
-            consumer->domain()->domain().end(),
-            [&mapped_to_trivial_reduction](IterDomain* id) {
-              return mapped_to_trivial_reduction.count(id);
-            });
-
-        auto consumer_pos = pos_it == consumer->domain()->domain().end()
-            ? pos
-            : std::min(
-                  (int)std::distance(
-                      consumer->domain()->domain().begin(), pos_it) +
-                      1,
-                  (pos < 0 ? pos + (int)consumer->nDims() : pos));
-        // Assume we don't want to reset computeAt on tensors that have already
-        // performed it.
-        producer->computeAt(consumer, consumer_pos, mode);
-      }
-    }
-  }
 }
 
 namespace {
@@ -822,9 +835,9 @@ PersistentBufferSizeReturn persistentBufferSize(
       TORCH_INTERNAL_ASSERT(
           id_size.has_value(), "Could not infer persistent buffer size.");
       if (persistent_buffer_sizes[buffer_i] == -1) {
-        persistent_buffer_sizes[buffer_i] = id_size.value();
+        persistent_buffer_sizes[buffer_i] = id_size->as<int64_t>();
       } else {
-        persistent_buffer_sizes[buffer_i] *= id_size.value().as<int64_t>();
+        persistent_buffer_sizes[buffer_i] *= id_size->as<int64_t>();
       }
     }
 
@@ -1075,13 +1088,14 @@ std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
 }
 
 namespace {
+
 // Take the inner most rfactor id from innerMostRootDim and project it to the
 // root domain if the provided domain is on the rfactor domain. If vectorize,
 // will not project if not following the inner most path.
 IterDomain* projectIdToRoot(
     TensorView* tv,
     IterDomain* reference_id,
-    bool vectorize) {
+    bool inner_only) {
   if (reference_id == nullptr) {
     return nullptr;
   }
@@ -1102,14 +1116,19 @@ IterDomain* projectIdToRoot(
     if (expr->isA<Merge>()) {
       auto merge = expr->as<Merge>();
       if (merge->out() == projected_id) {
-        projected_id = merge->inner();
+        if (!merge->inner()->isBroadcast() &&
+            !merge->inner()->isTrivialReduction()) {
+          projected_id = merge->inner();
+        } else {
+          projected_id = merge->outer();
+        }
       }
     } else if (expr->isA<Split>()) {
       auto split = expr->as<Split>();
       if (split->inner() == projected_id) {
         projected_id = split->in();
       } else if (split->outer() == projected_id) {
-        if (vectorize) {
+        if (inner_only) {
           projected_id = nullptr;
         } else {
           projected_id = split->in();
@@ -1125,6 +1144,62 @@ IterDomain* projectIdToRoot(
   }
   return projected_id;
 }
+
+// Take the inner most root id from innerMostRootDim and project it to the
+// rfactor domain if the provided domain is on the rfactor domain. If vectorize,
+// will not project if not following the inner most path.
+IterDomain* projectIdToRFactor(
+    TensorView* tv,
+    IterDomain* reference_id,
+    bool inner_only) {
+  if (reference_id == nullptr) {
+    return nullptr;
+  }
+
+  if (!tv->hasRFactor()) {
+    return reference_id;
+  }
+
+  auto replay_exprs = StmtSort::getExprs(
+      tv->fusion(),
+      {tv->getRFactorDomain().begin(), tv->getRFactorDomain().end()},
+      false);
+  if (replay_exprs.empty()) {
+    return reference_id;
+  }
+
+  IterDomain* projected_id = reference_id;
+  for (auto expr_it = replay_exprs.begin(); expr_it != replay_exprs.end();
+       ++expr_it) {
+    auto expr = *expr_it;
+    if (expr->isA<Merge>()) {
+      auto merge = expr->as<Merge>();
+      if (merge->inner() == projected_id) {
+        projected_id = merge->out();
+      } else if (merge->outer() == projected_id) {
+        if (merge->inner()->isBroadcast() ||
+            merge->inner()->isTrivialReduction() || !inner_only) {
+          projected_id = merge->out();
+        } else {
+          projected_id = nullptr;
+        }
+      }
+    } else if (expr->isA<Split>()) {
+      auto split = expr->as<Split>();
+      if (split->in() == projected_id) {
+        projected_id = split->inner();
+      }
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "Didn't recognize the iterdomain expression: ", expr);
+    }
+    if (projected_id == nullptr) {
+      break;
+    }
+  }
+  return projected_id;
+}
+
 } // namespace
 
 IterDomain* innerMostRootDim(TensorView* tv) {
@@ -1176,95 +1251,76 @@ IterDomain* innerMostRootDim(TensorView* tv) {
 FindAllMappedDims::FindAllMappedDims(
     TensorView* from,
     IterDomain* id,
-    bool vectorize_pass)
-    : starting_tv(from), starting_id(id) {
-  std::deque<TensorView*> to_visit{starting_tv};
-  std::unordered_set<TensorView*> visited;
-  mapped_ids.emplace(std::make_pair(starting_tv, starting_id));
+    bool inner_only)
+    : starting_tv_(from), starting_id_(id), inner_only_(inner_only) {}
 
-  // Propagate mapping of id
-  while (!to_visit.empty()) {
-    auto tv = to_visit.front();
-    to_visit.pop_front();
+void FindAllMappedDims::setUp() {
+  mapped_root_ids_[starting_tv_] =
+      projectIdToRoot(starting_tv_, starting_id_, inner_only_);
+  mapped_rfactor_ids_[starting_tv_] =
+      projectIdToRFactor(starting_tv_, starting_id_, inner_only_);
+}
 
-    if (!visited.emplace(tv).second) {
-      continue;
-    }
-
-    auto tv_id = mapped_ids.at(tv);
-
-    for (auto consumer_tv : ir_utils::consumerTvsOf(tv)) {
-      if (visited.find(consumer_tv) != visited.end()) {
-        continue;
-      }
-
-      if (mapped_ids.find(consumer_tv) != mapped_ids.end()) {
-        continue;
-      }
-
-      PairwiseRootDomainMap root_map(tv, consumer_tv);
-      auto p2c_map =
-          root_map.mapProducerToConsumer(tv->domain(), consumer_tv->domain());
-
-      auto c_it = p2c_map.find(tv_id);
-      if (c_it != p2c_map.end()) {
-        mapped_ids.emplace(std::make_pair(consumer_tv, c_it->second));
-        to_visit.emplace_back(consumer_tv);
-      }
-    }
-
-    // For producers, project to root
-    tv_id = projectIdToRoot(tv, tv_id, vectorize_pass);
-    // If projection fails, don't map to producers
-    if (tv_id == nullptr) {
-      continue;
-    }
-
-    for (auto producer_tv : ir_utils::producerTvsOf(tv)) {
-      if (visited.find(producer_tv) != visited.end()) {
-        continue;
-      }
-
-      if (mapped_ids.find(producer_tv) != mapped_ids.end()) {
-        continue;
-      }
-
-      PairwiseRootDomainMap root_map(producer_tv, tv);
-      auto c2p_map =
-          root_map.mapConsumerToProducer(tv->domain(), producer_tv->domain());
-      auto p_it = c2p_map.find(tv_id);
-      if (p_it != c2p_map.end()) {
-        mapped_ids.emplace(std::make_pair(producer_tv, p_it->second));
-        to_visit.emplace_back(producer_tv);
-      }
-    }
+void FindAllMappedDims::propagateC2P(TensorView* from, TensorView* to) {
+  auto from_id = mapped_root_ids_.at(from);
+  PairwiseRootDomainMap root_map(to, from);
+  auto c2p_map = root_map.mapConsumerToProducer(from->domain(), to->domain());
+  auto p_it = c2p_map.find(from_id);
+  if (p_it != c2p_map.end()) {
+    mapped_root_ids_[to] = projectIdToRoot(to, p_it->second, inner_only_);
+    mapped_rfactor_ids_[to] = p_it->second;
+  } else {
+    mapped_root_ids_[to] = nullptr;
+    mapped_rfactor_ids_[to] = nullptr;
   }
 }
 
-std::unordered_set<IterDomain*> FindAllMappedDims::from(
-    TensorView* tv,
-    IterDomain* id,
-    bool vectorize_pass) {
-  auto root_domain = tv->hasReduction() && tv->hasRFactor()
-      ? tv->getRootDomain()
-      : tv->getMaybeRFactorDomain();
+void FindAllMappedDims::propagateP2C(TensorView* from, TensorView* to) {
+  auto from_id = mapped_rfactor_ids_.at(from);
+  PairwiseRootDomainMap root_map(from, to);
+  auto p2c_map = root_map.mapProducerToConsumer(from->domain(), to->domain());
+  auto c_it = p2c_map.find(from_id);
+  if (c_it != p2c_map.end()) {
+    mapped_root_ids_[to] = c_it->second;
+    mapped_rfactor_ids_[to] = projectIdToRFactor(to, c_it->second, inner_only_);
+  } else {
+    mapped_root_ids_[to] = nullptr;
+    mapped_rfactor_ids_[to] = nullptr;
+  }
+}
 
-  TORCH_INTERNAL_ASSERT(
-      std::find_if(
-          root_domain.begin(),
-          root_domain.end(),
-          [&id](IterDomain* root_id) { return root_id == id; }) !=
-          root_domain.end(),
-      "Tried to map out ",
-      id,
-      " from TV ",
-      tv,
-      " to the rest of the fusion, but id does not belong to this tv.");
+void FindAllMappedDims::propagateSibling(TensorView* from, TensorView* to) {
+  auto from_id = mapped_root_ids_.at(from);
+  if (from_id == nullptr) {
+    mapped_root_ids_[to] = nullptr;
+  } else {
+    for (auto i : c10::irange(from->getRootDomain().size())) {
+      if (from_id == from->getRootDomain()[i]) {
+        mapped_root_ids_[to] = to->getRootDomain()[i];
+        break;
+      }
+    }
+  }
+  from_id = mapped_rfactor_ids_.at(from);
+  if (from_id == nullptr) {
+    mapped_root_ids_[to] = nullptr;
+  } else {
+    for (auto i : c10::irange(from->getMaybeRFactorDomain().size())) {
+      if (from_id == from->getMaybeRFactorDomain()[i]) {
+        mapped_rfactor_ids_[to] = to->getMaybeRFactorDomain()[i];
+        return;
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unable to find mapped root/rfactor domain");
+}
 
-  FindAllMappedDims mapped_dims(tv, id, vectorize_pass);
-
+std::unordered_set<IterDomain*> FindAllMappedDims::get() const {
   std::unordered_set<IterDomain*> mapped_id_set;
-  for (auto entry : mapped_dims.mapped_ids) {
+  for (auto entry : mapped_root_ids_) {
+    mapped_id_set.emplace(entry.second);
+  }
+  for (auto entry : mapped_rfactor_ids_) {
     mapped_id_set.emplace(entry.second);
   }
   return mapped_id_set;
@@ -1272,15 +1328,15 @@ std::unordered_set<IterDomain*> FindAllMappedDims::from(
 
 bool hasInnerDim(
     TensorView* tv,
-    std::unordered_set<IterDomain*> vector_dims,
+    std::unordered_set<IterDomain*> inner_dims,
     bool should_vectorize) {
   const auto& inner_most_dim = innerMostRootDim(tv);
   if (inner_most_dim == nullptr || inner_most_dim->isReduction()) {
     return false;
   }
 
-  // Make sure inner most dimension is in the vector_dim set
-  if (vector_dims.count(inner_most_dim) == 0) {
+  // Make sure inner most dimension is in the inner_dims set
+  if (inner_dims.count(inner_most_dim) == 0) {
     return false;
   }
 
@@ -1312,29 +1368,41 @@ bool hasInnerDim(
 
 std::vector<TensorView*> getInputsOutputsWithInnerDim(
     TensorView* reference_tv,
+    bool inner_only,
     bool vectorize_pass) {
+  if (vectorize_pass) {
+    TORCH_INTERNAL_ASSERT(
+        inner_only, "Can only vectorize inner-most dimensions");
+  }
+
   auto inner_most_id = innerMostRootDim(reference_tv);
 
   if (inner_most_id == nullptr) {
     return {};
   }
 
-  auto vectorizable_dims =
-      FindAllMappedDims::from(reference_tv, inner_most_id, vectorize_pass);
+  FindAllMappedDims all_mapped_root_dims(
+      reference_tv, inner_most_id, inner_only);
+  MaxRootDomainInfoSpanningTree tree(reference_tv);
+  tree.traverse(&all_mapped_root_dims);
+
+  auto vectorizable_dims = all_mapped_root_dims.get();
 
   std::vector<TensorView*> vectorizable_tensors;
+
+  // We put outputs in front of inputs because this would make the transpose
+  // scheduler prefer to use output instead of input as reference tensor.
+  for (auto output_tv :
+       ir_utils::filterByType<TensorView>(reference_tv->fusion()->outputs())) {
+    if (hasInnerDim(output_tv, vectorizable_dims, vectorize_pass)) {
+      vectorizable_tensors.push_back(output_tv);
+    }
+  }
 
   for (auto input_tv :
        ir_utils::filterByType<TensorView>(reference_tv->fusion()->inputs())) {
     if (hasInnerDim(input_tv, vectorizable_dims, vectorize_pass)) {
       vectorizable_tensors.push_back(input_tv);
-    }
-  }
-
-  for (auto output_tv :
-       ir_utils::filterByType<TensorView>(reference_tv->fusion()->outputs())) {
-    if (hasInnerDim(output_tv, vectorizable_dims, vectorize_pass)) {
-      vectorizable_tensors.push_back(output_tv);
     }
   }
 
@@ -1483,7 +1551,7 @@ size_t collectMaxVectorizeSizeWithContigMerge(
           tv->toString(),
           ", id: ",
           root_id->toString());
-      merged_size *= maybe_dimension_size.value().as<int64_t>();
+      merged_size *= maybe_dimension_size->as<int64_t>();
     }
   } else {
     auto maybe_dimension_size =
@@ -1494,7 +1562,7 @@ size_t collectMaxVectorizeSizeWithContigMerge(
         tv->toString(),
         ", id: ",
         innermost_root_id->toString());
-    merged_size = maybe_dimension_size.value();
+    merged_size = maybe_dimension_size->as<int64_t>();
   }
 
   size_t vector_size = 1;
@@ -2141,12 +2209,6 @@ size_t expandVectorizationToContigMergedDomains(
     TensorView* reference_tv,
     int break_point,
     size_t default_word_size) {
-  // Don't vectorize when RNG is used
-  if (fusion->isStochastic() &&
-      isOptionDisabled(DisableOption::UnrollWithRng)) {
-    return default_word_size;
-  }
-
   size_t max_expand_size = SchedulerRuntimeInfo::max_alignment_size_in_byte;
   size_t common_alignment_size =
       SchedulerRuntimeInfo::max_alignment_size_in_byte;

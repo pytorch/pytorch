@@ -1,14 +1,19 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Dict, List, Type, Optional, cast
+from typing import Set, Dict, List, Type, Optional, cast, Union
 import operator
+import builtins
+import math
 import functools
-from functools import lru_cache
+from functools import lru_cache, partial
 import traceback
 import collections
+import textwrap
+from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
+    from sympy.printing.precedence import precedence  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -17,7 +22,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "PySymInt", "ShapeEnv",
-    "SymDispatchMode", "PySymFloat", "sym_float"
+    "SymDispatchMode", "PySymFloat", "sym_float", "FloorDiv"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -63,11 +68,7 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self.inner
 
 def has_symbolic_sizes_strides(elem):
-    return (
-        any([isinstance(i, torch.SymIntNode) for i in elem.shape])
-        or any([isinstance(i, torch.SymIntNode) for i in elem.stride()])
-        or isinstance(elem.storage_offset(), torch.SymIntNode)
-    )
+    return elem._has_symbolic_sizes_strides
 
 def create_contiguous(shape):
     strides = [1]
@@ -90,7 +91,16 @@ def _handle_sym_dispatch(func, args, kwargs):
 def sym_float(a):
     if hasattr(a, '__sym_float__'):
         return a.__sym_float__()
+    elif isinstance(a, torch._C.SymFloatNode):
+        return a
     return float(a)
+
+def sym_int(a):
+    if hasattr(a, '__sym_int__'):
+        return a.__sym_int__()
+    elif isinstance(a, torch._C.SymIntNode):
+        return a
+    return int(a)
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -102,12 +112,23 @@ class PySymInt(object):
     implementation of symbolic shapes.
     """
     def __init__(self, expr, shape_env, constant=None):
-        self.expr = expr
+        self._expr = expr
         self.shape_env = shape_env
         self.constant = constant
 
+    @property
+    def expr(self):
+        self._update_expr()
+        return self._expr
+
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
+
+    def clone(self):
+        return PySymInt(self.expr, self.shape_env, constant=self.constant)
+
+    def _update_expr(self):
+        self._expr = self.shape_env.replace(self._expr)
 
     def __str__(self):
         return f"{self.expr}"
@@ -148,13 +169,73 @@ class PySymFloat:
     def __str__(self):
         return f"{self.expr}"
 
+if HAS_SYMPY:
+    class FloorDiv(sympy.Function):
+        """
+        We maintain this so that:
+        1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
+        2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
+        """
+        nargs = (2,)
+
+        def _sympystr(self, printer):
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer._print(lhs)
+            rhs_str = printer._print(rhs)
+            if precedence(lhs) < precedence(sympy.div):
+                lhs_str = f"({lhs_str})"
+            if precedence(rhs) < precedence(sympy.div):
+                rhs_str = f"({rhs_str})"
+
+            return f"{lhs_str}//{rhs_str}"
+
+        @classmethod
+        def eval(cls, base, divisor):
+            if base == 0:
+                return sympy.Integer(0)
+            if divisor == 1:
+                return base
+            if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+                return base // divisor
+            if isinstance(base, FloorDiv):
+                return FloorDiv(base.args[0], base.args[1] * divisor)
+
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
+
+    class Ceil(sympy.Function):
+        """
+        sympy doesn't have its own ceil(), so rolling one here.
+        We maintain this so that we can simplify a sympy.Rational into a sympy.Float.
+        sympy.Float isn't supported.
+        """
+        nargs = (1,)
+
+        @classmethod
+        def eval(cls, a):
+            if isinstance(a, sympy.Integer):
+                return a
+            elif isinstance(a, sympy.core.symbol.Symbol) and a.is_scalar:
+                # TODO: do we need to simplify expr's first? (e.g. if we have 3/3), is is_scalar() true?
+                return a
+            elif isinstance(a, sympy.Rational):
+                return a.floor() + 1
+            else:
+                raise NotImplementedError("math.ceil() not supported for type: " + str(type(a)))
+
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
-    'floordiv': lambda a, b: (a - (a % b)) / b
+    'pow': lambda a, b: a ** b,
+    'truediv': lambda a, b: a / b,
+    'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
 magic_methods = {
@@ -164,31 +245,82 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
+    'ceil': lambda a: Ceil(a),
+    'neg': lambda a: -a,
+    'min': lambda a, b: sympy.Min(a, b),
+    'max': lambda a, b: sympy.Max(a, b),
 }
 
-for method, _func in magic_methods.items():
-    def _create_magic_impl(func):
-        method_name = method
+unary_magic_methods = {
+    'ceil',
+    'neg'
+}
 
-        def magic_impl(self, other):
-            if SYM_FUNCTION_MODE:
-                return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
-            if isinstance(other, PySymInt):
-                other = other.expr
-            # TODO: consider constant prop here
-            expr = self.shape_env.replace(self.expr)
-            other = self.shape_env.replace(other)
-            out = func(expr, other)
-            out = sympy.expand(out)
+float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+
+def _make_magic(method, func, py_type):
+    func = lru_cache(256)(func)
+
+    def magic_impl(self, other):
+        if method in ["min", "max"]:
+            op = getattr(builtins, method)
+        else:
+            op = getattr(operator, method)
+        if SYM_FUNCTION_MODE:
+            return _handle_sym_dispatch(op, (self, other), {})
+        if isinstance(other, py_type):
+            other_expr = other.expr
+        else:
+            assert isinstance(other, sympy.Expr)
+            other_expr = other
+        # TODO: consider constant prop here
+        expr = self.shape_env.replace(self.expr)
+        other_expr = self.shape_env.replace(other_expr)
+        out = func(expr, other_expr)
+        out = sympy.expand(out)
+        if method in ["truediv"]:
+            return PySymFloat(out, self.shape_env)
+        else:
+            # TODO: relational operators actually technically return a
+            # PySymBool, this is a type error
+            return py_type(out, self.shape_env)
+
+    def unary_magic_impl(self):
+        if SYM_FUNCTION_MODE:
+            if method in ["ceil", "floor"]:
+                op = getattr(math, method)
+            else:
+                op = getattr(operator, method)
+            return _handle_sym_dispatch(op, (self,), {})
+        # TODO: consider constant prop here
+        expr = self.shape_env.replace(self.expr)
+        out = func(expr)
+        out = sympy.expand(out)
+        if method in ["ceil", "floor"]:
             return PySymInt(out, self.shape_env)
-        return magic_impl
+        else:
+            return py_type(out, self.shape_env)
 
-    _func = lru_cache(256)(_func)
     # this should be wrapped transparently into torch.SymIntNode
-    setattr(PySymInt, method, _create_magic_impl(_func))
-    setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
-    if method in reflectable_magic_methods:
-        setattr(PySymInt, f"__r{method}__", _create_magic_impl(_func))
+    if method in unary_magic_methods:
+        setattr(py_type, method, unary_magic_impl)
+        setattr(py_type, f"__{method}__", unary_magic_impl)
+    else:
+        setattr(py_type, method, magic_impl)
+        setattr(py_type, f"__{method}__", magic_impl)
+        if method in reflectable_magic_methods:
+            setattr(py_type, f"__r{method}__", magic_impl)
+
+for method, func in magic_methods.items():
+    _make_magic(method, func, PySymInt)
+
+for method, func in magic_methods.items():
+    if method not in float_magic_methods:
+        continue
+    _make_magic(method, func, PySymFloat)
+
+del method
+del func
 
 def _lru_cache(fn, maxsize=None):
     """
@@ -225,8 +357,11 @@ class ShapeEnv(object):
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
-        # Keys are Mod(x, y), values are 0 (for ease of substitution)
-        self.divisible: Dict["sympy.Expr", "sympy.Integer"] = {}
+        # Set holds a % b expressions that evaluate to 0.
+        self.divisible: Set["sympy.Expr"] = set()
+        # Duck-shaping says that if two input tensors have the same size,
+        # they get assigned the same symbolic variable
+        self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
 
     def _get_key(self):
         """
@@ -235,41 +370,95 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
-    def create_symint(self, name, val):
-        if not HAS_SYMPY:
-            raise RuntimeError("Need sympy installed to create symbolic shapes")
+    def create_symbolic_sizes_strides(self, ex: torch.Tensor):
+        """
+        Returns a list of symbolic sizes and strides for the given tensor.
+        We try our best to express stride in terms of the sizes, so as to not
+        introduce new symbolic variables.
+        """
 
-        # Currently we don't put 0/1 specialization in guards but perhaps we should
-        if val == 0 or val == 1:
-            return val
-        sympy_expr = sympy.Symbol(name, positive=True, integer=True)
-        py_sym_int = PySymInt(sympy_expr, self)
+        size = [self.create_symbol(i) for i in ex.size()]
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        for i, val in enumerate(ex.stride()):
+            if val in (0, 1):
+                stride[i] = sympy.Integer(val)
+        while any(x is None for x in stride):
+            candidates = {
+                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
+                for i in range(len(size))
+                if stride[i] is not None and ex.stride()[i] >= 0
+            }
+            # iterate over unbound strides in sorted order
+            val_list = sorted(
+                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
+            )
+            for _, i in val_list:
+                if stride[i] is None and ex.stride()[i] in candidates:
+                    stride[i] = candidates[ex.stride()[i]]
+                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
+            if any(x is None for x in stride):
+                # bind the smallest unbound stride to a new variable
+                val, i = sorted(
+                    [
+                        (ex.stride()[i], i)
+                        for i in range(len(stride))
+                        if stride[i] is None
+                    ]
+                )[0]
+                stride[i] = self.create_symbol(val)
+        assert all(x is not None for x in stride)
+        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
+
+    def create_symintnode(self, expr: Union["sympy.Expr", int]):
+        py_sym_int = PySymInt(expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
-        self.var_to_val[sympy_expr] = sympy.Integer(val)
         return cpp_sym_int
 
-    def create_shapes_for_args(self, args):
-        arg_cnt = 0
-
-        def create_shape(x):
-            nonlocal arg_cnt
-            if not isinstance(x, torch.Tensor):
-                return x
-
-            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz) for idx, sz in enumerate(x.shape)]
-            arg_cnt += 1
-            return out_shape
-        return list(map(create_shape, pytree.tree_flatten(args)[0]))
+    def create_symbol(self, val: int) -> "sympy.Expr":
+        if not HAS_SYMPY:
+            raise RuntimeError("Need sympy installed to create symbolic shapes")
+        if val < 0:
+            # all sympy base variables must be positive and > 1
+            return -self.create_symbol(-val)
+        # This implements duck-shaping: input sizes that match are assigned
+        # the same symint
+        # TODO: Create a guard whenever this happens
+        # TODO: But how do I represent the guard in this case?
+        # Note: val_to_var is also initialized with 0/1 mapping to constants, so
+        # this also ensures that all symbols are > 1
+        if val in self.val_to_var:
+            return self.val_to_var[val]
+        sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+        self.var_to_val[sympy_expr] = sympy.Integer(val)
+        self.val_to_var[val] = sympy_expr
+        return sympy_expr
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
-        _ = new_env.create_shapes_for_args(args)
+        # NB: This must be kept in sync with create_aot_dispatcher_function
+        # and wrap_fake_symbolic
+        meta_converter = MetaConverter()
+        pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
         return all(guard.xreplace(new_env.var_to_val) == value for guard, value, _ in self.guards)
 
     def get_nontrivial_guards(self):
-        guards = [(self.simplify(guard), val) for guard, val, _ in self.guards]
-        guards = [guard for guard in guards if len(guard[0].free_symbols) > 0]
-        return guards
+        return [(self.simplify(guard), val) for guard, val, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+
+    def format_guards(self, verbose=False):
+        def format_val(guard, val):
+            if val is sympy.true:
+                return str(guard)
+            elif val is sympy.false:
+                return f"Not({guard})"
+            else:
+                return f"Eq({guard}, {val})"
+
+        def format_tb(tb):
+            if not verbose:
+                return ""
+            return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
+
+        return '\n'.join(f" - {format_val(guard, val)}{format_tb(tb)}" for guard, val, tb in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -282,6 +471,7 @@ class ShapeEnv(object):
         """
         Tries to evaluate expr without introducing guards
         """
+        expr = self.simplify(expr)
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
         symbols = list(expr.free_symbols)
         new_shape_env = {
@@ -289,7 +479,10 @@ class ShapeEnv(object):
             for idx, k in enumerate(symbols)
         }
         new_expr = expr.xreplace(new_shape_env)
-        new_expr = sympy.expand(new_expr)
+        floor_div_replace = {}
+        for atom in new_expr.atoms(FloorDiv):
+            floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
+        new_expr = sympy.expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -301,20 +494,25 @@ class ShapeEnv(object):
 
     @_lru_cache
     def _update_divisible(self):
-        new_divisible = {}
+        new_divisible = set()
         for k in self.divisible:
             res = self.replace(k)
             if len(res.free_symbols) > 0:
-                new_divisible[k] = sympy.Integer(0)
+                new_divisible.add(k)
 
         self.divisible = new_divisible
 
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if expr.has(sympy.Mod):
+        if expr.has(FloorDiv):
             self._update_divisible()
-            expr = expr.xreplace(self.divisible)
+            div_replacements = {}
+            for atom in expr.atoms(FloorDiv):
+                base, divisor = atom.args
+                if self.replace(base % divisor) in self.divisible:
+                    div_replacements[atom] = base / divisor
+            expr = expr.xreplace(div_replacements)
             expr = sympy.expand(expr)
         return expr
 
@@ -345,6 +543,7 @@ class ShapeEnv(object):
         self.replacements[a] = self.replacements[a].xreplace(cur_replace)
         return self.replacements[a]
 
+    @lru_cache(256)
     def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
@@ -363,24 +562,23 @@ class ShapeEnv(object):
         lhs = expr.lhs
         rhs = expr.rhs
         try:
-            solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
-            if not solutions.is_finite_set:
-                if expr.has(sympy.Mod):
-                    mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                    solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
-                    if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
-                        self.divisible[mod_expr] = sympy.Integer(0)
+            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+            if len(solutions) != 1:
                 return
-
-            if not isinstance(solutions, sympy.FiniteSet):
-                return
-
-            solutions = tuple(solutions)
-            if len(solutions) == 1 and all(t.is_integer for t in sympy.preorder_traversal(solutions[0])):
-                new_var = self._find(solutions[0])
+            solution = solutions[0][free[0]]
+            if all(t.is_integer for t in sympy.preorder_traversal(solution)):
+                new_var = self._find(solution)
                 self.replacements[cast(sympy.Symbol, free[0])] = new_var
-        except ZeroDivisionError:
-            pass
+        except NotImplementedError:
+            if expr.has(sympy.Mod):
+                mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+                try:
+                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                        self.divisible.add(mod_expr)
+                except NotImplementedError:
+                    pass
+            return
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
@@ -390,7 +588,6 @@ class ShapeEnv(object):
         if len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)
-
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             return static_expr
@@ -399,6 +596,9 @@ class ShapeEnv(object):
             self._maybe_guard_eq(expr)
         concrete_val = self.size_hint(expr)
 
-        stack = ''.join(traceback.format_stack())
+        # TODO: optimize this; avoid formatting traces until we need them
+        # NB: drop two frames; evaluate_expr and the Sym* function that
+        # actually called us
+        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
         self.guards.append((expr, concrete_val, stack))
         return concrete_val

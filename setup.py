@@ -844,6 +844,13 @@ def configure_extension_build():
             extra_compile_args += ['-g']
             extra_link_args += ['-g']
 
+    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
+    if pytorch_extra_install_requirements:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
+        extra_install_requires += pytorch_extra_install_requirements.split(";")
+
+
     # Cross-compile for M1
     if IS_DARWIN:
         macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
@@ -961,7 +968,19 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
+        'sympy',
+        'networkx',
     ]
+
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
+    if platform.system() == 'Linux':
+        triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton.txt")
+        if os.path.exists(triton_pin_file):
+            with open(triton_pin_file) as f:
+                triton_pin = f.read().strip()
+                extras_require['dynamo'] = ['torchtriton==2.0.0+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -996,11 +1015,11 @@ def main():
         'cuda/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
-        'utils/data/*.pyi',
         'nn/*.pyi',
         'nn/modules/*.pyi',
         'nn/parallel/*.pyi',
         'utils/data/*.pyi',
+        'utils/data/datapipes/*.pyi',
         'lib/*.so*',
         'lib/*.dylib*',
         'lib/*.dll',
@@ -1051,8 +1070,6 @@ def main():
         'include/c10/cuda/impl/*.h',
         'include/c10/hip/*.h',
         'include/c10/hip/impl/*.h',
-        'include/c10d/*.h',
-        'include/c10d/*.hpp',
         'include/caffe2/**/*.h',
         'include/torch/*.h',
         'include/torch/csrc/*.h',
@@ -1080,9 +1097,6 @@ def main():
         'include/torch/csrc/autograd/generated/*.h',
         'include/torch/csrc/autograd/utils/*.h',
         'include/torch/csrc/cuda/*.h',
-        'include/torch/csrc/deploy/*.h',
-        'include/torch/csrc/deploy/interpreter/*.h',
-        'include/torch/csrc/deploy/interpreter/*.hpp',
         'include/torch/csrc/distributed/c10d/exception.h',
         'include/torch/csrc/distributed/rpc/*.h',
         'include/torch/csrc/jit/*.h',
@@ -1107,6 +1121,7 @@ def main():
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
+        'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
         'include/torch/csrc/tensor/*.h',
         'include/torch/csrc/lazy/backend/*.h',
@@ -1124,6 +1139,8 @@ def main():
         'include/THH/*.cuh',
         'include/THH/*.h*',
         'include/THH/generic/*.h',
+        "_inductor/codegen/*.h",
+        "_inductor/codegen/*.j2",
         'share/cmake/ATen/*.cmake',
         'share/cmake/Caffe2/*.cmake',
         'share/cmake/Caffe2/public/*.cmake',
@@ -1161,6 +1178,7 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,

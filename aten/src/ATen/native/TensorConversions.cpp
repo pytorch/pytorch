@@ -8,6 +8,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <numeric>
 
@@ -455,6 +456,15 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
   if (input_.layout() == c10::kSparse) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
+  }
+  if (at::sparse_csr::is_sparse_compressed(input_)) {
+    // TODO: implement sparse_compressed_mask
+    switch(input_.layout()) {
+    case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
+    case kSparseCsc: return grad.sparse_mask(input_.to_sparse()).to_sparse_csc();
+      // BSR and BSC should be handled via implement sparse_compressed_mask
+    default: ; // fall back to unsupported input layout error
+    }
   }
   if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn(input_.scalar_type());
@@ -992,59 +1002,256 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
       values.device());
 }
 
+void _check_blocksize_matches(
+    const Tensor& self,
+    c10::optional<IntArrayRef> blocksize_opt,
+    const std::string& name) {
+  if (blocksize_opt.has_value()) {
+    const auto blocksize = *blocksize_opt;
+    const auto self_values = self.values();
+    const auto self_blocksize = at::DimVector({self_values.size(-2), self_values.size(-1)});
+    TORCH_CHECK(self_blocksize == blocksize,
+        name, "(): the provided blocksize does not match the blocksize of the to be converted tensor, ",
+        "got (", blocksize[0], ", ", blocksize[1], ") ",
+        "but expected (", self_blocksize[0], ", ", self_blocksize[1], ").");
+  }
+}
+
+Tensor sparse_compressed_clone(
+    const Tensor& self,
+    c10::optional<IntArrayRef> blocksize,
+    const std::string& name) {
+  _check_blocksize_matches(self, blocksize, name);
+  // Just returning self doesn't work
+  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
+  // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
+  // please report a bug to PyTorch.
+  const auto layout = self.layout();
+  Tensor compressed_indices, plain_indices;
+  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
+  auto values = self.values();
+  return _sparse_compressed_tensor_unsafe(
+      compressed_indices,
+      plain_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      layout,
+      values.device());
+}
+
+Tensor sparse_compressed_to_flipped(
+    const Tensor& self,
+    c10::optional<IntArrayRef> blocksize,
+    const std::string& name) {
+  _check_blocksize_matches(self, blocksize, name);
+
+  const auto layout = self.layout();
+  // NOTE: errors on non-compressed sparse layouts.
+  const auto flipped_layout = at::sparse_csr::flip_compressed_layout(layout);
+
+  // Suppose compressed_indices represent rows of an input in either
+  // CSR or BSR sparse compressed format.
+  // In order to convert a batched CSR/BSR index into a batched CSC/BSC index
+  // we perform the following steps:
+  // 1. Convert a sparse compressed index representing batches of matrices of
+  //    shape (b, r, c) to a sparse compressed index that represents a single
+  //    matrix of shape (b * r, c).
+  // 2. Turn the compressed indices of the matrix of shape (b * r, c) into
+  //    COO indices.
+  // 3. Map these COO indices into the COO indices of a matrix of shape (r, b * c)
+  //    such that if A is a matrix of shape (b * r, c) and B is a matrix of shape
+  //    (r, b * c) such that
+  //    A[(k * r):(k * r + r), :] = B[:, (k * c):(k * c + c)] for all k in arange(b),
+  //    then A[i, j] = B[i', j'].
+  //    This is equivalent to finding indices that match values of matrices
+  //    tiled vertically to values of the same matrices tiled horizontally.
+  // 4. Convert the COO indices to the CSC/BSC indices and form the output.
+  //
+  // NOTE: the reason behind vertical/horizontal tiling is to be able to transform
+  //       indices over all matrices in the batch in a single kernel call, since
+  //       all the existing coo <-> compressed indices conversion methods assume
+  //       a single matrix.
+  //
+  // CSC/BSC inputs are handled in a similar fashion with a "transposed" argument.
+  // See the comments below for detailed explanations on how exactly each step
+  // is performed.
+
+  Tensor compressed_indices, plain_indices;
+  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
+  auto values = self.values();
+  const auto nnz = plain_indices.size(-1);
+
+  const auto n_batches = compressed_indices.dim() - 1;
+  auto n_batches_nonzero = n_batches;
+  // Insert fake batch dim for simplicity
+  if (!n_batches) {
+    n_batches_nonzero = 1;
+    compressed_indices.unsqueeze_(0);
+    plain_indices.unsqueeze_(0);
+    values.unsqueeze_(0);
+  }
+
+  // NOTE: these sparse_dims are true sparse dims only for CSR/CSC inputs.
+  // And for BSR/BSC these are <true sparse dims> / <blocksize>.
+  // In other words, sparse_dims stores ranges of valid indices in the row/col dims.
+  const auto sparse_dims = [&]() -> at::DimVector {
+    auto sparse_dims = at::DimVector(self.sizes().slice(n_batches, 2));
+    if (layout == at::kSparseBsr || layout == at::kSparseBsc) {
+      std::array<int64_t, 2> blocksize = {values.size(-2), values.size(-1)};
+      sparse_dims[0] /= blocksize[0];
+      sparse_dims[1] /= blocksize[1];
+    }
+    return sparse_dims;
+  }();
+
+  // batch_sizes_nonempty stores at least one, potentially fake, batch dimension.
+  // rebatch_sizes_nonempty is equivalent to batch_sizes_nonempty.push_back(-1),
+  // and is used to unflatten batch dimensions from a dimension of size
+  // (batch_numel * dim_size,) for some dim_size.
+  const auto batch_sizes_nonempty = at::DimVector(plain_indices.sizes().slice(0, n_batches_nonzero));
+  auto rebatch_sizes_nonempty = at::DimVector(batch_sizes_nonempty);
+  rebatch_sizes_nonempty.push_back(-1);
+  const auto batch_numel_nonzero = std::accumulate(
+      batch_sizes_nonempty.begin(),
+      batch_sizes_nonempty.begin() + n_batches_nonzero,
+      1,
+      std::multiplies<int64_t>());
+
+  // Equivalent to (arange(batch_numel_nonzero).mul_(nnz)).reshape(batch_sizes_nonempty).
+  // We just compute it differently to use `add` kernel in place of `mul` for better
+  // performance.
+  const auto batch_nnz_offset = [&]() -> Tensor {
+    const auto wrapped_nnz = at::tensor({nnz}, compressed_indices.options());
+    const auto offset = wrapped_nnz
+      .expand({batch_numel_nonzero})
+      .cumsum(-1).sub_(wrapped_nnz)
+      .reshape(batch_sizes_nonempty);
+    return offset;
+  }();
+
+  // Step 1 for CSR/BSR inputs:
+  // Convert a sparse compressed index representing batches of matrices of
+  // shape (b, r, c) to a sparse compressed index that represents a single
+  // matrix of shape (b * r, c).
+  // The algorithm is identical for CSC/BSC inputs, with the batch dimensions
+  // flattened in the "transposed" dimension.
+  const auto compressed_indices_2d = [&]() -> Tensor {
+    // Extract offsets only relevant for the first :-1 elements in a row/col.
+    const auto compressed_offsets = compressed_indices.slice(-1, 0, -1);
+    // batch_offsets offsets each individual matrix row/col offsets by the total
+    // sum of nnz's of all the matrices with the smaller batch index.
+    const auto batch_offsets = batch_nnz_offset
+      .unsqueeze(-1).expand_as(compressed_offsets);
+    // compressed_offsets + batch_offsets creates an offset vector for a 2d matrix
+    // that is stored in a compressed sparse format.
+    const auto compressed_offsets_2d = compressed_offsets.add(batch_offsets).reshape({-1});
+    const auto offsets_len = compressed_offsets_2d.numel();
+    auto res = at::empty({offsets_len + 1}, compressed_indices.options());
+    res.slice(-1, 0, -1).copy_(compressed_offsets_2d);
+    // By appending nnz * batch_numel_nonzero to (compressed_offsets + batch_offsets)
+    // a compressed index of a 2d matrix is formed.
+    res.slice(-1, -1).fill_(nnz * batch_numel_nonzero);
+    return res;
+  }();
+  // More involved for compressed indices, but pretty easy for plain_indices and values:
+  // just squash batch dimensions.
+  const auto plain_indices_2d = plain_indices.flatten(0, n_batches_nonzero);
+  // NOTE: values are not 2d! They just represent values of a sparse compressed 2d matrix.
+  const auto values_2d = values.flatten(0, n_batches_nonzero);
+
+  const auto is_out_int32 = compressed_indices.scalar_type() == ScalarType::Int;
+
+  // Step 2 & 3:
+  //
+  // Turn the compressed indices of the matrix of shape (b * r, c) into COO indices.
+  //
+  // Map these COO indices into the COO indices of a matrix of shape (r, b * c)
+  // such that if A is a matrix of shape (b * r, c) and B is a matrix of shape
+  // (r, b * c) such that
+  // A[(k * r):(k * r + r), :] = B[:, (k * c):(k * c + c)] for all k in arange(b),
+  // then A[i, j] = B[i', j'].
+  // This is equivalent to finding indices that match values of matrices
+  // tiled vertically to values of the same matrices tiled horizontally.
+
+  // coo <-> sparse index conversions assume CSR/BSR inputs.
+  // To CSC/BSC inputs these indices will appear "transposed".
+  const auto is_transposed_indices = layout == at::kSparseCsc || layout == at::kSparseBsc;
+  const auto coo_indices_2d_transposed = [&]() -> Tensor {
+    const auto coo_indices_2d = _convert_indices_from_csr_to_coo(
+        compressed_indices_2d,
+        plain_indices_2d,
+        is_out_int32,
+        /*transpose=*/true); // Flip rows/cols for convenience.
+    // Convert COO indices of (b * r, c) to (r, b * c).
+    // It is a map (i, j) -> {
+    //    b = i // r
+    //    i' = i % r
+    //    j' = j + b * c
+    //    return (i', j')
+    // }
+    // NOTE: we used transposed=true above!
+    auto i = coo_indices_2d.select(0, 1);
+    auto j = coo_indices_2d.select(0, 0);
+    auto b = i.div(is_transposed_indices ? sparse_dims[1] : sparse_dims[0], "trunc");
+    // Modify i, j in-place.
+    i.fmod_(is_transposed_indices ? sparse_dims[1] : sparse_dims[0]);
+    j.add_(b * (is_transposed_indices ? sparse_dims[0] : sparse_dims[1]));
+    return coo_indices_2d;
+  }();
+
+  // Step 4:
+  // Convert the COO indices to the CSC/BSC indices and form the output.
+  // We need to sort COO indices along the "tranposed" dim to satisfy the
+  // invariant of sorted plain indices.
+  // Hash coo indices by converting 2d indices to linear offsets with
+  // more "weight" (aka stride) placed on the "transposed" dimension.
+  const auto coo_indices_2d_transposed_hashed = at::sparse::flatten_indices(
+      coo_indices_2d_transposed,
+      is_transposed_indices ? at::DimVector({sparse_dims[0], sparse_dims[1] * batch_numel_nonzero})
+                            : at::DimVector({sparse_dims[1], sparse_dims[0] * batch_numel_nonzero}));
+  const auto hash_argsort = std::get<1>(coo_indices_2d_transposed_hashed.sort());
+  const auto coo_indices_2d_transposed_sorted = coo_indices_2d_transposed.index_select(1, hash_argsort);
+
+  const auto new_compressed_indices_coo_2d = coo_indices_2d_transposed_sorted.select(0, 0);
+  const auto new_plain_indices_2d = coo_indices_2d_transposed_sorted.select(0, 1);
+  const auto new_values_2d = values_2d.index_select(0, hash_argsort);
+
+  auto new_compressed_indices = compressed_to_batched_compressed_indices(
+      _convert_indices_from_coo_to_csr(
+        new_compressed_indices_coo_2d,
+        is_transposed_indices
+          ? batch_numel_nonzero * sparse_dims[0]
+          : batch_numel_nonzero * sparse_dims[1],
+        is_out_int32),
+      batch_numel_nonzero,
+      is_out_int32)
+    .unflatten(0, batch_sizes_nonempty);
+  auto new_plain_indices = new_plain_indices_2d.unflatten(0, rebatch_sizes_nonempty);
+  auto new_values = new_values_2d.unflatten(0, rebatch_sizes_nonempty);
+  // Kill fake batch dim if it was inserted.
+  if (!n_batches) {
+    new_compressed_indices.squeeze_(0);
+    new_plain_indices.squeeze_(0);
+    new_values.squeeze_(0);
+  }
+
+  return _sparse_compressed_tensor_unsafe(
+      new_compressed_indices,
+      new_plain_indices,
+      new_values,
+      self.sizes(),
+      new_values.scalar_type(),
+      flipped_layout,
+      new_values.device());
+}
+
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
   if (self.layout() == kSparseCsc) {
-    TORCH_CHECK(
-        self.dim() == 2,
-        "Expected self to be of dimension 2, but got ",
-        self.dim(),
-        ".");
-    auto sizes = self.sizes();
-    auto ccol_indices = self.ccol_indices();
-    auto row_indices = self.row_indices();
-    auto values = self.values();
-
-    // convert CSC indices to COO indices and swap its rows
-    const bool out_int32 = ccol_indices.scalar_type() == ScalarType::Int;
-    Tensor indices_transposed = _convert_indices_from_csr_to_coo(
-        ccol_indices, row_indices, out_int32, true);
-
-    // sort transposed indices
-    auto indices_scalar =
-        at::sparse::flatten_indices(indices_transposed, {sizes[0], sizes[1]});
-    auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
-    auto indices_transposed_sorted =
-        indices_transposed.index_select(1, indicesPermutation);
-
-    // construct a CSR tensor
-    auto new_row_indices = indices_transposed_sorted.select(0, 0);
-    auto new_col_indices = indices_transposed_sorted.select(0, 1);
-    auto new_values = values.index_select(0, indicesPermutation);
-    Tensor new_crow_indices =
-        _convert_indices_from_coo_to_csr(new_row_indices, sizes[0], out_int32);
-
-    return _sparse_csr_tensor_unsafe(
-        new_crow_indices,
-        new_col_indices,
-        new_values,
-        {sizes[0], sizes[1]},
-        new_values.scalar_type(),
-        c10::kSparseCsr,
-        new_values.device());
+    return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csr");
   }
   if (self.layout() == kSparseCsr) {
-    // Just returning self doesn't work
-    // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
-    // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
-    // please report a bug to PyTorch. aten::to_sparse_csr
-    return at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices(),
-        self.col_indices(),
-        self.values(),
-        self.sizes(),
-        self.scalar_type(),
-        c10::kSparseCsr,
-        self.device());
+    return sparse_compressed_clone(self, c10::nullopt, "to_sparse_csr");
   }
   AT_ERROR(
       "sparse_compressed_to_sparse_csr expected SparseCsr or SparseCsc layout but got ",
@@ -1381,59 +1588,73 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
 }
 
 Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
-  TORCH_CHECK(
-      self.is_sparse_csr(),
-      "Can only convert CSR to SparseBsr, but got ",
-      self.layout(),
-      " instead.");
-  Tensor self_values = self.values();
-  Tensor self_crow_indices = self.crow_indices();
-  Tensor self_col_indices = self.col_indices();
-  Tensor cpu_result = _csr_to_block_csr_cpu(
-      _sparse_csr_tensor_unsafe(
-          self_crow_indices.cpu(),
-          self_col_indices.cpu(),
-          self_values.cpu(),
-          self.sizes(),
-          self_values.scalar_type(),
-          self.layout(),
-          self_values.device()),
-      blocksize);
-  Tensor result_values = cpu_result.values().to(self_values.options());
-  Tensor result_crow_indices =
-      cpu_result.crow_indices().to(self_crow_indices.options());
-  Tensor result_col_indices =
-      cpu_result.col_indices().to(self_col_indices.options());
-  return at::native::_sparse_bsr_tensor_unsafe(
-      result_crow_indices,
-      result_col_indices,
-      result_values,
-      self.sizes(),
-      result_values.scalar_type(),
-      c10::kSparseBsr,
-      result_values.device());
+  if (self.layout() == kSparseBsc) {
+    return sparse_compressed_to_flipped(self, blocksize, "to_sparse_bsr");
+  }
+  if (self.layout() == kSparseBsr) {
+    return sparse_compressed_clone(self, blocksize, "to_sparse_bsr");
+  }
+  if (self.layout() == kSparseCsr) {
+    TORCH_CHECK(self.dim() == 2,
+        "to_sparse_bsr(): conversion from Csr to Bsr is only possible for 2d inputs, ",
+        "but got input of dimension ", self.dim(), " instead.");
+    Tensor self_values = self.values();
+    Tensor self_crow_indices = self.crow_indices();
+    Tensor self_col_indices = self.col_indices();
+    Tensor cpu_result = _csr_to_block_csr_cpu(
+        _sparse_csr_tensor_unsafe(
+            self_crow_indices.cpu(),
+            self_col_indices.cpu(),
+            self_values.cpu(),
+            self.sizes(),
+            self_values.scalar_type(),
+            self.layout(),
+            at::kCPU),
+        blocksize);
+    Tensor result_values = cpu_result.values().to(self_values.options());
+    Tensor result_crow_indices =
+        cpu_result.crow_indices().to(self_crow_indices.options());
+    Tensor result_col_indices =
+        cpu_result.col_indices().to(self_col_indices.options());
+    return at::native::_sparse_bsr_tensor_unsafe(
+        result_crow_indices,
+        result_col_indices,
+        result_values,
+        self.sizes(),
+        result_values.scalar_type(),
+        c10::kSparseBsr,
+        result_values.device());
+  }
+  AT_ERROR(
+      "sparse_compressed_to_sparse_bsr expected SparseCsr, SparseBsr or SparseBsc layout but got ",
+      self.layout());
+  return self;
 }
 
 Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+  if (self.layout() == kSparseBsr) {
+    return sparse_compressed_to_flipped(self, blocksize, "to_sparse_bsr");
+  }
+  if (self.layout() == kSparseBsc) {
+    return sparse_compressed_clone(self, blocksize, "to_sparse_bsr");
+  }
   AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
+      "sparse_compressed_to_sparse_bsc expected SparseBsr or SparseBsc layout but got ",
+      self.layout());
   return self;
 }
 
 Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
+  if (self.layout() == kSparseCsr) {
+    return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csc");
+  }
   if (self.layout() == kSparseCsc) {
-    // Based on to_sparse_csr just returning self doesn't work
-    return _sparse_csc_tensor_unsafe(
-        self.ccol_indices(),
-        self.row_indices(),
-        self.values(),
-        self.sizes(),
-        self.scalar_type(),
-        c10::kSparseCsc,
-        self.device());
+    return sparse_compressed_clone(self, c10::nullopt, "to_sparse_csc");
   }
   AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
+      "sparse_compressed_to_sparse_csc expected SparseCsr or SparseCsc layout but got ",
+      self.layout());
+  return self;
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
@@ -1486,11 +1707,11 @@ c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
   return c10::nullopt;
 }
 
-std::vector<Tensor> to_meta(const at::TensorList& t_list) {
+std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   std::vector<Tensor> outs;
   outs.reserve(t_list.size());
-  for (const auto& i : c10::irange(t_list.size())) {
-    outs.push_back(to_meta(t_list[i]));
+  for (const auto& tensor : t_list) {
+    outs.push_back(to_meta(tensor));
   }
   return outs;
 }
