@@ -28,7 +28,6 @@ _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", 
 def register_meta(op, register_dispatcher=True):
     def wrapper(f):
         def add_func(aten_op):
-
             overloads = []
             if isinstance(aten_op, OpOverload):
                 overloads.append(aten_op)
@@ -40,17 +39,6 @@ def register_meta(op, register_dispatcher=True):
                 if op_overload in meta_table:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
                 meta_table[op_overload] = f
-
-            # meta_table[op] = f
-            # if register_dispatcher:
-            #     name = (
-            #         op.__name__
-            #         if op._overloadname != "default"
-            #         else op.overloadpacket.__name__
-            #     )
-            #     _meta_lib_dont_use_me_use_register_meta.impl(name, f)
-
-            # op.py_impl(torch._C.DispatchKey.Meta)(f)
 
         tree_map(add_func, op)
         return f
