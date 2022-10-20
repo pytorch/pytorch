@@ -1463,16 +1463,24 @@ class FlatParamHandle:
                     None, flat_param.grad, i, expected_shape, offset, False
                 )
             elif param.grad is not None:
-                needs_grad_writeback = flat_param.grad is None or not _same_storage(
-                    param.grad, flat_param.grad
+                # For `NO_SHARD` + CPU offloading, `_cpu_grad` is always in
+                # memory and owns the gradient storage, so it will never
+                # require gradient writeback.
+                flat_param_grad = (
+                    flat_param.grad if self.uses_sharded_strategy or not self._config.offload_params
+                    else flat_param._cpu_grad  # type: ignore[attr-defined]
+                )
+                needs_grad_writeback = flat_param_grad is None or not _same_storage(
+                    param.grad, flat_param_grad
                 )
                 if needs_grad_writeback:
-                    if flat_param.grad is None:
-                        flat_param.grad = torch.zeros_like(flat_param)
+                    if flat_param_grad is None:
+                        flat_param_grad = torch.zeros_like(flat_param)
                     expected_shape = torch.Size([numel_in_shard])
                     self._writeback_tensor(
-                        param.grad, flat_param.grad, i, expected_shape, offset, False
+                        param.grad, flat_param_grad, i, expected_shape, offset, False
                     )
+                    flat_param.grad = flat_param_grad
             offset += numel_in_shard
         # TODO (awgu): Handle shared parameters. We need to re-generate the
         # shared parameter data structures in case sharedness changed.

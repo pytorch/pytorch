@@ -471,6 +471,10 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
 class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     """Tests the unshard/reshard flow."""
 
+    @property
+    def world_size(self) -> int:
+        return 2
+
     def _get_fsdp_models_and_optims(
         self,
         sharding_strategy: ShardingStrategy,
