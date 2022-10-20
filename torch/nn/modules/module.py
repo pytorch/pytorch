@@ -1112,7 +1112,9 @@ class Module:
         return self._apply(convert)
 
     def register_full_backward_pre_hook(
-        self, hook: Callable[['Module', _grad_t], Union[None, _grad_t]]
+        self,
+        hook: Callable[["Module", _grad_t], Union[None, _grad_t]],
+        prepend: bool = False,
     ) -> RemovableHandle:
         r"""Registers a backward pre-hook on the module.
 
@@ -1143,34 +1145,14 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
-        return handle
-
-    def register_backward_hook(
-        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
-    ) -> RemovableHandle:
-        r"""Registers a backward hook on the module.
-
-        This function is deprecated in favor of :meth:`~torch.nn.Module.register_full_backward_hook` and
-        the behavior of this function will change in future versions.
-
-        Returns:
-            :class:`torch.utils.hooks.RemovableHandle`:
-                a handle that can be used to remove the added hook by calling
-                ``handle.remove()``
-
-        """
-        if self._is_full_backward_hook is True:
-            raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
-                               "single Module. Please use only one of them.")
-
-        self._is_full_backward_hook = False
-
-        handle = hooks.RemovableHandle(self._backward_hooks)
-        self._backward_hooks[handle.id] = hook
+        if prepend:
+            self._backward_pre_hooks.move_to_end(handle.id, last=False)
         return handle
 
     def register_full_backward_hook(
-        self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
+        self,
+        hook: Callable[["Module", _grad_t, _grad_t], Union[None, _grad_t]],
+        prepend: bool = False,
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
 
@@ -1203,13 +1185,17 @@ class Module:
 
         """
         if self._is_full_backward_hook is False:
-            raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
-                               "single Module. Please use only one of them.")
+            raise RuntimeError(
+                "Cannot use both regular backward hooks and full backward hooks on a "
+                "single Module. Please use only one of them."
+            )
 
         self._is_full_backward_hook = True
 
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
+        if prepend:
+            self._backward_hooks.move_to_end(handle.id, last=False)
         return handle
 
     def _get_backward_hooks(self):
@@ -1281,7 +1267,9 @@ class Module:
                               "some grad_input. Please use register_full_backward_hook to get the documented "
                               "behavior.")
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_pre_hook(
+        self, hook: Callable[..., None], prepend: bool = False
+    ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
@@ -1302,9 +1290,13 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
         self._forward_pre_hooks[handle.id] = hook
+        if prepend:
+            self._forward_pre_hooks.move_to_end(handle.id, last=False)
         return handle
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_forward_hook(
+        self, hook: Callable[..., None], prepend: bool = False
+    ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
         The hook will be called every time after :func:`forward` has computed an output.
@@ -1325,6 +1317,8 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
         self._forward_hooks[handle.id] = hook
+        if prepend:
+            self._forward_hooks.move_to_end(handle.id, last=False)
         return handle
 
     def _slow_forward(self, *input, **kwargs):
