@@ -239,9 +239,17 @@ class Unpickler:
                 pid = self.stack.pop()
                 # Only allow persistent load of storage
                 if type(pid) is not tuple and not type(pid) is not int:
-                    raise RuntimeError(f"persistent_load id must be tuple or int, but got {type(pid)}")
-                if type(pid) is tuple and len(pid) > 0 and pid[0] != "storage":
-                    raise RuntimeError(f"Only persistent_load of storage is allowed, but got {pid[0]}")
+                    raise RuntimeError(
+                        f"persistent_load id must be tuple or int, but got {type(pid)}"
+                    )
+                if (
+                    type(pid) is tuple
+                    and len(pid) > 0
+                    and torch.serialization._maybe_decode_ascii(pid[0]) != "storage"
+                ):
+                    raise RuntimeError(
+                        f"Only persistent_load of storage is allowed, but got {pid[0]}"
+                    )
                 self.append(self.persistent_load(pid))
             elif key[0] in [BINGET[0], LONG_BINGET[0]]:
                 idx = (read(1) if key[0] == BINGET[0] else unpack("<I", read(4)))[0]
