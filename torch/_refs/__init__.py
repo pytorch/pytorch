@@ -375,7 +375,6 @@ def _make_elementwise_unary_reference(
     type_promotion_kind,
     *,
     aten_op=infer_aten_op,
-    disable_meta=False,
     extra_meta=None,
 ) -> Callable:
     def inner(prim: Callable):
@@ -402,7 +401,7 @@ def _make_elementwise_unary_reference(
         if aten_op is infer_aten_op:
             aten_op = getattr(torch.ops.aten, prim.__name__)
         if aten_op is not None:
-            register_decomposition(aten_op, disable_meta=disable_meta)(_ref)
+            register_decomposition(aten_op)(_ref)
 
         return _ref
 
@@ -849,7 +848,6 @@ def _make_elementwise_binary_reference(
     has_out=True,
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
-    disable_meta=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"),
@@ -872,7 +870,7 @@ def _make_elementwise_binary_reference(
         # TODO: enable this for operations that support it, like add
         if isinstance(a, Number) and isinstance(b, Number):
             raise ValueError(
-                "Receive two Number inputs to an elementwise binary operation!"
+                f"Receive two Number inputs to an elementwise binary operation {prim}!"
             )
 
         a, b = _maybe_broadcast(a, b)
@@ -884,7 +882,7 @@ def _make_elementwise_binary_reference(
     if aten_op is infer_aten_op:
         aten_op = getattr(torch.ops.aten, prim.__name__.split(".")[0])
     if aten_op is not None:
-        register_decomposition(aten_op, disable_meta=disable_meta)(_ref)
+        register_decomposition(aten_op)(_ref)
 
     return _ref
 
@@ -2580,7 +2578,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 2)
 
 
-@register_decomposition(torch.ops.aten.expand, disable_meta=True)
+@register_decomposition(torch.ops.aten.expand)
 def expand(a: Tensor, *shape) -> Tensor:
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -2801,7 +2799,7 @@ def native_layer_norm(
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
 # test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
-@register_decomposition(torch.ops.aten.permute, disable_meta=True)
+@register_decomposition(torch.ops.aten.permute)
 def permute(a: TensorLikeType, *dims) -> TensorLikeType:
     _permutation = utils.canonicalize_dims(
         a.ndim, utils.extract_dims_from_varargs(dims)
@@ -3237,7 +3235,7 @@ def index_add(
     return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
 
 
-@register_decomposition(torch.ops.aten.index_select, disable_meta=True)
+@register_decomposition(torch.ops.aten.index_select)
 @out_wrapper()
 def index_select(x: TensorLike, dim: int, index: TensorLike):
     dim = utils.canonicalize_dims(x.ndim, dim)
@@ -3256,7 +3254,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 
 # Note: although squeeze is documented as having the out= kwarg it doesn't
-@register_decomposition(torch.ops.aten.squeeze, disable_meta=True)
+@register_decomposition(torch.ops.aten.squeeze)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
     if dim is not None:
         dim = utils.canonicalize_dim(a.ndim, dim)
@@ -3436,7 +3434,7 @@ def vsplit(
     return tensor_split(a, split_sizes, 0)
 
 
-@register_decomposition(torch.ops.aten.diagonal, disable_meta=True)
+@register_decomposition(torch.ops.aten.diagonal)
 def diagonal(
     self: TensorLikeType,
     offset: int = 0,
@@ -3546,7 +3544,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     return tensor_split(a, sections, 2)
 
 
-@register_decomposition(torch.ops.aten.t.default, disable_meta=True)
+@register_decomposition(torch.ops.aten.t.default)
 def t(a: TensorLikeType):
     # TODO: Add sparse support
     # if a.is_sparse:
@@ -3577,7 +3575,7 @@ def T(a: TensorLikeType) -> TensorLikeType:
     return a.t()
 
 
-@register_decomposition(torch.ops.aten.transpose, disable_meta=True)
+@register_decomposition(torch.ops.aten.transpose)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
 
@@ -3634,7 +3632,7 @@ def cumsum(
     return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
 
 
-@register_decomposition(torch.ops.aten.unsqueeze, disable_meta=True)
+@register_decomposition(torch.ops.aten.unsqueeze)
 def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
     # Note that unsqueeze canonicalizes with rank + 1 because it allows
     # a new innermost dimension to be specified
@@ -3647,7 +3645,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(torch.ops.aten.view, disable_meta=True)
+@register_decomposition(torch.ops.aten.view)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
