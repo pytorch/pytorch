@@ -111,15 +111,23 @@ class PySymInt(object):
     implementation of symbolic shapes.
     """
     def __init__(self, expr, shape_env, constant=None):
-        self.expr = expr
+        self._expr = expr
         self.shape_env = shape_env
         self.constant = constant
+
+    @property
+    def expr(self):
+        self._update_expr()
+        return self._expr
 
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
         return PySymInt(self.expr, self.shape_env, constant=self.constant)
+
+    def _update_expr(self):
+        self._expr = self.shape_env.simplify(self._expr)
 
     def __str__(self):
         return f"{self.expr}"
