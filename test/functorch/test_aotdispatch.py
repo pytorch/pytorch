@@ -253,6 +253,13 @@ class TestAOTAutograd(AOTTestCase):
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
+        if isinstance(ref_out, torch.Tensor):
+            self.assertTrue(isinstance(test_out, torch.Tensor))
+            ref_out, test_out = [ref_out], [test_out]
+        for ref_o, test_o in zip(ref_out, test_out):
+            if isinstance(ref_o, torch.Tensor):
+                self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
+
     def test_single_output(self):
         def f(a, b):
             return a + b
@@ -279,6 +286,12 @@ class TestAOTAutograd(AOTTestCase):
         for inps in itertools.product(inp_thunks, repeat=2):
             inps = [i() for i in inps]
             self.verify_aot_autograd(f, inps)
+
+    def test_some_outputs_dont_require_grad(self):
+        def f(a, b):
+            return a.detach(), b
+        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
 
     def test_inner_grad(self):
         def foo(x):
@@ -1146,7 +1159,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.pad', 'circular'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta fu...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta...
     xfail('nn.functional.pairwise_distance', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
