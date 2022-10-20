@@ -101,7 +101,6 @@ void col2im_out_cuda_template(
   int64_t input_batch_stride = input.stride(0);
 
   output.resize_({batch_size, n_output_plane, output_height, output_width});
-  output.zero_();
   int64_t output_batch_stride = output.stride(0);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
