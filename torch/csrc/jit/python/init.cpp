@@ -137,6 +137,10 @@ static bool is_int_or_symint(py::object x) {
   return py::isinstance<py::int_>(x) || torch::is_symint_node(x);
 }
 
+static bool is_float_or_symfloat(py::object x) {
+  return py::isinstance<py::float_>(x) || torch::is_symfloat_node(x);
+}
+
 static c10::SymIntNode toSymIntNode(c10::SymIntNode a, py::object b) {
   return torch::is_symint_node(b) ? b.cast<c10::SymIntNode>()
                                   : a->wrap(b.cast<int64_t>());
@@ -1601,9 +1605,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->add(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->add(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1612,9 +1618,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(snb->add(a));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(snb->add(a));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1623,9 +1631,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->sub(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->sub(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1634,9 +1644,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(snb->sub(a));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(snb->sub(a));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1645,9 +1657,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->mul(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->mul(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1656,9 +1670,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(snb->mul(a));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(snb->mul(a));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1667,9 +1683,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->truediv(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->truediv(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1678,9 +1696,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(snb->truediv(a));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(snb->truediv(a));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1689,9 +1709,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->floordiv(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->floordiv(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1700,9 +1722,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(snb->floordiv(a));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(snb->floordiv(a));
+                } else {
+                  throw py::reference_cast_error();
                 }
               }, py::is_operator())
           .def(
@@ -1738,9 +1762,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->eq(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->eq(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               })
           .def(
@@ -1749,9 +1775,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->gt(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->gt(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               })
           .def(
@@ -1760,9 +1788,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->lt(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->lt(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               })
           .def(
@@ -1771,9 +1801,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->le(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->le(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               })
           .def(
@@ -1782,9 +1814,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->ge(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->ge(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               })
           .def(
@@ -1799,9 +1833,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->min(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->min(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               })
           .def(
@@ -1810,9 +1846,11 @@ void initJITBindings(PyObject* module) {
                 if (is_int_or_symint(b)) {
                   auto snb = toSymIntNode(a, b);
                   return py::cast(a->max(snb));
-                } else {
+                } else if (is_float_or_symfloat(b)) {
                   auto snb = toSymFloatNode(a, b);
                   return py::cast(a->max(snb));
+                } else {
+                  throw py::reference_cast_error();
                 }
               })
           .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
@@ -1845,9 +1883,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->add(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->add(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1856,9 +1896,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(snb->add(a));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(snb->add(a));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1867,9 +1909,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->sub(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->sub(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1878,9 +1922,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(snb->sub(a));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(snb->sub(a));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1889,9 +1935,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->mul(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->mul(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1900,9 +1948,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(snb->mul(a));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(snb->mul(a));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1911,9 +1961,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->truediv(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->truediv(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1922,9 +1974,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(snb->truediv(a));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(snb->truediv(a));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1933,9 +1987,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->eq(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->eq(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           })
       .def(
@@ -1944,9 +2000,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->gt(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->gt(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           })
       .def(
@@ -1955,9 +2013,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->lt(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->lt(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           })
       .def(
@@ -1966,9 +2026,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->le(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->le(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           })
       .def(
@@ -1977,9 +2039,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->ge(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->ge(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           })
       .def(
@@ -1988,9 +2052,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(a->pow(snb));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(a->pow(snb));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
@@ -1999,9 +2065,11 @@ void initJITBindings(PyObject* module) {
             if (is_int_or_symint(b)) {
               auto snb = toSymIntNode(a, b);
               return py::cast(snb->pow(a));
-            } else {
+            } else if (is_float_or_symfloat(b)) {
               auto snb = toSymFloatNode(a, b);
               return py::cast(snb->pow(a));
+            } else {
+              throw py::reference_cast_error();
             }
           }, py::is_operator())
       .def(
