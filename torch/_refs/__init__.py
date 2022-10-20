@@ -729,7 +729,6 @@ def log_softmax(
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
 
-@register_decomposition(torch.ops.aten.logsumexp)
 @out_wrapper()
 def logsumexp(
     a: TensorLikeType,

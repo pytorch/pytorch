@@ -1744,16 +1744,12 @@ class TestRefsOpsInfo(TestCase):
         '_refs.full',
         '_refs.full_like',
         '_refs.item',
-        '_refs.to',
-        '_refs.ones',
         '_refs.ones_like',
-        '_refs.special.expit',
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
         '_refs.scalar_tensor',
         '_refs.trunc_divide',
-        '_refs.zeros',
         '_refs.zeros_like',
         '_refs.rfloordiv',
         '_refs.rtruediv',
@@ -1766,6 +1762,7 @@ class TestRefsOpsInfo(TestCase):
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
+        '_refs.logsumexp',
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
         '_refs.norm',
@@ -1863,9 +1860,8 @@ class TestRefsOpsInfo(TestCase):
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_python_ref_db(self, op):
-        err = f"{op} does not have an entry in python_ref_db"
         if op in self.skip_ref_ops:
-            raise unittest.SkipTest(err)
+            raise unittest.SkipTest(f"{op} skipped")
         # Skip aliases since we don't want them to have dedicated RefInfo
         # entries.  Instead, refs are expected to follow the same format as
         # OpInfos, where each ref alias is part of its corresponding ref entry.
@@ -1873,7 +1869,8 @@ class TestRefsOpsInfo(TestCase):
         # much boilerplate for no good reason, e.g., due to handling skips.
         if op in self.ref_alias_names:
             return
-        self.assertIn(op, self.ref_db_names, msg=err)
+        self.assertIn(op, self.ref_db_names,
+                      msg=f"{op} does not have an entry in python_ref_db")
 
     # like 'test_refs_are_in_python_ref_db' but check in the other direction,
     # this includes aliases since those are not allowed in 'ref_db_names'
