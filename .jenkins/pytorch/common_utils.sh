@@ -111,6 +111,12 @@ function checkout_install_torchvision() {
   popd
 }
 
+function install_torchtext() {
+  local commit
+  commit=$(get_pinned_commit text)
+  pip_install --user "git+https://github.com/pytorch/text.git@${commit}"
+}
+
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
     git clone --recursive --quiet https://github.com/pytorch/xla.git

@@ -277,6 +277,19 @@ test_inductor_huggingface_shard() {
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
 }
 
+test_inductor_torchbench_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  TEST_REPORTS_DIR=/tmp/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_torchbench_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_torchbench_"$1".csv
+}
+
 test_python_gloo_with_tls() {
   source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
   assert_git_not_dirty
@@ -738,6 +751,20 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SH
   install_triton
   install_huggingface
   test_inductor_huggingface_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  test_inductor_torchbench_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 4 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchtext
+  install_torchvision
+  install_filelock
+  install_triton
+  checkout_install_torchbench
+  test_inductor_torchbench_shard 1
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
