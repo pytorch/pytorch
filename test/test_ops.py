@@ -98,6 +98,8 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
+# This list specifies the ops that should be skipped by `test_numpy_ref_mps`. Currently a large chunk of
+# `op_db`'s tests fail, but as MPS is brought in line with numpy, this list should disappear.
 _ops_failing_on_mps = [
     'addbmm',
     'linalg.cross',
@@ -112,11 +114,6 @@ _ops_failing_on_mps = [
     'nn.functional.pdist',
     'searchsorted'
 ]
-# This list specifies the ops that should be tested by `test_numpy_ref_mps`. Currently a large chunk of
-# `op_db`'s tests fail, but as MPS is brought in line with numpy, this list should expand.
-_ref_test_ops_passing_on_mps = tuple(
-    filter(lambda op: op.name not in _ops_failing_on_mps, _ref_test_ops)
-)
 _ops_and_refs = op_db + python_ref_db
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
@@ -199,16 +196,20 @@ class TestCommon(TestCase):
     @onlyMPS
     @suppress_warnings
     # MPS only supports float32
-    @ops(_ref_test_ops_passing_on_mps, allowed_dtypes=(torch.float32,))
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
     def test_numpy_ref_mps(self, device, dtype, op):
+        if op.name in _ops_failing_on_mps:
+            raise unittest.SkipTest("Unsupported or fails on MPS")
+
         try:
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
             torch.set_default_dtype(torch.double)
-            # TODO: This currently uses `sample_inputs` instead of `reference_inputs` because almost all of
-            # `reference_inputs` fails on MPS since many of them test handling of tensors of different fp types
-            # which MPS does not yet handle.
-            for sample_input in op.sample_inputs(device, dtype):
+            # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
+            # get patched up and this workaround removed.
+            broken_on_ref_inputs = op.name in ['cat', 'clamp', 'clone', 'where']
+            inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
+            for sample_input in inputs:
                 self.compare_with_reference(
                     op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
                 )
