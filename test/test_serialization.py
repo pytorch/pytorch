@@ -285,7 +285,7 @@ class SerializationMixin(object):
         self.assertTrue(torch.equal(a, b))
         self.assertEqual(i, j)
 
-    def test_serialization_sparse(self):
+    def _test_serialization_sparse(self, weights_only):
         def _test_serialization(conversion):
             x = torch.zeros(3, 3)
             x[1][1] = 1
@@ -293,10 +293,16 @@ class SerializationMixin(object):
             with tempfile.NamedTemporaryFile() as f:
                 torch.save({"tensor": x}, f)
                 f.seek(0)
-                y = torch.load(f)
+                y = torch.load(f, weights_only=weights_only)
                 self.assertEqual(x, y["tensor"])
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
+
+    def test_serialization_sparse(self):
+        self._test_serialization(False)
+
+    def test_serialization_sparse_safe(self):
+        self._test_serialization(True)
 
     def test_serialization_sparse_invalid(self):
         x = torch.zeros(3, 3)
@@ -364,13 +370,13 @@ class SerializationMixin(object):
             device_copied = copy.deepcopy(device)
             self.assertEqual(device, device_copied)
 
-    def test_serialization_backwards_compat(self):
+    def _test_serialization_backwards_compat(self, weights_only):
         a = [torch.arange(1 + i, 26 + i).view(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
-        c = torch.load(path)
+        c = torch.load(path, weights_only=weights_only)
         self.assertEqual(b, c, atol=0, rtol=0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -409,12 +415,17 @@ class SerializationMixin(object):
                 old_x = old_cls(x)
                 torch.save(old_x, f)
                 f.seek(0)
-                load_x = torch.load(f)
+                load_x = torch.load(f, weights_only=weights_only)
                 self.assertEqual(x.storage(), load_x.storage())
                 self.assertEqual(x.storage_offset(), load_x.storage_offset())
                 self.assertEqual(x.size(), load_x.size())
                 self.assertEqual(x.stride(), load_x.stride())
 
+    def test_serialization_backwards_compat(self):
+        self._test_serialization_backwards_compat(False)
+
+    def test_serialization_backwards_compat_safe(self):
+        self._test_serialization_backwards_compat(True)
 
     def test_serialization_save_warnings(self):
         with warnings.catch_warnings(record=True) as warns:
