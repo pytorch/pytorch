@@ -4055,8 +4055,10 @@ if HAS_CUDA:
                     return [permute, add]
 
             inps = [
-                rand_strided((12, 3, 512, 64), (64, 196608, 768, 1), torch.float32, 'cuda'),
-                rand_strided((), (), torch.int64, 'cpu'),
+                rand_strided(
+                    (12, 3, 512, 64), (64, 196608, 768, 1), torch.float32, "cuda"
+                ),
+                rand_strided((), (), torch.int64, "cpu"),
             ]
             mod = make_fx(Repro().to(device="cuda"))(*inps)
             compiled = compile_fx_inner(mod, inps)
