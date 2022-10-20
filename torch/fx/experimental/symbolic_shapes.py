@@ -127,7 +127,10 @@ class PySymInt(object):
         return self._expr
 
     def wrap(self, num):
-        return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
+        if isinstance(num, float):
+            return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
+        else:
+            return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
         return self
@@ -169,7 +172,10 @@ class PySymFloat:
         self.constant = constant
 
     def wrap(self, num):
-        return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
+        if isinstance(num, float):
+            return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
+        else:
+            return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def __str__(self):
         return f"{self.expr}"
@@ -235,7 +241,6 @@ magic_methods = {
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
-    'neg': lambda a: a * -1
 }
 
 unary_magic_methods = {
@@ -245,6 +250,26 @@ unary_magic_methods = {
 }
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+
+def output_py_type(method, a, b=None):
+    # truediv always returns floats
+    if method in ["truediv"]:
+        return PySymFloat
+    # ceil/floorfloordiv always returns ints
+    if method in ["ceil", "floor", "floordiv"]:
+        return PySymInt
+
+    assert isinstance(a, (PySymInt, PySymFloat))
+    # unary op case = no type promotion
+    if b is None:
+        return type(a)
+
+    assert isinstance(b, (PySymInt, PySymFloat))
+    # otherwise, normal type promotion.
+    if isinstance(a, PySymFloat) or isinstance(b, PySymFloat):
+        return PySymFloat
+    return PySymInt
+
 
 def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
@@ -256,9 +281,11 @@ def _make_magic(method, func, py_type):
             op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
             return _handle_sym_dispatch(op, (self, other), {})
-        if isinstance(other, py_type):
+        if isinstance(other, (PySymInt, PySymFloat)):
             other_expr = other.expr
         else:
+            if not isinstance(other, sympy.Expr):
+                import pdb; pdb.set_trace()
             assert isinstance(other, sympy.Expr)
             other_expr = other
         # TODO: consider constant prop here
@@ -266,12 +293,9 @@ def _make_magic(method, func, py_type):
         other_expr = self.shape_env.replace(other_expr)
         out = func(expr, other_expr)
         out = sympy.expand(out)
-        if method in ["truediv"]:
-            return PySymFloat(out, self.shape_env)
-        else:
-            # TODO: relational operators actually technically return a
-            # PySymBool, this is a type error
-            return py_type(out, self.shape_env)
+        # TODO: relational operators actually technically return a
+        # PySymBool, this is a type error
+        return output_py_type(method, self, other)(out, self.shape_env)
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
@@ -284,10 +308,7 @@ def _make_magic(method, func, py_type):
         expr = self.shape_env.replace(self.expr)
         out = func(expr)
         out = sympy.expand(out)
-        if method in ["ceil", "floor"]:
-            return PySymInt(out, self.shape_env)
-        else:
-            return py_type(out, self.shape_env)
+        return output_py_type(method, self)(out, self.shape_env)
 
     # this should be wrapped transparently into torch.SymIntNode
     if method in unary_magic_methods:
