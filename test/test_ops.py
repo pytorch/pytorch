@@ -182,20 +182,14 @@ class TestCommon(TestCase):
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
     def test_numpy_ref_mps(self, device, dtype, op):
-        try:
-            # Sets the default dtype to NumPy's default dtype of double
-            cur_default = torch.get_default_dtype()
-            torch.set_default_dtype(torch.double)
-            # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
-            # get patched up and this workaround removed.
-            broken_on_ref_inputs = op.name in ['cat', 'clamp', 'where']
-            inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
-            for sample_input in inputs:
-                self.compare_with_reference(
-                    op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
-                )
-        finally:
-            torch.set_default_dtype(cur_default)
+        # Unlike above, this test compares in `float32` since at the time of this test's creation MPS does
+        # not support float64 Tensors.
+        # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
+        # get patched up and this workaround removed.
+        broken_on_ref_inputs = op.name in ['cat', 'clamp', 'where']
+        inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
+        for sample_input in inputs:
+            self.compare_with_reference(op, op.ref, sample_input)
 
     # Tests that the cpu and gpu results are consistent
     @onlyCUDA
