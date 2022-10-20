@@ -852,6 +852,21 @@ def forward(self, a_1):
     detach = torch.ops.aten.detach.default(empty);  empty = None
     return detach""")
 
+
+    def test_neg_shape(self):
+        def f(a):
+            return torch.empty(-a.shape[0] + 10)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(1)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
+    neg = -sym_size;  sym_size = None
+    add = neg + 10;  neg = None
+    empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
+    detach = torch.ops.aten.detach.default(empty);  empty = None
+    return detach""")
+
     def test_sqrt_size(self):
         def f(a):
             return a / a.size(-1) ** 0.5
@@ -927,16 +942,30 @@ def forward(self, a_1):
         self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
         self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
 
-    def test_symbolic_meta(self):
+    def test_metadata(self):
         def f(a, b):
             d = a.new_empty(a.shape[0] + b.shape[0])
             return d
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
-        fx_g.graph.eliminate_dead_code()
-        fx_g.recompile()
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
-        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
+        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj().expr == meta_d.meta['val'].expr)
+
+    def test_metadata_fresh(self):
+        def f(x):
+            assert x.shape[0] == 3
+            return x.cos()
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
+        meta_cos = _get_node(fx_g, lambda x: x.target == aten.cos.default)
+        meta_inp = _get_node(fx_g, lambda x: x.op == 'placeholder')
+        self.assertTrue(meta_cos.meta['val'].shape[0].get_pyobj().expr == 3)
+        # Checks if the input expr has been updated even though the constraint
+        # happened afterwards
+        self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
+
+
+
 
     def test_return_symint(self):
         def f(x):
@@ -1239,7 +1268,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
     xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
-    xfail('nn.functional.pad', 'circular'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta function/decompo...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
