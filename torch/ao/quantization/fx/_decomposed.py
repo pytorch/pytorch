@@ -8,7 +8,7 @@ quantized_decomposed_lib.define(
 
 @impl(quantized_decomposed_lib, "quantize_per_tensor", "CPU")
 def quantize_per_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
-    assert input.dtype == torch.float32, "Expecting input to have dtype torch.float32, but got dtype: ".format(input.dtype)
+    assert input.dtype == torch.float32, "Expecting input to have dtype torch.float32, but got dtype: {}".format(input.dtype)
     quant_min_lower_bound = 0
     quant_max_upper_bound = 0
     if dtype == torch.uint8:
