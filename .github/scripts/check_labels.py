@@ -2,7 +2,7 @@
 """check_labels.py"""
 
 from typing import Any, List
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from export_pytorch_labels import get_pytorch_labels
 from gitutils import (
@@ -17,10 +17,15 @@ from trymerge import (
 )
 
 
-ERR_MSG = ("This PR needs a label. If your changes are user facing and intended to be a "
-           "part of release notes, please use a label starting with `release notes:`. If "
-           "not, please add the `topic: not user facing` label. For more information, see "
-           "https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.")  # noqa: E501  pylint: disable=line-too-long
+BOT_AUTHORS = ["github-actions", "pytorchmergebot", "pytorch-bot"]
+
+ERR_MSG_TITLE = "This PR needs a label"
+ERR_MSG = (
+    f"# {ERR_MSG_TITLE}\n"
+    "If your changes are user facing and intended to be a part of release notes, please use a label starting with `release notes:`.\n\n"
+    "If not, please add the `topic: not user facing` label.\n\n"
+    "For more information, see https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work."
+)  # noqa: E501  pylint: disable=line-too-long
 
 
 def get_release_notes_labels() -> List[str]:
@@ -32,7 +37,7 @@ def delete_comment(comment_id: int) -> None:
     _fetch_url(url, method="DELETE")
 
 
-def check_labels(pr: GitHubPR) -> bool:
+def has_required_labels(pr: GitHubPR) -> bool:
     pr_labels = pr.get_labels()
 
     # Check if PR is not user facing
@@ -40,13 +45,11 @@ def check_labels(pr: GitHubPR) -> bool:
     if is_not_user_facing_pr:
         return True
 
-    # Check if bot has already posted message within the past hour to include release notes label
-    err_msg_start = ERR_MSG.partition(".")[0]
-    bot_authors = ["github-actions", "pytorchmergebot", "pytorch-bot"]
+    # Check if bot has already posted a message within the past hour to include a release notes label
     for comment in pr.get_comments():
-        if comment.body_text.startswith(err_msg_start) and comment.author_login in bot_authors:
+        if comment.body_text.lstrip(" #").startswith(ERR_MSG_TITLE) and comment.author_login in BOT_AUTHORS:
             ts = datetime.strptime(comment.created_at, "%Y-%m-%dT%H:%M:%SZ")
-            if (datetime.utcnow() - ts).total_seconds() < 3600:
+            if (datetime.utcnow() - ts) < timedelta(hours=1):
                 return True
             delete_comment(comment.database_id)
             break
@@ -69,7 +72,7 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
 
     try:
-        if not check_labels(pr):
+        if not has_required_labels(pr):
             print(ERR_MSG)
             gh_post_pr_comment(pr.org, pr.project, pr.pr_num, ERR_MSG)
             exit(1)
