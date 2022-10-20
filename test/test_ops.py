@@ -207,7 +207,7 @@ class TestCommon(TestCase):
             torch.set_default_dtype(torch.double)
             # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
             # get patched up and this workaround removed.
-            broken_on_ref_inputs = op.name in ['cat', 'clamp', 'clone', 'where']
+            broken_on_ref_inputs = op.name in ['cat', 'clamp', 'where']
             inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
             for sample_input in inputs:
                 self.compare_with_reference(
