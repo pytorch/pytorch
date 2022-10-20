@@ -20,26 +20,29 @@ from torch._dynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
-original_dir = abspath(os.getcwd())
+def setup_torchbench_env():
+    original_dir = abspath(os.getcwd())
 
-os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-for torchbench_dir in (
-    "./torchbenchmark",
-    "../torchbenchmark",
-    "../torchbench",
-    "../benchmark",
-    "../../torchbenchmark",
-    "../../torchbench",
-    "../../benchmark",
-):
+    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
+    for torchbench_dir in (
+        "./torchbenchmark",
+        "../torchbenchmark",
+        "../torchbench",
+        "../benchmark",
+        "../../torchbenchmark",
+        "../../torchbench",
+        "../../benchmark",
+    ):
+        if exists(torchbench_dir):
+            break
+
     if exists(torchbench_dir):
-        break
+        torchbench_dir = abspath(torchbench_dir)
+        os.chdir(torchbench_dir)
+        sys.path.append(torchbench_dir)
+    return original_dir
 
-if exists(torchbench_dir):
-    torchbench_dir = abspath(torchbench_dir)
-    os.chdir(torchbench_dir)
-    sys.path.append(torchbench_dir)
-
+original_dir = setup_torchbench_env()
 
 # Some models have large dataset that doesn't fit in memory. Lower the batch
 # size to test the accuracy.

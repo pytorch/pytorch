@@ -66,6 +66,8 @@ dynamic_propagation = True
 
 # Run the FX graph with FakeTensors
 fake_tensor_propagation = True
+# Hack to enable FSDP
+aot_use_fake_tensor = True
 
 # run FX normalization passes in optimizer
 normalize_ir = False
