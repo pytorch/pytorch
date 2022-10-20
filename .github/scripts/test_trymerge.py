@@ -24,6 +24,7 @@ from trymerge import (find_matching_merge_rule,
                       MergeRule,
                       MandatoryChecksMissingError,
                       WorkflowCheckState,
+                      IGNORED_CHECKS,
                       main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
@@ -369,6 +370,19 @@ class TestGitHubPR(TestCase):
 
         self.assertListEqual(failing_checks, [checks[1], checks[2]])
         self.assertListEqual(pending_checks, [checks[3]])
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_ignored_checks(self, mocked_gql: Any) -> None:
+        """ Tests that ignore checks are ignored
+        """
+        pr = GitHubPR("pytorch", "pytorch", 87297)
+        conclusions = pr.get_checkrun_conclusions()
+        failed_checks = {check.name for check in filter_failed_checks(conclusions)}
+
+        # This should not contain ignored checks
+        for ignored_check in IGNORED_CHECKS:
+            self.assertFalse(ignored_check in failed_checks)
+
 
 if __name__ == "__main__":
     main()
