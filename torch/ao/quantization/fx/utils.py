@@ -28,7 +28,8 @@ from torch.fx.graph import (
     Node,
 )
 from .custom_config import PrepareCustomConfig
-from ._decomposed import quantized_decomposed_lib
+# importing the lib so that the quantized_decomposed ops are registered
+from ._decomposed import quantized_decomposed_lib  # noqa: F401
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 from collections import namedtuple
@@ -165,7 +166,7 @@ def get_per_tensor_qparams(activation_post_process):
 def get_quantize_node_info(
     activation_post_process: Callable,
     is_decomposed: bool
-) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
+) -> Optional[Tuple[str, Union[Callable[..., Any], str], Dict[str, Any]]]:
     """ Extract information about quantize op from activation_post_process module
     Args:
       * `activation_post_process`: observer module instance or fake quant module instance
@@ -191,7 +192,7 @@ def get_quantize_node_info(
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             if is_decomposed:
-                raise NotImplementedError("decomposed quantize_per_tensor op not implemented yet")
+                raise NotImplementedError("decomposed quantize_per_channel op not implemented yet")
             else:
                 quantize_op = torch.quantize_per_channel
         else:
