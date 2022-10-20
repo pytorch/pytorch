@@ -1,6 +1,14 @@
 # Owner(s): ["module: onnx"]
 
-"""Test consistency between torch.onnx exported operators and aten operators.
+"""Test consistency between torch.onnx exported operators and torch operators.
+
+Usage:
+
+    pytest test/onnx/test_op_consistancy.py
+
+    To run tests on a specific operator (e.g. torch.ceil):
+
+    pytest test/onnx/test_op_consistancy.py -k ceil
 
 NOTE:
 
@@ -15,7 +23,16 @@ import io
 import itertools
 import unittest
 from collections import namedtuple
-from typing import Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Iterable,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import onnx
 
@@ -35,7 +52,6 @@ MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
 
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 ORT_PROVIDERS = ("CPUExecutionProvider",)
-
 
 SUPPORTED_DTYPES = (
     # Boolean
@@ -107,7 +123,7 @@ DecorateMeta = namedtuple(
 
 
 def xfail(
-    op_name: str,
+    op,
     variant_name: str = "",
     *,
     device_type: Optional[str] = None,
@@ -116,7 +132,7 @@ def xfail(
 ):
     """Expects a OpInfo test to fail."""
     return DecorateMeta(
-        op_name=op_name,
+        op_name=op.__name__,
         variant_name=variant_name,
         decorator=unittest.expectedFailure,
         device_type=device_type,
@@ -126,7 +142,7 @@ def xfail(
 
 
 def skip(
-    op_name: str,
+    op,
     variant_name: str = "",
     *,
     device_type: Optional[str] = None,
@@ -135,7 +151,7 @@ def skip(
 ):
     """Skips a test case in OpInfo."""
     return DecorateMeta(
-        op_name=op_name,
+        op_name=op.__name__,
         variant_name=variant_name,
         decorator=unittest.skip(reason),
         device_type=device_type,
@@ -148,11 +164,14 @@ def skip(
 class XfailOpset:
     """Expects a OpInfo test to fail on specific ONNX opsets."""
 
-    op_name: str
+    op: Any
     opsets: Collection[Union[int, Callable[[int], bool]]]
     dtypes: Optional[Collection[torch.dtype]] = None
     exception: Optional[Exception] = None
     reason: str = "unspecified"
+
+    def __post_init__(self):
+        self.op_name = self.op.__name__
 
     def _contains_opset(self, opset: int) -> bool:
         return any(
@@ -172,11 +191,11 @@ def skip_ops(
     all_opinfos: Sequence[opinfo_core.OpInfo],
     test_case_name: str,
     base_test_name: str,
-    to_skip: Iterable[DecorateMeta],
+    skip_or_xfails: Iterable[DecorateMeta],
 ):
-    """Decorates OpInfo tests with decorators based on the to_skip list."""
+    """Decorates OpInfo tests with decorators based on the skip_or_xfails list."""
     ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
-    for decorate_meta in to_skip:
+    for decorate_meta in skip_or_xfails:
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
         assert (
             opinfo is not None
@@ -217,15 +236,24 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
-# Modify this section ###
+# Modify this section ##########################################################
 # NOTE: Modify this section as more ops are supported. The list should be sorted
 # alphabetically.
+#
+# For example, to add a test for torch.ceil:
+# 1.  Add `torch.ceil` to ALLOWLIST_OP then run pytest.
+# 2a. If the test fails, fix the error or add a new entry to EXPECTED_SKIPS_OR_FAILS.
+# 2b. If the test is expected to fail only on certain opsets, add a new entry to
+#     EXPECTED_OPSET_FAILS.
 
 # Ops to be tested for consistency between onnx and pytorch
-ALLOWLIST_OP = (
-    "ceil",
-    "sqrt",
-    "t",
+ALLOWLIST_OP = frozenset(
+    op.__name__
+    for op in (
+        torch.ceil,
+        torch.sqrt,
+        torch.t,
+    )
 )
 
 # fmt: off
@@ -235,11 +263,10 @@ ALLOWLIST_OP = (
 # ONNX opsets, add the op to EXPECTED_OPSET_FAILS below.
 # The list should be sorted alphabetically by op name.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    skip("ceil", dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
-    skip("ceil", dtypes=[torch.float64], reason="Ceil on f64 not supported by ONNX Runtime"),
-    skip("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
-    xfail("t", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
-    skip("t", dtypes=[torch.float16], reason="flaky tests in CI"),
+    skip(torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    skip(torch.ceil, dtypes=[torch.float64], reason="Ceil on f64 not supported by ONNX Runtime"),
+    skip(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    xfail(torch.t, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
 )
 # fmt: on
 
@@ -249,7 +276,7 @@ EXPECTED_OPSET_FAILS: Tuple[XfailOpset, ...] = (
     # TODO: sqrt for torch.bfloat16 is just an example. Replace it with more meaningful
     # skips when there are.
     XfailOpset(
-        "sqrt",
+        torch.sqrt,
         dtypes=[torch.bfloat16],
         opsets=[opsets_before(13)],
         reason="Sqrt not defined for bf16 before opset 13",
@@ -285,7 +312,7 @@ class TestConsistency(common_utils.TestCase):
         OPS_DB,
         "TestConsistency",
         "test_output_match",
-        to_skip=EXPECTED_SKIPS_OR_FAILS,
+        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         assert device == "cpu"
