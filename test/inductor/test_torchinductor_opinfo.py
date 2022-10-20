@@ -149,6 +149,7 @@ inductor_skips["cuda"] = {
     "nn.functional.conv_transpose3d": {f16},
     "max.reduction_with_dim": {i32, i64},
     "min.reduction_with_dim": {i32, i64},
+    "linalg.lu": {f32, f64},
     # Issues on sm86 periodic job (complex numbers)
     "cdouble": {b8, f16, f32, f64, i32, i64},
     "cfloat": {b8, f16, f32, f64, i32, i64},
@@ -376,7 +377,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "cumprod": {f16},
     "linalg.vector_norm": {f64, f64},
     "linalg.householder_product": {f32},
-    "linalg.lu": {f32, f64},
     "kron": {f16},
     "nanquantile": {f32, f64},
     "native_batch_norm": {f16, f32, f64},
