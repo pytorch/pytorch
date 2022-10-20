@@ -6269,7 +6269,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
              ((), (), (), False),
              ((M, 1, M), (), (M, M, 1), True),
              ((), (M, M), (), True),
-             (((), (2), (1, 1), True)),
+             ((), (2), (1, 1), True),
              )
 
     for shape, mask_shape, other_shape, broadcasts_input in cases:
