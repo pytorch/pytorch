@@ -374,10 +374,10 @@ class ShardedStateDictConfig(StateDictConfig):
 @dataclass
 class OptimStateDictConfig:
     """
-    ``StateDictConfig`` is the base class for all state_dict configuration classes.
-    Users should instantiate a child version (i.e. ``FullStateDictConfig``) in
-    order to configure settings for the particular type of ``state_dict``
-    implementation FSDP will use.
+    ``OptimStateDictConfig`` is the base class for all optimizer state_dict
+    configuration classes.  Users should instantiate a child version
+    (i.e. ``FullOptimStateDictConfig``) in order to configure settings for the
+    particular type of ``optim_state_dict`` implementation FSDP will use.
     """
     offload_to_cpu: bool = True
 
@@ -614,7 +614,7 @@ class _ExecOrderData:
             tensor_kwargs = {"dtype": torch.int32, "device": device}
             world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)
             local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_num_valid_indices,
                 local_num_valid_indices,
                 group=self.process_group,
@@ -639,7 +639,7 @@ class _ExecOrderData:
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
             local_indices = torch.tensor(local_indices, **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
             # Check that all ranks plan to all-gather the same index parameters
@@ -1926,8 +1926,8 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root is not None:
             return  # no-op: already initialized
         if not torch.cuda.is_available():
-            # Allow the FSDP constructor to run even with CUDA but check this
-            # once we start real execution
+            # Allow the FSDP constructor to run even without CUDA but check
+            # this once we start real execution
             raise RuntimeError("FSDP does not support CPU only execution")
         # The following logic is only run on the root FSDP instance since it
         # will set `_is_root=False` for the non-root instances
@@ -2257,11 +2257,15 @@ class FullyShardedDataParallel(nn.Module):
                 prev_optim_state_dict_config = submodule._optim_state_dict_config
             if prev_state_dict_type != submodule._state_dict_type:
                 raise RuntimeError("All FSDP module should the same state_dict_type.")
-            if type(prev_state_dict_config) != type(submodule._state_dict_config):
+            if not isinstance(
+                submodule._state_dict_config, type(prev_state_dict_config)
+            ):
                 raise RuntimeError(
                     "All FSDP modules should have the same type of state_dict_config."
                 )
-            if type(prev_optim_state_dict_config) != type(submodule._optim_state_dict_config):
+            if not isinstance(
+                submodule._optim_state_dict_config, type(prev_optim_state_dict_config)
+            ):
                 raise RuntimeError(
                     "All FSDP modules should have the same type of optim_state_dict_config."
                 )
@@ -2776,9 +2780,10 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         nonsharded_tensors = []
-        # TODO: Reduce the communication by using only one _all_gather_base to
-        # gather all the parameters in this layer. This can be achieved by
-        # concatenated all the local shards and then append the padding.
+        # TODO: Reduce the communication by using only one
+        # `all_gather_into_tensor()` to gather all the parameters in this
+        # layer. This can be achieved by concatenating all the local shards and
+        # then appending the padding.
         # https://github.com/pytorch/pytorch/issues/77461
         shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
         for fqn, _, _ in self._param_fqns:
@@ -2808,7 +2813,7 @@ class FullyShardedDataParallel(nn.Module):
             tensor = torch.empty(
                 chunk_size * self.world_size, dtype=local_tensor.dtype
             ).cuda()
-            dist._all_gather_base(tensor, local_tensor, group=self.process_group)
+            dist.all_gather_into_tensor(tensor, local_tensor, group=self.process_group)
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             nonsharded_tensors.append(tensor)
 
