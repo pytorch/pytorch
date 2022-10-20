@@ -277,10 +277,10 @@ struct PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
-  using args_t = struct {
+  struct args_t {
     PyFrameState frame_state_;
     c10::optional<NNModuleInfo> module_info_;
-    c10::optional<OptimizerInfo> opt_info_;
+    c10::optional<OptimizerInfo> optimizer_info_;
   };
 
   ExtraFields(
@@ -291,11 +291,11 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
         callsite_{args.frame_state_},
         module_{args.module_info_},
-        opt_{args.opt_info_} {}
+        optimizer_{args.optimizer_info_} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
-  c10::optional<OptimizerInfo> opt_;
+  c10::optional<OptimizerInfo> optimizer_;
 };
 
 template <>

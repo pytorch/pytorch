@@ -31,13 +31,18 @@ using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
 RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
-    : /*impl_=*/impl_(t.unsafeGetTensorImpl()),
-      /*data_=*/data_(t.has_storage() ? t.storage().data() : nullptr),
-      /*device_type_*/ device_type_(t.device().type()),
-      /*device_index_*/ device_index_(t.device().index()),
-      /*dtype_=*/dtype_(t.scalar_type()),
-      /*layout_=*/layout_(t.layout()),
-      /*dim_=*/dim_(t.sizes().size()){};
+    : impl_{t.unsafeGetTensorImpl()},
+      data_{t.has_storage() ? t.storage().data() : nullptr},
+      device_type_{t.device().type()},
+      device_index_{t.device().index()},
+      dtype_{t.scalar_type()},
+      layout_{t.layout()},
+      dim_{static_cast<uint32_t>(t.sizes().size())} {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
+      "Cannot profile Tensors of size > uint32 max. Got dim: ",
+      t.sizes().size());
+}
 
 // ============================================================================
 // == PyTorch Ops =============================================================
@@ -71,18 +76,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
-    const auto& sizes = t.sizes();
-    const auto dim = sizes.size();
-    const auto layout = t.layout();
-    TORCH_CHECK(
-        dim <= std::numeric_limits<uint32_t>::max(),
-        "Cannot profile Tensors of size > uint32 max. Got dim: ",
-        dim);
-
     tensor_metadata_.emplace_back(t);
-
-    tensor_sizes_strides_.copy(sizes);
-    if (layout == at::kStrided) {
+    tensor_sizes_strides_.copy(t.sizes());
+    if (t.layout() == at::kStrided) {
       // Only Strided layout tensors have strides
       tensor_sizes_strides_.copy(t.strides());
     }
