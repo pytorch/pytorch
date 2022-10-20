@@ -8212,7 +8212,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-04),
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestCommon', 'test_numpy_refs_mps'),
+                   'TestCommon', 'test_numpy_ref_mps'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                    'TestConsistency',
