@@ -1186,7 +1186,7 @@ TensorView* reductionOp(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,
@@ -1521,7 +1521,7 @@ WelfordResult Welford(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,
@@ -2320,7 +2320,7 @@ TensorView* fusedMultiplySum(
 
     TORCH_CHECK(
         axis >= 0 && axis < ndims,
-        "Reduction on invalid axis, recieved: ",
+        "Reduction on invalid axis, received: ",
         axis,
         " however tensor view only has ",
         ndims,

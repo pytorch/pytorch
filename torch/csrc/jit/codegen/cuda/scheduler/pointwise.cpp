@@ -110,7 +110,12 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
         (int64_t)dataTypeSize(inp->getDataType().value(), index_type));
   }
 
-  auto ref_root = largest_out->getMaybeRFactorDomain();
+  // We always cacheBefore output at the beginning of the scheduling. And after
+  // cacheBefore, the reference tensor will have all reduction IDs removed.
+  // TODO: clean this up when we kill trivial reduction.
+  auto ref_root =
+      TensorDomain::noReductions(largest_out->getMaybeRFactorDomain());
+
   std::vector<int64_t> elem_counts(ref_root.size(), 1);
   int64_t n_elems = 1;
   for (size_t ref_i = 0; ref_i < ref_root.size(); ref_i++) {

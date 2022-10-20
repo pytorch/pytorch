@@ -1483,8 +1483,13 @@ BroadcastMultipleInformation getBroadcastMultiples(
   auto fusion = reference_tv->fusion();
   FusionGuard fg(fusion);
 
-  std::vector<BroadcastMultiple> multiples(
-      reference_tv->getMaybeRFactorDomain().size());
+  // We always cacheBefore output at the beginning of the scheduling. And after
+  // cacheBefore, the reference tensor will have all reduction IDs removed.
+  // TODO: clean this up when we kill trivial reduction.
+  auto ref_root_domain =
+      TensorDomain::noReductions(reference_tv->getMaybeRFactorDomain());
+
+  std::vector<BroadcastMultiple> multiples(ref_root_domain.size());
 
   auto disjoint_view_sets = disjointViewSets(fusion);
   auto disjoint_set_information = scheduler_utils::getDisjointViewSetsOf(
@@ -1505,8 +1510,6 @@ BroadcastMultipleInformation getBroadcastMultiples(
   // Shouldn't matter if we use EXACT or PERMISSIVE mapping mode for compute
   // at map as we're just looking at the root mappings.
   auto ca_map = ComputeAtMap(fusion);
-
-  auto ref_root_domain = reference_tv->getMaybeRFactorDomain();
 
   // Map all inputs and output domains to reference tv domains
   for (auto in_out_tv : in_out_tvs) {
