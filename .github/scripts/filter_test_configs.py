@@ -22,6 +22,7 @@ VALID_TEST_CONFIG_LABELS = {f"{PREFIX}{label}" for label in {
     "dynamo",
     "force_on_cpu",
     "functorch",
+    "inductor",
     "jit_legacy",
     "multigpu",
     "nogpu_AVX512",
