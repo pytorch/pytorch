@@ -159,6 +159,8 @@ if "torch." in dynamo_import:
 else:
     base_dir = dirname(dirname(abspath(__file__)))
 
+debug_dir_root = os.path.join(os.cwd(), "torchdynamo_debug")
+
 
 class _AccessLimitingConfig(ModuleType):
     def __setattr__(self, name, value):

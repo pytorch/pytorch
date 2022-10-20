@@ -3,6 +3,7 @@ import contextlib
 import copy
 import cProfile
 import dataclasses
+import datetime
 import dis
 import functools
 import gc
@@ -29,7 +30,8 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-from . import config, logging as torchdynamo_logging
+from . import config
+from . import logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -928,3 +930,35 @@ class CompileProfiler:
             rpt += "No cache-limited recompilations detected.\n"
 
         return rpt
+
+
+class DebugDir:
+    def __init__(self):
+        self.num_setup_calls = 0
+        self.debug_path = None
+
+    def setup(self):
+        assert self.num_setup_calls >= 0
+        if self.num_setup_calls == 0:
+            debug_root = config.debug_dir_root
+            dir_name = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+            self.debug_path = os.path.join(debug_root, dir_name)
+
+        self.num_setup_calls += 1
+
+    def clear(self):
+        assert self.num_setup_calls >= 0
+        if self.num_setup_calls == 1:
+            self.debug_path = None
+
+        self.num_setup_calls -= 1
+        assert self.num_setup_calls >= 0
+
+    def get(self):
+        assert self.debug_path is not None
+        return self.debug_path
+
+debug_dir = DebugDir()
+
+def get_debug_dir():
+    return debug_dir.get()
