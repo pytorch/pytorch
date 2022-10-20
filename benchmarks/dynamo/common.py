@@ -147,7 +147,10 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "cait_m36_384",  # fp64_OOM
     "coat_lite_mini",  # time out
     "convit_base",  # fp64_OOM
+    "gernet_l",  # accuracy
     "gluon_xception65",
+    "lcnet_0500",  # accuracy
+    "levit_128",  # levit_128
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out

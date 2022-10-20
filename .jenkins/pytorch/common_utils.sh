@@ -137,6 +137,39 @@ function install_triton() {
   fi
 }
 
+function setup_torchdeploy_deps(){
+  conda install -y cmake
+  conda install -y -c conda-forge libpython-static=3.10
+  local CC
+  local CXX
+  CC="$(which gcc)"
+  CXX="$(which g++)"
+  export CC
+  export CXX
+  pip install --upgrade pip
+}
+
+function checkout_install_torchdeploy() {
+  local commit
+  setup_torchdeploy_deps
+  pushd ..
+  git clone --recurse-submodules https://github.com/pytorch/multipy.git
+  pushd multipy
+  # with ABI flag change
+  python multipy/runtime/example/generate_examples.py
+  pip install -e . --install-option="--abicxx"
+  popd
+  popd
+}
+
+function test_torch_deploy(){
+ pushd ..
+ pushd multipy
+ ./multipy/runtime/build/test_deploy
+ popd
+ popd
+}
+
 function install_huggingface() {
   pip_install pandas
   pip_install scipy
