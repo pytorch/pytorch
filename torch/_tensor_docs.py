@@ -4795,7 +4795,7 @@ In-place version of :meth:`~Tensor.squeeze`
 add_docstr_all(
     "std",
     r"""
-std(dim=None, *, correction=1, keepdim=False) -> Tensor
+std(dim=None, *, correction=None, keepdim=False) -> Tensor
 
 See :func:`torch.std`
 """,
@@ -5701,7 +5701,7 @@ In-place version of :meth:`~Tensor.unsqueeze`
 add_docstr_all(
     "var",
     r"""
-var(dim=None, *, correction=1, keepdim=False) -> Tensor
+var(dim=None, *, correction=None, keepdim=False) -> Tensor
 
 See :func:`torch.var`
 """,
