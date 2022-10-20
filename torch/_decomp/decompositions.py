@@ -1835,8 +1835,8 @@ def upsample_bilinear2d_vec(
     n_batch, n_channels, in_h, in_w = input.shape
 
     if output_size is not None:
-        out_h = float(output_size[0])
-        out_w = float(output_size[1])
+        out_h = sym_float(output_size[0])
+        out_w = sym_float(output_size[1])
     elif scale_factors is not None:
         out_h = in_h * scale_factors[0]
         out_w = in_w * scale_factors[1]
@@ -1844,7 +1844,7 @@ def upsample_bilinear2d_vec(
     # Calculate horizontal and vertical scaling factor
     if out_h > 1:
         if align_corners:
-            h_scale_factor = (in_h - 1) / (int(out_h) - 1)
+            h_scale_factor = (in_h - 1) / (sym_int(out_h) - 1)
         else:
             h_scale_factor = in_h / out_h
     else:
@@ -1852,14 +1852,14 @@ def upsample_bilinear2d_vec(
 
     if out_w > 1:
         if align_corners:
-            w_scale_factor = (in_w - 1) / (int(out_w) - 1)
+            w_scale_factor = (in_w - 1) / (sym_int(out_w) - 1)
         else:
             w_scale_factor = in_w / out_w
     else:
         w_scale_factor = 0.0
 
-    i = torch.arange(int(out_h), dtype=input.dtype, device=input.device)
-    j = torch.arange(int(out_w), dtype=input.dtype, device=input.device)
+    i = torch.arange(sym_int(out_h), dtype=input.dtype, device=input.device)
+    j = torch.arange(sym_int(out_w), dtype=input.dtype, device=input.device)
 
     if align_corners:
         x = h_scale_factor * i
