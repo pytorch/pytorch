@@ -824,8 +824,9 @@ class FlatParamHandle:
         in_computation = in_forward or self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
             # We use `Tensor` views in the forward so that they are tracked by
-            # autograd, and we use them in the pre-backward to ensure that
-            # post-backward hooks run when using activation checkpointing.
+            # autograd. We use them in the pre-backward as well to support
+            # reentrant activation checkpointing, which needs the views to be
+            # tracked by autograd in the backward pass's recomputed forward.
             self._use_unsharded_views(as_params=(not in_computation))
         elif in_forward:
             self._use_unsharded_views(as_params=False)
