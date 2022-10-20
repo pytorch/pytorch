@@ -1631,7 +1631,7 @@ class ReduceOpTest(TestCase):
         ):
             self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
         for scale in ([torch.tensor(1.0)], 2.0):
-            self.assertTrue(c10d._make_nccl_premul_sum(scale), c10d.ReduceOp)
+            self.assertTrue(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
 
 
 if __name__ == "__main__":
