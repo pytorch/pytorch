@@ -292,7 +292,11 @@ op_db: List[OpInfo] = [
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
         skips=(
-            DecorateInfo(unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"), 'TestCommon', 'test_numpy_ref_mps'),
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -304,7 +308,11 @@ op_db: List[OpInfo] = [
         reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
         skips=(
-            DecorateInfo(unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"), 'TestCommon', 'test_numpy_ref_mps'),
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -316,7 +324,11 @@ op_db: List[OpInfo] = [
         reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
         skips=(
-            DecorateInfo(unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"), 'TestCommon', 'test_numpy_ref_mps'),
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
         ),
     ),
 ]
