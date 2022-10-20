@@ -30,8 +30,7 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-from . import config
-from . import logging as torchdynamo_logging
+from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -958,7 +957,9 @@ class DebugDir:
         assert self.debug_path is not None
         return self.debug_path
 
+
 debug_dir = DebugDir()
+
 
 def get_debug_dir():
     return debug_dir.get()

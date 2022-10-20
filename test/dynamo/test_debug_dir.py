@@ -38,9 +38,6 @@ class DebugDirTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(debug_dir.num_setup_calls, 1)
         return debug_dir
 
-
-
-
     def test_setup(self):
         self._setup()
 
@@ -48,7 +45,7 @@ class DebugDirTests(torch._dynamo.test_case.TestCase):
         debug_dir = self._setup()
         debug_dir.clear()
         self.assertIsNone(debug_dir.debug_path)
-        self.assertEqual(debug_dir.debug_path, 1)
+        self.assertEqual(debug_dir.num_setup_calls, 0)
 
     def test_multi_setup_single_clear(self):
         debug_dir = self._setup()
@@ -60,8 +57,7 @@ class DebugDirTests(torch._dynamo.test_case.TestCase):
 
         debug_dir.clear()
         self.assertEqual(prev, get_debug_dir())
-        self.assertEqual(debug_dir.debug_path, 1)
-
+        self.assertEqual(debug_dir.num_setup_calls, 1)
 
     def test_multi_setup_multi_clear(self):
         debug_dir = self._setup()
@@ -79,19 +75,6 @@ class DebugDirTests(torch._dynamo.test_case.TestCase):
         self.assertIsNone(debug_dir.debug_path)
         self.assertEqual(debug_dir.num_setup_calls, 0)
 
-
-
-    def test_single_setup_multi_clear(self):
-        debug_dir = self._setup()
-
-        debug_dir.clear()
-        self.assertIsNone(debug_dir.debug_path)
-        self.assertEqual(debug_dir.num_setup_calls, 0)
-
-        debug_dir.clear()
-        self.assertIsNone(debug_dir.debug_path)
-        self.assertEqual(debug_dir.num_setup_calls, 0)
-
     def test_single_setup_single_clear(self):
         debug_dir = self._setup()
         debug_dir.clear()
@@ -103,8 +86,6 @@ class DebugDirTests(torch._dynamo.test_case.TestCase):
         prev = get_debug_dir()
         next = get_debug_dir()
         self.assertEqual(prev, next)
-
-
 
 
 if __name__ == "__main__":
