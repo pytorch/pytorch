@@ -125,6 +125,7 @@ def _allowed_function_ids():
         disallowed_modules = (
             "torch.optim.",
             "torch.nn.modules.rnn.",
+            "torch.nn.modules.",
             "torch._dynamo.",
             "torch._C._dynamo.",
             "torch._inductor.",
