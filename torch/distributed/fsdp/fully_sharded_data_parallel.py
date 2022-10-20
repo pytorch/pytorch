@@ -94,6 +94,7 @@ from .wrap import (
     _recursive_wrap,
     _wrap_batchnorm_individually,
 )
+import torchdynamo
 
 _TORCHDISTX_AVAIL = True
 try:
