@@ -1,5 +1,5 @@
 # Owner(s): ["module: nn"]
-from torch.testing._internal.common_utils import TestCase, run_tests,
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 import torch
 import torch.nn as nn
