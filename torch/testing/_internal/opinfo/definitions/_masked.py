@@ -559,14 +559,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
-            # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=(torch.bfloat16,),
-                device_type="cpu",
-            ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                 "TestCompositeCompliance",
