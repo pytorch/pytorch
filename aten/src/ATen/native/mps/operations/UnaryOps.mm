@@ -231,5 +231,23 @@ TORCH_IMPL_FUNC(frac_out_mps) (const Tensor& self, const Tensor& output) {
                 });
 }
 
+TORCH_IMPL_FUNC(erfinv_out_mps) (const Tensor& self, const Tensor& output) {
+ mps::unary_op(self, output, "erfinv_out_mps",
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+                  auto zeroTensor = [mpsGraph constantWithScalar:0.0
+                                                       dataType:inputTensor.dataType];
+                  auto predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                             secondaryTensor:zeroTensor
+                                                                        name:nil];
+                  auto truncTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
+                                                     truePredicateTensor:[mpsGraph ceilWithTensor :inputTensor name:nil]
+                                                    falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
+                                                                    name:nil];
+                  return [mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                               secondaryTensor:truncTensor
+                                                   name: nil];
+                }); 
+}
+
 } // namespace native
 } // namespace at

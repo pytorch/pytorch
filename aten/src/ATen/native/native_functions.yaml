@@ -8488,6 +8488,7 @@
     CPU, CUDA: erfinv_out
     SparseCPU, SparseCUDA: erfinv_sparse_out
     SparseCsrCPU, SparseCsrCUDA: erfinv_sparse_csr_out
+    MPS: erfinv_out_mps
 
 - func: i0(Tensor self) -> Tensor
   structured_delegate: i0.out
