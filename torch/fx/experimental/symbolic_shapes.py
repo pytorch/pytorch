@@ -100,6 +100,8 @@ def sym_int(a):
         return a.__sym_int__()
     elif isinstance(a, torch._C.SymIntNode):
         return a
+    elif isinstance(a, torch._C.SymFloatNode):
+        return math.floor(a)
     return int(a)
 
 def guard_int_hack_please_dont_use(x):

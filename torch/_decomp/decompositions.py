@@ -14,7 +14,7 @@ from torch._decomp import register_decomposition
 from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
-from torch.fx.experimental.symbolic_shapes import guard_int_hack_please_dont_use
+from torch.fx.experimental.symbolic_shapes import guard_int_hack_please_dont_use, sym_float, sym_int
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
