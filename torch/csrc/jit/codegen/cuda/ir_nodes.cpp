@@ -561,10 +561,6 @@ BroadcastOp::BroadcastOp(
       out_(out),
       in_(in),
       is_broadcast_dims_(std::move(is_broadcast_dims)) {
-  // clang-tidy complains about out_ that it may be null.
-  TORCH_INTERNAL_ASSERT(out_ != nullptr);
-  TORCH_INTERNAL_ASSERT(in_ != nullptr);
-
   auto out_type = out->getValType().value();
   auto in_type = in->getValType().value();
 
@@ -580,46 +576,39 @@ BroadcastOp::BroadcastOp(
     return;
   }
 
-  passkey.ir_container_->registerExpr(exprPasskey(), this);
+  auto in_tv = in->as<TensorView>();
+  auto out_tv = out->as<TensorView>();
+  auto in_dom = TensorDomain::noReductions(in_tv->getMaybeRFactorDomain());
+  auto& out_dom = out_tv->getRootDomain();
+  TORCH_INTERNAL_ASSERT(
+      is_broadcast_dims_.size() == out_dom.size(),
+      "The dimensions of output tensor and does not match with is_broadcast_dims");
 
-  // This is a generic check that root dims of a consumer and producer match.
-  // Maybe we shouldn't relegate it to this constructor.
-  const auto c_tv = out_->as<TensorView>();
-  const auto p_tv = in_->as<TensorView>();
-
-  const auto& c_root = c_tv->getRootDomain();
-  const auto& p_root = p_tv->getMaybeRFactorDomain();
-
-  const auto root_p2c =
-      PairwiseRootDomainMap(p_tv, c_tv)
-          .mapProducerToConsumer(p_tv->domain(), c_tv->domain());
-
-  for (auto id : p_root) {
-    if (root_p2c.find(id) == root_p2c.end()) {
+  auto out_size = is_broadcast_dims_.size();
+  auto num_new_broadcasts = 0;
+  for (const auto i : c10::irange(out_size)) {
+    if (is_broadcast_dims_[i]) {
+      num_new_broadcasts++;
+      auto id = out_dom[i];
       TORCH_INTERNAL_ASSERT(
-          id->isReduction() || id->isStride(),
-          "Invalid broadcast op: ",
-          id,
-          ". Non-reduction input dim does't match to output.");
+          id->isBroadcast(),
+          "New broadcast dimension does not properly set its IterType.");
+      TORCH_INTERNAL_ASSERT(
+          !id->hasExpandedExtent(),
+          "New broadcast dimension can not be expanded.");
+      TORCH_INTERNAL_ASSERT(
+          id->extent()->isOneInt(),
+          "New broadcast dimension must have extent 1");
+    } else {
+      auto in_id = in_dom[i - num_new_broadcasts];
+      auto out_id = out_dom[i];
+      TORCH_INTERNAL_ASSERT(
+          in_id->sameAs(out_id), "IterDomain does not match in BroadcastOp");
     }
   }
-
-  std::unordered_set<IterDomain*> c_mapped;
-  for (auto pair_entry : root_p2c) {
-    c_mapped.insert(pair_entry.second);
-  }
-
-  for (const auto i : c10::irange(c_root.size())) {
-    const auto c_id = c_root[i];
-    if (c_mapped.find(c_id) != c_mapped.end()) {
-      continue;
-    }
-    TORCH_INTERNAL_ASSERT(
-        c_id->isBroadcast() && is_broadcast_dims_[i],
-        "Invalid broadcast op: ",
-        c_id,
-        ". Non-broadcasted output dim isn't matched from input.");
-  }
+  TORCH_INTERNAL_ASSERT(
+      out_size == in_dom.size() + num_new_broadcasts,
+      "The dimensions of output tensor and does not match with is_broadcast_dims and input tensor");
 }
 
 BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
@@ -643,6 +632,89 @@ bool BroadcastOp::sameAs(const Statement* other) const {
   }
   const auto other_op = other->as<BroadcastOp>();
   if (getBroadcastDimFlags() != other_op->getBroadcastDimFlags()) {
+    return false;
+  }
+  return Expr::sameAs(other);
+}
+
+SqueezeOp::SqueezeOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in,
+    std::vector<bool> is_squeeze_dims)
+    : Expr(passkey, ExprType::SqueezeOp),
+      out_(out),
+      in_(in),
+      is_squeeze_dims_(std::move(is_squeeze_dims)) {
+  auto out_type = out->getValType().value();
+  auto in_type = in->getValType().value();
+
+  TORCH_INTERNAL_ASSERT(
+      (out_type == ValType::TensorView && in_type == ValType::TensorView) ||
+          (out_type == ValType::TensorIndex && in_type == ValType::TensorIndex),
+      "Cannot squeeze a non-tensor object.");
+
+  addOutput(out);
+  addInput(in);
+
+  if (!out->isA<TensorView>() || !in->isA<TensorView>()) {
+    return;
+  }
+
+  auto in_tv = in->as<TensorView>();
+  auto out_tv = out->as<TensorView>();
+  auto in_dom = TensorDomain::noReductions(in_tv->getMaybeRFactorDomain());
+  auto& out_dom = out_tv->getRootDomain();
+  TORCH_INTERNAL_ASSERT(
+      is_squeeze_dims_.size() == in_dom.size(),
+      "The dimensions of input tensor and does not match with is_squeeze_dims");
+
+  auto in_size = is_squeeze_dims_.size();
+  auto num_removed_broadcasts = 0;
+  for (const auto i : c10::irange(is_squeeze_dims_.size())) {
+    if (is_squeeze_dims_[i]) {
+      num_removed_broadcasts++;
+      auto id = in_dom[i];
+      TORCH_INTERNAL_ASSERT(
+          id->isBroadcast(), "Can not squeeze non-broadcasting dimension(s).");
+      TORCH_INTERNAL_ASSERT(
+          !id->hasExpandedExtent(), "Can not squeeze expanded dimension(s).");
+      TORCH_INTERNAL_ASSERT(
+          id->extent()->isOneInt(),
+          "Can not squeeze dimension(s) with size != 1.");
+    } else {
+      auto in_id = in_dom[i];
+      auto out_id = out_dom[i - num_removed_broadcasts];
+      TORCH_INTERNAL_ASSERT(
+          in_id->sameAs(out_id), "IterDomain does not match in BroadcastOp");
+    }
+  }
+  TORCH_INTERNAL_ASSERT(
+      in_size == out_tv->nDims() + num_removed_broadcasts,
+      "The dimensions of output tensor and does not match with is_squeeze_dims and input tensor");
+}
+
+SqueezeOp::SqueezeOp(const SqueezeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      is_squeeze_dims_(src->is_squeeze_dims_) {}
+
+Expr* SqueezeOp::shallowCopy() const {
+  auto result = IrBuilder::create<SqueezeOp>(out_, in_, is_squeeze_dims_);
+  result->copyPredicatesFrom(this);
+  return result;
+}
+
+bool SqueezeOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<SqueezeOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<SqueezeOp>();
+  if (getSqueezeDimFlags() != other_op->getSqueezeDimFlags()) {
     return false;
   }
   return Expr::sameAs(other);

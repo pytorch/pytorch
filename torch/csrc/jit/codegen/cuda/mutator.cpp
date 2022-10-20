@@ -421,6 +421,20 @@ void OptOutMutator::mutate(BroadcastOp* bop) {
   IrBuilder::create<BroadcastOp>(container, out, in, flags);
 }
 
+void OptOutMutator::mutate(SqueezeOp* sop) {
+  Val* out = maybeMutated(sop->out());
+  Val* in = maybeMutated(sop->in());
+
+  if (out->sameAs(sop->out()) && in->sameAs(sop->in())) {
+    return;
+  }
+
+  auto container = sop->container();
+  auto flags = sop->getSqueezeDimFlags();
+  container->removeExpr(sop);
+  IrBuilder::create<SqueezeOp>(container, out, in, flags);
+}
+
 void OptOutMutator::mutate(TransposeOp* top) {
   TensorView* out = maybeMutated(top->out())->as<TensorView>();
   TensorView* in = maybeMutated(top->in())->as<TensorView>();

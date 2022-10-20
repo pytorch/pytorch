@@ -30,6 +30,10 @@ TORCH_CUDA_CU_API TensorView* flatten(
 
 TORCH_CUDA_CU_API TensorView* squeeze(
     TensorView* x,
+    const std::vector<bool>& to_squeeze);
+
+TORCH_CUDA_CU_API TensorView* squeeze(
+    TensorView* x,
     const std::vector<int64_t>& sizes);
 
 TORCH_CUDA_CU_API TensorView* squeeze(

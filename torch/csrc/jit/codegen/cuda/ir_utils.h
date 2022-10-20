@@ -334,6 +334,12 @@ std::string toString(const T& nodes) {
   return ss.str();
 }
 
+// Test if the given tensor is an input of squeeze op
+TORCH_CUDA_CU_API bool isSqueezeInput(const TensorView* tv);
+
+// Test if the given ID in the given tensor is squeezed
+TORCH_CUDA_CU_API bool isSqueezedID(const TensorView* tv, const IterDomain* id);
+
 } // namespace ir_utils
 } // namespace cuda
 } // namespace fuser

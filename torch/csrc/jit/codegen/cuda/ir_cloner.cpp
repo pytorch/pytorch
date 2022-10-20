@@ -120,6 +120,10 @@ void IrCloner::handle(const BroadcastOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }
 
+void IrCloner::handle(const SqueezeOp* op) {
+  clone_ = IrBuilder::clone(op, this);
+}
+
 void IrCloner::handle(const ReductionOp* op) {
   clone_ = IrBuilder::clone(op, this);
 }

@@ -4132,18 +4132,18 @@ TEST_F(NVFuserTest, FusionSqueeze1_CUDA) {
   // [I, B]
   auto tv1 = sum(tv0, {1}, true);
   // [I]
-  auto tv2 = squeeze(tv1, {shape[0], 1});
+  auto tv2 = squeeze(tv1, std::vector<int64_t>{shape[0], 1});
   fusion.addOutput(tv2);
 
   TORCH_CHECK(
-      tv2->nDims() == 2, "Unexpected squeeze result: ", tv2->toString());
+      tv2->nDims() == 1, "Unexpected squeeze result: ", tv2->toString());
 
   // [I, R]
   auto tv3 = sum(tv0, {1});
   // tv3 has only one non-reduction axis. The extent of the first axis
   // is not one, so squeeze should fail.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  ASSERT_ANY_THROW(squeeze(tv3, {shape[0], 1}));
+  ASSERT_ANY_THROW(squeeze(tv3, std::vector<int64_t>{shape[0], 1}));
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({10, 11}, options);
@@ -6272,7 +6272,7 @@ TEST_F(NVFuserTest, FusionReplayTrivialReductionAndBroadcast2_CUDA) {
   tv0->merge(-2, -1)->merge(-2, -1)->split(0, 4);
 
   MaxRootDomainInfoSpanningTree tree(tv0);
-  TransformPropagator tp(tv0);
+  TransformPropagatorWithCheck tp(tv0);
   tree.traverse(&tp);
 
   auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
@@ -6830,6 +6830,139 @@ TEST_F(NVFuserTest, FusionIssue2068_CUDA) {
       __LINE__,
       __FILE__,
       "");
+}
+
+// Similar to the following HuggingFace repro:
+// https://github.com/csarofeen/pytorch/issues/2064
+// but with the trivial reduction replaced with squeeze
+TEST_F(NVFuserTest, FusionHuggingFaceRepro2064Squeeze_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false, false});
+  auto tv2 = mul(tv1, IrBuilder::create<Double>(0.5));
+  auto tv3 = mul(tv1, IrBuilder::create<Double>(0.707107));
+  auto tv4 = erf(tv3);
+  auto tv5 = add(tv4, IrBuilder::create<Double>(1.0));
+  auto tv6 = mul(tv2, tv5);
+  auto tv7 = squeeze(tv6, std::vector<bool>{true, false, false});
+
+  fusion.addOutput(tv1);
+  fusion.addOutput(tv7);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({2, 8}, options);
+  auto t1 = t0.unsqueeze(0);
+  auto t2 = t1 * 0.5;
+  auto t5 = (t1 * 0.707107).erf() + 1.0;
+  auto t6 = t2 * t5;
+  auto t7 = t6.squeeze(0);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {t0},
+      {t1, t7},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
+TEST_F(NVFuserTest, FusionSqueezeTransformPropagation_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({5, 1, 1, 1, 1});
+  fusion.addInput(tv0);
+  auto tv1 = squeeze(tv0, std::vector<bool>{false, true, false, true, false});
+  auto tv2 = squeeze(tv0, std::vector<bool>{false, false, true, false, true});
+  auto tv3 = squeeze(tv0, std::vector<bool>{false, false, false, false, true});
+  fusion.addOutput(tv1);
+  fusion.addOutput(tv2);
+  fusion.addOutput(tv3);
+
+  tv3->merge(0);
+  tv3->merge(0);
+  tv3->merge(0);
+
+  MaxRootDomainInfoSpanningTree tree(tv3);
+  TransformPropagatorWithCheck tp(tv3);
+  tree.traverse(&tp);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({5, 1, 1, 1, 1}, options);
+  auto t1 = t0.squeeze(1).squeeze(2);
+  auto t2 = t0.squeeze(2).squeeze(-1);
+  auto t3 = t0.squeeze(-1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t1, t2, t3}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionSqueezeInlining_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({1, -1});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = squeeze(tv1, std::vector<bool>{true, false});
+  fusion.addOutput(tv2);
+
+  tv0->merge(0);
+  tv0->split(0, 128);
+
+  {
+    MaxRootDomainInfoSpanningTree tree(tv0);
+    TransformPropagatorWithCheck tp(tv0);
+    tree.traverse(&tp);
+    TORCH_CHECK(tv2->nDims() == 2);
+    TORCH_CHECK(tv1->nDims() == 2);
+    TORCH_CHECK(tv0->nDims() == 2);
+  }
+
+  {
+    // The propagation here should be a no-op, I am adding it here just to test
+    // if transformation propagation works for squeeze on both direction.
+    MaxRootDomainInfoSpanningTree tree(tv2);
+    TransformPropagatorWithCheck tp(tv2);
+    tree.traverse(&tp);
+    TORCH_CHECK(tv2->nDims() == 2);
+    TORCH_CHECK(tv1->nDims() == 2);
+    TORCH_CHECK(tv0->nDims() == 2);
+  }
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  inlineMost();
+
+  TORCH_CHECK(tv1->getComputeAtPosition() == 2);
+  TORCH_CHECK(tv2->getComputeAtPosition() == 2);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1, 1024}, options);
+  auto t1 = t0.squeeze(0);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t1}, __LINE__, __FILE__);
 }
 
 // HuggingFace repro:

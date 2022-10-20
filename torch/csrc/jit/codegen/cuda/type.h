@@ -116,6 +116,7 @@ enum class ExprType {
   ReductionOp,
   GroupedReductionOp,
   BroadcastOp,
+  SqueezeOp,
   WelfordOp,
   GroupedWelfordOp,
   MmaOp,

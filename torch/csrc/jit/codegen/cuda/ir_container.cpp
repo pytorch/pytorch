@@ -110,10 +110,6 @@ void IrContainer::registerExpr(IrBuilderPasskey, Expr* expr) {
   registerExpr(expr);
 }
 
-void IrContainer::registerExpr(ExprPasskey, Expr* expr) {
-  registerExpr(expr);
-}
-
 void IrContainer::removeExpr(Expr* expr) {
   TORCH_INTERNAL_ASSERT(
       exprs_.find(expr) != exprs_.end(),

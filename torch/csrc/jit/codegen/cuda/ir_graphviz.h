@@ -90,6 +90,7 @@ class TORCH_CUDA_CU_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const TernaryOp*) override;
   void handle(const RNGOp*) override;
   void handle(const BroadcastOp*) override;
+  void handle(const SqueezeOp*) override;
   void handle(const ReductionOp*) override;
 
   void handle(const Split*) override;

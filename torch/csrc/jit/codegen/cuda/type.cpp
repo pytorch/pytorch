@@ -323,6 +323,8 @@ static const char* expr_type2string(ExprType t) {
       return "GroupedReductionOp";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
+    case ExprType::SqueezeOp:
+      return "SqueezeOp";
     case ExprType::WelfordOp:
       return "WelfordOp";
     case ExprType::GroupedWelfordOp:

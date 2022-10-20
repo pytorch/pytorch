@@ -1181,7 +1181,7 @@ class AllocateReuseModifier {
     return false;
   }
 
-  // Utility to capture reduction ops
+  // Utility to capture broadcast ops
   bool isBroadcastTvOp(const Expr* expr) {
     if (!ir_utils::isTvOp(expr)) {
       return false;

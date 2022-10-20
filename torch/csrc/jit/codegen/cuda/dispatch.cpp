@@ -137,6 +137,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
       return;
+    case ExprType::SqueezeOp:
+      ptr(handler)->handle(expr->as<SqueezeOp>());
+      return;
 
     case ExprType::Split:
       ptr(handler)->handle(expr->as<Split>());
@@ -328,6 +331,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
+      return;
+    case ExprType::SqueezeOp:
+      ptr(handler)->handle(expr->as<SqueezeOp>());
       return;
 
     case ExprType::Split:
@@ -528,6 +534,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::BroadcastOp:
       ptr(mutator)->mutate(expr->as<BroadcastOp>());
+      return;
+    case ExprType::SqueezeOp:
+      ptr(mutator)->mutate(expr->as<SqueezeOp>());
       return;
 
     case ExprType::Split:
@@ -794,6 +803,9 @@ void OptOutConstDispatch::handle(const MmaOp* stmt) {
 void OptOutConstDispatch::handle(const BroadcastOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const SqueezeOp* stmt) {
+  unhandled(stmt);
+}
 
 void OptOutConstDispatch::handle(const Split* stmt) {
   unhandled(stmt);
@@ -954,6 +966,9 @@ void OptOutDispatch::handle(MmaOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(BroadcastOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(SqueezeOp* stmt) {
   unhandled(stmt);
 }
 

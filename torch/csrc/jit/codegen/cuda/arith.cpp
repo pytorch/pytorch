@@ -1160,6 +1160,8 @@ TensorView* reductionOp(
     TensorView* tv,
     bool keep_dim /*=false*/,
     DataType dtype /* DataType::Null */) {
+  // TODO: should we use squeeze for size 1 broadcast dim?
+
   TORCH_CHECK(
       init->isConstScalar(),
       "Cannot create a reduction operation where the initial value is not a const scalar.");

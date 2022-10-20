@@ -73,6 +73,7 @@ IR_BUILDER_INSTANTIATE(WelfordOp)
 IR_BUILDER_INSTANTIATE(LoadStoreOp)
 IR_BUILDER_INSTANTIATE(MmaOp)
 IR_BUILDER_INSTANTIATE(BroadcastOp)
+IR_BUILDER_INSTANTIATE(SqueezeOp)
 
 Val* IrBuilder::newResult(DataType dtype) {
   switch (dtype) {

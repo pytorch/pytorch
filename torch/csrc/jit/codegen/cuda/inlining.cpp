@@ -31,7 +31,8 @@ void MaxPosCalculator::buildUnmappableDims() {
           root_map.getMappableDims(tv->domain(), consumer->domain());
       for (auto tv_root_id : tv->getMaybeRFactorDomain()) {
         if (mappable_roots.find(tv_root_id) == mappable_roots.end() &&
-            !tv_root_id->isTrivialReduction()) {
+            !tv_root_id->isTrivialReduction() &&
+            !ir_utils::isSqueezedID(tv, tv_root_id)) {
           unmappable_dims_.emplace(tv_root_id);
         }
       }

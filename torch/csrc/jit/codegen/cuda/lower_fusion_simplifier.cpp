@@ -105,6 +105,14 @@ class UnaryOpInserter : private kir::ExprMutator {
         top, IrBuilder::create<UnaryOp>(container, UnaryOpType::Set, out, in));
   }
 
+  void handle(SqueezeOp* sop) final {
+    auto out = sop->out();
+    auto in = sop->in();
+    auto container = out->container();
+    registerReplace(
+        sop, IrBuilder::create<UnaryOp>(container, UnaryOpType::Set, out, in));
+  }
+
   void handle(ExpandOp* eop) final {
     auto out = eop->out();
     auto in = eop->in();

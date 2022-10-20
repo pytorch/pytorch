@@ -487,6 +487,12 @@ void IrGraphGenerator::handle(const BroadcastOp* op) {
   addArc(op, op->out());
 }
 
+void IrGraphGenerator::handle(const SqueezeOp* op) {
+  printExpr(op, "Squeeze");
+  addArc(op->in(), op);
+  addArc(op, op->out());
+}
+
 void IrGraphGenerator::handle(const ReductionOp* op) {
   // node
   std::stringstream label;

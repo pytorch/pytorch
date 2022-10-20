@@ -69,11 +69,6 @@ class TORCH_CUDA_CU_API IrContainer : public PolymorphicBase {
   //! Register expr with this container.
   virtual void registerExpr(IrBuilderPasskey, Expr* expr);
 
-  //! Allow expr's to register themselves with a container, this is only used
-  //! for broadcastOp so it can register itself in its constructor so root maps
-  //! can be built.
-  virtual void registerExpr(ExprPasskey, Expr* expr);
-
   //! Return the set of Exprs registered with this fusion. Warning: This will
   //! return exprs outside inputs/outputs, so can be unsafe for use with
   //! segmented fusions.

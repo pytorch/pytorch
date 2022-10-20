@@ -131,6 +131,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::LoadStoreOp ||
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
+       expr->getExprType().value() == ExprType::SqueezeOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ExpandOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
