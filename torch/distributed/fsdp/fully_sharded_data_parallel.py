@@ -2763,6 +2763,7 @@ class FullyShardedDataParallel(nn.Module):
         with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.load_state_dict(state_dict, strict)
 
+    @torchdynamo.skip
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
         Runs the forward pass for the wrapped module, inserting FSDP-specific
