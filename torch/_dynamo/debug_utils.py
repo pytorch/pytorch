@@ -83,6 +83,11 @@ class NNModuleToString:
 
         for module_name, module in gm.named_children():
             module_str = f"{module.__repr__()}"
+            # module should be a core torch.nn.Module, so all parameters
+            # should be on the same device.
+            example_param = next(module.parameters(), None)
+            if example_param is not None and example_param.is_cuda:
+                module_str = f"{module_str}.cuda()" 
             model_str += f"{tab*2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
@@ -94,12 +99,17 @@ class NNModuleToString:
                 tensor_str = (
                     f"torch.randint(1, size={list(buffer.shape)}, dtype={buffer.dtype})"
                 )
+            if buffer.is_cuda:
+                tensor_str = f"{tensor_str}.cuda()"
             model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
 
         for param_name, param in gm._parameters.items():
+            # import pdb; pdb.set_trace()
             if param is None:
                 continue
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
+            if param.is_cuda:
+                tensor_str = f"{tensor_str}.cuda()"
             model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
@@ -169,7 +179,7 @@ def generate_compiler_repro_string(gm, args):
     model_str += (
         "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
     )
-    model_str += 'mod = make_fx(Repro().to(device="cuda"))(*args)\n'
+    model_str += 'mod = make_fx(Repro())(*args)\n'
     return model_str
 
 
@@ -544,6 +554,9 @@ def cast_to_fp64(model, inputs):
     return cast_to(torch.float64, model, inputs)
 
 
+TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
+
+
 def generate_dynamo_fx_repro_string(
     model_str, args, compiler_name, check_accuracy=False
 ):
@@ -581,12 +594,14 @@ from {config.dynamo_import}.testing import rand_strided
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.debug_utils import same_two_models
 
+{TEST_REPLACEABLE_COMMENT}
+
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
 
 {model_str}
 
-mod = Repro().cuda()
+mod = Repro()
 opt_mod = {config.dynamo_import}.optimize("{compiler_name}")(mod)
 
 {run_code}
@@ -757,13 +772,15 @@ from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
 
+{TEST_REPLACEABLE_COMMENT}
+
 {config.dynamo_import}.config.repro_dir = \"{minifier_dir()}\"
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
 
 {model_str}
-mod = Repro().cuda()
+mod = Repro()
 
 # Setup debug minifier compiler
 compiler_fn = BACKENDS["{minifier_backend}"]
@@ -794,6 +811,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
         assert config.repro_after in ("dynamo", "aot", None)
+        model_str = NNModuleToString.convert(gm)
         if config.repro_after == "dynamo":
             # Ensure that we fail when backend fails
             config.raise_on_backend_error = True
