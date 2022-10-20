@@ -1093,6 +1093,9 @@ op_db: List[OpInfo] = [
         supports_out=True,
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True,
+        skips=(
+            DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+        ),
     ),
     OpInfo(
         "linalg.det",
@@ -1211,6 +1214,7 @@ op_db: List[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=(torch.complex64, torch.complex128),
             ),
+            DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
         ),
     ),
     OpInfo(
@@ -1647,6 +1651,9 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_out=False,
         sample_inputs_func=sample_inputs_linalg_vander,
+        skips=(
+               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+        ),
     ),
     ReductionOpInfo(
         "linalg.vector_norm",
@@ -2123,6 +2130,9 @@ op_db: List[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
+        skips=(
+            DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+        ),
     ),
     OpInfo(
         "linalg.tensorsolve",
@@ -2141,6 +2151,9 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ],
+        skips=(
+            DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+        ),
     ),
 ]
 

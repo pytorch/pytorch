@@ -98,22 +98,6 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
-# This list specifies the ops that should be skipped by `test_numpy_ref_mps`. Currently a large chunk of
-# `op_db`'s tests fail, but as MPS is brought in line with numpy, this list should disappear.
-_ops_failing_on_mps = [
-    'addbmm',
-    'linalg.cross',
-    'linalg.tensorinv',
-    'linalg.tensorsolve',
-    'linalg.vander',
-    'linalg.vecdot',
-    'native_layer_norm',
-    'nn.functional.conv_transpose2d',
-    'nn.functional.gelu',
-    'nn.functional.layer_norm',
-    'nn.functional.pdist',
-    'searchsorted'
-]
 _ops_and_refs = op_db + python_ref_db
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
@@ -198,9 +182,6 @@ class TestCommon(TestCase):
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
     def test_numpy_ref_mps(self, device, dtype, op):
-        if op.name in _ops_failing_on_mps:
-            raise unittest.SkipTest("Unsupported or fails on MPS")
-
         try:
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
