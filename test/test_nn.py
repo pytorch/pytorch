@@ -17886,13 +17886,32 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.double)
     def test_transformerencoderlayer_fast_path(self, device, dtype):
+        """
+        Test transformer fast path on CPU with different valid mask types and shapes
+        """
         model = torch.nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True, device=device, dtype=dtype)
         src = torch.rand(32, 10, 512)
-        src_mask = torch.zeros(10, 10).to(torch.bool)
-
         model.eval()
+
+        # Attention mask of shape (seq_len, src_len)
+        src_mask = torch.zeros(10, 10).to(torch.bool)
         with torch.no_grad():
-            model(src, src_mask)
+            model(src, src_mask=src_mask)
+
+        # Attention mask of shape (batch_size * nhead, src_len, src_len)
+        src_mask = torch.zeros(32 * 8, 10, 10).to(torch.bool)
+        with torch.no_grad():
+            model(src, src_mask=src_mask)
+
+        # Padding mask of shape (src_len)
+        src_key_padding_mask = torch.zeros(10).to(torch.bool)
+        with torch.no_grad():
+            model(src, src_key_padding_mask=src_key_padding_mask)
+
+        # Padding mask of shape (batch_size, src_len)
+        src_key_padding_mask = torch.zeros(32, 10).to(torch.bool)
+        with torch.no_grad():
+            model(src, src_key_padding_mask=src_key_padding_mask)
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
