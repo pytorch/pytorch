@@ -128,15 +128,53 @@ Tensor masked_softmax(
         "negatively affect performance. Prefer to use a boolean mask directly.");
     attn_mask = attn_mask->to(at::kBool);
   }
-  if (attn_scores.is_cpu() && attn_mask && attn_mask->dim() == 2) {
-    // TODO: CPU path does not support transformer mask yet.
+
+  if (attn_scores.is_cpu() && attn_mask) {
+
     const auto batch_size = attn_scores.sizes()[0];
+    const auto num_heads = attn_scores.sizes()[1];
     const auto seq_len = attn_scores.sizes()[3];
-    TORCH_CHECK(attn_mask->sizes()[0] == batch_size);
-    TORCH_CHECK(attn_mask->sizes()[1] == seq_len);
-    attn_mask = attn_mask->view({batch_size, 1, 1, seq_len});
+
+    TORCH_CHECK((mask_type == 0) || (mask_type == 1) || (mask_type == 2),
+    "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask), or 2 (default_mask)");
+    if (mask_type == 0) {
+
+      TORCH_CHECK((attn_mask->dim() == 2) || (attn_mask->dim() == 3),
+      "Mask of type 0 (src_mask) should have either 2 dimensions (seq_len, src_len) or 3 dimensions (batch_size * num_heads, seq_len, seq_len)");
+      if (attn_mask->dim() == 2) {
+          TORCH_CHECK(attn_mask->sizes()[0] == seq_len);
+          TORCH_CHECK(attn_mask->sizes()[1] == seq_len);
+          attn_mask = attn_mask->view({1, 1, seq_len, seq_len});
+
+        } else {
+          TORCH_CHECK(attn_mask->sizes()[0] == batch_size * num_heads);
+          TORCH_CHECK(attn_mask->sizes()[1] == seq_len);
+          TORCH_CHECK(attn_mask->sizes()[2] == seq_len);
+          attn_mask = attn_mask->view({batch_size, num_heads, seq_len, seq_len});
+
+        };
+
+    } else if (mask_type == 1) {
+
+      TORCH_CHECK((attn_mask->dim() == 1) || (attn_mask->dim() == 2),
+      "Mask of type 1 (src_key_padding_mask) should have either 1 dimension (seq_len) or 2 dimensions (batch_size, seq_len)");
+      if (attn_mask->dim() == 1) {
+          TORCH_CHECK(attn_mask->sizes()[0] == seq_len);
+          attn_mask = attn_mask->view({1, 1, 1, seq_len});
+        } else if (attn_mask->dim() == 2) {
+          TORCH_CHECK(attn_mask->sizes()[0] == batch_size);
+          TORCH_CHECK(attn_mask->sizes()[1] == seq_len);
+          attn_mask = attn_mask->view({batch_size, 1, 1, seq_len});
+        } else {
+           TORCH_CHECK(false, "Wrong attn_mask dims");
+        }
+
+    };
+
     attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
+
   }
+
   if (attn_mask) {
     return _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);
   } else {
