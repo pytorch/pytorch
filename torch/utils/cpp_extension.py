@@ -70,7 +70,9 @@ CUDA_CLANG_VERSIONS = {
     '11.7': ((6, 0, 0), (13, 0, 0)),
 }
 
-
+__all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
+           "CppExtension", "CUDAExtension", "include_paths", "library_paths", "load", "load_inline", "is_ninja_available",
+           "verify_ninja_availability"]
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
 def _nt_quote_args(args: Optional[List[str]]) -> List[str]:
@@ -292,7 +294,9 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
     # If compiler wrapper is used try to infer the actual compiler by invoking it with -v flag
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
+    env = os.environ.copy()
+    env['LC_ALL'] = 'C'  # Don't localize output
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
         # Check for 'gcc' or 'g++' for sccache warpper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)

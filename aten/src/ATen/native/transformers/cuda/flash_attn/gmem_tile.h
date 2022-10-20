@@ -118,7 +118,7 @@ struct Gmem_tile_mma_s : public Base {
     // Store to global memory.
     template<typename Mask, typename Fragment>
     inline __device__ void store(const Fragment (&frag)[N][M], const Mask& mask){
-        static_assert(Fragment::kStorageElements == 4);
+        static_assert(Fragment::kStorageElements == 4, "");
         #pragma unroll
         for( int mi = 0; mi < M; mi++ ) {
             #pragma unroll

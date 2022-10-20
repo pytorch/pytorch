@@ -1,7 +1,5 @@
 """Module for handling symbolic function registration."""
 
-import importlib
-import inspect
 import warnings
 from typing import (
     Callable,
@@ -35,26 +33,27 @@ def _dispatch_opset_version(
     """
     if not registered_opsets:
         return None
-    registered_versions = sorted(registered_opsets)
+
+    descending_registered_versions = sorted(registered_opsets, reverse=True)
     # Linear search for the opset version, which is fine since the number of opset
     # versions is small.
 
-    # Always round toward opset 9 (ONNX_BASE_OPSET).
-    # Count down until opset 9 is reached.
-    for version in reversed(registered_versions):
-        if _constants.ONNX_BASE_OPSET <= version <= target:
-            return version
+    if target >= _constants.ONNX_BASE_OPSET:
+        # Always look down toward opset 1 when the target is >= ONNX_BASE_OPSET (opset 9).
+        # When a custom op is register at opset 1, we want to be able to discover it as a
+        # fallback for all opsets >= ONNX_BASE_OPSET.
+        for version in descending_registered_versions:
+            if version <= target:
+                return version
+        return None
 
-    for version in registered_versions:
+    # target < opset 9. This is the legacy behavior to support opset 7 and opset 8.
+    # for caffe2 support. We search up toward opset 9.
+    for version in reversed(descending_registered_versions):
         # Count back up until _constants.ONNX_BASE_OPSET
         if target <= version <= _constants.ONNX_BASE_OPSET:
             return version
 
-    assert (
-        not registered_versions
-        or _constants.ONNX_BASE_OPSET <= target < registered_versions[0]
-        or registered_versions[-1] < _constants.ONNX_BASE_OPSET <= target
-    )
     return None
 
 
@@ -263,49 +262,6 @@ class SymbolicRegistry:
     def all_functions(self) -> Set[str]:
         """Returns the set of all registered function names."""
         return set(self._registry)
-
-
-def discover_and_register_all_symbolic_opsets() -> None:
-    """Discover all symbolic functions.
-    Opset 9 is the base version. It is selected as the base version because
-        1. It is the first opset version supported by PyTorch export.
-        2. opset 9 is more robust than previous opset versions. Opset versions like 7/8 have limitations
-            that certain basic operators cannot be expressed in ONNX. Instead of basing on these limitations,
-            we chose to handle them as special cases separately.
-
-    Backward support for opset versions beyond opset 7 is not in our roadmap.
-    For opset versions other than 9, by default they will inherit the symbolic functions defined in
-    symbolic_opset9.py.
-
-    To extend support for updated operators in different opset versions on top of opset 9,
-    simply add the updated symbolic functions in the respective symbolic_opset{version}.py file.
-    Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.py for example.
-    """
-    for opset in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
-        module = importlib.import_module(f"torch.onnx.symbolic_opset{opset}")
-        _register_module(module, opset)
-
-
-def _register_module(module, opset: OpsetVersion) -> None:
-    """Registers all functions in the given module.
-
-    Args:
-        module: The module to register.
-        opset: The opset version to register.
-    """
-    global registry
-    members = inspect.getmembers(module)
-    for name, obj in members:
-        if isinstance(obj, type) and hasattr(obj, "domain"):
-            # Symbolic functions in domains other than aten
-            ops = inspect.getmembers(obj, predicate=inspect.isfunction)
-            for op in ops:
-                registry.register(f"{obj.domain}::{op[0]}", opset, op[1])  # type: ignore[attr-defined]
-
-        elif inspect.isfunction(obj):
-            if name in {"_len", "_list", "_any", "_all"}:
-                name = name[1:]
-            registry.register(f"aten::{name}", opset, obj)
 
 
 @_beartype.beartype
