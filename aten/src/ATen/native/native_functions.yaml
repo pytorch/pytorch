@@ -5978,6 +5978,7 @@
     CPU, CUDA: zero_
     MPS: zero_mps_
     Meta: zero_meta_
+    QuantizedCPU: zero_quantized_cpu_
     SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_

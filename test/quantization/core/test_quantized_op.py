@@ -1269,6 +1269,15 @@ class TestQuantizedOps(TestCase):
         np.testing.assert_equal(qC, qC_hat.int_repr(),
                                 "Quantized multiplication failed.")
 
+    """Tests the correctness of the QuantizedCPU zero_."""
+    def test_qzero_(self):
+        A = torch.randn(5)
+        qA = torch.quantize_per_tensor(A, 5, 5, torch.quint8)
+        qB = torch.quantize_per_tensor(torch.zeros((5)), 0, 0, torch.quint8)
+        qA.zero_()
+        self.assertEqual(qA, qB,
+                                "Quantized zero_ failed.")
+
     """Tests that quantized add works with broadcasting"""
     def test_qadd_broadcast(self):
         A = torch.randn(1, 1, 4, 4)
