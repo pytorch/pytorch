@@ -5,7 +5,11 @@ import sys
 import types
 from typing import Any, List, Optional
 
-from .bytecode_analysis import stacksize_analysis
+from .bytecode_analysis import (
+    propagate_line_nums,
+    remove_extra_line_nums,
+    stacksize_analysis,
+)
 
 
 @dataclasses.dataclass
@@ -332,6 +336,7 @@ def transform_code_object(code, transformations, safe=False):
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
     instructions = cleaned_instructions(code, safe)
+    propagate_line_nums(instructions)
 
     transformations(instructions, code_options)
 
@@ -344,6 +349,7 @@ def transform_code_object(code, transformations, safe=False):
         # this pass might change offsets, if so we need to try again
         dirty = fix_extended_args(instructions)
 
+    remove_extra_line_nums(instructions)
     bytecode, lnotab = assemble(instructions, code_options["co_firstlineno"])
     if sys.version_info < (3, 10):
         code_options["co_lnotab"] = lnotab
