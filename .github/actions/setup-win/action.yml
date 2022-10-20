@@ -63,8 +63,3 @@ runs:
           **/requirements.txt
           **/.circleci/docker/requirements-ci.txt
           **/.github/requirements-gha-cache.txt
-
-    - name: Install all (cached) pip dependencies in Windows here
-      shell: bash
-      run: |
-        pip install -r .github/requirements-gha-cache.txt
