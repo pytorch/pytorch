@@ -4038,21 +4038,17 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    if dtype is None:
-        dtype = torch.get_default_dtype()
-
-    # NB: NumPy actually doesn't do this cast, but for this ref, I'd rather have this
-    #     cast than not, because it allows us to always go into the precise path
-    #     if dtype is integral and not worry about whether start/end are float
-    if prims.utils.is_integer_dtype(dtype):
-        if isinstance(start, float):
-            start = int(start)
-        if isinstance(end, float):
-            end = int(end)
-
+    result_dtype = utils.type_to_dtype(utils.get_higher_type(type(start), type(end)))
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
-        raise NotImplementedError
-    assert not isinstance(start, complex) and not isinstance(end, complex)  # for mypy
+        if dtype is None:
+            dtype = corresponding_complex_dtype(torch.get_default_dtype())
+        else:
+            check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {result_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = dtype or torch.get_default_dtype()
 
     check(
         isinstance(steps, int),
@@ -4075,12 +4071,17 @@ def linspace(
     elif start == end:
         return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
     else:
-        step_size = (end - start) / (steps - 1)
+        step_size = 1 / (steps - 1)
         eps = step_size / 2
-        ret_double = torch.arange(  # type: ignore[call-overload]
-            start, end + eps, step_size, dtype=torch.float64, **factory_kwargs
+        # torch.arange is a reduction, so we need precision here
+        rg = torch.arange(  # type: ignore[call-overload]
+            0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs
         )
-        return _maybe_convert_to_dtype(ret_double, dtype)
+        float_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
+        rg = _maybe_convert_to_dtype(rg, float_dtype)
+        cast = partial(torch.full, (1,), dtype=float_dtype, **factory_kwargs)
+        out = torch.lerp(cast(start), cast(end), rg)
+        return _maybe_convert_to_dtype(out, dtype)
 
 
 @register_decomposition(torch.ops.aten.logspace)
