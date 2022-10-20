@@ -25,7 +25,7 @@ aten = torch.ops.aten
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
 
 
-def register_meta(op, register_dispatcher=True):
+def register_meta(op):
     def wrapper(f):
         def add_func(aten_op):
             overloads = []
@@ -101,7 +101,7 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
-@register_meta(aten.copy_.default, register_dispatcher=False)
+@register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
     return self
 
@@ -241,7 +241,7 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
-@register_meta(aten.bernoulli_.float, register_dispatcher=False)
+@register_meta(aten.bernoulli_.float)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
@@ -283,7 +283,7 @@ def meta_dot(self, tensor):
     return self.new_empty(())
 
 
-@register_meta([aten.mm.default], register_dispatcher=False)
+@register_meta([aten.mm.default])
 def meta_mm(a, b):
     check(a.dim() == 2, lambda: "a must be 2D")
     check(b.dim() == 2, lambda: "b must be 2D")
@@ -467,7 +467,7 @@ def check_dim_size(tensor, dim, dim_size, size):
     )
 
 
-@register_meta(aten.avg_pool2d.default, register_dispatcher=False)
+@register_meta(aten.avg_pool2d.default)
 def meta_avg_pool2d(
     input,
     kernel_size,
@@ -586,7 +586,7 @@ def avg_pool2d_backward_shape_check(
 
 
 # Don't override the C++ registration.
-@register_meta(aten.avg_pool2d_backward.default, register_dispatcher=False)
+@register_meta(aten.avg_pool2d_backward.default)
 def meta_avg_pool2d_backward(
     gradOutput_,
     input,
@@ -731,7 +731,7 @@ def vdot(self, other):
 # of indexing shape inference is useful,
 # but not registering it to the dispatcher because we already
 # get shape inference through structured kernels
-@register_meta(aten.index.Tensor, register_dispatcher=False)
+@register_meta(aten.index.Tensor)
 def meta_index_Tensor(self, indices):
     check_no_bool_index_tensors(aten.index.Tensor, self, indices)
     check(indices, lambda: "at least one index must be provided")
@@ -1106,40 +1106,39 @@ def meta_repeat(self, repeats):
     return self.new_empty(target_size)
 
 
-@register_meta(aten.zero_.default, register_dispatcher=False)
+@register_meta(aten.zero_.default)
 def meta_zero_(self):
     return self
 
 
 @register_meta(
-    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar],
-    register_dispatcher=False,
+    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar]
 )
 def meta_fill_(self, val):
     return self
 
 
-@register_meta(aten.relu_.default, register_dispatcher=False)
+@register_meta(aten.relu_.default)
 def meta_relu_(self):
     return self
 
 
-@register_meta(aten.index_put.default, register_dispatcher=False)
+@register_meta(aten.index_put.default)
 def meta_index_put(self, indices, values, accumulate=False):
     return self.new_empty(self.size())
 
 
-@register_meta(aten.masked_fill_.Scalar, register_dispatcher=False)
+@register_meta(aten.masked_fill_.Scalar)
 def meta_masked_fill_(self, mask, value):
     return self
 
 
-@register_meta(aten.index_put_.default, register_dispatcher=False)
+@register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     return self
 
 
-@register_meta(aten.alias.default, register_dispatcher=False)
+@register_meta(aten.alias.default)
 def meta_alias(self):
     return self.view(self.shape)
 
@@ -1177,7 +1176,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
     return output
 
 
-@register_meta(aten.bmm.default, register_dispatcher=False)
+@register_meta(aten.bmm.default)
 def meta_bmm(self, mat2):
     return common_meta_baddbmm_bmm(self, mat2, True)
 
@@ -1287,7 +1286,7 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices.default, register_dispatcher=False)
+@register_meta(aten.max_pool2d_with_indices.default)
 def meta_max_pool2d_with_indices(
     input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
 ):
@@ -1485,7 +1484,7 @@ def gather_shape_check(self, dim, index):
             )
 
 
-@register_meta(aten.gather.default, register_dispatcher=False)
+@register_meta(aten.gather.default)
 def meta_gather(self, dim, index, sparse_grad=False):
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
     is_index_empty = index.numel() == 0
@@ -1601,7 +1600,7 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
         get_operator_enum(reduce_, use_new_options)
 
 
-@register_meta(aten.scatter_add.default, register_dispatcher=False)
+@register_meta(aten.scatter_add.default)
 def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
