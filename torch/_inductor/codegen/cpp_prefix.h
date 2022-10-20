@@ -5,6 +5,7 @@
 #include <limits>
 #include <omp.h>
 
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>

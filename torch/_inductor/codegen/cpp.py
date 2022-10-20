@@ -72,6 +72,17 @@ def reduction_combine(reduction_type, var, next_value):
     return f"{var} = std::{reduction_type}({var}, {next_value})"
 
 
+def reduction_combine_vec(reduction_type, var, next_value):
+    if reduction_type == "max":
+        return f"{var} = at::vec::maximum({var}, {next_value})"
+    elif reduction_type == "min":
+        return f"{var} = at::vec::minimum({var}, {next_value})"
+    elif reduction_type == "sum":
+        return f"{var} += {next_value}"
+    else:
+        raise NotImplementedError()
+
+
 index_value_name_counter = 1
 
 
@@ -260,6 +271,14 @@ class CppVecOverrides(OpOverrides):
         else:
             quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({repr(val)})"
         return f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({quote})"
+
+    @staticmethod
+    def minimum(a, b):
+        return f"at::vec::minimum({a}, {b})"
+
+    @staticmethod
+    def maximum(a, b):
+        return f"at::vec::maximum({a}, {b})"
 
 
 class CppOverrides(OpOverrides):
@@ -671,6 +690,44 @@ class CppVecKernel(CppKernel):
         line = f"{value}.store({var} + {cexpr(new_index)});"
         self.stores.writeline(name, line)
 
+    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+        assert reduction_type in {"max", "min", "sum"}
+        assert dtype == torch.float
+        assert src_dtype == torch.float
+        reduce_map = {"max": "maximum", "min": "minimum"}
+
+        tmpvar = self.cse.generate(
+            self.loads, f"reduction {name} {cexpr(index)}", write=False
+        )
+        tmpvar_vec = f"{tmpvar}_vec"
+
+        index = self.rename_indexing(index)
+        self.reduction_vars[tmpvar] = reduction_type
+        self.reduction_prefix.writeline(
+            f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+        )
+        self.reduction_prefix.writeline(
+            f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
+        )
+        self.stores.writeline(
+            None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+        )
+
+        vec_ns = "at::vec"
+        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+        reduce_all_body = "{"
+        if reduction_type == "sum":
+            reduce_all_body += "return x + y;"
+        else:
+            reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
+        reduce_all_body += "}"
+        vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+        self.reduction_suffix.writeline(
+            name,
+            f"{tmpvar} = {vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec});",
+        )
+        self.cse.store_cache[name] = tmpvar
+
 
 class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads):
@@ -721,7 +778,14 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        self.simd_vec = False
+        if (
+            dtype == torch.float
+            and src_dtype == torch.float
+            and reduction_type in ["max", "min", "sum"]
+        ):
+            pass
+        else:
+            self.simd_vec = False
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -781,8 +845,8 @@ class CppVecKernelChecker(CppVecKernel):
 class CppKernelProxy(CppKernel):
     def __init__(self, args=None, num_threads=None):
         super(CppKernelProxy, self).__init__(args, num_threads)
-        self.simd_vec_kernel = None
-        self.simd_omp_kernel = None
+        self.simd_vec_kernel: CppVecKernel = None
+        self.simd_omp_kernel: CppKernel = None
 
     def vectorize_most_inner_loop(self, loop_nest):
         loop_nest.split_most_inner_loop(config.cpp.simdlen)
@@ -792,7 +856,7 @@ class CppKernelProxy(CppKernel):
         self.simd_vec_kernel.simd = False
         self.simd_vec_kernel.fast_vec = True
 
-        loop_with_tail.tail_loop.simd_omp = True
+        # loop_with_tail.tail_loop.simd_omp = True
         loop_with_tail.tail_loop.simd_len = int(config.cpp.simdlen / 2)
         loop_with_tail.tail_loop.simd_vec = False
 
@@ -809,51 +873,81 @@ class CppKernelProxy(CppKernel):
 
         assert self.simd_vec_kernel.itervars == self.simd_omp_kernel.itervars
         assert self.simd_vec_kernel.ranges == self.simd_omp_kernel.ranges
+        assert (
+            self.simd_vec_kernel.reduction_vars == self.simd_omp_kernel.reduction_vars
+        )
 
         itervars = self.simd_vec_kernel.itervars
         rangs = self.simd_vec_kernel.ranges
         loops = [LoopLevel(var, size) for var, size in zip(itervars, rangs)]
 
         # TODO: Support reductions
-        loops_nest_non_reduc, _ = LoopNest(loops[: self.reduction_depth]), LoopNest(
-            loops[self.reduction_depth :]
+        assert (
+            self.simd_vec_kernel.reduction_depth == self.simd_omp_kernel.reduction_depth
         )
+        reduction_depth = self.simd_vec_kernel.reduction_depth
+        loops_nest_non_reduce, loops_nest_reduce = LoopNest(
+            loops[:reduction_depth]
+        ), LoopNest(loops[reduction_depth:])
+        loops_nest_reduce.mark_reduction(self.simd_vec_kernel.reduction_vars)
 
-        assert config.cpp.simdlen
-        loops_nest_non_reduc.loops[-1].simd_omp = True
+        if config.cpp.simdlen:
+            # TODO(jansel): detect stride-1 dimension and vectorize that
+            if loops_nest_reduce:
+                loops_nest_reduce.loops[-1].simd = True
+            elif loops:
+                loops_nest_non_reduce.loops[-1].simd = True
 
         par_depth = 0
-        if loops_nest_non_reduc:
+        reduction_par_depth = 0
+        if loops_nest_non_reduce:
             par_depth = self.simd_vec_kernel.decide_parallel_depth(
-                self.simd_vec_kernel.call_ranges[: self.reduction_depth], threads
+                self.simd_vec_kernel.call_ranges[:reduction_depth], threads
+            )
+        else:
+            reduction_par_depth = self.simd_vec_kernel.decide_parallel_depth(
+                self.simd_vec_kernel.call_ranges[reduction_depth:], threads
             )
 
         with contextlib.ExitStack() as stack:
             if par_depth:
                 worksharing.parallel(threads)
-                loops_nest_non_reduc.mark_parallel(par_depth)
+                loops_nest_non_reduce.mark_parallel(par_depth)
+            elif reduction_par_depth:
+                # need to close the worksharing scope to define reduction vars outside it
+                worksharing.close()
+                loops_nest_reduce.mark_parallel(reduction_par_depth)
             elif threads > 1:
                 if worksharing.single():
                     stack.enter_context(code.indent())
 
-            self.vectorize_most_inner_loop(loops_nest_non_reduc)
+            if loops_nest_reduce:
+                self.vectorize_most_inner_loop(loops_nest_reduce)
+            else:
+                self.vectorize_most_inner_loop(loops_nest_non_reduce)
 
-            for loop in loops_nest_non_reduc.loops[0:-1]:
+            for loop in loops[0:-1]:
                 code.writelines(loop.lines())
                 stack.enter_context(code.indent())
 
-            loop_with_tail: LoopLevelWithTail = loops_nest_non_reduc.loops[-1]
+            code.splice(self.simd_vec_kernel.reduction_prefix)
+
+            if loops_nest_reduce:
+                loop_with_tail: LoopLevelWithTail = loops_nest_reduce.loops[-1]
+            else:
+                loop_with_tail: LoopLevelWithTail = loops_nest_non_reduce.loops[-1]
+
             for loop, kernel in (
                 (loop_with_tail.main_loop, loop_with_tail.main_loop_body),
                 (loop_with_tail.tail_loop, loop_with_tail.tail_loop_body),
             ):
-
                 code.writelines(loop.lines())
                 with contextlib.ExitStack() as stack:
                     stack.enter_context(code.indent())
                     code.splice(kernel.loads)
                     code.splice(kernel.compute)
                     code.splice(kernel.stores)
+                code.splice(kernel.reduction_suffix)
 
 
 class CppScheduling:
@@ -1084,7 +1178,7 @@ class LoopLevel:
             )
         else:
             reduction = ""
-        simd = f"simd simdlen({self.simd_len})" if self.simd_omp else ""
+        simd = f"simd simdlen({self.simd_len}) " if self.simd_omp else ""
         if self.parallel:
             # TODO(jansel): look into chunk size and other schedules
             line1 = f"#pragma omp for{reduction} "
@@ -1150,14 +1244,24 @@ class LoopNest:
         main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
 
         main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
-        main_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
+        is_reduction_loop = bool(most_inner_loop.reduction_vars)
+        if is_reduction_loop:
+            main_loop.parallel = 0
+        else:
+            main_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
         main_loop.collapsed = False
+        main_loop.reduction_vars = most_inner_loop.reduction_vars
 
         offset = main_loop_range * sympy_factor
         tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
         tail_loop.offset = offset
-        tail_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
+        if is_reduction_loop:
+            tail_loop.parallel = 0
+            tail_loop.simd_omp = False
+        else:
+            tail_loop.parallel = 1 if most_inner_loop.parallel > 0 else 0
         tail_loop.collapsed = False
+        tail_loop.reduction_vars = most_inner_loop.reduction_vars
 
         loop_with_tail = LoopLevelWithTail(main_loop, tail_loop)
         loop_with_tail.parallel = 0
