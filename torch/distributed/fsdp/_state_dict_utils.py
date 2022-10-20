@@ -214,7 +214,7 @@ def _local_pre_load_state_dict_hook(
     # Convert the ShardedTensor to a Tensor.
     shards = load_tensor.local_shards()
     assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
-    load_tensor = cast(torch.Tensor, shards[0].tensor)
+    load_tensor = shards[0].tensor
 
     # Get the metada of the flat_param to decide whether to pad the loaded
     # tensor.
@@ -308,7 +308,7 @@ def _sharded_pre_load_state_dict_hook(
             math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
         )
         if len(shards) == 1:
-            local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
+            local_tensor = shards[0].tensor.flatten()
             if not local_tensor.is_cuda:
                 local_tensor = local_tensor.cuda()
             num_padding = chunk_size - local_tensor.numel()
@@ -330,19 +330,19 @@ def _sharded_pre_load_state_dict_hook(
     )
 
     # Get the chunk from the loaded flat_param for the local rank.
-    loaded_flat_param, num_to_pad = FlatParamHandle._get_shard(
+    loaded_flat_tensor, num_to_pad = FlatParamHandle._get_shard(
         loaded_flat_param, self.rank, self.world_size,
     )
-    loaded_flat_param.to(flat_param.device)
-    assert flat_param.numel() == loaded_flat_param.numel(), (
-        f"The loaded local chunk has different numel({loaded_flat_param.numel()}) "
+    loaded_flat_tensor.to(flat_param.device)
+    assert flat_param.numel() == loaded_flat_tensor.numel(), (
+        f"The loaded local chunk has different numel({loaded_flat_tensor.numel()}) "
         f"from the local chunk {flat_param.numel()}."
     )
     assert flat_param._shard_numel_padded == num_to_pad, (
         f"The loaded local chunk has different padding({num_to_pad}) "
         f"from the local chunk {flat_param._shard_numel_padded}."
     )
-    state_dict[f"{prefix}_fsdp_wrapped_module.flat_param"] = loaded_flat_param
+    state_dict[f"{prefix}_fsdp_wrapped_module.flat_param"] = loaded_flat_tensor
     if self._use_orig_params:
         self._deregister_orig_params()
 

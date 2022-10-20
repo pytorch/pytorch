@@ -18,8 +18,6 @@ from typing import (
     Iterable,
     Iterator,
     List,
-    Mapping,
-    NamedTuple,
     Optional,
     Set,
     Tuple,
