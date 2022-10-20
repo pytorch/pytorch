@@ -1081,8 +1081,6 @@ class MultiheadAttention(Module):
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
             why_not_fast_path = "training is enabled"
-        elif not self.batch_first:
-            why_not_fast_path = "batch_first was not True"
         elif self.bias_k is not None:
             why_not_fast_path = "self.bias_k was not None"
         elif self.bias_v is not None:
@@ -1121,8 +1119,11 @@ class MultiheadAttention(Module):
             elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
+
             if not why_not_fast_path:
-                return torch._native_multi_head_attention(
+                if not self.batch_first:
+                    query = key = value = query.transpose(1, 0)
+                attn_output_fast, attn_output_weights_fast = torch._native_multi_head_attention(
                     query,
                     key,
                     value,
@@ -1136,6 +1137,10 @@ class MultiheadAttention(Module):
                     need_weights,
                     average_attn_weights,
                     1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
+                if self.batch_first:
+                    return attn_output_fast, attn_output_weights_fast
+                else:
+                    return attn_output_fast.transpose(1, 0), attn_output_weights_fast
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
@@ -1172,6 +1177,7 @@ class MultiheadAttention(Module):
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask, average_attn_weights=average_attn_weights)
+
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
