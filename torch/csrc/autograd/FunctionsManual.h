@@ -76,6 +76,12 @@ at::Tensor norm_backward(
     at::Tensor norm,
     at::IntArrayRef dim,
     bool keepdim);
+std::tuple<Tensor, Tensor, Tensor> attn_backward(
+    const Tensor& grad_o,
+    const Tensor& grad_a,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v);
 Tensor norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
