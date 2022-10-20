@@ -2226,6 +2226,12 @@ def dot(self, other):
 
     return (self * other).sum()
 
+@register_decomposition(aten.mul.left_t)
+def mul_left_t(self, n):
+    for i, v in enumerate(self):
+        self[i] = v * n
+    return self
+
 
 @register_decomposition(aten.binary_cross_entropy_with_logits)
 def binary_cross_entropy_with_logits(
@@ -2471,6 +2477,7 @@ def register_inplace(aten_op, outplace_op):
 register_inplace(aten.add_, aten.add)
 register_inplace(aten.sub_, aten.sub)
 register_inplace(aten.mul_, aten.mul)
+register_inplace(aten.mul.left_t_, aten.mul.left_t)
 register_inplace(aten.relu_, aten.relu)
 register_inplace(aten.hardtanh_, aten.hardtanh)
 register_inplace(aten.hardswish_, aten.hardswish)
