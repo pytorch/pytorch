@@ -308,7 +308,6 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "meshgrid"),
     # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
     (None, None, "diag"),
-
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
