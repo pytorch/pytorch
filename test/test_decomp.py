@@ -200,6 +200,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
+        (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
         # The decomposition is TOO correct. It computes everything in int64, so sometimes
         # there's an off-by-one error. See
         # https://github.com/pytorch/pytorch/issues/81996
@@ -306,8 +307,11 @@ CROSS_REF_EXCLUDE_SET = {
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
-    # Backward formula is not as precise as the custom CUDA kernel
+    # Decomposed backward formula is not as precise
+    ("cuda", torch.float16, "nn.functional.embedding"),
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
+    ("cpu", torch.bfloat16, "nn.functional.hardswish"),
+    ("cuda", torch.float16, "nn.functional.cross_entropy"),
 }
 
 all_decomposed = set()
