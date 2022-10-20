@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     onlyCUDA,
     onlyCPU,
+    onlyMPS,
     onlyNativeDeviceTypes,
     OpDTypes,
     skipCUDAIfRocm,
@@ -96,6 +97,12 @@ _ref_test_ops = tuple(
         and op.ref is not None,
         op_db,
     )
+)
+# This list specifies the ops that should be tested by `test_numpy_ref_mps`. Currently a large chunk of
+# `op_db`'s tests fail, but as MPS is brought in line with numpy, this list should expand.
+_ops_passing_on_mps = ['where']
+_ref_test_ops_passing_on_mps = tuple(
+    filter(lambda op: op.name in _ops_passing_on_mps, _ref_test_ops)
 )
 _ops_and_refs = op_db + python_ref_db
 
@@ -161,6 +168,26 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_numpy_ref(self, device, dtype, op):
+        try:
+            # Sets the default dtype to NumPy's default dtype of double
+            cur_default = torch.get_default_dtype()
+            torch.set_default_dtype(torch.double)
+            for sample_input in op.reference_inputs(device, dtype):
+                self.compare_with_reference(
+                    op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
+                )
+        finally:
+            torch.set_default_dtype(cur_default)
+
+    # Same as above `test_numpy_ref`, but with different settings required for the MPS backend
+    # When MPS becomes more consistent, this can probably be merged with the above using
+    # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyMPS
+    @suppress_warnings
+    # MPS only supports float32
+    @ops(_ref_test_ops_passing_on_mps, allowed_dtypes=(torch.float32,))
+    def test_numpy_ref_mps(self, device, dtype, op):
         try:
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
@@ -2026,7 +2053,7 @@ class TestFakeTensor(TestCase):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
 
-instantiate_device_type_tests(TestCommon, globals())
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
