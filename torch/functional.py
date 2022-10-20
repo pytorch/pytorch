@@ -44,6 +44,8 @@ __all__ = [
 
 
 def attn(q, k, v):
+    if has_torch_function([q, k, v]):
+        return handle_torch_function(attn, [q, k, v], q, k, v)
     return _VF.attn(q, k, v)
 
 

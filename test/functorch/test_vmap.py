@@ -3309,6 +3309,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('attn'),  # hit the vmap fallback which is currently disabled
         xfail('complex'),
         xfail('copysign'),
         xfail('native_batch_norm'),
