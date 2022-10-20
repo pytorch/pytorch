@@ -159,8 +159,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
@@ -199,6 +199,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
+        (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
         # The decomposition is TOO correct. It computes everything in int64, so sometimes
         # there's an off-by-one error. See
         # https://github.com/pytorch/pytorch/issues/81996
@@ -310,7 +311,11 @@ CROSS_REF_EXCLUDE_SET = {
 
 }
 
-CROSS_REF_BACKWARD_EXCLUDE_SET = {}
+CROSS_REF_BACKWARD_EXCLUDE_SET = {
+    # Decomposed backward formula is not as precise
+    ("cpu", torch.bfloat16, "nn.functional.hardswish"),
+    ("cuda", torch.float16, "nn.functional.cross_entropy"),
+}
 
 all_decomposed = set()
 all_called = defaultdict(int)
