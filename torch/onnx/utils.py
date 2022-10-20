@@ -684,8 +684,8 @@ def _optimize_graph(
     # elimination variant that doesn't need to look up if an op has side effects.
     _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
     _C._jit_pass_lint(graph)
-    # graph = _C._jit_pass_canonicalize(graph)
-    # _C._jit_pass_lint(graph)
+    graph = _C._jit_pass_canonicalize(graph)
+    _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
         _C._jit_pass_onnx_graph_shape_type_inference(
             graph, params_dict, GLOBALS.export_onnx_opset_version
