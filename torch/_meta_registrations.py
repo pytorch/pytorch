@@ -1718,6 +1718,10 @@ def activate_meta():
             "aten::div.Tensor_mode",  # ValueError: Receive two Number inputs to an elementwise binary operation! test/inductor/test_torchinductor.py -k test_div8_cpu
 
             "aten::diag_embed",  # RuntimeError: Stride mismatch! Strides are (180, 30, 1, 6) and (180, 30, 5, 1) (mismatched at 2)! test/test_ops.py -k test_fake_autocast_diag_embed_cuda_float32
+
+            "aten::copy_",  # Exception not raiseed, test/test_torch.py -k test_storage_meta_errors_cpu_int64
+
+            "aten::constant_pad_nd",  # requires_grad mismatch, test/test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
         }:
             pass
         else:
