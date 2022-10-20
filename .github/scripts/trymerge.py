@@ -410,6 +410,14 @@ CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 
+# The status from these checks are ignored and don't block merge
+IGNORED_CHECKS = {
+    "Auto Request Review",
+    "Auto Request Review / Auto Request Review",
+    "Labeler",
+    "Labeler / triage",
+}
+
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -1212,7 +1220,7 @@ def filter_checks_with_lambda(
     checks: Dict[str, WorkflowCheckState],
     status_filter: Callable[[Optional[str]], bool]
 ) -> List[WorkflowCheckState]:
-    return [check for check in checks.values() if status_filter(check.status)]
+    return [check for check in checks.values() if check.name not in IGNORED_CHECKS and status_filter(check.status)]
 
 def filter_pending_checks(checks: Dict[str, WorkflowCheckState]) -> List[WorkflowCheckState]:
     return filter_checks_with_lambda(checks, lambda x: x is None)
