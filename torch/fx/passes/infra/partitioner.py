@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable
+from typing import Dict, List, Set, Iterable, Optional
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
