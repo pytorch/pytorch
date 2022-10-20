@@ -88,11 +88,15 @@ class JitScalarType(enum.IntEnum):
     ) -> JitScalarType:
         """Convert a JIT scalar type or torch type name to ScalarType.
 
+        NB: DO NOT USE this API if dtype is comes from a torch._C.Value.type().scalarType() call because
+            "RuntimeError: INTERNAL ASSERT FAILED at "../aten/src/ATen/core/jit_type_base.h" can
+            be raised in some scenarios. Instead use from_value API which handles all cases
+
         Args:
             name: JIT scalar type name (Byte) or torch type name (uint8_t).
 
         Returns:
-            ScalarType.
+            JitScalarType
 
         Raises:
             ValueError: if name is not a valid scalar type name or if it is None.
@@ -109,17 +113,34 @@ class JitScalarType(enum.IntEnum):
     @classmethod
     @_beartype.beartype
     def from_dtype(cls, dtype: torch.dtype) -> JitScalarType:
-        """Convert a torch dtype to ScalarType."""
+        """Convert a torch dtype to JitScalarType.
+
+        NB: DO NOT USE this API if dtype is comes from a torch._C.Value.type().dtype() call because
+            "RuntimeError: INTERNAL ASSERT FAILED at "../aten/src/ATen/core/jit_type_base.h" can
+            be raised in some scenarios. Instead use from_value API which handles all cases
+
+        Args:
+            dtype: A torch.dtype to create a JitScalarType from
+
+        Returns:
+            JitScalarType
+
+        Raises:
+            ValueError: if dtype is not a valid torch.dtype or if it is None.
+        """
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
             raise ValueError(f"Unknown dtype: {dtype}")
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
-    # TODO(thiagofc): `value: torch._C.Value` and -> `Union[JitScalarType, None] break CI`
+    # TODO: `value: torch._C.Value` type annotation raises (CI machines only):
+    #       NameError: name '_C' is not defined
+    # TODO: Return type Optional[JitScalarType] or Union[JitScalarType, None] raises (CI machines only):
+    #       NameError: name 'JitScalarType' is not defined
+    # In both cases, using typing.TypeVar or string literals didn't work
     @classmethod
     @_beartype.beartype
-    # def from_value(cls, value, allow_list_type: bool = True, raises: bool = True) -> Optional[JitScalarType]:
     def from_value(cls, value, allow_list_type: bool = True, raises: bool = True):
-        """Convert a torch dtype to ScalarType.
+        """Convert a torch dtype to JitScalarType.
 
         Args:
             value: A `torch._C.Value` object to fetch scalar type from.
@@ -127,7 +148,7 @@ class JitScalarType(enum.IntEnum):
             raises: `raises==True` raises exception, otherwise `None` is returned
 
         Returns:
-            ScalarType when raises==True and Union[ScalarType, None] otherwise.
+            JitScalarType when raises==True and Union[JitScalarType, None] otherwise.
 
         Raises:
             OnnxExporterError: if value is None.
@@ -159,29 +180,29 @@ class JitScalarType(enum.IntEnum):
 
     @_beartype.beartype
     def scalar_name(self) -> ScalarName:
-        """Convert a ScalarType to a JIT scalar type name."""
+        """Convert a JitScalarType to a JIT scalar type name."""
         return _SCALAR_TYPE_TO_NAME[self]
 
     @_beartype.beartype
     def torch_name(self) -> TorchName:
-        """Convert a ScalarType to a torch type name."""
+        """Convert a JitScalarType to a torch type name."""
         return _SCALAR_TYPE_TO_TORCH_NAME[self]
 
     @_beartype.beartype
     def dtype(self) -> torch.dtype:
-        """Convert a ScalarType to a torch dtype."""
+        """Convert a JitScalarType to a torch dtype."""
         return _SCALAR_TYPE_TO_DTYPE[self]
 
     @_beartype.beartype
     def onnx_type(self) -> _C_onnx.TensorProtoDataType:
-        """Convert a ScalarType to an ONNX data type."""
+        """Convert a JitScalarType to an ONNX data type."""
         if self not in _SCALAR_TYPE_TO_ONNX:
             raise ValueError(f"Scalar type {self} cannot be converted to ONNX")
         return _SCALAR_TYPE_TO_ONNX[self]
 
     @_beartype.beartype
     def onnx_compatible(self) -> bool:
-        """Return whether this ScalarType is compatible with ONNX."""
+        """Return whether this JitScalarType is compatible with ONNX."""
         return (
             self in _SCALAR_TYPE_TO_ONNX
             and self != JitScalarType.UNDEFINED
