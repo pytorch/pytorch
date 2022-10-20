@@ -113,6 +113,7 @@ jobs:
         run: |
           # Install dependencies
           brew install libomp
+          brew link --force libomp
 
       - name: Parse ref
         id: parse-ref
