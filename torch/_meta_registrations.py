@@ -1778,13 +1778,13 @@ def infer_dense_strides(tensor_sizes, tensor_strides):
     check(
         len(tensor_sizes) == len(tensor_strides),
         lambda: f"Input sizes and strides should have same size but got {len(tensor_sizes)} and {len(tensor_strides)}",
-        )
+    )
     ndim = len(tensor_sizes)
     if ndim == 0:
         return ()
     if ndim == 1:
         return (1,)
-    perm = [x for x in range(ndim)]
+    perm = list(x for x in range(ndim))
 
     def should_swap(dim0, dim1):
         stride0 = tensor_strides[dim0]
@@ -1831,6 +1831,22 @@ def sort_meta(self, dim=-1, descending=False):
     values = self.new_empty_strided(self.shape, strides)
     indices = self.new_empty_strided(self.shape, strides, dtype=torch.long)
     return (values, indices)
+
+
+@register_meta(aten.grid_sampler_2d_backward.default, register_dispatcher=False)
+def grid_sample_2d_backward_meta(grad_output, input, grid, interpolation_mode, padding_mode, align_corners, output_mask):
+    input_requires_grad = output_mask[0]
+    if input_requires_grad:
+        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+    else:
+        grad_input = None
+    grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
+    return (grad_input, grad_grid)
+
+@register_meta(aten.upsample_bilinear2d_backward.vec, register_dispatcher=False)
+def upsample_bilinear2d_backward_vec_meta(grad_output, output_size, input_size, align_corners, scale_factors):
+    mem_format = utils.suggest_memory_format(grad_output)
+    return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
