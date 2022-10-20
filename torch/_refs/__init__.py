@@ -86,6 +86,7 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "log_softmax",
     "nan_to_num",
     "neg",
     "positive",
@@ -98,6 +99,7 @@ __all__ = [
     "sin",
     "sinc",
     "sinh",
+    "softmax",
     "sqrt",
     "square",
     "tan",
@@ -654,15 +656,15 @@ def log10(a):
     return prims.log10(a)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def log_softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
-    computation_dtype = utils.get_computation_dtype(a.dtype)
+    computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
@@ -3141,17 +3143,16 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
-    computation_dtype = utils.get_computation_dtype(a.dtype)
+    computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    assert isinstance(a_, TensorLike)  # to avoid MyPy error for amax
     a_max = amax(a_, dim, keepdim=True)
     a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
@@ -4041,7 +4042,7 @@ def linspace(
     result_dtype = utils.type_to_dtype(utils.get_higher_type(type(start), type(end)))
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         if dtype is None:
-            dtype = corresponding_complex_dtype(torch.get_default_dtype())
+            dtype = utils.corresponding_complex_dtype(torch.get_default_dtype())
         else:
             check(
                 utils.is_complex_dtype(dtype),
@@ -4049,6 +4050,7 @@ def linspace(
             )
     else:
         dtype = dtype or torch.get_default_dtype()
+    assert isinstance(dtype, torch.dtype)
 
     check(
         isinstance(steps, int),
@@ -4065,23 +4067,25 @@ def linspace(
         "requires_grad": requires_grad,
     }
     if steps == 0:
-        return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+        return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     elif steps == 1:
-        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     elif start == end:
-        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[call-overload]
+        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     else:
         step_size = 1 / (steps - 1)
         eps = step_size / 2
         # torch.arange is a reduction, so we need precision here
-        rg = torch.arange(  # type: ignore[call-overload]
-            0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs
+        rg = torch.arange(
+            0, 1 + eps, step_size, dtype=torch.float64, **factory_kwargs  # type: ignore[arg-type]
         )
-        float_dtype = torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
-        rg = _maybe_convert_to_dtype(rg, float_dtype)
+        float_dtype = (
+            torch.complex128 if utils.is_complex_dtype(dtype) else torch.float64
+        )
+        rg = _maybe_convert_to_dtype(rg, float_dtype)  # type: ignore[assignment]
         cast = partial(torch.full, (1,), dtype=float_dtype, **factory_kwargs)
         out = torch.lerp(cast(start), cast(end), rg)
-        return _maybe_convert_to_dtype(out, dtype)
+        return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 
 
 @register_decomposition(torch.ops.aten.logspace)
