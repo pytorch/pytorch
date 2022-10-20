@@ -920,6 +920,7 @@ class BenchmarkRunner:
         self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
+        self.optimizer = None
         self._args = None
 
     def setup_amp(self):
@@ -942,10 +943,9 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
-        param_list = list(params)
-        if device == "cuda" and len(param_list) != 0:
+        if device == "cuda":
             # capturable is only supported on cuda at the moment
-            self.optimizer = torch.optim.Adam(param_list, capturable=True)
+            self.optimizer = torch.optim.Adam(params, capturable=True)
         else:
             self.optimizer = None
 
@@ -1068,6 +1068,15 @@ class BenchmarkRunner:
             batch_size = self.decay_batch_exp(batch_size)
         return 1
 
+    def run_n_iterations(self, mod, inputs, n=2):
+        for _ in range(n - 1):
+            self.model_iter_fn(mod, inputs, collect_outputs=False)
+        return self.model_iter_fn(mod, inputs, collect_outputs=True)
+
+    def optimizer_zero_grad(self):
+        if self.optimizer is not None:
+            self.optimizer.zero_grad(True)
+
     def optimizer_step(self):
         if self.optimizer is not None:
             self.optimizer.step()
@@ -1113,7 +1122,7 @@ class BenchmarkRunner:
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
         try:
-            fp64_outputs = self.model_iter_fn(
+            fp64_outputs = self.run_n_iterations(
                 *cast_to_fp64(
                     copy.deepcopy(model),
                     clone_inputs(example_inputs),
@@ -1133,14 +1142,18 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
-            correct_result = self.model_iter_fn(
-                copy.deepcopy(model), clone_inputs(example_inputs)
+            model_copy = copy.deepcopy(model)
+            self.init_optimizer(current_device, model_copy.parameters())
+            correct_result = self.run_n_iterations(
+                model_copy, clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
-            correct_rerun_result = self.model_iter_fn(
-                copy.deepcopy(model), clone_inputs(example_inputs)
+            model_copy = copy.deepcopy(model)
+            self.init_optimizer(current_device, model_copy.parameters())
+            correct_rerun_result = self.run_n_iterations(
+                model_copy, clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1156,7 +1169,8 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                self.init_optimizer(current_device, model.parameters())
+                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
                 accuracy_status = "fail_to_run"
@@ -1205,6 +1219,7 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
+        self.init_optimizer(current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
@@ -1463,6 +1478,12 @@ def parse_args():
         help="Fail a benchmark if backend throws an exception",
     )
     parser.add_argument(
+        "--raise-on-any",
+        "--raise",
+        action="store_true",
+        help="Raise on assertion or backend errors",
+    )
+    parser.add_argument(
         "--output",
         help="Overrides the output filename",
     )
@@ -1653,8 +1674,7 @@ def main(runner, original_dir=None):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
-        args.raise_on_assertion_error = True
-        args.raise_on_backend_error = True
+        args.raise_on_any = True
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1718,8 +1738,12 @@ def main(runner, original_dir=None):
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
 
-    torch._dynamo.config.raise_on_assertion_error = args.raise_on_assertion_error
-    torch._dynamo.config.raise_on_backend_error = args.raise_on_backend_error
+    torch._dynamo.config.raise_on_assertion_error = (
+        args.raise_on_assertion_error or args.raise_on_any
+    )
+    torch._dynamo.config.raise_on_backend_error = (
+        args.raise_on_backend_error or args.raise_on_any
+    )
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass

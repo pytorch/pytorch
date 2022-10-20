@@ -686,6 +686,13 @@ def forward(self, x_1):
 
         make_fx(f)(torch.randn(2, 3, 4, 5))
 
+    def test_pr_86917(self):
+        # Tests the issue brought up here https://github.com/pytorch/pytorch/pull/86917#issuecomment-1283155344
+        def f(a, b):
+            return torch.ops.aten.nll_loss_forward(a, b, None, 1, 10)
+
+        self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
+
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
 
@@ -715,9 +722,6 @@ def xfail_inherited_tests(tests):
     "test_inplace_metadata",
     "test_mode_tracing_factory_function",
     "test_make_fx_overloads",
-    "test_make_fx_model_fwd_bwd_wgtupdate",
-    "test_make_fx_model_fwd_bwd",
-    "test_proxy_tensor",
     "test_resnet18_backward_trace",
     "test_trace_subclasses",
 ])
@@ -848,6 +852,35 @@ def forward(self, a_1):
     detach = torch.ops.aten.detach.default(empty);  empty = None
     return detach""")
 
+
+    def test_neg_shape(self):
+        def f(a):
+            return torch.empty(-a.shape[0] + 10)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(1)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
+    neg = -sym_size;  sym_size = None
+    add = neg + 10;  neg = None
+    empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
+    detach = torch.ops.aten.detach.default(empty);  empty = None
+    return detach""")
+
+    def test_sqrt_size(self):
+        def f(a):
+            return a / a.size(-1) ** 0.5
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    sym_size = torch.ops.aten.sym_size(a_1, 0)
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
+    div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
+    return div""")
+
+
     def test_symint_to_tensor(self):
         def f(a):
             return a / a.shape[0]
@@ -909,16 +942,30 @@ def forward(self, a_1):
         self._test_dynamic(f, [(3,)], [[(3,)], [(4,)], [(2,)]])
         self._test_dynamic(f, [(5, 1)], [[(4, 1)], [(3, 1)], [(6, 1)]])
 
-    def test_symbolic_meta(self):
+    def test_metadata(self):
         def f(a, b):
             d = a.new_empty(a.shape[0] + b.shape[0])
             return d
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
-        fx_g.graph.eliminate_dead_code()
-        fx_g.recompile()
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
-        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
+        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj().expr == meta_d.meta['val'].expr)
+
+    def test_metadata_fresh(self):
+        def f(x):
+            assert x.shape[0] == 3
+            return x.cos()
+
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
+        meta_cos = _get_node(fx_g, lambda x: x.target == aten.cos.default)
+        meta_inp = _get_node(fx_g, lambda x: x.op == 'placeholder')
+        self.assertTrue(meta_cos.meta['val'].shape[0].get_pyobj().expr == 3)
+        # Checks if the input expr has been updated even though the constraint
+        # happened afterwards
+        self.assertTrue(meta_inp.meta['val'].shape[0].get_pyobj().expr == 3)
+
+
+
 
     def test_return_symint(self):
         def f(x):
@@ -992,6 +1039,7 @@ def forward(self, a_1):
 
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self._assert_no_guards(fx_g, 1)
+
 
 
 
@@ -1112,7 +1160,6 @@ symbolic_tensor_failures = {
     xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
@@ -1222,7 +1269,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
     xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
-    xfail('nn.functional.pad', 'circular'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta function/decompo...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
@@ -1258,7 +1304,6 @@ symbolic_tensor_failures = {
     xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
-    xfail('scatter_add', ''),  # aten.scatter_add.default - couldn't find symbolic meta function/decomposition
     xfail('scatter', ''),  # aten.scatter.src - couldn't find symbolic meta function/decomposition
     xfail('scatter_reduce', 'amax'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomposition
     xfail('scatter_reduce', 'amin'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomposition
