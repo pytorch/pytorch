@@ -160,6 +160,10 @@ def parse_args():
         help="Log operator inputs",
     )
 
+    parser.add_argument(
+        "--extra-args", default="", help="Append commandline with these args"
+    )
+
     # Choose either inference or training
     group_mode = parser.add_mutually_exclusive_group(required=True)
     group_mode.add_argument(
@@ -239,8 +243,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 for compiler in compilers:
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}_{testing}.csv"
-                    cmd = f"python benchmarks/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    cmd = f"{cmd} {base_cmd} --no-skip --dashboard"
+                    cmd = f"python benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
+                    cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
 
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
@@ -251,6 +255,9 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.quick:
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
+
+                    if testing == "performance" and compiler == "inductor":
+                        cmd = f"{cmd} --cold_start_latency"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
@@ -811,6 +818,7 @@ class DashboardUpdater:
                 self.args.dashboard_gh_cli_path,
                 "issue",
                 "comment",
+                "--repo=https://github.com/pytorch/torchdynamo.git",
                 "681",
                 "-b",
                 comment,
