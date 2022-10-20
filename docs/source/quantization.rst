@@ -1003,17 +1003,12 @@ Frequently Asked Questions
 
 1. How can I do quantized inference on GPU?:
 
-   We don't have official GPU support yet, but we have two protoypes:
-
-   i) PyTorch quantization + fx2trt lowering, inference in TensorRT (A100 and later GPUs): see examples in
-      `pytorch/TensorRT <https://github.com/pytorch/TensorRT/blob/master/py/torch_tensorrt/fx/test/quant/test_quant_trt.py>`_
-
-   ii) Integration with cudnn through native quantized cuda ops: see examples in `pytorch/test_quantized_op.py <https://github.com/pytorch/pytorch/blob/master/test/quantization/core/test_quantized_op.py#L4598>`_
-       this project is an early prototype and has been paused
+   We don't have official GPU support yet, but this is an area of active development, you can find more information
+   at `Torch-TensorRT <https://pytorch.org/TensorRT/#getting-started>`_
 
 2. Where can I get ONNX support for my quantized model?:
 
-   Supporting export to onnx model is not a priority for PyTorch quantization, please open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
+   You can open an issue in `GitHub - onnx/onnx <https://github.com/onnx/onnx>`_  when you encounter problems with ONNX,
    or reach out to people in this list: `PyTorch Governance | Maintainers | ONNX exporter <https://pytorch.org/docs/stable/community/persons_of_interest.html#onnx-exporter>`_
 
 3. How can use quantization with LSTM's?:
