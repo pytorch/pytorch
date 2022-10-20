@@ -266,7 +266,7 @@ General Project Policies
 
 PyTorch has been established as PyTorch a Series of LF Projects, LLC.
 Policies applicable to PyTorch and participants in PyTorch, including
-guidelines on the usage of trademarks, are located at www.lfprojects.org/policies/. 
+guidelines on the usage of trademarks, are located at `www.lfprojects.org/policies/ <www.lfprojects.org/policies/>`__.
 
 PyTorch participants acknowledge that the copyright in all new contributions
 will be retained by the copyright holder as independent works of authorship
@@ -276,7 +276,7 @@ must be made using the 3-Clause-BSD License available here:
 https://opensource.org/licenses/BSD-3-Clause (the “Project License”).
 All outbound code will be made available under the Project License.
 The Maintainers may approve the use of an alternative open license or
-licenses for inbound or outbound contributions on an exception basis. 
+licenses for inbound or outbound contributions on an exception basis.
 
 FAQ
 ---
