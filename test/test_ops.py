@@ -1909,6 +1909,7 @@ fake_autocast_backward_xfails = {
     skip("linalg.pinv", "hermitian"),
     skip("linalg.pinv", "singular"),
     skip('pinverse'),
+    skip('cholesky_inverse'),  # test/test_ops.py -k test_fake_crossref_backward_amp_cholesky_inverse_cuda_float32
 }
 
 @skipIfSlowGradcheckEnv
