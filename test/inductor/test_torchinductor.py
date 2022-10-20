@@ -3802,7 +3802,6 @@ class CommonTemplate:
         self.common(forward, args)
 
     @requires_cuda()
-    @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs(self):
         def fn(x, y):
             return x + y, x * y, x / y
@@ -3818,7 +3817,6 @@ class CommonTemplate:
         self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @requires_cuda()
-    @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs_fp16(self):
         def fn(x, y):
             return x + y, x * y, x / y
