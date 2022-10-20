@@ -247,7 +247,7 @@ class TestCommon(TestCase):
         device,
         dtype,
         op,
-        make_test_inputs,
+        make_test_inputs,  # (ctx, no_ctx)
         skip_zero_numel=False,
         skip_zero_dim=False,
         skip_bfloat=False,
@@ -289,9 +289,7 @@ class TestCommon(TestCase):
             if not test_inputs:
                 self.skipTest("Skipped! No matching test inputs found")
 
-            for test_input in test_inputs:
-                test_input_ctx = self._get_test_input_ctx(test_input)
-                test_input_no_ctx = self._get_test_input_no_ctx(test_input)
+            for test_input_ctx, test_input_no_ctx in test_inputs:
                 with ctx() as c:
                     ref_result = test_input_ctx(sample.input, *sample.args, **sample.kwargs)
                     if hasattr(c, "mock") and c.mock:
@@ -390,83 +388,13 @@ class TestCommon(TestCase):
             msg = "Test passed because the reference was more accurate than the torch operator."
             warnings.warn(msg)
 
-    # Create an input to be tested inside and outside an execution context. For
-    # example, with TorchRefsMode(strict=True) as the context, a function with
-    # torch.foo in it will call refs.foo instead.
-
-    # Setters
-    # Test different inputs inside and outside an execution context.
-    def _set_test_input_different(self, ctx, no_ctx):
-        # keep in sync with get functions
-        return (ctx, no_ctx)
-
-    # Test the same input inside and outside an execution context.
-    def _set_test_input_same(self, x):
-        # keep in sync with get functions
-        return (x, x)
-
-    # Getters
-    def _get_test_input_ctx(self, test_input):
-        # keep in sync with set functions
-        # (ctx, no_ctx)
-        return test_input[0]
-
-    def _get_test_input_no_ctx(self, test_input):
-        # keep in sync with set functions
-        # (ctx, no_ctx)
-        return test_input[1]
-
-    # Create test input functions to check op behavior and API compatibility
-    # inside and outside an execution context. For example, with
-    # TorchRefsMode(strict=True) as the context, a function with torch.foo in it
-    # will call refs.foo instead.
-    #
-    # Note that the torch to refs dispatch must first hit a special conditional
-    # at the start of a torch function before going to the ref. That is why we
-    # have the op_op and op_aliases test input functions. If a torch op and its
-    # ref have incompatible signatures, the call in the said conditional will
-    # fail. The ref_op and ref_op_aliases test input functions exist so that we
-    # could call ref's entrypoint directly.
-
     # Directly call each ref (in the context) and test it against the
     # corresponding op (outside of the context). This test calls *different*
     # entrypoints. Users are not expected to call the ref directly, this is only
     # done to check for compatibility issues.
     def _make_test_inputs_ref_op(self, op):  # default
-        return (self._set_test_input_different(ctx=op, no_ctx=op.torch_opinfo),)  # ref, op
-
-    # Directly call each ref alias (in the context) and test it against the
-    # corresponding alias op (outside of the context). This test calls
-    # *different* entrypoints. Users are not expected to call the ref alias
-    # directly, this is only done to check for compatibility issues.
-    def _make_test_inputs_ref_op_aliases(self, op):
-        # The output of zip is determined by the shortest input iterable, so
-        # make sure both inputs have the same length.
-        self.assertTrue(len(op.aliases) == len(op.torch_opinfo.aliases),
-                        msg="Ref and op aliases have different lengths")
-        return tuple(
-            self._set_test_input_different(ctx=ctx, no_ctx=no_ctx)
-            for ctx, no_ctx
-            # ref aliases, op aliases
-            in zip(op.aliases, op.torch_opinfo.aliases)
-            # As an optimization, this only considers "near aliases" and skips
-            # "proper aliases". A "near alias" is a ref alias which is defined
-            # with a 'def', as a wrapper around a torch op, due to signature
-            # compatibility issues. A "proper alias" is declared as 'foo_alias =
-            # torch.foo'. "Proper aliases" are already covered by the ref_op
-            # test input function.
-            if ctx.op is not op.torch_opinfo.op)  # like: absolute = torch.abs
-
-    # Check *the same* op inside and outside the context. This is the entrypoint
-    # that users will actually be executing both inside and outside the context.
-    def _make_test_inputs_op_op(self, op):
-        return (self._set_test_input_same(op.torch_opinfo),)
-
-    # Check *the same* aliases inside and outside the context. This is the
-    # entrypoint that users will actually be executing both inside and outside
-    # the context.
-    def _make_test_inputs_op_aliases(self, op):
-        return tuple(self._set_test_input_same(x) for x in op.torch_opinfo.aliases)
+        # (ctx, no_ctx)
+        return ((op, op.torch_opinfo),)  # ref, op
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
@@ -475,9 +403,10 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref(self, device, dtype, op):
-        # In this test, primTorch refs call into the refs namespace
-        # For example, a ref with torch.foo in it will calls refs.foo instead
-        # Direct calls to refs and prims are not affected
+        # In this test, primTorch refs call into the refs namespace. For
+        # example, a ref with torch.foo in it will call refs.foo instead.
+        # Direct calls to refs and prims are not affected. This test *performs*
+        # numerical checking.
         self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
                               make_test_inputs=self._make_test_inputs_ref_op)
 
@@ -485,24 +414,64 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_mode_ref_op_aliases(self, device, dtype, op):
-        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
-                              make_test_inputs=self._make_test_inputs_ref_op_aliases)
+        # Directly call each ref alias (in the context) and test it against the
+        # corresponding alias op (outside of the context). This test calls
+        # *different* entrypoints. Users are not expected to call the ref alias
+        # directly, this is only done to check for compatibility issues. This
+        # test *performs* numerical checking.
+        def _make_test_inputs_ref_op_aliases(op):
+            # The output of zip is determined by the shortest input iterable, so
+            # make sure both inputs have the same length.
+            self.assertTrue(len(op.aliases) == len(op.torch_opinfo.aliases),
+                            msg="Ref and op aliases have different lengths")
+            return tuple(
+                (ctx, no_ctx) for ctx, no_ctx
+                # ref aliases, op aliases
+                in zip(op.aliases, op.torch_opinfo.aliases)
+                # As an optimization, this only considers "near aliases" and
+                # skips "proper aliases". A "near alias" is a ref alias which is
+                # defined with a 'def', as a wrapper around a torch op, due to
+                # signature (or other) compatibility issues. A "proper alias" is
+                # declared as 'foo_alias = torch.foo'. "Proper aliases" are
+                # already covered by 'test_python_ref'.
+                if ctx.op is not op.torch_opinfo.op)  # like: absolute = torch.abs
 
-    # This only checks API compatibility, so test on one device with any dtype.
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
+                              make_test_inputs=_make_test_inputs_ref_op_aliases)
+
+    # Only checks API compatibility, so test on one device with any dtype.
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @ops(python_ref_db, dtypes=OpDTypes.any_one)
     def test_python_ref_mock_mode_op_op(self, device, dtype, op):
-        self._ref_test_helper(lambda: TorchRefsMode(strict=True, mock=True), device, dtype, op,
-                              make_test_inputs=self._make_test_inputs_op_op)
+        # Check that a torch op properly goes through the torch to refs
+        # dispatch. The torch op is the entrypoint that users will actually be
+        # executing. mock=True *skips* numerical tests, so set the no_ctx input
+        # to None. It is expected that numerical checking is performed by other
+        # tests.
+        def _make_test_inputs_op_op(op):
+            # (ctx, no_ctx)
+            return ((op.torch_opinfo, None),)
 
-    # This only checks API compatibility, so test on one device with any dtype.
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True, mock=True), device, dtype, op,
+                              make_test_inputs=_make_test_inputs_op_op)
+
+    # Only checks API compatibility, so test on one device with any dtype.
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @ops(python_ref_db, dtypes=OpDTypes.any_one)
     def test_python_ref_mock_mode_op_aliases(self, device, dtype, op):
+        # Check that a torch op alias properly goes through the torch to refs
+        # dispatch. The torch op alias is the entrypoint that users will
+        # actually be executing. mock=True *skips* numerical tests, so set the
+        # no_ctx input to None. It is expected that numerical checking is
+        # performed by other tests.
+        def _make_test_inputs_op_aliases(op):
+            # (ctx, no_ctx)
+            return tuple((x, None) for x in op.torch_opinfo.aliases)
+
         self._ref_test_helper(lambda: TorchRefsMode(strict=True, mock=True), device, dtype, op,
-                              make_test_inputs=self._make_test_inputs_op_aliases)
+                              make_test_inputs=_make_test_inputs_op_aliases)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
