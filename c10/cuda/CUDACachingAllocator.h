@@ -211,7 +211,6 @@ using OutOfMemoryObserver = std::function<void(
   _(C10_CUDA_API void,                                                         \
     notifyCaptureDestroy,                                                      \
     (int device, MempoolId_t mempool_id))                                      \
-  _(C10_CUDA_API std::mutex*, getFreeMutex, ())                                \
   _(C10_CUDA_API std::shared_ptr<void>, getIpcDevPtr, (std::string handle))    \
   _(C10_CUDA_API void,                                                         \
     recordHistory,                                                             \
@@ -324,11 +323,6 @@ inline void notifyCaptureEnded(int device, CaptureId_t graph_id) {
 inline void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
   return Chosen::notifyCaptureDestroy(device, mempool_id);
 }
-
-inline std::mutex* getFreeMutex() {
-  return Chosen::getFreeMutex();
-}
-
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return Chosen::getIpcDevPtr(handle);
