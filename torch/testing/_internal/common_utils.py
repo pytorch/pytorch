@@ -612,15 +612,6 @@ def sanitize_test_filename(filename):
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
-# hack until https://github.com/pytorch/pytorch/issues/82109 is resolved
-def sanitize_if_functorch_test_filename(filename):
-    # absolute filenames must be converted to relative paths, otherwise,
-    # we cannot prepend test-reports/ to it
-    # (e.g. test-reports\\C:\\... on windows is nonsense)
-    if filename.startswith(CI_FUNCTORCH_ROOT):
-        filename = filename[len(CI_PT_ROOT) + 1:]
-    return filename
-
 def lint_test_case_extension(suite):
     succeed = True
     for test_case_or_suite in suite:
