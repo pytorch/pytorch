@@ -98,11 +98,24 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
+_ops_failing_on_mps = [
+    'addbmm',
+    'linalg.cross',
+    'linalg.tensorinv',
+    'linalg.tensorsolve',
+    'linalg.vander',
+    'linalg.vecdot',
+    'native_layer_norm',
+    'nn.functional.conv_transpose2d',
+    'nn.functional.gelu',
+    'nn.functional.layer_norm',
+    'nn.functional.pdist',
+    'searchsorted'
+]
 # This list specifies the ops that should be tested by `test_numpy_ref_mps`. Currently a large chunk of
 # `op_db`'s tests fail, but as MPS is brought in line with numpy, this list should expand.
-_ops_passing_on_mps = ['where']
 _ref_test_ops_passing_on_mps = tuple(
-    filter(lambda op: op.name in _ops_passing_on_mps, _ref_test_ops)
+    filter(lambda op: op.name not in _ops_failing_on_mps, _ref_test_ops)
 )
 _ops_and_refs = op_db + python_ref_db
 
