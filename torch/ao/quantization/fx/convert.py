@@ -69,7 +69,8 @@ from .custom_config import (
     PrepareCustomConfig,
 )
 from .lower_to_fbgemm import lower_to_fbgemm
-from ._decomposed import quantized_decomposed_lib
+# importing the lib so that the quantized_decomposed ops are registered
+from ._decomposed import quantized_decomposed_lib  # noqa: F401
 
 
 # TODO: revisit this list. Many helper methods shouldn't be public
@@ -654,7 +655,11 @@ def convert(
                 if is_decomposed:
                     # use the same qparams from quantize op
                     dq_inputs = [quantized_node] + quantize_op_inputs[1:]
-                    dequantized_node = graph.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor, tuple(dq_inputs), {})
+                    dequantized_node = graph.call_function(
+                        torch.ops.quantized_decomposed.dequantize_per_tensor,
+                        tuple(dq_inputs),
+                        {}
+                    )
                 else:
                     dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
                 node.replace_all_uses_with(dequantized_node)
