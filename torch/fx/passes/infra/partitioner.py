@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable
+from typing import Dict, List, Set, Iterable, Optional
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
@@ -7,7 +7,6 @@ from torch.fx.node import Node, _get_qualified_name
 from torch.fx.passes.operator_support import OperatorSupportBase
 
 import logging
-import operator
 import itertools
 from copy import copy
 
@@ -44,18 +43,7 @@ class CapabilityBasedPartitioner:
 
     def __is_node_supported(self, node: Node) -> bool:
         return (
-            self.operator_support.is_node_supported(
-                dict(self.graph_module.named_modules()), node
-            )
-            or
-            # accept 'getitem' node only if its producer is supported
-            (
-                node.op == "call_function"
-                and node.target == operator.getitem
-                and self.operator_support.is_node_supported(
-                    dict(self.graph_module.named_modules()), node.args[0]  # type: ignore[arg-type]
-                )
-            )
+            self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
         )
 
     def propose_partitions(self) -> List[Partition]:
@@ -116,13 +104,17 @@ class CapabilityBasedPartitioner:
 
             return True
 
-        def merge_single_node(node: Node, id: int):
-            assert node not in assignment
+        def merge_single_node(node: Node, id: Optional[int]):
+            if node in assignment:
+                partitions_by_id[assignment[node]].remove_node(node)
 
-            assignment[node] = id
-            if id not in partitions_by_id:
+            if id is None:
+                assignment.pop(node)
+            elif id not in partitions_by_id:
+                assignment[node] = id
                 partitions_by_id[id] = Partition(id=id, nodes=[node])
             else:
+                assignment[node] = id
                 partitions_by_id[id].add_node(node)
 
         logger.debug("Proposing partitions...")
