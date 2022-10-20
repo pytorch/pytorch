@@ -42,10 +42,6 @@ class XNNGraph {
   void buildXNNGraph(
       std::shared_ptr<torch::jit::Graph>& graph,
       std::vector<c10::IValue> example_inputs);
-
-  void runGraphOnInputs(
-      std::vector<at::Tensor> tensor_inputs,
-      std::vector<at::Tensor> tensor_outputs);
 };
 
 } // namespace delegate
