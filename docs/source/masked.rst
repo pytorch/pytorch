@@ -19,9 +19,10 @@ Motivation
   The PyTorch API of masked tensors is in the prototype stage and may or may not change in the future.
 
 MaskedTensor serves as an extension to :class:`torch.Tensor` that provides the user with the ability to:
-- use any masked semantics (e.g. variable length tensors, nan* operators, etc.)
-- differentiation between 0 and NaN gradients
-- various sparse applications (see tutorial below)
+
+* use any masked semantics (e.g. variable length tensors, nan* operators, etc.)
+* differentiate between 0 and NaN gradients
+* various sparse applications (see tutorial below)
 
 "Specified" and "unspecified" have a long history in PyTorch without formal semantics and certainly without
 consistency; indeed, MaskedTensor was born out of a build up of issues that the vanilla :class:`torch.Tensor`
