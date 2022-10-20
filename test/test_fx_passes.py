@@ -184,14 +184,14 @@ class TestPartitionFunctions:
 
     @staticmethod
     def forward14(a, b, c):
-        a0, a1 = torch.std_mean(a)
+        a0, a1 = torch.ops.aten.std_mean(a)
         out = a0 + 1.0
         return out
 
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add, operator.getitem, torch.ops.aten.std_mean.correction}
+        return node.op == "call_function" and node.target in {operator.add, operator.getitem, torch.ops.aten.std_mean}
 
 
 @instantiate_parametrized_tests
@@ -221,7 +221,7 @@ class TestFXGraphPasses(JitTestCase):
 
         # 5 getitem special case
         (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]]),
-        (TestPartitionFunctions.forward14, [["add", "std_mean", "get_item"]]),
+        (TestPartitionFunctions.forward14, [["add", "std_mean", "getitem", "getitem_1"]]),
     ])
     def test_partitioner(self, fn, expected_partition):
         traced = symbolic_trace(fn)
