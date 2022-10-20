@@ -4,7 +4,8 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._decomp import meta_table as meta_table
+from torch._decomp import global_decomposition_table, meta_table
+from torch._ops import OpOverload, OpOverloadPacket
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -18,7 +19,7 @@ from torch._refs import _broadcast_shapes
 
 from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
-from torch._ops import OpOverload, OpOverloadPacket
+
 
 aten = torch.ops.aten
 
@@ -1638,7 +1639,6 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
-from torch._decomp import global_decomposition_table
 
 def activate_meta():
 
@@ -1663,55 +1663,39 @@ def activate_meta():
 
         dispatch_key_registration = torch._C._dispatch_dump(name)
 
-        # Internally, we shouldn't be registering meta kernels for any operators that
-        # have CompositeImplicitAutograd kernels.
-        # Instead, we should be letting those decompositions run, and writing meta kernels
-        # only for the base operators.
-        if 'CompositeImplicitAutograd' in dispatch_key_registration:
-            # raise RuntimeError(
-            #     f"We should not register a meta kernel directly to the operator '{name}',"
-            #     " because it has a CompositeImplicitAutograd kernel in core."
-            #     " Instead we should let the operator decompose, and ensure that we have meta kernels"
-            #     " for the base ops that it decomposes into.")
+        if "CompositeImplicitAutograd" in dispatch_key_registration:
+            # Internally, we shouldn't be registering meta kernels for any operators that
+            # have CompositeImplicitAutograd kernels.
+            # Instead, we should be letting those decompositions run, and writing meta kernels
+            # only for the base operators.
             pass
-        # skip if it's a view op
         elif any(
             a.alias_info is not None and not a.alias_info.is_write
             for a in op_overload._schema.arguments
         ):
-#             raise RuntimeError(
-#                 f"""
-# Attempting to register a python meta kernel for a view operator: {str(op_overload)}.
-# We shouldn't do this, because the output will report as not having aliased storages.
-# All view ops have meta kernels in C++ today, so we should use those instead.
-
-# If you're registering an operator through the `@register_decomposition` decorator,
-# Please set `disable_meta=True`.
-#             """
-#             )
+            # Attempting to register a python meta kernel for a view operator.
+            # We shouldn't do this, because the output will report as not having aliased storages.
+            # All view ops have meta kernels in C++ today, so we should use those instead.
             pass
         elif name in {
             "aten::empty_strided",  # causing infinite recursion, test/test_meta.py
             "aten::clone",  # causing infinite recursion,
-            "aten::_to_copy", # causing infinite recursion, test/test_serialization.py -k test_tensor_subclass_getstate_overwrite
+            "aten::_to_copy",  # causing infinite recursion, test/test_serialization.py -k test_tensor_subclass_getstate_overwrite
             "aten::randn",  # pin_memory parameter is not supported!, test/test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32
             "aten::zeros.names",  # TypeError: zeros() got an unexpected keyword argument 'names', test/inductor/test_torchinductor.py -k test_zeros_cpu
             "aten::empty.names",  # TypeError: empty() got an unexpected keyword argument 'names', test/inductor/test_torchinductor.py -k test_zeros_cpu
-
             "aten::add.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test/inductor/test_torchinductor.py -k test_both_scalars
             "aten::sub.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test/inductor/test_torchinductor.py -k test_both_scalars
             "aten::mul.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test/inductor/test_torchinductor.py -k test_both_scalars
             "aten::div.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test/test_fake_tensor.py -k test_scalar_inputs
             "aten::div.Tensor_mode",  # ValueError: Receive two Number inputs to an elementwise binary operation! test/inductor/test_torchinductor.py -k test_div8_cpu
-
             "aten::diag_embed",  # RuntimeError: Stride mismatch! Strides are (180, 30, 1, 6) and (180, 30, 5, 1) (mismatched at 2)! test/test_ops.py -k test_fake_autocast_diag_embed_cuda_float32
-
             "aten::copy_",  # Exception not raiseed, test/test_torch.py -k test_storage_meta_errors_cpu_int64
-
             "aten::constant_pad_nd",  # requires_grad mismatch, test/test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
         }:
             pass
         else:
             _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+
 
 activate_meta()
