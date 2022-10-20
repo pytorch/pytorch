@@ -4331,7 +4331,6 @@ if HAS_CUDA:
                 return lambda x: example_inputs_
 
         def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
-            from torch._dynamo.eval_frame import OptimizeContext
             from torch._inductor.debug import DebugContext
             from torch._inductor.graph import GraphLowering
             from torch._inductor.virtualized import V
