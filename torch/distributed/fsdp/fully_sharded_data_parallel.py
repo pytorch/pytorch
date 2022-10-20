@@ -570,7 +570,7 @@ class _ExecOrderData:
             tensor_kwargs = {"dtype": torch.int32, "device": device}
             world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)
             local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_num_valid_indices,
                 local_num_valid_indices,
                 group=self.process_group,
@@ -595,7 +595,7 @@ class _ExecOrderData:
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
             local_indices = torch.tensor(local_indices, **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
             # Check that all ranks plan to all-gather the same index parameters
@@ -1845,8 +1845,8 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root is not None:
             return  # no-op: already initialized
         if not torch.cuda.is_available():
-            # Allow the FSDP constructor to run even with CUDA but check this
-            # once we start real execution
+            # Allow the FSDP constructor to run even without CUDA but check
+            # this once we start real execution
             raise RuntimeError("FSDP does not support CPU only execution")
         # The following logic is only run on the root FSDP instance since it
         # will set `_is_root=False` for the non-root instances
@@ -2656,9 +2656,10 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         nonsharded_tensors = []
-        # TODO: Reduce the communication by using only one _all_gather_base to
-        # gather all the parameters in this layer. This can be achieved by
-        # concatenated all the local shards and then append the padding.
+        # TODO: Reduce the communication by using only one
+        # `all_gather_into_tensor()` to gather all the parameters in this
+        # layer. This can be achieved by concatenating all the local shards and
+        # then appending the padding.
         # https://github.com/pytorch/pytorch/issues/77461
         shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
         for fqn, _, _ in self._param_fqns:
@@ -2688,7 +2689,7 @@ class FullyShardedDataParallel(nn.Module):
             tensor = torch.empty(
                 chunk_size * self.world_size, dtype=local_tensor.dtype
             ).cuda()
-            dist._all_gather_base(tensor, local_tensor, group=self.process_group)
+            dist.all_gather_into_tensor(tensor, local_tensor, group=self.process_group)
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             nonsharded_tensors.append(tensor)
 
