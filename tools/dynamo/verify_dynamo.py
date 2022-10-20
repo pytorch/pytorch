@@ -26,6 +26,7 @@ def check_python():
 
 def check_torch():
     import torch
+
     return packaging.version.parse(torch.__version__)
 
 
