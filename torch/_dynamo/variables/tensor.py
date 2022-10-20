@@ -86,13 +86,12 @@ def cleanup_module(nn_module):
 
     # very bad hack to mutate the original module back to have register_parameters
 
-    if hasattr(nn_module, "is_flat_param"):
-        for attr_name in dir(nn_module):
-            attr = getattr(nn_module, attr_name)
-            if isinstance(attr, torch.Tensor):
-                copy_tensor = copy.deepcopy(attr.clone().detach())
-                delattr(nn_module, attr_name)
-                nn_module.register_buffer(attr_name, copy_tensor)
+    for attr_name in dir(nn_module):
+        attr = getattr(nn_module, attr_name)
+        if isinstance(attr, torch.Tensor):
+            copy_tensor = copy.deepcopy(attr.clone().detach())
+            delattr(nn_module, attr_name)
+            setattr(nn_module, attr_name, torch.nn.Parameter(copy_tensor))
     return nn_module
 
 
