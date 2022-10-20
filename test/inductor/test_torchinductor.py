@@ -3801,48 +3801,37 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
-    @unittest.skip("https://github.com/pytorch/torchdynamo/issues/1297")
-    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
-    def test_symbolic(self):
-        def f(x):
-            x = x.cos()
-            x = x.view(x.shape[0] * 2, -1)
-            return (x,)
-
-        traced = make_fx(f, tracing_mode="symbolic")(
-            torch.randn(8, 4, device=self.device)
-        )
-        compiled = compile_fx_inner(traced, [torch.randn(8, 4, device=self.device)])
-
-        out = compiled([torch.randn(8, 4, device=self.device)])
-        self.assertEqual(out[0].shape, (16, 2))
-
-        out = compiled([torch.randn(12, 4, device=self.device)])
-        self.assertEqual(out[0].shape, (24, 2))
-
     @requires_cuda()
     @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs(self):
         def fn(x, y):
-            return x + y
+            return x + y, x * y, x / y
+
+        opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
             rand_strided((2, 3), (3, 1), device="cuda"),
             rand_strided((), (), device="cpu"),
         )
-        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @requires_cuda()
     @patch.object(config.triton, "cudagraphs", True)
     def test_unspec_inputs_cudagraphs(self):
         def fn(x, y):
-            return x + y
+            return x + y, x * y, x / y
+
+        opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
             rand_strided((2, 3), (3, 1), device="cuda"),
             rand_strided((), (), device="cpu"),
         )
-        self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        inputs = (inputs[1], inputs[0])
+        self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
