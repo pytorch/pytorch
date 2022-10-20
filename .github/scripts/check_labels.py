@@ -22,10 +22,10 @@ BOT_AUTHORS = ["github-actions", "pytorchmergebot", "pytorch-bot"]
 ERR_MSG_TITLE = "This PR needs a label"
 ERR_MSG = (
     f"# {ERR_MSG_TITLE}\n"
-    "If your changes are user facing and intended to be a part of release notes, please use a label starting with `release notes:`.\n\n"
+    "If your changes are user facing and intended to be a part of release notes, please use a label starting with `release notes:`.\n\n"  # noqa: E501  pylint: disable=line-too-long
     "If not, please add the `topic: not user facing` label.\n\n"
-    "For more information, see https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work."
-)  # noqa: E501  pylint: disable=line-too-long
+    "For more information, see https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work."  # noqa: E501  pylint: disable=line-too-long
+)
 
 
 def get_release_notes_labels() -> List[str]:
