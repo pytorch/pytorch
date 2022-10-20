@@ -1977,18 +1977,17 @@ def _reduction(
 
 
 def _make_copy_from_view(fn):
-    # Does not handle multiple outputs, but I think we don't have any such an op
+    """
+    Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
+    """
     name = fn.__name__
     fn = out_wrapper()(fn)
 
     def _fn(*args, out=None, **kwargs):
-        result = fn(*args, **kwargs)
+        result = fn(*args, out=out, **kwargs)
         if out is None:
             return result.clone()
-        else:
-            _maybe_resize_out(out, result.shape)
-            _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=False)  # type: ignore[arg-type]
-            return out
+        return result
 
     copy_name = f"{name}_copy"
     _fn.__name__ = copy_name
