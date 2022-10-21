@@ -6394,7 +6394,7 @@ class TestAdvancedIndexing(TestCase):
     def test_advancedindex_big(self, device="mps"):
         reference = torch.arange(0, 123344, dtype=torch.int, device=device)
 
-        self.assertEqual(reference[[0, 123, 44488, 68807, 123343],],
+        self.assertEqual(reference[[0, 123, 44488, 68807, 123343]],
                          torch.tensor([0, 123, 44488, 68807, 123343], dtype=torch.int))
 
     def test_set_item_to_scalar_tensor(self, device="mps"):
