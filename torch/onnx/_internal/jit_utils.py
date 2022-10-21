@@ -15,11 +15,6 @@ from torch.onnx import errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration
 
-# TODO(titaiwang): remove this when onnx-script becomes dependency
-try:
-    import onnxscript  # type: ignore[import]
-except Exception:
-    raise errors.OnnxExporterError("Module onnxscript is not installed!")
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 _SKIP_NODE_ATTRIBUTES = {"inplace", "aten"}
@@ -104,6 +99,12 @@ class GraphContext:
             overload_name_s=overload_name,
             **kwargs,
         )
+
+    # TODO(titaiwang): remove this when onnx-script becomes dependency
+    try:
+        import onnxscript  # type: ignore[import]
+    except Exception:
+        raise errors.OnnxExporterError("Module onnxscript is not installed!")
 
     @_beartype.beartype
     def onnxscript_op(
