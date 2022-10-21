@@ -8,12 +8,15 @@ import sys
 import time
 from contextlib import nullcontext
 from functools import partial
+from os.path import abspath, exists
 from typing import List
 
 import functorch.compile
 import numpy as np
 import tabulate
 import torch
+
+import torch._dynamo as dynamo
 import torch.distributed as dist
 import torch.fx as fx
 import torch.multiprocessing as mp
@@ -21,21 +24,24 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils._pytree as pytree
 import transformers
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.distributed.fsdp.wrap import always_wrap_policy
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.profiler import ProfilerActivity
-from torch.profiler import profile
-from torch.profiler import record_function
-from traitlets.config.loader import ArgumentError
-
-import torch._dynamo as dynamo
 from torch._dynamo.optimizations import BACKENDS
 from torch._dynamo.optimizations.distributed import DDPOptimizer
-from os.path import abspath, exists
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
+    size_based_auto_wrap_policy,
+    transformer_auto_wrap_policy,
+)
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.profiler import profile, ProfilerActivity, record_function
+from traitlets.config.loader import ArgumentError
+
 
 def setup_torchbench_env():
     original_dir = abspath(os.getcwd())
@@ -131,19 +137,34 @@ def fsdp_checkpointing_base(model, blocks):
 
 from transformers.models.t5.modeling_t5 import T5Block
 
-wrap_mycustom_policy = functools.partial(
-    transformer_auto_wrap_policy, transformer_layer_cls=(T5Block, MyModule)
-)
-
-FSDP_WRAP = {
-    ToyModel: lambda model: FSDP(model, )
+MODEL_FSDP_WRAP = {
+    ToyModel: (MyModule,)
+    # TODO T5: (T5Block,)
 }
+
+
+def apply_fsdp(model, use_checkpointing=False, use_wrap_policy=True):
+    blocks = MODEL_FSDP_WRAP[model.__class__]
+
+    wrap_policy = None
+    if use_wrap_policy:
+        # transformer policy is really a generic policy that wraps modules of specified classes
+        wrap_policy = functools.partial(
+            transformer_auto_wrap_policy, transformer_layer_cls=blocks
+        )
+
+    model = FSDP(model, auto_wrap_policy=wrap_policy)
+    if use_checkpointing:
+        fsdp_checkpointing_base(model, blocks)
+
+    return model
 
 
 unpack_logits_types = (
     transformers.modeling_outputs.MaskedLMOutput,
     transformers.modeling_outputs.Seq2SeqLMOutput,
 )
+
 
 def unpack_outputs(outputs):
     if isinstance(outputs, unpack_logits_types):
@@ -168,8 +189,11 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
     inputs = pytree.tree_map(move_tensor, inputs)
 
     if args.fsdp:
-        model = FSDP(model, auto_wrap_policy=wrap_mycustom_policy)
-        # model = FSDP(model)
+        model = apply_fsdp(
+            model,
+            use_checkpointing=args.fsdp_checkpoint,
+            use_wrap_policy=args.fsdp_wrap,
+        )
         print(model)
     elif args.ddp:
         model = DDP(model)
@@ -223,12 +247,17 @@ def experiment(fn, key, world_size, results):
     ctx = mp.get_context("spawn")
     # just get a time from rank0
     result_q = ctx.SimpleQueue()
-    mp.spawn(
-        fn,
-        args=(world_size, key, result_q),
-        nprocs=world_size,
-        join=True,
-    )
+    f_args = (world_size, key, result_q)
+    if world_size > 1:
+        mp.spawn(
+            fn,
+            args=f_args,
+            nprocs=world_size,
+            join=True,
+        )
+    else:
+        # rank 0
+        fn(0, *f_args)
     times = result_q.get()
 
     results.append((key, np.median(times)))
@@ -337,6 +366,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--world_size", type=int, default=2, help="Number of ranks/gpus for experiments"
     )
+    parser.add_argument(
+        "--fsdp_checkpoint",
+        action="store_true",
+        help="whether to use gradient checkpointing via model-specific policy",
+    )
+    parser.add_argument(
+        "--fsdp_wrap",
+        action="store_true",
+        help="whether to apply fsdp to submodules via model-specific policy",
+    )
 
     dist_arg = parser.add_mutually_exclusive_group()
     dist_arg.add_argument("--ddp", action="store_true")
@@ -366,9 +405,9 @@ if __name__ == "__main__":
         exit(0)
 
     times = []
-    if args.world_size > 1:
-        experiment(fn, model_name, args.world_size, times)
-    else:
-        fn(0, 1, model_name, times)
+    # if args.world_size > 1:
+    experiment(fn, model_name, args.world_size, times)
+    # else:
+    # fn(0, 1, model_name, times)
     print("\nExperiment Results:")
     print(tabulate.tabulate(times, headers=("key", "time")))

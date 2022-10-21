@@ -20,6 +20,8 @@ from torch._dynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
+
+
 def setup_torchbench_env():
     original_dir = abspath(os.getcwd())
 
@@ -41,6 +43,7 @@ def setup_torchbench_env():
         os.chdir(torchbench_dir)
         sys.path.append(torchbench_dir)
     return original_dir
+
 
 original_dir = setup_torchbench_env()
 
