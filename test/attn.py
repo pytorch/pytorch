@@ -37,14 +37,15 @@ class AttentionFunction(autograd.Function):
         # improve efficiency. If you want to make your code simpler, you can
         # skip them. Returning gradients for inputs that don't require it is
         # not an error.
-        i = grad_o @ v.T
+
+        i = grad_o @ v.T if grad_o is not None else torch.zeros(1)
         j = 1 - a ** 2
         if ctx.needs_input_grad[0]:
-            total_q = (i * j) @ k + (grad_a * j) @ k
+            total_q = (i * j) @ k + ((grad_a * j) @ k if grad_a is not None else torch.zeros(1))
         if ctx.needs_input_grad[1]:
-            total_k = (i * j).T @ q + (grad_a * j).T @ q
+            total_k = (i * j).T @ q + ((grad_a * j).T @ q if grad_a is not None else torch.zeros(1))
         if ctx.needs_input_grad[2]:
-            total_v = a.T @ grad_o
+            total_v = a.T @ grad_o if grad_o is not None else None
 
         return total_q, total_k, total_v
 
