@@ -156,7 +156,7 @@ class NNModuleVariable(VariableTracker):
         @contextmanager
         def record_nn_module_stack():
             try:
-                tx.nn_module_stack[self.module_key] = mod.__class__.__name__
+                tx.nn_module_stack[self.module_key] = type(mod)
                 yield
             finally:
                 del tx.nn_module_stack[self.module_key]
@@ -357,6 +357,7 @@ class NNModuleVariable(VariableTracker):
             if isinstance(args[0], SliceVariable):
                 # Build a TupleVariable of NNModules
                 result = []
+                submods = []
 
                 # Turn the slice into the list of integers
                 keys = list(range(len(module)))[args[0].as_python_constant()]
@@ -371,7 +372,18 @@ class NNModuleVariable(VariableTracker):
                             **options,
                         )
                     )
-                return TupleVariable(result, **options)
+                    submods.append(submod)
+
+                new_module = torch.nn.Sequential(*submods)
+                new_module_variable = tx.output.register_attr_or_module(
+                    new_module,
+                    f"{self}.__getitem__(slice)",
+                    source=NNModuleSource(
+                        GetItemSource(self.source, args[0].as_python_constant())
+                    ),
+                    **options,
+                )
+                return new_module_variable
 
             key = args[0].as_python_constant()
             submod = module[key]
