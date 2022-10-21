@@ -1539,6 +1539,8 @@ class CommonTemplate:
                 self.common(
                     mod,
                     (v, other),
+                    atol=2e-3,
+                    rtol=0.016
                 )
 
     def test_gather1(self):
