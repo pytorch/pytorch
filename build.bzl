@@ -98,8 +98,6 @@ def define_targets(rules):
             ":tags.yaml",
             ":ts_native_functions.cpp",
             ":ts_native_functions.yaml",
-            ":rules.h.in",
-            ":rules.py.in",
             ":rules.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
@@ -297,5 +295,5 @@ GENERATED_AUTOGRAD_CPP = [
 
 GENERATED_ONNX_DIAGNOSTICS_RULES = [
     "torch/csrc/onnx/diagnostics/generated/rules.h",
-    "torch/onnx/_internal/diagnostics/generated/rules.py"
+    "torch/onnx/_internal/diagnostics/generated/_rules.py"
 ]

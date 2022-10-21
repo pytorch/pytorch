@@ -429,6 +429,7 @@ cu_library(
         "@cuda//:cublas",
         "@cuda//:cufft",
         "@cuda//:cusparse",
+        "@cutlass",
     ],
     alwayslink = True,
 )
@@ -1673,6 +1674,7 @@ cc_library(
     ] + if_cuda([
         ":torch_distributed_cuda",
         "@cuda//:nvToolsExt",
+        "@cutlass",
     ]),
     alwayslink = True,
 )
@@ -1909,8 +1911,6 @@ test_suite(
         "aten/src/ATen/native/ts_native_functions.yaml",
         "torch/csrc/lazy/core/shape_inference.h",
         "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
-        "tools/onnx/templates/rules.h.in",
-        "tools/onnx/templates/rules.py.in",
         "torch/onnx/_internal/diagnostics/rules.yaml",
     ]
 ]
