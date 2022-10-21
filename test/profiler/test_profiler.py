@@ -1708,6 +1708,9 @@ class TestTorchTidyProfiler(TestCase):
                     p.storage_data_ptr: {name: s.storage_data_ptr for name, s in state}
                     for (p, _, state) in opt_.parameters
                 }
+
+                # Make sure the profiler collected all optimizer state and check
+                # that the address recorded by the profiler is correct.
                 for parameter, parameter_state in opt.state.items():
                     self.assertEqual(
                         {name: value.storage().data_ptr() for name, value in parameter_state.items()},
