@@ -143,6 +143,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   Node& operator=(Node&& other) = delete;
   virtual ~Node() = default;
 
+  std::shared_ptr<Node> getptr() {
+    return shared_from_this();
+  }
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(variable_list&& inputs) {
