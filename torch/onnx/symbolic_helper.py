@@ -31,6 +31,7 @@ __all__ = [
     "check_training_mode",
     "dequantize_helper",
     "is_caffe2_aten_fallback",
+    "is_complex_value",
     "parse_args",
     "pytorch_name_to_type",
     "quantize_helper",
@@ -501,6 +502,16 @@ def _is_scalar_list(x: _C.Value) -> bool:
 @_beartype.beartype
 def _is_tuple_construct(x: _C.Value) -> bool:
     return x.node().kind() == "prim::TupleConstruct"
+
+
+@_beartype.beartype
+def is_complex_value(x: _C.Value) -> bool:
+    assert _is_value(x)
+    return _type_utils.JitScalarType.from_name(x.type().scalarType()) in {
+        _type_utils.JitScalarType.COMPLEX32,
+        _type_utils.JitScalarType.COMPLEX64,
+        _type_utils.JitScalarType.COMPLEX128,
+    }
 
 
 @_beartype.beartype

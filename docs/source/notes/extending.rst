@@ -372,7 +372,7 @@ tensor, parametrized by the order ``N`` and value along the diagonal entries,
             self._value = value
 
         def __repr__(self):
-            return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+            return "ScalarTensor(N={}, value={})".format(self._N, self._value)
 
         def tensor(self):
             return self._value * torch.eye(self._N)
@@ -409,7 +409,7 @@ this time adding a ``__torch_function__`` implementation::
           self._value = value
 
       def __repr__(self):
-          return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+          return "ScalarTensor(N={}, value={})".format(self._N, self._value)
 
       def tensor(self):
           return self._value * torch.eye(self._N)
@@ -494,7 +494,7 @@ function correctly when either operand is a ``ScalarTensor`` or a regular
 
   >>> s = ScalarTensor(2, 2)
   >>> torch.add(s, s)
-  DiagonalTensor(N=2, value=4)
+  ScalarTensor(N=2, value=4)
   >>> t = torch.tensor([[1, 1,], [1, 1]])
   >>> torch.add(s, t)
   tensor([[3., 1.],

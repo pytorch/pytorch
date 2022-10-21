@@ -7589,7 +7589,7 @@ class TestConsistency(TestCase):
         'normnuc': None,
         'nn.functional.softminwith_dtype': None,
         'nn.functional.feature_alpha_dropoutwith_train': None,
-        'log_softmaxdtype': None,
+        'log_softmaxwith_dtype': None,
         'split_with_sizes': None,
         'trapezoid': None,
         'eq': None,
