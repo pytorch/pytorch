@@ -676,7 +676,7 @@ Tensor fft_c2r_backward(
     const Tensor& grad,
     IntArrayRef dim,
     int64_t normalization);
-Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
+Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x,
     const Tensor& self,
@@ -772,13 +772,23 @@ std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
     const Tensor& result,
     const Tensor& input,
-    const Tensor& tau);
+    const Tensor& tau,
+    const bool flip_order = false);
 Tensor householder_product_jvp(
     const Tensor& dV,
     const Tensor& dtau,
     const Tensor& prod,
     const Tensor& V,
     const Tensor& tau);
+std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
+    const Tensor& grad,
+    const Tensor& result,
+    const Tensor& self,
+    const Tensor& tau,
+    const Tensor& other,
+    bool left,
+    bool transpose,
+    std::array<bool, 3> grad_output_mask);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);

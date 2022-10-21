@@ -96,40 +96,16 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
       // This copys offsets so we are safe to move
       auto new_offsets = std::vector<int64_t>(offsets);
       int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
-      int64_t *stride_ptr = new_strides.data_ptr<int64_t>();
       // Get start val for each split
       int64_t start_val = split_idx * split_size;
       for (int64_t i : c10::irange(n_tensors)) {
         const int64_t index = i * tensor_dim + dim;
-        new_offsets[i] = offsets[i] + start_val * stride_ptr[index];
+        new_offsets[i] = offsets[i] + start_val;
         size_ptr[index] = split_size;
-        stride_ptr[index] *= 1;
     }
     splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, std::move(new_offsets));
   }
   return splits;
-}
-
-std::vector<IntArrayRef> NestedTensor_get_sizes(
-    const NestedTensorImpl* self_ptr) {
-  int64_t ntensors = self_ptr->size(0);
-  std::vector<IntArrayRef> sizes(ntensors);
-  if (ntensors == 0) {
-    return sizes;
-  }
-  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
-  int64_t orig_dim = sizemat.size(1);
-  // nesting scalars has empty sizes
-  if (orig_dim == 0) {
-    return sizes;
-  }
-  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
-
-  for (const auto i : c10::irange(ntensors)) {
-    sizes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
-    sizemat_ptr += orig_dim;
-  }
-  return sizes;
 }
 
 } // namespace native
