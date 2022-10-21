@@ -296,6 +296,10 @@ class OpOverload(PyOperatorABC):
                 dispatch_key_or_mode != torch._C.DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
 
+            if dispatch_key_or_mode in self.py_kernels:
+                raise RuntimeError(
+                    f"Trying to override a python impl for {dispatch_key_or_mode} on operator {self._name}"
+                )
             self.py_kernels[dispatch_key_or_mode] = fn
             return fn
 
