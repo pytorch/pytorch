@@ -19,7 +19,6 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
 from . import config, ir
-from .codecache import cache_dir
 from .scheduler import (
     BaseSchedulerNode,
     ExternKernelSchedulerNode,

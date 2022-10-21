@@ -323,6 +323,7 @@ def inductor_accuracy_fails(fx_g, args, check_str=None):
 
     return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
+
 def get_minifier_repro_path():
     return os.path.join(minifier_dir(), "minifier_launcher.py")
 
@@ -468,11 +469,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     from functorch._src.aot_autograd import make_boxed_func
 
-    from .testing import (
-        collect_results,
-        reduce_to_scalar_loss,
-        requires_bwd_pass,
-    )
+    from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
     new_args = clone_inputs(args)
@@ -820,7 +817,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError(f"Issue detected. Repro at {get_minifier_repro_path()}.")
+                    raise ValueError(
+                        f"Issue detected. Repro at {get_minifier_repro_path()}."
+                    )
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -869,9 +868,8 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 
 @register_backend
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
-    from torchdynamo.optimizations.backends import BACKENDS
-
     from functorch.compile import minifier
+    from torchdynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
         from torchinductor.compile_fx import compile_fx
