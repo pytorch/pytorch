@@ -285,7 +285,7 @@ test_inductor_timm_shard() {
   TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 3 --partition-id "$1" \
+    --device cuda --inductor --float32 --total-partitions 8 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
@@ -740,35 +740,24 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
-  test_inductor
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  test_inductor_timm_shard $id
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_huggingface
   test_inductor_huggingface_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 10 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
-  install_timm
-  test_inductor_timm_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 4 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_timm
-  test_inductor_timm_shard 1
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 5 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_timm
-  test_inductor_timm_shard 2
+  test_inductor
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
