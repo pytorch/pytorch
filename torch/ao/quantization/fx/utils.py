@@ -231,7 +231,7 @@ def get_quantize_node_info(
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
         return None
-    return node_type, quantize_op, qparams
+    return node_type, quantize_op, qparams  # type: ignore[return-value]
 
 # Keep it here for BC in torch.quantization namespace, we can remove it after
 # we deprecate the torch.quantization namespace
