@@ -198,7 +198,7 @@ function checkout_install_torchbench() {
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
   git checkout "${commit}"
-  python install.py
+  python install.py --continue_on_fail
   pip_install gym==0.25.2  # workaround issue in 0.26.0
   popd
 }
