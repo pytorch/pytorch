@@ -228,12 +228,19 @@ def get_default_qconfig(backend='fbgemm', version=0):
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports
+      * `backend` (str): a string representing the target backend. Currently supports
         `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
 
     Return:
         qconfig
     """
+    supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
+    if backend not in supported_backends:
+        raise AssertionError(
+            "backend: " + str(backend) +
+            " not supported. backend must be one of {}".format(supported_backends)
+        )
+
     if version == 0:
         if backend == 'fbgemm':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
@@ -249,6 +256,7 @@ def get_default_qconfig(backend='fbgemm', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                               weight=default_per_channel_weight_observer)
         else:
+            # won't reach
             qconfig = default_qconfig
     else:
         raise AssertionError("Version number: " + str(version) +
@@ -303,13 +311,20 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
     Returns the default QAT qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports
+      * `backend` (str): a string representing the target backend. Currently supports
         `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
         qconfig
     """
+    supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
+    if backend not in supported_backends:
+        raise AssertionError(
+            "backend: " + str(backend) +
+            " not supported. backend must be one of {}".format(supported_backends)
+        )
+
     # Histogram observer is too slow for quantization aware training
     if version == 0:
         if backend == 'fbgemm':
