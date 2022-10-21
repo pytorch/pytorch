@@ -1092,14 +1092,16 @@ def squeeze_default(self: Tensor) -> Tensor:
     n_dims = self.dim()
     size = self.size()
     assert n_dims == len(size)
-    reduction_axes = []
-    for i in range(0, n_dims):
-        if size[i] == 1:
-            reduction_axes.append(i)
-    if len(reduction_axes) == 0:
-        return self
-    return torch.sum(self, reduction_axes, False, dtype=self.dtype)
+    sizes = []
+    strides = []
 
+    stride = self.stride()
+    for i in range(0, n_dims):
+        size_at_i = size[i]
+        if size_at_i[i] != 1:
+            sizes.append(size_at_i)
+            strides.append(stride[i])
+    return torch.as_strided(self, strides, sizes)
 
 @register_decomposition(aten.squeeze_.dim, disable_meta=True)
 def squeeze_dim(self: Tensor, dim: int) -> Tensor:
@@ -1113,8 +1115,12 @@ def squeeze_dim(self: Tensor, dim: int) -> Tensor:
         dim = n_dims + dim
     assert dim >= 0 and dim < n_dims
 
+    stride = self.stride()
+
     if size[dim] == 1:
-        return torch.sum(self, [dim], False, dtype=self.dtype)
+        del size[dim]
+        del stride[dim]
+        return torch.as_strided(self, stride, size)
     return self
 
 
