@@ -3128,8 +3128,8 @@ class Convolution(ExternKernelAlloc):
             ):
                 valid_cudnn = True
 
-            valid_device = x.get_device() == "cpu" or (
-                x.get_device() == "cuda" and valid_cudnn
+            valid_device = x.get_device().type == "cpu" or (
+                x.get_device().type == "cuda" and valid_cudnn
             )
             if (
                 valid_device
