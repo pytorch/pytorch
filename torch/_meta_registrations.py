@@ -10,6 +10,7 @@ from torch._prims_common import (
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    FloatLike,
     IntLike,
 )
 
@@ -1385,6 +1386,22 @@ def full(size, fill_value, *args, **kwargs):
 )
 def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
+
+
+# hacky: Please remove after math.ceil works with arange
+@register_meta(aten.arange.default)
+def arange(end, **kwargs):
+    if isinstance(end, FloatLike):
+        end = math.ceil(end)  # type: ignore[arg-type]
+
+    def is_integral(x):
+        return isinstance(x, IntLike) or isinstance(x, bool)
+
+    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
+    if set_to_integral_dtype:
+        kwargs["dtype"] = torch.int64
+
+    return aten.empty([end], **kwargs)
 
 
 @register_meta(aten.arange.start)
