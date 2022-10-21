@@ -135,7 +135,7 @@ git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
-  # push to a temp branch first to trigger CLA check and satisfying branch protections
+  # push to a temp branch first to trigger CLA check and satisfy branch protections
   git push -u origin pytorchbot/temp-branch-py -f
   sleep 30
   git push -u origin "${branch}"
