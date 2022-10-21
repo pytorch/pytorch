@@ -301,9 +301,11 @@ ALLOWLIST_OP = frozenset(
 # Expected failures for onnx export. If an op is expected to fail only for certain
 # ONNX opsets, add the op to EXPECTED_OPSET_FAILS below.
 # The list should be sorted alphabetically by op name.
-# Q: When should I use skip vs xfail?
-# A: Use skip if we don't care about the test passing or if the test is flaky.
-#    Use xfail if we want to eventually fix the test.
+# Q: When should I use skip vs vs dont_care vs xfail?
+# A: Use skip when we want to fix the test eventually but it doesn't fail consistently,
+#        e.g. the test is flaky. Otherwise, use xfail.
+#    Use dont_care if we don't care about the test passing, e.g. ONNX doesn't support the usage.
+#    Use xfail if a test fails now and we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     dont_care(
         torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
