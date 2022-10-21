@@ -145,6 +145,7 @@ class TestClipGradNorm(FSDPTest):
         fsdp_total_norm = fsdp_model.clip_grad_norm_(max_norm=max_norm, norm_type=norm_type)
         self.assertEqual(ddp_total_norm, fsdp_total_norm)
 
+        # Check that the gradients were modified by `clip_grad_norm_()`
         for param, orig_grad in zip(ddp_model.parameters(), orig_ddp_grads):
             assert not torch.equal(param.grad, orig_grad)
         for param, orig_grad in zip(fsdp_model.parameters(), orig_fsdp_grads):
