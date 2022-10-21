@@ -21,6 +21,7 @@
 #else
 #include <ATen/ops/_conj_physical_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
@@ -75,6 +76,8 @@
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/rad2deg.h>
 #include <ATen/ops/rad2deg_native.h>
+#include <ATen/ops/relu.h>
+#include <ATen/ops/relu_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/round.h>
@@ -90,15 +93,17 @@
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh.h>
 #include <ATen/ops/sinh_native.h>
-#include <ATen/ops/sqrt.h>
-#include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/sparse_mask.h>
 #include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/tan.h>
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh.h>
 #include <ATen/ops/tanh_native.h>
 #include <ATen/ops/tensor.h>
+#include <ATen/ops/threshold_backward.h>
+#include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zero_native.h>
@@ -366,6 +371,7 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
+CREATE_UNARY_UFUNC(relu);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -381,6 +387,30 @@ Tensor& round_sparse_csr_(Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
   self.values().round_();
   return self;
+}
+
+Tensor threshold_backward_sparse_compressed(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Scalar& threshold) {
+  return get_result_tensor_for_unary_op(
+      [&](const Tensor& t) {
+        return at::threshold_backward(t, self.values(), threshold);
+      },
+      grad_output);
+}
+
+Tensor& threshold_backward_sparse_compressed_out(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Scalar& threshold,
+    Tensor& grad_input) {
+  return unary_op_out(
+      [&](const Tensor& t, Tensor& out) {
+        return at::threshold_backward_outf(t, self.values(), threshold, out);
+      },
+      grad_output,
+      grad_input);
 }
 
 // angle, isneginf, isposinf and signbit currently don't have an inplace variant

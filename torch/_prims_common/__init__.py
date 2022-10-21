@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
 import weakref
-
 import torch
 
 # nvFuser imports are conditional on being compiled with CUDA
@@ -129,6 +128,14 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             msg = (
                 "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
                     a.stride(), b.stride(), idx
+                )
+            )
+            raise RuntimeError(msg)
+
+        if a.storage_offset() != b.storage_offset():
+            msg = (
+                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
+                    a.storage_offset(), b.storage_offset()
                 )
             )
             raise RuntimeError(msg)
@@ -634,6 +641,17 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     return shape if shape is not None else scalar_shape
 
 
+# Extracts dimensions that might be passed either as a list/tuple or as varargs.
+# A typical case is Tensor.permute .
+def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
+    if dims and isinstance(dims[0], Sequence):
+        assert len(dims) == 1
+        dims = cast(Tuple[DimsSequenceType], dims)
+        return dims[0]
+    else:
+        return cast(DimsSequenceType, dims)
+
+
 def extract_shape_from_varargs(
     shape: Union[ShapeType, Tuple[ShapeType]],
     validate=True,
@@ -779,15 +797,14 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float
+    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
-        # TODO: type error here is real, replace with sym_int
-        return lambda x: int(x)  # type: ignore[arg-type]
+        return sym_int
     if dtype in _float_dtypes:
         return sym_float
     if dtype in _complex_dtypes:
@@ -936,6 +953,14 @@ def get_higher_dtype(
             return a
 
     raise RuntimeError("Unexpected termination!")
+
+
+def check_pin_memory(pin_memory: bool):
+    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
+
+
+def check_layout(layout: torch.layout):
+    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
 
 
 # TODO: maybe unify with can_cast_to?

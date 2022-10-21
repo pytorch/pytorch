@@ -30,6 +30,20 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
+    : impl_{t.unsafeGetTensorImpl()},
+      data_{t.has_storage() ? t.storage().data() : nullptr},
+      device_type_{t.device().type()},
+      device_index_{t.device().index()},
+      dtype_{t.scalar_type()},
+      layout_{t.layout()},
+      dim_{static_cast<uint32_t>(t.sizes().size())} {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
+      "Cannot profile Tensors of size > uint32 max. Got dim: ",
+      t.sizes().size());
+}
+
 // ============================================================================
 // == PyTorch Ops =============================================================
 // ============================================================================
@@ -62,26 +76,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
-    const auto& sizes = t.sizes();
-    const auto dim = sizes.size();
-    const auto layout = t.layout();
-    TORCH_CHECK(
-        dim <= std::numeric_limits<uint32_t>::max(),
-        "Cannot profile Tensors of size > uint32 max. Got dim: ",
-        dim);
-
-    tensor_metadata_.emplace_back(
-        /*impl_=*/TensorImplAddress(t.unsafeGetTensorImpl()),
-        /*data_=*/
-        StorageImplData(t.has_storage() ? t.storage().data() : nullptr),
-        /*device_type_*/ t.device().type(),
-        /*device_index_*/ t.device().index(),
-        /*dtype_=*/t.scalar_type(),
-        /*layout_=*/layout,
-        /*dim_=*/(uint32_t)dim);
-
-    tensor_sizes_strides_.copy(sizes);
-    if (layout == at::kStrided) {
+    tensor_metadata_.emplace_back(t);
+    tensor_sizes_strides_.copy(t.sizes());
+    if (t.layout() == at::kStrided) {
       // Only Strided layout tensors have strides
       tensor_sizes_strides_.copy(t.strides());
     }
@@ -114,7 +111,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
               out.strides_.back().push_back(*tensor_size_strides_it++);
             }
           }
-          out.tensor_metadata_.emplace_back(std::move(md));
+          out.tensor_metadata_.emplace_back(TensorMetadata(md));
           out.ivalues_.emplace_back();
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
@@ -837,7 +834,7 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
     storage_id_t storage_id_;
 
     // Used to assign the result.
-    std::reference_wrapper<c10::optional<size_t>> id_ref_;
+    std::reference_wrapper<c10::optional<TensorID>> id_ref_;
   };
   std::vector<TensorStoragePair> tensors;
 
@@ -846,27 +843,50 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   {
     storage_id_t current_id{0};
     ska::flat_hash_map<StorageImplData, storage_id_t> live_storage;
+    auto lookup = [&current_id, &live_storage](const StorageImplData data) {
+      auto inserted = live_storage.insert({data, current_id});
+      current_id += storage_id_t(inserted.second);
+      return inserted.first->second;
+    };
+
+    ska::flat_hash_set<storage_id_t> tensor_set;
     for (auto& result : sorted_results) {
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
             for (auto& m : torch_op.inputs_.tensor_metadata_) {
               if (m.has_value() && m->impl_ && m->data_) {
-                auto inserted = live_storage.insert({m->data_, current_id});
-                current_id += storage_id_t(inserted.second);
-                tensors.emplace_back(TensorStoragePair{
-                    m->impl_, inserted.first->second, m->id_});
+                auto id = lookup(m->data_);
+                tensor_set.insert(id);
+                tensors.emplace_back(TensorStoragePair{m->impl_, id, m->id_});
               }
             }
           },
-
-          // Handle deallocation
           [&](ExtraFields<EventType::Allocation>& alloc_op) {
+            // We won't know which allocations are for Tensor storage yet.
+            // We'll filter after we see all of the op inputs.
+            tensors.emplace_back(TensorStoragePair{
+                TensorImplAddress(nullptr),
+                lookup(StorageImplData(alloc_op.ptr_)),
+                alloc_op.id_});
+
+            // Handle deallocation
             if (alloc_op.alloc_size_ < 0) {
               live_storage.erase(StorageImplData(alloc_op.ptr_));
             }
           },
           [](const auto&) {}));
     }
+
+    // Handle any allocation events which we cannot prove are for
+    // `StorageImpl`s.
+    tensors.erase(
+        std::remove_if(
+            tensors.begin(),
+            tensors.end(),
+            [&tensor_set](const auto& i) {
+              return tensor_set.find(i.storage_id_) == tensor_set.end();
+            }),
+        tensors.end());
   }
 
   // Step 2) Handle the case that the storage of a TensorImpl changed.
@@ -876,6 +896,12 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   {
     ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
     for (const auto& t : tensors) {
+      // Storage allocations / frees don't have an associated TensorImpl, so
+      // we don't want all storages to merge through nullptr.
+      if (!t.impl_) {
+        continue;
+      }
+
       const auto it = impl_map.insert({t.impl_, t.storage_id_}).first;
 
       // The pair needs to be sorted for the coalesce step to work properly.
@@ -906,7 +932,7 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // Step 4) Write back to metadata
   // --------------------------------------------------------------------------
   for (const auto& t : tensors) {
-    t.id_ref_.get() = id_map.at(t.storage_id_);
+    t.id_ref_.get() = TensorID(id_map.at(t.storage_id_));
   }
 }
 
@@ -1042,7 +1068,13 @@ RecordQueue::getRecords(
     queue.torch_ops_.materialize(
         out, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
-    materialize(queue.allocations_);
+    for (auto& i : queue.allocations_) {
+      out.emplace_back(Result::create(
+          /*start_time_ns_=*/converter(i.start_time_),
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/ExtraFields<EventType::Allocation>(i)));
+    }
     materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {

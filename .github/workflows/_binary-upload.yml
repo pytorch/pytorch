@@ -101,7 +101,7 @@ jobs:
           no-sudo: true
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
@@ -112,14 +112,13 @@ jobs:
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        shell: bash -e -l {0}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
-        # Please note this is temporary disabling of uploading pypi cudnn wheel to our wheels repo
-        if: ${{ !contains(inputs.build_name, 'with-pypi-cudnn') }}
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
@@ -127,5 +126,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
+          BUILD_NAME: ${{ inputs.build_name }}
         run: |
+            set -ex
             bash .circleci/scripts/binary_upload.sh
