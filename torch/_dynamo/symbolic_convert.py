@@ -180,7 +180,11 @@ def break_graph_if_unsupported(*, push):
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
-                if not explain and graph_break_dup_warning_checker.add(frame_loc):
+                if (
+                    config.print_graph_breaks
+                    and not explain
+                    and graph_break_dup_warning_checker.add(frame_loc)
+                ):
                     log.warning(
                         f"Graph break: {exc} from user code at {user_stack_formatted}"
                     )
@@ -303,7 +307,7 @@ class InstructionTranslatorBase(object):
         else:
             self.instruction_pointer = None
             self.next_instruction = None
-        if inst.starts_line:
+        if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
             log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
 
@@ -893,7 +897,7 @@ class InstructionTranslatorBase(object):
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, ConstantVariable) or (
-                isinstance(k, TensorVariable) and k.parameter_value is not None
+                isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
             result[ConstDictVariable.get_key(k)] = v

@@ -13,6 +13,7 @@
 #include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -3428,7 +3429,7 @@ REGISTER_OPERATOR_FUNCTOR(
 
 REGISTER_OPERATOR_FUNCTOR(aten::nll_loss, aten_nll_loss, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor"))) {
+          "aten::nll_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto& target = p_node->Input(1).toTensor();
@@ -3455,7 +3456,7 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_nll_loss_backward,
     [](Node* n) -> SROperator {
       if (n->matches(torch::schema(
-              "aten::nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor"))) {
+              "aten::nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, SymInt ignore_index, Tensor total_weight) -> Tensor"))) {
         return [](ProcessedNode* p_node) {
           const auto& grad_output = p_node->Input(0).toTensor();
           const auto& self = p_node->Input(1).toTensor();
@@ -3494,7 +3495,7 @@ REGISTER_OPERATOR_FUNCTOR(
 
 REGISTER_OPERATOR_FUNCTOR(aten::nll_loss2d, aten_nll_loss2d, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor"))) {
+          "aten::nll_loss2d(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto& target = p_node->Input(1).toTensor();
