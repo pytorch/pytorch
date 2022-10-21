@@ -587,32 +587,6 @@ def try_script(model, example_inputs):
         return None
 
 
-def speedup_experiment_sr(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of static runtime.
-
-    Writes to ./baseline_sr.csv
-    """
-
-    if current_name not in ("opacus_cifar10", "timm_nfnet", "hf_T5"):
-        sr = backends.static_runtime(try_script(model, example_inputs), example_inputs)
-    else:
-        # segfaults on these models
-        sr = None
-    return baselines(
-        [
-            ("eager", model),
-            (
-                "sr",
-                sr,
-            ),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
-
-
 def speedup_experiment_onnx(args, model_iter_fn, model, example_inputs):
     """
     Measure baseline performance (without using TorchDynamo) of ONNXRT and TensorFlow.
@@ -1420,9 +1394,6 @@ def parse_args():
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
-        "--speedup-sr", action="store_true", help=help(speedup_experiment_sr)
-    )
-    group.add_argument(
         "--speedup-onnx", action="store_true", help=help(speedup_experiment_onnx)
     )
     group.add_argument(
@@ -1676,9 +1647,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.speedup_sr:
-        experiment = speedup_experiment_sr
-        output_filename = "baseline_sr.csv"
     elif args.speedup_onnx:
         experiment = speedup_experiment_onnx
         output_filename = "baseline_onnx.csv"
