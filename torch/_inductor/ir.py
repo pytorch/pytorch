@@ -3097,7 +3097,7 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
-        elif config.tune_layout:
+        elif config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
             output_layout_str = tuned_conv_layout(
@@ -3121,13 +3121,16 @@ class Convolution(ExternKernelAlloc):
 
             # CUDA channels_last path depend on cudnn version, see
             # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
-            valid_device = True
+            valid_cudnn = False
             if (
-                x.get_device() == "cuda"
-                and torch.backends.cudnn.is_available()
-                and torch.backends.cudnn.version() < 8302
+                torch.backends.cudnn.is_available()
+                and torch.backends.cudnn.version() >= 7603
             ):
-                valid_device = False
+                valid_cudnn = True
+
+            valid_device = x.get_device().type == "cpu" or (
+                x.get_device().type == "cuda" and valid_cudnn
+            )
             if (
                 valid_device
                 and len(x.get_size()) == 4
