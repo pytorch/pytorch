@@ -293,9 +293,12 @@ class AsyncCompile:
         def init():
             def run():
                 while True:
-                    if orig_ppid != os.getppid():
-                        os.kill(os.getpid(), signal.SIGKILL)
-                    sleep(1)
+                    try:
+                        sleep(1)
+                        if orig_ppid != os.getppid():
+                            os.kill(os.getpid(), signal.SIGKILL)
+                    except Exception:
+                        pass
 
             global _watchdog_thread
             _watchdog_thread = Thread(target=run, daemon=True)
