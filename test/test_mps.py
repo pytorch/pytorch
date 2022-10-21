@@ -7865,8 +7865,8 @@ class TestCommon(TestCase):
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
     def test_numpy_ref_mps(self, device, dtype, op):
-        # Unlike above, this test compares in `float32` since at the time of this test's creation MPS does
-        # not support float64 Tensors.
+        # Unlike `test_numpy_ref`, this test compares in `float32` since at the time of this test's creation MPS
+        # does not support float64 Tensors.
         # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
         # get patched up and this workaround removed.
         broken_on_ref_inputs = op.name in ['cat', 'clamp', 'where']
