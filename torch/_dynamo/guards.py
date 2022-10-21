@@ -215,7 +215,7 @@ class GuardBuilder:
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == {obj.__name__})"
+        code = f"{self.arg_ref(guard)}.__name__ == {obj.__name__}"
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
