@@ -99,10 +99,9 @@ git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
   # push to a temp branch first to trigger CLA check and satisfy branch protections
-  git push -u origin pytorchbot/temp-branch-cpp -f
+  git push -u origin HEAD:pytorchbot/temp-branch-cpp -f
   sleep 30
   git push -u origin
-  git push origin --delete pytorchbot/temp-branch-cpp
 fi
 
 popd
