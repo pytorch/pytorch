@@ -1440,16 +1440,6 @@ def parse_args():
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
     )
     group.add_argument(
-        "--speedup-ltc",
-        action="store_true",
-        help="speedup using the ltc backend",
-    )
-    group.add_argument(
-        "--speedup-ltc-trivial",
-        action="store_true",
-        help="speedup using the ltc backend without reusing compiled graph",
-    )
-    group.add_argument(
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
@@ -1707,18 +1697,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.speedup_ltc:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.ltc_reuse_graph, nopython=args.nopython
-        )
-        experiment = speedup_experiment
-        output_filename = "speedups_ltc.csv"
-    elif args.speedup_ltc_trivial:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.ltc_trivial, nopython=args.nopython
-        )
-        experiment = speedup_experiment
-        output_filename = "speedups_ltc_trivial.csv"
     elif args.speedup_ts:
         experiment = speedup_experiment_ts
         output_filename = "baseline_ts.csv"
