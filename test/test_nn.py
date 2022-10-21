@@ -646,44 +646,53 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, expected_grad)
 
     def test_hook_buffer_registration(self):
-        def buffer_registration_hook(module, name, buffer):
-            buffer.registered = True
-        handle = torch.nn.modules.module.register_module_buffer_registration_hook(
-            buffer_registration_hook
-        )
-        try:
-            l, n, s = self._create_basic_net()
-            for b in s.buffers():
-                self.assertTrue(getattr(b, "registered", False))
-        finally:
-            handle.remove()
+        for return_buffer in (True, False):
+            def buffer_registration_hook(module, name, buffer):
+                buffer.registered = True
+                if return_buffer:
+                    return buffer
+            handle = torch.nn.modules.module.register_module_buffer_registration_hook(
+                buffer_registration_hook
+            )
+            try:
+                l, n, s = self._create_basic_net()
+                for b in s.buffers():
+                    self.assertTrue(getattr(b, "registered", False))
+            finally:
+                handle.remove()
 
     def test_hook_submodule_registration(self):
-        def module_registration_hook(module, name, submodule):
-            module.registered = True
-            submodule.registered = True
-        handle = torch.nn.modules.module.register_module_module_registration_hook(
-            module_registration_hook
-        )
-        try:
-            l, n, s = self._create_basic_net()
-            for m in s.modules():
-                self.assertTrue(getattr(m, "registered", False))
-        finally:
-            handle.remove()
+        for return_submodule in (True, False):
+            def module_registration_hook(module, name, submodule):
+                module.registered = True
+                submodule.registered = True
+                if return_submodule:
+                    return submodule
+            handle = torch.nn.modules.module.register_module_module_registration_hook(
+                module_registration_hook
+            )
+            try:
+                l, n, s = self._create_basic_net()
+                for m in s.modules():
+                    self.assertTrue(getattr(m, "registered", False))
+            finally:
+                handle.remove()
 
     def test_hook_parameter_registration(self):
-        def parameter_registration_hook(module, name, parameter):
-            parameter.registered = True
-        handle = torch.nn.modules.module.register_module_parameter_registration_hook(
-            parameter_registration_hook
-        )
-        try:
-            l, n, s = self._create_basic_net()
-            for p in s.parameters():
-                self.assertTrue(getattr(p, "registered", False))
-        finally:
-            handle.remove()
+        for return_parameter in (True, False):
+            def parameter_registration_hook(module, name, parameter):
+                parameter.registered = True
+                if return_parameter:
+                    return parameter
+            handle = torch.nn.modules.module.register_module_parameter_registration_hook(
+                parameter_registration_hook
+            )
+            try:
+                l, n, s = self._create_basic_net()
+                for p in s.parameters():
+                    self.assertTrue(getattr(p, "registered", False))
+            finally:
+                handle.remove()
 
     def test_to(self):
         m = nn.Linear(3, 5)
