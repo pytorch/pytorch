@@ -2487,8 +2487,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> local_dict.keys()
             >>> odict_keys(['flat_param', 'inner.flat_param'])
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives may be used.
+        .. warning:: This needs to be called on all ranks since it calls
+            collective communications.
         """
         # TODO (rohan-varma): separate these out once a state_dict pre-hook
         # is available.
@@ -2784,8 +2784,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> local_dict.keys()
             >>> odict_keys(['flat_param', 'inner.flat_param'])
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives may be used.
+        .. warning:: This needs to be called on all ranks since it calls
+            collective communications.
         """
         return super().load_state_dict(state_dict, *args)
 
@@ -3884,8 +3884,8 @@ class FullyShardedDataParallel(nn.Module):
             calling it for FSDP models would lead to different scaling being
             applied per subset of model parameters.
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives will be used.
+        .. warning:: This needs to be called on all ranks since it calls
+            collective communications.
         """
         self._lazy_init()
         self._wait_for_previous_optim_step()
@@ -3960,10 +3960,10 @@ class FullyShardedDataParallel(nn.Module):
         and ``"param_groups"``. The flattened parameters in ``FSDP`` modules
         contained in ``model`` are mapped back to their unflattened parameters.
 
-        .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used. However, if ``rank0_only=True``, then the
-            state dict is only populated on rank 0, and all other ranks return
-            an empty :class:`dict`.
+        .. warning:: This needs to be called on all ranks since it calls
+            collective communications. However, if ``rank0_only=True``, then
+            the state dict is only populated on rank 0, and all other ranks
+            return an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
