@@ -14,7 +14,7 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
-from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, unique
+from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, sympy_symbol, unique
 from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -78,15 +78,6 @@ class OpOverrides:
     @staticmethod
     def constant(value, dtype):
         return repr(value)
-
-    @staticmethod
-    def sigmoid(x):
-        x = ops.exp(f"-{x}")
-        return f"1 / (1 + {x})"
-
-    @staticmethod
-    def silu(x):
-        return f"{x} * {ops.sigmoid(x)}"
 
     @staticmethod
     def reciprocal(x):
@@ -388,7 +379,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-            precompile_args.append(SizeArg(inner, sympy.expand(outer)))
+            precompile_args.append(SizeArg(inner, sympy_symbol(outer)))
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
@@ -544,7 +535,7 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(index_var):
-                return sympy.Symbol(str(index_var))
+                return sympy_symbol(str(index_var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

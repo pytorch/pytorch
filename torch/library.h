@@ -819,6 +819,8 @@ class TORCH_API Library final {
       CppFunction&& f) &;
   Library& _impl(const char* name, CppFunction&& f) &;
   Library& _fallback(CppFunction&& f) &;
+
+  at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
 namespace detail {

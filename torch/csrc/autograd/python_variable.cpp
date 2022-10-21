@@ -222,14 +222,6 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,
       torch::jit::Stack* stack) const override;
-  // NB: this is defined in python_dispatch.cpp
-  void python_op_registration_trampoline(
-      const c10::OperatorHandle& op,
-      c10::DispatchKey key,
-      torch::jit::Stack* stack) const override {
-    torch::impl::dispatch::python_op_registration_trampoline_impl(
-        op, key, stack);
-  }
 
   bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override;
   bool is_strides_like(const TensorImpl* self, at::MemoryFormat) const override;
@@ -326,7 +318,7 @@ class PyInterpreterHolder {
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
             ConcretePyInterpreterVTable::instance())) {
-    at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
+    is_main_interpreter_ = at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
   }
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
@@ -337,9 +329,13 @@ class PyInterpreterHolder {
   c10::impl::PyInterpreter* get() const noexcept {
     return impl_;
   }
+  bool is_main_interpreter() const noexcept {
+    return is_main_interpreter_;
+  }
 
  private:
   c10::impl::PyInterpreter* impl_;
+  bool is_main_interpreter_;
 };
 PyInterpreterHolder self_interpreter;
 
@@ -363,6 +359,10 @@ c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return self_interpreter.get();
+}
+
+bool isMainPyInterpreter() {
+  return self_interpreter.is_main_interpreter();
 }
 
 std::string ConcretePyInterpreterVTable::name() const {
@@ -1898,10 +1898,9 @@ static PyObject* THPVariable_NewWithVar(
     auto v = (THPVariable*)obj;
     // TODO: named constructor to avoid default initialization
     new (&v->cdata) MaybeOwned<Variable>();
-    v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
-    const auto& var = THPVariable_Unpack(v);
     if (c10::impl::HermeticPyObjectTLS::get_state()) {
-      // Do NOT initialize pyobj field on the tensor
+      // Do NOT initialize pyobj field on the tensor, do not make it owned
+      v->cdata = MaybeOwned<Variable>::borrowed(std::move(_var));
       TORCH_INTERNAL_ASSERT(
           !check_has_torch_dispatch(obj),
           "While HermeticPyObject was enabled, we attempted to create a tensor "
@@ -1913,6 +1912,8 @@ static PyObject* THPVariable_NewWithVar(
           "Python op registration.");
     } else {
       // Normal codepath
+      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+      const auto& var = THPVariable_Unpack(v);
       var.unsafeGetTensorImpl()->init_pyobj(
           self_interpreter.get(), obj, status);
       if (check_has_torch_dispatch(obj)) {

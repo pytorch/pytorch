@@ -3,9 +3,9 @@
 namespace c10 {
 namespace impl {
 
-thread_local bool hermeticPyObjectState = false;
+thread_local std::atomic<bool> hermeticPyObjectState{false};
 
-bool HermeticPyObjectTLS::haveState_{false};
+std::atomic<bool> HermeticPyObjectTLS::haveState_{false};
 
 void HermeticPyObjectTLS::set_state(bool state) {
   hermeticPyObjectState = state;

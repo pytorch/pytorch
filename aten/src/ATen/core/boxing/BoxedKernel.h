@@ -109,7 +109,6 @@ public:
   // the common case where unboxed is available.
   bool isValid() const;
   bool isFallthrough() const;
-  bool isPythonOpRegistrationTrampoline() const;
 
   /**
    * Call the function with boxed arguments.
