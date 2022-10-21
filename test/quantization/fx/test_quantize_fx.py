@@ -31,7 +31,7 @@ from torch.ao.quantization.fx.match_utils import (
 
 from torch.ao.quantization import (
     QuantType,
-    quant_type_to_str,
+    _get_quant_type_to_str,
 )
 
 from torch.ao.quantization import (
@@ -2634,7 +2634,7 @@ class TestQuantizeFx(QuantizationTestCase):
         }
 
         for quant_type in [QuantType.STATIC, QuantType.DYNAMIC]:
-            key = quant_type_to_str(quant_type)
+            key = _get_quant_type_to_str(quant_type)
             qconfig, quantized_module_class, num_observers = test_configs[key]
             qconfig_dict = {"": qconfig}
             if key == "static":

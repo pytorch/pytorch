@@ -124,7 +124,6 @@ __all__ = [
     "prepare_qat",
     "propagate_qconfig_",
     "qconfig_equals",
-    "quant_type_to_str",
     "quantize",
     "quantize_dynamic",
     "quantize_dynamic_jit",

@@ -118,7 +118,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
     def test_function_import_quant_type(self):
         function_list = [
             'QuantType',
-            'quant_type_to_str',
+            '_get_quant_type_to_str',
         ]
         self._test_function_import('quant_type', function_list)
 
