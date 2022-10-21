@@ -915,7 +915,12 @@ def col2im(
 @register_decomposition(aten.native_dropout_backward)
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
-    return grad_output * (mask.type_as(grad_output) * scale)
+    # According to the CUDA kernel implementation we should have this test;
+    # but it seems to fail tests!
+    # utils.check(mask.dtype == torch.bool, lambda: f"Mask should be Bool Scalar Type {mask.dtype}")
+    r = (grad_output * (mask.type_as(grad_output) * scale)).clone(
+        memory_format=utils.suggest_memory_format(grad_output))
+    return r
 
 
 @register_decomposition(aten.unfold_backward)

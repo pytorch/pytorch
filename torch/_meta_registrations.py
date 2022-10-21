@@ -1739,9 +1739,9 @@ def upsample_nearest2d_backward_vec_meta(grad_output, output_size, input_size, s
 
 @register_meta(aten._thnn_fused_lstm_cell.default)
 def _thnn_fused_lstm_cell_meta(input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None):
-    workspace = torch.empty_like(input_gates).to(memory_format.torch.contiguous)
-    hy = torch.empty_like(cx).to(memory_format.torch.contiguous)
-    cy = torch.empty_like(cx).to(memory_format.torch.contiguous)
+    workspace = torch.empty_like(input_gates).to(memory_format=torch.contiguous_format)
+    hy = torch.empty_like(cx).to(memory_format=torch.contiguous_format)
+    cy = torch.empty_like(cx).to(memory_format=torch.contiguous_format)
     return (workspace, hy, cy)
 
 
