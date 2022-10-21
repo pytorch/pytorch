@@ -235,7 +235,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   // either dst_ is not representable as 1d view or its stride order is different
   // in that case create an empty storage like src, copy it to device and then do
   // reshaping on the device
-  if (src.strides() == dst_.strides()) {
+  if (src.strides() != dst_.strides()) {
     needs_copy = true;
     dst = at::empty_like(src, at::device(at::kMPS));
   }
