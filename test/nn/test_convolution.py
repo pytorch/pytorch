@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import gradcheck, gradgradcheck, \
     GRADCHECK_NONDET_TOL
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, skipCUDAIfNoCudnn
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
@@ -59,7 +58,7 @@ class TestConvolutionNN(NNTestCase):
             m = torch.load(path, encoding='utf-8')
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
-    
+
     def test_invalid_conv1d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble]:
             module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True).to(dtype)
@@ -1055,7 +1054,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         output.backward(grad.contiguous())
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-    
+
     @onlyCUDA
     @dtypes(torch.double)
     def test_conv_double_backward(self, device, dtype):
@@ -2099,6 +2098,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         for cudnn_enabled in [False, True]:
             with torch.backends.cudnn.flags(enabled=cudnn_enabled):
                 torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
+
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_conv_thnn_nhwc(self, device, dtype):
@@ -2462,8 +2462,6 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_grad_output.shape, gO.shape)
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
-
-
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals())
