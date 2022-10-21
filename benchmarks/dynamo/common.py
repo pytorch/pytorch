@@ -147,6 +147,10 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "cait_m36_384",  # fp64_OOM
     "coat_lite_mini",  # time out
     "convit_base",  # fp64_OOM
+    "gernet_l",  # accuracy
+    "gluon_xception65",
+    "lcnet_0500",  # accuracy
+    "levit_128",  # levit_128
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
@@ -920,7 +924,6 @@ class BenchmarkRunner:
         self.use_amp = False
         self.grad_scaler = DummyGradScaler()
         self.autocast = NullContext
-        self.optimizer = None
         self._args = None
 
     def setup_amp(self):
@@ -943,9 +946,10 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
-        if device == "cuda":
+        param_list = list(params)
+        if device == "cuda" and len(param_list) != 0:
             # capturable is only supported on cuda at the moment
-            self.optimizer = torch.optim.Adam(params, capturable=True)
+            self.optimizer = torch.optim.Adam(param_list, capturable=True)
         else:
             self.optimizer = None
 
@@ -1142,18 +1146,14 @@ class BenchmarkRunner:
         with self.pick_grad(name, self.args.training):
             # Get results of native pytorch
             reset_rng_state()
-            model_copy = copy.deepcopy(model)
-            self.init_optimizer(current_device, model_copy.parameters())
             correct_result = self.run_n_iterations(
-                model_copy, clone_inputs(example_inputs)
+                copy.deepcopy(model), clone_inputs(example_inputs)
             )
 
             # Rerun native pytorch
             reset_rng_state()
-            model_copy = copy.deepcopy(model)
-            self.init_optimizer(current_device, model_copy.parameters())
             correct_rerun_result = self.run_n_iterations(
-                model_copy, clone_inputs(example_inputs)
+                copy.deepcopy(model), clone_inputs(example_inputs)
             )
             if not same(
                 correct_result,
@@ -1169,7 +1169,6 @@ class BenchmarkRunner:
             reset_rng_state()
             torch._dynamo.reset()
             try:
-                self.init_optimizer(current_device, model.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
@@ -1219,7 +1218,6 @@ class BenchmarkRunner:
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
-        self.init_optimizer(current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
@@ -1468,20 +1466,9 @@ def parse_args():
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
-        "--raise-on-assertion-error",
+        "--suppress-errors",
         action="store_true",
-        help="Fail a benchmark if torch._dynamo triggers an internal assertion",
-    )
-    parser.add_argument(
-        "--raise-on-backend-error",
-        action="store_true",
-        help="Fail a benchmark if backend throws an exception",
-    )
-    parser.add_argument(
-        "--raise-on-any",
-        "--raise",
-        action="store_true",
-        help="Raise on assertion or backend errors",
+        help="Suppress errors instead of raising them",
     )
     parser.add_argument(
         "--output",
@@ -1674,7 +1661,7 @@ def main(runner, original_dir=None):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
-        args.raise_on_any = True
+        args.suppress_errors = False
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1738,12 +1725,7 @@ def main(runner, original_dir=None):
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
 
-    torch._dynamo.config.raise_on_assertion_error = (
-        args.raise_on_assertion_error or args.raise_on_any
-    )
-    torch._dynamo.config.raise_on_backend_error = (
-        args.raise_on_backend_error or args.raise_on_any
-    )
+    torch._dynamo.config.suppress_errors = args.suppress_errors
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass
