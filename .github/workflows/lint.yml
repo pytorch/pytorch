@@ -229,6 +229,7 @@ jobs:
   check-labels:
     name: Check labels
     runs-on: linux.20_04.16x
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
