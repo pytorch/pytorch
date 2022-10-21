@@ -135,7 +135,10 @@ git commit -m "Generate Python docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
 
 if [[ "${WITH_PUSH:-}" == true ]]; then
+  git push -u origin pytorchbot/temp-branch -f
+  sleep 30
   git push -u origin "${branch}"
+  git push origin --delete pytorchbot/temp-branch
 fi
 
 popd
