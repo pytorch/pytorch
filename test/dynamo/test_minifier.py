@@ -41,11 +41,13 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
         shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
         cls._exit_stack.close()
 
-    def setup_method(self, _):
+    def setUp(self):
+        super().setUp()
         torch._dynamo.utils.debug_dir.setup()
 
-    def teardown_method(self, _):
+    def tearDown(self):
         torch._dynamo.utils.debug_dir.clear()
+        super().tearDown()
 
     def test_after_dynamo(self):
         @create_backend

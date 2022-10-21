@@ -25,11 +25,13 @@ class DebugDirTests(torch._dynamo.test_case.TestCase):
         shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
         cls._exit_stack.close()
 
-    def setup_method(self, _):
+    def setUp(self):
+        super().setUp()
         torch._dynamo.utils.debug_dir = DebugDir()
 
-    def teardown_method(self, _):
+    def tearDown(self):
         torch._dynamo.utils.debug_dir = DebugDir()
+        super().tearDown()
 
     def _setup(self):
         debug_dir = torch._dynamo.utils.debug_dir
