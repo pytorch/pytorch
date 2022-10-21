@@ -9,6 +9,7 @@ import textwrap
 import uuid
 from collections import Counter
 from importlib import import_module
+from tempfile import TemporaryFile
 
 import torch
 import torch.fx as fx
@@ -212,6 +213,8 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    if "inductor" in compiler_name:
+        fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
@@ -263,16 +266,20 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         )
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
+    stdout, stderr = TemporaryFile(), TemporaryFile()
     p = subprocess.Popen(
         ["python", file_name],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout,
+        stderr=stderr,
         env=new_env,
     )
-    out, err = p.communicate()
+    p.wait()
+
     if p.returncode != 0:
-        print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
-        print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
+        stdout.seek(0)
+        stderr.seek(0)
+        print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
+        print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
         return True
     return False
 
@@ -382,8 +389,11 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
 
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
+        from torch._subclasses import FakeTensorMode
+
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
+        inner_compiled_fn = None
 
         def deferred_for_real_inputs(real_inputs):
             """
@@ -393,6 +403,15 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             should be called with real tensors. Therefore, the actual invocation
             is deffered.
             """
+            # Avoid re-compiling when we call the compiled function twice. This happens
+            # when we run the model inference or training in a for loop like here
+            # https://github.com/pytorch/torchdynamo/issues/1687#issuecomment-1280040633
+            nonlocal inner_compiled_fn
+            # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
+            # because inductor clears the tensor list in its codegen. And example_inputs
+            # are available only for the first invocation.
+            fake_mode = FakeTensorMode()
+            copy_tensor_attrs = [fake_mode.from_tensor(x) for x in real_inputs]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
@@ -404,41 +423,43 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                if inner_compiled_fn is None:
+                    inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
-                        example_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
-                        example_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     raise ValueError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return compiled_fn(real_inputs)
+                    return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
-                    compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                    if inner_compiled_fn is None:
+                        inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                     # Call the compiled function with real inputs
-                    return compiled_fn(real_inputs)
+                    return inner_compiled_fn(real_inputs)
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),
-                            example_inputs,
+                            copy_tensor_attrs,
                             compiler_name,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
                             fx.GraphModule(gm, orig_graph),
-                            example_inputs,
+                            copy_tensor_attrs,
                             compiler_name,
                         )
                     raise e
