@@ -140,6 +140,7 @@ function install_triton() {
   else
     commit=$(get_pinned_commit triton)
     pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+    pip_install --user jinja2
   fi
 }
 

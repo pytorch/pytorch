@@ -758,6 +758,11 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
 
     def test_expanded_reduction(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "https://github.com/pytorch/torchdynamo/issues/1697"
+            )
+
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
@@ -3145,6 +3150,9 @@ class CommonTemplate:
         )
 
     def test_scatter2(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("unstable on sm86")
+
         def fn(a, dim, index, b):
             return aten.scatter.reduce(a, dim, index, b, reduce="add")
 
@@ -3259,6 +3267,11 @@ class CommonTemplate:
 
     # issue #1150
     def test_dense_mask_index(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "https://github.com/pytorch/torchdynamo/issues/1697"
+            )
+
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
