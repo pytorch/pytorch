@@ -100,16 +100,10 @@ class GraphContext:
             **kwargs,
         )
 
-    # TODO(titaiwang): remove this when onnx-script becomes dependency
-    try:
-        import onnxscript  # type: ignore[import]
-    except Exception:
-        raise errors.OnnxExporterError("Module onnxscript is not installed!")
-
     @_beartype.beartype
     def onnxscript_op(
         self,
-        onnx_fn: onnxscript.OnnxFunction,
+        onnx_fn,  # TODO(titaiwang): annotate this when onnx-script becomes dependency
         *raw_args: Union[torch.Tensor, _C.Value],
         outputs: int = 1,
         **kwargs,
