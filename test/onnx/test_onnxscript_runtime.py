@@ -23,13 +23,12 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model = torch.nn.SELU()
 
-        # custom domain is needed for custom Op
-        # domain name should be aligned to the one
-        # in symbolic_fn
-        # TODO: make an official domain for onnxscript usage
-        custom_opset = onnxscript.values.Opset("onnxscript", 1)
-
         from onnxscript.onnx_opset import opset15 as op
+
+        # custom domain is needed for custom Op domain name should be
+        # aligned to the one in symbolic_fn
+        # TODO(titaiwang): make an official domain for onnxscript usage
+        custom_opset = onnxscript.values.Opset(domain="onnx-script", version=1)
 
         @onnxscript.script(custom_opset)
         def Selu(X, alpha: float, gamma: float):
@@ -45,13 +44,12 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
             return op.Where(X <= zero, neg, pos)
 
         def custom_selu(g: jit_utils.GraphContext, X):
-            return g.op("onnxscript::Selu", X).setType(X.type())
+            return g.onnxscript_op(Selu, X).setType(X.type())
 
         torch.onnx.register_custom_op_symbolic(
             symbolic_name="aten::selu",
             symbolic_fn=custom_selu,
             opset_version=self.opset_version,
-            onnxscript_fn=Selu,  # newly support
         )
         self.run_test(model, x)
 
@@ -91,7 +89,6 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
 
         from onnxscript.onnx_opset import opset15 as op
 
-        opset_version = 15
         custom_opset = onnxscript.values.Opset(domain="onnxscript", version=1)
 
         @onnxscript.script(custom_opset)
@@ -118,15 +115,14 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         ):
             # TODO: move the comprehension into local function once it's supported by onnxscript
             axes = [-i for i in range(len(normalized_shape), 0, -1)]
-            return g.op(
-                "onnxscript::layer_norm", input, weight, bias, axes_i=axes, eps_f=eps
+            return g.onnxscript_op(
+                layer_norm, input, weight, bias, axes_i=axes, eps_f=eps
             ).setType(input.type())
 
         torch.onnx.register_custom_op_symbolic(
             symbolic_name="aten::layer_norm",
             symbolic_fn=custom_layer_norm,
             opset_version=self.opset_version,
-            onnxscript_fn=layer_norm,  # newly support
         )
 
         self.run_test(model, (x, y, z))
