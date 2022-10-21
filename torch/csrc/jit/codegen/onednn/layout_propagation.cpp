@@ -6,6 +6,8 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
+bool propagate_layout_mode = true;
+
 void LayoutPropagation(Node* n) {
   if (!LlgaGraphHelper::isLlgaSubgraph(n))
     return;
@@ -35,7 +37,18 @@ void LayoutPropagation(at::ArrayRef<Block*> blocks) {
 }
 
 void PropagateLayout(const std::shared_ptr<Graph>& graph) {
-  LayoutPropagation(graph->block());
+  if (PropagateLayoutEnabled())
+    LayoutPropagation(graph->block());
+}
+
+bool PropagateLayoutEnabled() {
+  return propagate_layout_mode;
+}
+
+bool setPropagateLayoutMode(bool mode) {
+  auto old_mode = PropagateLayoutEnabled();
+  propagate_layout_mode = mode;
+  return old_mode;
 }
 
 } // namespace onednn

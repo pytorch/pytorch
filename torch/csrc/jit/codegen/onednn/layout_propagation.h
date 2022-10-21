@@ -7,6 +7,8 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
+bool PropagateLayoutEnabled();
+TORCH_API bool setPropagateLayoutMode(bool mode);
 void PropagateLayout(const std::shared_ptr<Graph>& graph);
 
 } // namespace onednn

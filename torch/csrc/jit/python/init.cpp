@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
 #include <torch/csrc/jit/codegen/onednn/interface.h>
+#include <torch/csrc/jit/codegen/onednn/layout_propagation.h>
 #endif
 #include <c10/core/SymIntNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
@@ -963,9 +964,11 @@ void initJITBindings(PyObject* module) {
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+      .def("_jit_set_onednn_layout_propagation", &jit::fuser::onednn::setPropagateLayoutMode)
 #else
       .def("_jit_set_llga_enabled", [](bool flag) { return false; })
       .def("_jit_llga_enabled", []() { return false; })
+      .def("_jit_set_onednn_layout_propagation", [](bool flag) { return false; })
 #endif
       .def(
           "_jit_set_tracer_state_warn",
