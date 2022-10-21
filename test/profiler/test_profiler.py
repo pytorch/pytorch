@@ -1599,11 +1599,11 @@ class TestTorchTidyProfiler(TestCase):
             out = []
         for node in nodes:
             if (isinstance(node.extra_fields, _ExtraFields_PyCall) and
-                    node.extra_fields.opt and node.extra_fields.opt.param_addrs):
+                    node.extra_fields.optimizer and node.extra_fields.optimizer.param_addrs):
                 # avoiding OptInfo duplicates from iterations
-                addr = node.extra_fields.opt.param_addrs[0].storage_data_ptr
+                addr = node.extra_fields.optimizer.param_addrs[0].storage_data_ptr
                 if not [o for o in out if addr == o.param_addrs[0].storage_data_ptr]:
-                    out.append(node.extra_fields.opt)
+                    out.append(node.extra_fields.optimizer)
             self._flat_out_extrafields(node.children, out)
         return out
 
