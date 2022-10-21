@@ -2734,8 +2734,8 @@ def _normalize(
 
 # remove all specified dimensions
 def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
-    for idx in reversed(sorted(dimensions)):
-        x = squeeze(x, dimensions)
+    for dim in reversed(sorted(dimensions)):
+        x = squeeze(x, dim)
     return x
 
 
