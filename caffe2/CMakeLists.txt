@@ -410,9 +410,11 @@ set(GENERATED_TESTING_PYTHON
   "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   )
 
-set(GENERATED_ONNX_DIAGNOSTICS_RULES
+set(GENERATED_ONNX_EXPORTER_H
   "${TORCH_SRC_DIR}/torch/csrc/onnx/diagnostics/generated/rules.h"
-  "${TORCH_SRC_DIR}/torch/onnx/_internal/diagnostics/generated/rules.py"
+  )
+set(GENERATED_ONNX_EXPORTER_PYTHON
+  "${TORCH_SRC_DIR}/torch/onnx/_internal/diagnostics/generated/_rules.py"
   )
 
 set(TORCH_GENERATED_CODE
@@ -421,7 +423,8 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_PYTHON}
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
-  ${GENERATED_ONNX_DIAGNOSTICS_RULES}
+  ${GENERATED_ONNX_EXPORTER_H}
+  ${GENERATED_ONNX_EXPORTER_PYTHON}
   )
 
 set(GEN_PER_OPERATOR_FLAG)

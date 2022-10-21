@@ -101,7 +101,7 @@ def define_targets(rules):
             ":rules.yaml",
         ],
         tools = ["//tools/setup_helpers:generate_code"],
-        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY + GENERATED_ONNX_DIAGNOSTICS_RULES,
+        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY + GENERATED_ONNX_EXPORTER_FILES,
         cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
@@ -293,7 +293,12 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
 
-GENERATED_ONNX_DIAGNOSTICS_RULES = [
+GENERATED_ONNX_EXPORTER_HEADERS = [
     "torch/csrc/onnx/diagnostics/generated/rules.h",
-    "torch/onnx/_internal/diagnostics/generated/_rules.py"
 ]
+
+GENERATED_ONNX_EXPORTER_PYTHON = [
+    "torch/onnx/_internal/diagnostics/generated/_rules.py",
+]
+
+GENERATED_ONNX_EXPORTER_FILES = GENERATED_ONNX_EXPORTER_HEADERS + GENERATED_ONNX_EXPORTER_PYTHON
