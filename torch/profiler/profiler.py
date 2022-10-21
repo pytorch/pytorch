@@ -9,13 +9,13 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C._autograd import (
+from torch._C._profiler import (
     _add_execution_graph_observer,
-    _remove_execution_graph_observer,
-    _enable_execution_graph_observer,
     _disable_execution_graph_observer,
+    _enable_execution_graph_observer,
+    _ExperimentalConfig,
+    _remove_execution_graph_observer,
 )
-from torch._C._profiler import _ExperimentalConfig
 from torch.autograd import ProfilerActivity, kineto_available
 
 __all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
@@ -108,6 +108,17 @@ class _KinetoProfile(object):
     def start_trace(self):
         assert self.profiler is not None
         self.profiler._start_trace()
+
+        if self.profile_memory:
+            self.add_metadata_json("profile_memory", "1")
+        if self.with_stack:
+            self.add_metadata_json("with_stack", "1")
+        if self.record_shapes:
+            self.add_metadata_json("record_shapes", "1")
+        if self.with_modules:
+            self.add_metadata_json("with_modules", "1")
+        if self.with_flops:
+            self.add_metadata_json("with_flops", "1")
 
         if kineto_available():
             dist_info = self._get_distributed_info()
