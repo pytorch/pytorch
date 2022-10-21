@@ -1667,7 +1667,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
         extra_ldflags.append('-ltorch_cpu')
-        elif with_cuda:
+        if with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
         extra_ldflags.append('-ltorch')
         if not is_standalone:
