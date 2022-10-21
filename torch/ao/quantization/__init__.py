@@ -114,7 +114,6 @@ __all__ = [
     "get_quantized_operator",
     "get_static_quant_module_class",
     "get_unique_devices_",
-    "is_activation_post_process",
     "load_observer_state_dict",
     "no_observer_set",
     "per_channel_weight_observer_range_neg_127_to_127",

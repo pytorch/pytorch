@@ -3,8 +3,8 @@ from collections import defaultdict, OrderedDict
 from typing import Callable, Any, Dict, Tuple, Set, List
 from torch.ao.quantization import QConfig
 from torch.ao.quantization.qconfig import _add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
-from torch.ao.quantization.quantize import (
-    is_activation_post_process,
+from torch.ao.quantization.observer import (
+    _is_activation_post_process,
 )
 from torch.ao.quantization.backend_config import (
     DTypeConfig,
@@ -158,7 +158,7 @@ def generate_node_name_to_qconfig(
 
         elif node.op == 'call_module':
             # if the node is an observer, just continue - don't add it to the qconfig_map
-            if is_activation_post_process(modules[node.target]):
+            if _is_activation_post_process(modules[node.target]):
                 continue
             qconfig = _maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_mapping, type(modules[node.target]), node.target, global_qconfig)
