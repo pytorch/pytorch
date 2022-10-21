@@ -198,7 +198,7 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
   const size_t size_to_copy = src.nbytes();
   const void* host_src = static_cast<char *>(src.storage().data()) + src_byte_offset;
 
-  TORCH_CHECK(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
+  TORCH_INTERNAL_ASSERT(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
