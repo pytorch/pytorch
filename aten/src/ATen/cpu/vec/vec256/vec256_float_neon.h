@@ -827,6 +827,13 @@ Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<floa
   return Vectorized<float>(r0, r1);
 }
 
+template <>
+Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
+  float32x4_t r0 = vfmsq_f32(c.get_low(), a.get_low(), b.get_low());
+  float32x4_t r1 = vfmsq_f32(c.get_high(), a.get_high(), b.get_high());
+  return Vectorized<float>(r0, r1);
+}
+
 #endif /* defined(aarch64) */
 
 }}}
