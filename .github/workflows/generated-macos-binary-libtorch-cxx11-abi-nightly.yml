@@ -34,9 +34,9 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    xcode-version: "13.3.1"
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -144,9 +144,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    xcode-version: "13.3.1"
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -254,9 +254,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    xcode-version: "13.3.1"
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -364,9 +364,9 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-without-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    xcode-version: "13.3.1"
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder

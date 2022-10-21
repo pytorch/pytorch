@@ -37,6 +37,7 @@ jobs:
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12-xl
+    xcode-version: "13.3.1"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -141,6 +142,7 @@ jobs:
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12-xl
+    xcode-version: "13.3.1"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -245,6 +247,7 @@ jobs:
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12-xl
+    xcode-version: "13.3.1"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
