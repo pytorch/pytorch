@@ -46,8 +46,6 @@ def setup_torchbench_cwd():
     return original_dir
 
 
-original_dir = setup_torchbench_cwd()
-
 # Some models have large dataset that doesn't fit in memory. Lower the batch
 # size to test the accuracy.
 USE_SMALL_BATCH_SIZE = {
@@ -345,6 +343,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
 if __name__ == "__main__":
 
+    original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)
