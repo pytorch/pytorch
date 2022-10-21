@@ -341,9 +341,6 @@ class TestPySymInt(TestCase):
         s = torch.tensor(b)
         self.assertEqual(s.item(), 2.0)
 
-        self.assertRaisesRegex(RuntimeError, "can not be called", lambda: torch.tensor([a0, a0]))
-        self.assertRaisesRegex(RuntimeError, "can not be called", lambda: torch.tensor([b, b]))
-
     @skipIfNoSympy
     def test_guard_int(self):
         shape_env = ShapeEnv()

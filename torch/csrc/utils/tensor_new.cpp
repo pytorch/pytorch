@@ -214,13 +214,13 @@ void recursive_store(
   bool is_symint = torch::is_symint_node(obj);
   if (dim == ndim) {
     if (is_symfloat) {
-      auto new_obj = py::reinterpret_steal<py::object>(obj);
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymFloatNode>()->toSymFloat();
       *(double*)data = val.guard_float(__FILE__, __LINE__);
       return;
     }
     if (is_symint) {
-      auto new_obj = py::reinterpret_steal<py::object>(obj);
+      auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymIntNode>()->toSymInt();
       *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
       return;
@@ -228,7 +228,6 @@ void recursive_store(
     torch::utils::store_scalar(data, scalarType, obj);
     return;
   }
-  TORCH_CHECK(!(is_symfloat || is_symint), "torch.tensor can not be called with a list of SymInts or SymFloats");
   auto n = sizes[dim];
   auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
   if (!seq)
