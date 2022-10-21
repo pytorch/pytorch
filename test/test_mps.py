@@ -1649,6 +1649,69 @@ class TestMPS(TestCase):
         t_mps = torch.tensor(a, device="mps")
         self.assertEqual(t_cpu, t_mps.to("cpu"))
 
+    # See https://github.com/pytorch/pytorch/pull/84742
+    # and https://github.com/pytorch/pytorch/pull/78319
+    def test_binops_dtype_precedence(self):
+        # Test dtype precedence (casting order) in binary operations by comparing to CPU result
+        # Example values for all dtypes supported on the MPS backend
+        sample_vals = {
+            torch.bool: [False, True],
+            torch.int16: [-15, 0, 1, 10],
+            torch.int32: [-376, 0, 1, 13],
+            torch.int64: [-8, 0, 1, 77],
+            torch.float16: [-234.5, 0.0, 1.0, 2.0],
+            torch.float32: [-1.0, 0.0, 0.1, 111.99],
+        }
+        # Test all combinations of dtypes, operations, dimensionality
+        for dtype1, dtype2, binop in itertools.product(
+                sample_vals.keys(), sample_vals.keys(), ['add', 'sub', 'mul', 'div']):
+            # bool minus bool is generally unsupported, so skip
+            if binop == 'sub' and (dtype1 == torch.bool or dtype2 == torch.bool):
+                continue
+            full_shape = (10,)
+            for val1, val2 in itertools.product(sample_vals[dtype1], sample_vals[dtype2]):
+                # print(f'{dtype1},{dtype2}: ({val1}).{binop}({val2})')
+                # print(getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                #            (torch.tensor(val2, dtype=dtype2, device='mps')))
+                # print(getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                #            (torch.tensor(val2, dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='mps')),
+                    getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor([val1], dtype=dtype1, device='mps'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='mps')),
+                    getattr(torch.tensor([val1], dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='mps')),
+                    getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor([val2], dtype=dtype2, device='cpu')))
+                self.assertEqual(
+                    getattr(torch.tensor([val1], dtype=dtype1, device='mps'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='mps')),
+                    getattr(torch.tensor([val1], dtype=dtype1, device='cpu'), binop)
+                           (torch.tensor(val2, dtype=dtype2, device='cpu')))
+                # Test tensors created with torch.full
+                x1 = torch.full(full_shape, val1, dtype=dtype1, device='mps')
+                y1 = torch.tensor(val2, dtype=dtype2, device='mps')
+                x2 = torch.full(full_shape, val1, dtype=dtype1, device='cpu')
+                y2 = torch.tensor(val2, dtype=dtype2, device='cpu')
+                self.assertEqual(getattr(x1, binop)(y1), getattr(x2, binop)(y2))
+                x3 = torch.tensor(val1, dtype=dtype1, device='mps')
+                y3 = torch.full(full_shape, val2, dtype=dtype2, device='mps')
+                x4 = torch.tensor(val1, dtype=dtype1, device='cpu')
+                y4 = torch.full(full_shape, val2, dtype=dtype2, device='cpu')
+                self.assertEqual(getattr(x3, binop)(y3), getattr(x4, binop)(y4))
+                self.assertEqual(
+                    getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
+                           (torch.full(full_shape, val2, dtype=dtype2, device='mps')),
+                    getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
+                           (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
+
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
