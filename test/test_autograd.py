@@ -3073,6 +3073,82 @@ class TestAutograd(TestCase):
 
         self.assertEqual(torch._C._current_graph_task_id(), -1)
 
+    def test_current_graph_task_execution_order(self):
+        predicted = [None]
+
+        def hook(_):
+            predicted[0] = torch._C._current_graph_task_execution_order()
+
+        def names(nodes):
+            return [node.name() for node in nodes]
+
+        def grad_fns(*tensors):
+            # or grad accumulator
+            out = []
+            for t in tensors:
+                if t.requires_grad and t.grad_fn is None:
+                    out.append(t.clone().grad_fn.next_functions[0][0])
+                else:
+                    out.append(t.grad_fn)
+            return out
+
+
+        actual = []
+
+        def register_validation_hooks(*tensors):
+            def get_hook(i):
+                def hook(t_):
+                    actual.append(tensors[i])
+                return hook
+
+            for i, t in enumerate(tensors):
+                t.register_hook(get_hook(i))
+
+        # Basic example: single path
+        t = torch.tensor(1., requires_grad=True).clone().sin().exp()
+        t.register_hook(hook)
+        t.backward()
+        self.assertEqual(names(predicted[0]), [
+            "ExpBackward0", "SinBackward0", "CloneBackward0", "torch::autograd::AccumulateGrad"
+        ])
+
+        # We don't exactly follow sequence_nr order
+        a = torch.tensor(1., requires_grad=True)
+        b = torch.tensor(2., requires_grad=True)
+        c = b.sin()
+        d = a.cos()
+        out = c * d
+        register_validation_hooks(a, b, c, d, out)
+        out.register_hook(hook)
+        out.backward()
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
+        # Multiple roots are also OK
+        a = torch.tensor(1., requires_grad=True)
+        b = a * 2
+        out = b.sin()
+        out2 = b.cos()
+        out3 = b.cos()
+        register_validation_hooks(a, b, out, out2, out3)
+        out3.register_hook(hook)
+        torch.autograd.grad((out, out3, out2), inputs=(a,))
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
+        # Case where next node is nullptr
+        a = torch.tensor(1., requires_grad=True)
+        b = a * 2
+        out = b.sin()
+        register_validation_hooks(a, b, out)
+        out.register_hook(hook)
+        out.backward()
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
+        # When not called in a backward, empty list is returned
+        self.assertEqual(torch._C._current_graph_task_execution_order(), [])
+
     def test_profiler(self):
         x = torch.randn(10, 10)
 
