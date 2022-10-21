@@ -8833,6 +8833,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: remainder_out
+    MPS: remainder_out_mps
 
 - func: remainder.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator

@@ -248,50 +248,23 @@ TORCH_IMPL_FUNC(frac_out_mps) (const Tensor& self, const Tensor& output) {
                 });
 }
 
-TORCH_IMPL_FUNC(expm1_out_mps) (const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "expm1_out_mps",
+
+TORCH_IMPL_FUNC(remainder_out_mps) (const Tensor& self, const Tensor& output) {
+  mps::unary_op(self, output, "remainder_out_mps",
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-                  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
-                                                       shape:@[@1]
+                  auto zeroTensor = [mpsGraph constantWithScalar:0.0
                                                        dataType:inputTensor.dataType];
-                  MPSGraphTensor* ePowTensor = [mpsGraph exponentWithTensor:inputTensor
-                                                                         name:nil];
-                  return [mpsGraph subtractionWithPrimaryTensor:ePowTensor
-                                               secondaryTensor:oneTensor
+                  auto predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                             secondaryTensor:zeroTensor
+                                                                        name:nil];
+                  auto truncTensor = [mpsGraph selectWithPredicateTensor:predicateTensor
+                                                     truePredicateTensor:[mpsGraph ceilWithTensor :inputTensor name:nil]
+                                                    falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
+                                                                    name:nil];
+                  return [mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                               secondaryTensor:truncTensor
                                                    name: nil];
                 });
-}
-
-
-
-TORCH_IMPL_FUNC(cumsum_out_mps)
-(const Tensor& self,
- int64_t dim,
- c10::optional<ScalarType> dtype,
- const Tensor& result) {
-  TORCH_CHECK(dim >=0 && dim < std::max(1LL, self.ndimension()), "Expected dim to be between 0 and ", self.ndimension(), " but got ", dim);
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("torch.cumsum supported by MPS on MacOS 13+, please upgrade");
-    auto cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
-    at::_copy_from_and_resize(cpu_result, result);
-    return;
-  }
-  auto input = dtype.has_value() ? self.to(dtype.value()) : self;
-  mps::unary_op(input, result, "cumsum_out_mp" + std::to_string(dim),
-                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-       // cumsum is horribly broken for int8, int16 and as chances for overflow is pretty high, cast to int32
-       if (isIntegralType(input.scalar_type()) && input.scalar_type() !=ScalarType::Int) {
-           inputTensor = mps::castMPSTensor(mpsGraph, inputTensor, result.scalar_type());
-       }
-       auto rc = [mpsGraph cumulativeSumWithTensor: inputTensor
-                                              axis: dim
-                                              name: nil];
-       if (result.scalar_type()!= input.scalar_type() ||
-           (isIntegralType(input.scalar_type()) && input.scalar_type() !=ScalarType::Int)) {
-         return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
-       }
-       return rc;
-    });
 }
 
 } // namespace native
