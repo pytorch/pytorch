@@ -30,7 +30,8 @@ import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
 
-from . import config, logging as torchdynamo_logging
+from . import config
+from . import logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = (
@@ -198,7 +199,7 @@ def format_bytecode(prefix, name, filename, line_no, code):
 
 
 def gen_record_file_name(exc, code):
-    return f"{config.replay_record_dir_name}/\
+    return f"{get_debug_dir()}/error_recordings/\
 {code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
 
 
@@ -940,7 +941,7 @@ class DebugDir:
         assert self.num_setup_calls >= 0
         if self.num_setup_calls == 0:
             debug_root = config.debug_dir_root
-            dir_name = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+            dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
             self.debug_path = os.path.join(debug_root, dir_name)
 
         self.num_setup_calls += 1

@@ -83,7 +83,6 @@ raise_on_backend_error = True
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 replay_record_enabled = False
-replay_record_dir_name = "./torchdynamo_error_records"
 
 # Show a warning on every graph break
 print_graph_breaks = False
@@ -125,9 +124,6 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # 3: Always dumps a minifier_laucher.py. Good for segfaults.
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
-
-# Specify the directory where to save the repro artifacts
-repro_dir = os.environ.get("TORCHDYNAMO_REPRO_DIR", None)
 
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
