@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
+from torch._decomp import meta_table as meta_table
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -21,8 +22,6 @@ from torch.utils._pytree import tree_map
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
-
-meta_table = {}
 
 
 def register_meta(op, register_dispatcher=True):
@@ -83,6 +82,11 @@ def meta_randperm(n, *, generator=None, out):
 
 @register_meta(aten.randint.default)
 def meta_randint(high, size, *, dtype=torch.long, **kwargs):
+    return torch.empty(size, dtype=dtype, **kwargs)
+
+
+@register_meta(aten.randint.low)
+def meta_randint_low(low, high, size, *, dtype=torch.long, **kwargs):
     return torch.empty(size, dtype=dtype, **kwargs)
 
 
@@ -666,6 +670,26 @@ def meta_adaptive_avg_pool3d(self, output_size):
         lambda: f"Expected 4D or 5D tensor, but got {self.shape}",
     )
     return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+
+@register_meta(aten._adaptive_avg_pool2d_backward.default)
+def meta__adaptive_avg_pool2d_backward(grad_out, self):
+    ndim = grad_out.ndim
+    for i in range(1, ndim):
+        check(
+            grad_out.size(i) > 0,
+            lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
+                      size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
+        )
+    check(
+        ndim == 3 or ndim == 4,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
+    )
+    check(
+        self.dtype == grad_out.dtype,
+        lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
+    )
+    return self.new_empty(self.shape)
 
 
 @register_meta(aten.repeat_interleave.Tensor)
