@@ -11,7 +11,6 @@ from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch.onnx import errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration
 
