@@ -127,22 +127,47 @@ function install_filelock() {
   pip_install filelock
 }
 
-function install_torchdynamo() {
+function install_triton() {
   local commit
-  commit=$(get_pinned_commit torchdynamo)
-  pip_install --user "git+https://github.com/pytorch/torchdynamo.git@${commit}"
+  if [[ "${TEST_CONFIG}" == *rocm* ]]; then
+    echo "skipping triton due to rocm"
+  else
+    commit=$(get_pinned_commit triton)
+    pip_install --user "git+https://github.com/openai/triton@${commit}#subdirectory=python"
+  fi
 }
 
-function checkout_install_torchdynamo() {
+function setup_torchdeploy_deps(){
+  conda install -y cmake
+  conda install -y -c conda-forge libpython-static=3.10
+  local CC
+  local CXX
+  CC="$(which gcc)"
+  CXX="$(which g++)"
+  export CC
+  export CXX
+  pip install --upgrade pip
+}
+
+function checkout_install_torchdeploy() {
   local commit
-  commit=$(get_pinned_commit torchdynamo)
+  setup_torchdeploy_deps
   pushd ..
-  git clone https://github.com/pytorch/torchdynamo
-  pushd torchdynamo
-  git checkout "${commit}"
-  time python setup.py develop
+  git clone --recurse-submodules https://github.com/pytorch/multipy.git
+  pushd multipy
+  # with ABI flag change
+  python multipy/runtime/example/generate_examples.py
+  pip install -e . --install-option="--abicxx"
   popd
   popd
+}
+
+function test_torch_deploy(){
+ pushd ..
+ pushd multipy
+ ./multipy/runtime/build/test_deploy
+ popd
+ popd
 }
 
 function test_functorch() {
