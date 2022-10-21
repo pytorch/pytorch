@@ -29,7 +29,7 @@ from ..qconfig_mapping import (
     QConfigMapping,
 )
 from ..qconfig_mapping_utils import (
-    get_flattened_qconfig_dict,
+    _get_flattened_qconfig_dict,
     update_qconfig_for_qat,
 )
 from .qconfig_mapping_utils import (
@@ -1581,7 +1581,7 @@ def prepare(
 
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, _equalization_config)
-    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
+    flattened_qconfig_dict = _get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
 
