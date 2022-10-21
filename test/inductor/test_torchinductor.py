@@ -167,7 +167,6 @@ def compute_grads(args, kwrags, results, grads):
 
 
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
-@patch("torch._dynamo.config.raise_on_backend_error", True)
 def check_model(
     self: TestCase,
     model,
