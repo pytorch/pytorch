@@ -1445,6 +1445,36 @@ TEST_F(VulkanAPITest, hardshrink_) {
   }
 }
 
+TEST_F(VulkanAPITest, hardtanh) {
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 10;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::hardtanh(in_cpu, 3, 7);
+  const auto out_vulkan = at::hardtanh(in_vulkan, 3, 7);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, hardtanh_) {
+  auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 10;
+  auto a_vulkan = a_cpu.vulkan();
+
+  at::hardtanh_(a_cpu, 3, 7);
+  at::hardtanh_(a_vulkan, 3, 7);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
   c10::InferenceMode mode;
 
@@ -2224,6 +2254,38 @@ TEST_F(VulkanAPITest, mul_to_scalar_wrapped) {
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
     showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, relu) {
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::relu(in_cpu);
+  const auto out_vulkan = at::relu(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, relu_) {
+  auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  at::relu_(a_cpu);
+  at::relu_(a_vulkan);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
