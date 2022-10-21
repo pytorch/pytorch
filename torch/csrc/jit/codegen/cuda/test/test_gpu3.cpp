@@ -6596,17 +6596,18 @@ TEST_F(NVFuserTest, FusionRepro2094_CUDA) {
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
 
+  std::vector<int64_t> neg_one_vec = {-1};
   {
     auto tv0 = TensorViewBuilder()
                    .ndims(1)
-                   .shape({-1})
+                   .shape(neg_one_vec)
                    .contiguity({true})
                    .dtype(DataType::Float)
                    .build();
     fusion->addInput(tv0);
     auto tv1 = TensorViewBuilder()
                    .ndims(1)
-                   .shape({-1})
+                   .shape(neg_one_vec)
                    .contiguity({true})
                    .dtype(DataType::Float)
                    .build();
