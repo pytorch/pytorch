@@ -560,12 +560,10 @@ class CheckFunctionManager:
             ]
         )
         closure_vars.update(CLOSURE_VARS)
-        py_code = textwrap.dedent(
-            f"""
-            def ___make_guard_fn({','.join(closure_vars.keys())}):
-                return lambda {args}: {code}
-            """
-        )
+        py_code = f"""\
+def ___make_guard_fn({','.join(closure_vars.keys())}):
+    return lambda {args}: {code}
+"""
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
