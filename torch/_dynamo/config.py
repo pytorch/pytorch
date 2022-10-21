@@ -5,6 +5,7 @@ from os.path import abspath, dirname
 from types import ModuleType
 
 import torch
+from .logging import CODE
 
 try:
     import torch._prims
@@ -17,7 +18,8 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# torchdynamo.logging.CODE print compiled functions + graphs
+# CODE print compiled functions + graphs
+# NOTE: user code should use torch._dynamo.logging.CODE
 # logging.INFO print the steps that dynamo is running
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
