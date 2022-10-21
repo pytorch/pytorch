@@ -555,9 +555,6 @@ __global__ void GammaBetaBackwardCUDAKernel1(
   }
 }
 
-
-
-
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardCUDAKernel(
     int64_t M,
@@ -569,52 +566,67 @@ __global__ void GammaBetaBackwardCUDAKernel(
     T* dg,
     T* db) {
   alignas(sizeof(double)) extern __shared__ char s_data1[];
-  T_ACC * s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
+  T_ACC* s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
+
   const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
-  constexpr int unroll = 8;
-  T dYs[unroll];
-  T Xs[unroll];
-  T_ACC *  means = s_data_typed;
-  T_ACC * rstds = s_data_typed + unroll * blockDim.y;
+
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
-  if (j < N) {
-    int bcounter;
-    for (bcounter = 0; bcounter < M/(blockDim.y * unroll); bcounter++){
-      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
-      #pragma unroll
-      for (int ii=0; ii<unroll; ii++){
-        if (threadIdx.x == 0) {
-          means[ii*blockDim.y + threadIdx.y] = mean[offset + ii];
-          rstds[ii*blockDim.y + threadIdx.y] = rstd[offset + ii];
-        }
-        dYs[ii] = dY[(offset + ii) * N + j ];
-        Xs[ii] = X[(offset + ii) * N + j];
 
-      }
-      __syncthreads();
+  if (j < N) {
+
+    constexpr int unroll_factor = 16;
+    T_ACC mean_reg, mean_reg_tmp;
+    T_ACC rstd_reg, rstd_reg_tmp;
+    T_ACC dY_reg[unroll_factor];
+    T_ACC X_reg[unroll_factor];
+
+    int bcounter;
+    int laneId = threadIdx.x & 0x1f;
+
+    // Main loop to be unrolled
+    for (bcounter = 0; bcounter < M / (blockDim.y * unroll_factor); bcounter++){
+      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
+
       #pragma unroll
-      for (int ii=0; ii<unroll; ii++){
-        dg_sum += dYs[ii] * (Xs[ii] - means[ii*blockDim.y + threadIdx.y]) * rstds[ii * blockDim.y + threadIdx.y];
-        db_sum += dYs[ii];
+      for (int ii = 0; ii < unroll_factor; ++ii) {
+        dY_reg[ii] = dY[(offset + ii) * N + j];
+        X_reg[ii] = X[(offset + ii) * N + j];
       }
-      __syncthreads();
+
+      if (laneId < unroll_factor) {
+        mean_reg_tmp = mean[offset + laneId];
+        rstd_reg_tmp = rstd[offset + laneId];
+      }
+      __syncwarp();
+
+      #pragma unroll
+      for (int ii = 0; ii < unroll_factor; ++ii) {
+        mean_reg = __shfl_sync(0xffffffff, mean_reg_tmp, ii);
+        rstd_reg = __shfl_sync(0xffffffff, rstd_reg_tmp, ii);
+
+        dg_sum += dY_reg[ii] * (X_reg[ii] - mean_reg) * rstd_reg;
+        db_sum += dY_reg[ii];
+      }
     }
-    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
-    for (int ii = 0; ii<8; ii++ ){
-      T_ACC mean_val, rstd_val; // we don't use smem in the tail to avoid awkward synchronizations, perf penalty is negligible
+
+    // Remainder
+    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll_factor;
+    for (int ii = 0; ii < unroll_factor; ii++ ){
       if ((offset + ii) < M) {
-        mean_val = mean[offset+ii];
-        rstd_val = rstd[offset+ii];
-        dYs[0] = dY[(offset + ii) * N + j ];
-        Xs[0] = X[(offset + ii) * N + j];
-        dg_sum += dYs[0] * (Xs[0] - mean_val) * rstd_val;
-        db_sum += dYs[0];
+        mean_reg = mean[offset+ii];
+        rstd_reg = rstd[offset+ii];
+        dY_reg[0] = dY[(offset + ii) * N + j ];
+        X_reg[0] = X[(offset + ii) * N + j];
+        dg_sum += dY_reg[0] * (X_reg[0] - mean_reg) * rstd_reg;
+        db_sum += dY_reg[0];
       }
     }
+
     s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] = dg_sum;
     s_data_typed[blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x] = db_sum;
     __syncthreads();
+
     for (int offset = blockDim.y/2; offset >=1; offset /= 2){
       if (threadIdx.y < offset) {
         s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] += s_data_typed[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
