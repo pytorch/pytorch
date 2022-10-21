@@ -1164,12 +1164,15 @@ class Module:
         self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
     ) -> RemovableHandle:
         r"""Registers a backward hook on the module.
+
         This function is deprecated in favor of :meth:`~torch.nn.Module.register_full_backward_hook` and
         the behavior of this function will change in future versions.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
+
         """
         if self._is_full_backward_hook is True:
             raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
@@ -1228,10 +1231,8 @@ class Module:
 
         """
         if self._is_full_backward_hook is False:
-            raise RuntimeError(
-                "Cannot use both regular backward hooks and full backward hooks on a "
-                "single Module. Please use only one of them."
-            )
+            raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
+                               "single Module. Please use only one of them.")
 
         self._is_full_backward_hook = True
 
