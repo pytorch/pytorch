@@ -37,7 +37,6 @@ jobs:
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12-xl
-    xcode-version: "13.3.1"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -72,6 +71,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -142,7 +142,6 @@ jobs:
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12-xl
-    xcode-version: "13.3.1"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -177,6 +176,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -247,7 +247,6 @@ jobs:
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-12-xl
-    xcode-version: "13.3.1"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -282,6 +281,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
