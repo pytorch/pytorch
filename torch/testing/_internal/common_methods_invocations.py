@@ -5402,26 +5402,11 @@ def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
                   ((S, S), (S, S), (S, M)),
                   ((M, S), (M, S), (M, M)),
                   ((S, M), (S, M), (S, S)))
-    sample_inputs = []
     for qs, ks, vs in test_cases:
         q = make_tensor(qs, dtype=dtype, device=device, requires_grad=requires_grad)
         k = make_tensor(ks, dtype=dtype, device=device, requires_grad=requires_grad)
         v = make_tensor(vs, dtype=dtype, device=device, requires_grad=requires_grad)
-        sample_inputs.append(SampleInput(q, k, v))
-    return tuple(sample_inputs)
-
-def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases = (((S, S), (S, S), (S, S)),
-                  ((S, S), (S, S), (S, M)),
-                  ((M, S), (M, S), (M, M)),
-                  ((S, M), (S, M), (S, S)))
-    sample_inputs = []
-    for qs, ks, vs in test_cases:
-        q = make_tensor(qs, dtype=dtype, device=device, requires_grad=requires_grad)
-        k = make_tensor(ks, dtype=dtype, device=device, requires_grad=requires_grad)
-        v = make_tensor(vs, dtype=dtype, device=device, requires_grad=requires_grad)
-        sample_inputs.append(SampleInput(q, k, v))
-    return tuple(sample_inputs)
+        yield SampleInput(q, k, v)
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
@@ -13289,11 +13274,11 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('attn',
            op=torch.attn,
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16),
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+           backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
            supports_out=False,
-           supports_forward_ad=True,
+           supports_forward_ad=False,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_attn,
            decorators=[DecorateInfo(toleranceOverride({

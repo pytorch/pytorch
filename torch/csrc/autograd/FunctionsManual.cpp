@@ -4070,13 +4070,12 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v) {
-  Tensor x = at::matmul(q, k.transpose(0, 1));
-  Tensor a = at::tanh(x);
-  Tensor q_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - at::tanh(x).pow(2)), k) +
-               at::matmul(grad_a * (1 - at::tanh(x).pow(2)), k);
-  Tensor k_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - at::tanh(x).pow(2)).transpose(0, 1), q) +
-               at::matmul(grad_a * (1 - at::tanh(x).pow(2)).transpose(0, 1), q);
-  Tensor v_b = at::matmul(grad_o.transpose(0, 1), a);
+  Tensor a = at::tanh(at::matmul(q, k.transpose(0, 1)));
+  Tensor q_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - a.pow(2)), k) +
+               at::matmul(grad_a * (1 - a.pow(2)), k);
+  Tensor k_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - a.pow(2)).transpose(0, 1), q) +
+               at::matmul(grad_a * (1 - a.pow(2)).transpose(0, 1), q);
+  Tensor v_b = at::matmul(a.transpose(0, 1), grad_o);
   return std::tuple<Tensor, Tensor, Tensor>(q_b, k_b, v_b);
 }
 
