@@ -36,7 +36,7 @@ jobs:
       - name: Create conda environment and install deps
         run: |
           conda create -y -n pr-ci python="${PYTHON_VERSION}"
-          # shellcheck disable=SC1091
+          # shellcheck source=/dev/null
           . "${SETUP_SCRIPT}"
           conda activate pr-ci
           # pin cmake version to 3.22 since 3.23 breaks pytorch build
@@ -47,7 +47,7 @@ jobs:
           pip install --pre torch torchvision torchtext -f https://download.pytorch.org/whl/nightly/cu116/torch_nightly.html
       - name: Setup TorchBench branch
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck source=/dev/null
           . "${SETUP_SCRIPT}"
           conda activate pr-ci
           PR_BODY_FILE=/tmp/pr-body.txt
@@ -71,7 +71,7 @@ jobs:
           popd
           PR_BODY_FILE=/tmp/pr-body.txt
           echo "$PR_BODY" > ${PR_BODY_FILE}
-          # shellcheck disable=SC1091
+          # shellcheck source=/dev/null
           . "${SETUP_SCRIPT}"
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
@@ -84,6 +84,7 @@ jobs:
                   --pr-head-sha "$PR_HEAD_SHA"
       - name: Upload result to S3
         run: |
+          # shellcheck disable=SC1091
           . "${SETUP_SCRIPT}"
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
