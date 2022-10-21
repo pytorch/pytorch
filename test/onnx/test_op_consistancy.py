@@ -23,16 +23,7 @@ import io
 import itertools
 import unittest
 from collections import namedtuple
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Iterable,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
 
 import onnx
 
@@ -141,6 +132,30 @@ def xfail(
     )
 
 
+def dont_care(
+    op,
+    variant_name: str = "",
+    *,
+    device_type: Optional[str] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    reason="unspecified",
+):
+    """Skips a test case in OpInfo that we don't care about.
+
+    Likely because ONNX does not support the use case or it is by design.
+    However, if ONNX changes its behavior and start to support the use case, we should
+    update the test to expect the new behavior, leveraging XfailOpset.
+    """
+    return DecorateMeta(
+        op_name=op.__name__,
+        variant_name=variant_name,
+        decorator=unittest.skip(f"Don't care: {reason}"),
+        device_type=device_type,
+        dtypes=dtypes,
+        reason=reason,
+    )
+
+
 def skip(
     op,
     variant_name: str = "",
@@ -149,11 +164,11 @@ def skip(
     dtypes: Optional[Collection[torch.dtype]] = None,
     reason="unspecified",
 ):
-    """Skips a test case in OpInfo."""
+    """Skips a test case in OpInfo. It should be eventually fixed."""
     return DecorateMeta(
         op_name=op.__name__,
         variant_name=variant_name,
-        decorator=unittest.skip(reason),
+        decorator=unittest.skip(f"To fix: {reason}"),
         device_type=device_type,
         dtypes=dtypes,
         reason=reason,
@@ -270,7 +285,7 @@ ALLOWLIST_OP = frozenset(
 # A: Use skip if we don't care about the test passing or if the test is flaky.
 #    Use xfail if we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    skip(torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    dont_care(torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
     skip(torch.ceil, dtypes=[torch.float64], reason="Ceil on f64 not supported by ONNX Runtime"),
     xfail(torch.div, variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
     xfail(torch.div, variant_name="floor_rounding", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
@@ -297,7 +312,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     xfail(torch.floor_divide, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
     skip(torch.floor_divide, dtypes=[torch.float64], reason="Floor on f64 not supported by ONNX Runtime"),
     skip(torch.remainder, dtypes=[torch.float64], reason="Floor on f64 not supported by ONNX Runtime"),
-    skip(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
+    dont_care(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
     xfail(torch.t, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
     xfail(torch.true_divide, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
 )
