@@ -1089,7 +1089,6 @@ def split_with_sizes(
 
 @register_decomposition(aten.squeeze_.default, disable_meta=True)
 def squeeze_default(self):
-    breakpoint()
     n_dims = self.dim()
     size = self.size()
     assert n_dims == len(size)
@@ -1097,13 +1096,11 @@ def squeeze_default(self):
     strides = []
 
     stride = self.stride()
-    breakpoint()
     for i in range(0, n_dims):
         size_at_i = size[i]
         if size_at_i != 1:
             sizes.append(size_at_i)
             strides.append(stride[i])
-    breakpoint()
     return torch.as_strided(self, sizes, strides)
 
 
