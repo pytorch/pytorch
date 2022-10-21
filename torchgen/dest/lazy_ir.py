@@ -540,7 +540,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
                 dispatch_ns = "meta"
             aten_name = schema.aten_name
             # TODO: this is trolling
-            if func.func.has_symint():
+            if func.func.has_symint() and metadata.supports_symint():
                 aten_name += "_symint"
             shape_str = f"""\
         {meta_conversion_str}

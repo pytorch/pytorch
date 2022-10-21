@@ -1,14 +1,22 @@
-#include <ATen/Functions.h>
-#include <ATen/native/TensorTransformations.h>
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NativeFunctions.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
 #include <ATen/native/xnnpack/Engine.h>
 #endif
 #include <c10/util/Exception.h>
 
+#include <ATen/native/TensorTransformations.h>
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/channel_shuffle_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/native_channel_shuffle.h>
+#include <ATen/ops/native_channel_shuffle_native.h>
+#endif
 
 namespace at {
 namespace native {
