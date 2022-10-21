@@ -3853,13 +3853,6 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 m._sync_gradients = old_flag
 
-    @property
-    def params_with_grad(self) -> List[Parameter]:
-        """
-        Recursively returns a list of all module parameters that have a gradient.
-        """
-        return [p for p in self.parameters() if p.grad is not None]
-
     @torch.no_grad()
     def clip_grad_norm_(
         self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0
