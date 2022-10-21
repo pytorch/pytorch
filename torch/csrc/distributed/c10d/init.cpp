@@ -515,6 +515,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
+  // TODO(crcrpar): Hardening `ReduceOp`.
+  //    While keeping most op types as enum value,
+  //    making `PREMUL_SUM` callable, i.e., allowing for
+  //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
@@ -558,7 +562,9 @@ This class does not support ``__members__`` property.)");
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
             return self == other.op_;
           })
-      .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
+      .def("__hash__", [](const ::c10d::ReduceOp& self) {
+        return static_cast<uint8_t>(self.op_);
+      });
 
   // note(crcrpar): Deliberately skip
   // [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
@@ -575,7 +581,8 @@ This class does not support ``__members__`` property.)");
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
       .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
 
-  // Ref: [Implicit
+  // note(crcrpar): This could be removed because users will not pass
+  // `RedOpType` to reduce collective ops Ref: [Implicit
   // conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
   // Let us skip the explicit construction of `c10d::ReduceOp` from
   // `c10d::ReduceOp::RedOpType` in Python.
