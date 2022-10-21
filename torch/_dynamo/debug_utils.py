@@ -9,6 +9,7 @@ import textwrap
 import uuid
 from collections import Counter
 from importlib import import_module
+from tempfile import TemporaryFile
 
 import torch
 import torch.fx as fx
@@ -212,6 +213,8 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    if "inductor" in compiler_name:
+        fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
@@ -263,16 +266,20 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         )
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
+    stdout, stderr = TemporaryFile(), TemporaryFile()
     p = subprocess.Popen(
         ["python", file_name],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout,
+        stderr=stderr,
         env=new_env,
     )
-    out, err = p.communicate()
+    p.wait()
+
     if p.returncode != 0:
-        print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
-        print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
+        stdout.seek(0)
+        stderr.seek(0)
+        print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
+        print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
         return True
     return False
 

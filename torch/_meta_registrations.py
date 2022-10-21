@@ -4,12 +4,15 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
+from torch._decomp import meta_table as meta_table
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    FloatLike,
+    IntLike,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -21,8 +24,6 @@ from torch.utils._pytree import tree_map
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
-
-meta_table = {}
 
 
 def register_meta(op, register_dispatcher=True):
@@ -390,24 +391,24 @@ def meta_conv(
         output_padding: Optional[Union[List[int], int]] = None,
     ):
         ret_shape = []
-        if isinstance(stride, int):
+        if isinstance(stride, IntLike):
             stride = [stride] * len(dims)
         elif len(stride) == 1:
             stride = [stride[0]] * len(dims)
 
-        if isinstance(padding, int):
+        if isinstance(padding, IntLike):
             padding = [padding] * len(dims)
         elif len(padding) == 1:
             padding = [padding[0]] * len(dims)
 
-        if isinstance(dilation, int):
+        if isinstance(dilation, IntLike):
             dilation = [dilation] * len(dims)
         elif len(dilation) == 1:
             dilation = [dilation[0]] * len(dims)
 
         output_padding_list: Optional[List[int]] = None
         if output_padding:
-            if isinstance(output_padding, int):
+            if isinstance(output_padding, IntLike):
                 output_padding_list = [output_padding] * len(dims)
             elif len(output_padding) == 1:
                 output_padding_list = [output_padding[0]] * len(dims)
@@ -1479,6 +1480,22 @@ def meta_like(self, *args, **kwargs):
 def scatter_value(self, dim, index, value):
     scatter_meta_impl(self, dim, index)
     return self.new_empty(self.shape)
+
+
+# hacky: Please remove after math.ceil works with arange
+@register_meta(aten.arange.default)
+def arange(end, **kwargs):
+    if isinstance(end, FloatLike):
+        end = math.ceil(end)  # type: ignore[arg-type]
+
+    def is_integral(x):
+        return isinstance(x, IntLike) or isinstance(x, bool)
+
+    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
+    if set_to_integral_dtype:
+        kwargs["dtype"] = torch.int64
+
+    return aten.empty([end], **kwargs)
 
 
 @register_meta(aten.arange.start)
