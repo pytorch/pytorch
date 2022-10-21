@@ -6257,7 +6257,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 
         if mask_t.sum() == 0:
             def random_index(shape):
-                return tuple(map(lambda max_idx: random.randint(0, max_idx), shape))
+                return tuple(map(lambda max_idx: random.randrange(0, max_idx), shape))
 
             mask_t[random_index(mask_t.shape)] = True
             return mask_t
@@ -6268,7 +6268,9 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
              ((M, 1, M), (M, M), (M, M, 1), True),
              ((), (), (), False),
              ((M, 1, M), (), (M, M, 1), True),
-             ((), (M, M), (), True),)
+             ((), (M, M), (), True),
+             ((), (2), (1, 1), True),
+             )
 
     for shape, mask_shape, other_shape, broadcasts_input in cases:
         yield SampleInput(make_arg(shape),
@@ -8206,6 +8208,11 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=1.3e-05),
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_numpy_refs'),
+               # MPS has slightly worse precision. Is this acceptable?
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-04),
+                                      torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestCommon', 'test_numpy_ref_mps'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                    'TestConsistency',
@@ -8701,6 +8708,7 @@ op_db: List[OpInfo] = [
                # TypeError: _copy_dispatcher() got an unexpected keyword argument 'memory_format'
                # (NumPy reference needs to be extended with memory_format)
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref_mps'),
            ),),
     OpInfo('contiguous',
            op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
@@ -10398,6 +10406,7 @@ op_db: List[OpInfo] = [
                # Extremal value issue on aten::native_layer_norm, which returns 'nan' for mean on 'inf' inputs
                # possibly because of the welford implementation.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
            )),
     OpInfo('native_batch_norm',
            aten_name='native_batch_norm',
@@ -10664,6 +10673,19 @@ op_db: List[OpInfo] = [
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: UNSUPPORTED DTYPE: complex
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.complex64, torch.complex128)),
+               # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.int64,)),
+               # Reference: https://github.com/pytorch/pytorch/issues/86356
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.double, torch.cdouble)),
+               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+               # AssertionError: None mismatch: torch.complex64 is not None
+               DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules', 'test_custom_rules',
+                            dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose3d',
@@ -10826,7 +10848,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
                    'TestCommon', 'test_numpy_refs'
-               )
+               ),
+               DecorateInfo(unittest.skip("Bug in MPS backend!"), 'TestCommon', 'test_numpy_ref_mps'),
            ],
            sample_inputs_func=sample_inputs_layer_norm,
            supports_expanded_weight=True,),
@@ -12116,7 +12139,9 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Tensor-likes are not close!
                # May not replicate in CI
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+           )),
     UnaryUfuncInfo('nn.functional.relu6',
                    aten_name="relu6",
                    dtypes=all_types_and(torch.bfloat16),
@@ -14507,6 +14532,7 @@ op_db: List[OpInfo] = [
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
            )),
     OpInfo('cat',
            ref=_cat_np,
@@ -16123,7 +16149,11 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_pdist,
         dtypes=floating_types(),
         supports_out=False,
-        supports_gradgrad=False),
+        supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+        )
+    ),
     OpInfo(
         "nn.functional.poisson_nll_loss",
         dtypes=all_types_and(torch.bfloat16),
