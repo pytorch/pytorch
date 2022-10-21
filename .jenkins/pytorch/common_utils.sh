@@ -114,7 +114,7 @@ function checkout_install_torchvision() {
 function install_torchtext() {
   local commit
   commit=$(get_pinned_commit text)
-  pip_install --user "git+https://github.com/pytorch/text.git@${commit}"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${commit}"
 }
 
 function clone_pytorch_xla() {
