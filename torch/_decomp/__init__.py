@@ -26,7 +26,24 @@ decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
 
-meta_lib = torch.library.Library("aten", "IMPL", "Meta")
+def _add_op_to_registry(registry, op, fn):
+    overloads = []
+    if isinstance(op, OpOverload):
+        overloads.append(op)
+    else:
+        assert isinstance(op, OpOverloadPacket)
+        for ol in op.overloads():
+                overloads.append(getattr(op, ol))
+
+    for op_overload in overloads:
+        if op_overload in registry:
+            raise RuntimeError(f"duplicate registrations for {op_overload}")
+
+        # TorchScript dumps a bunch of extra nonsense overloads
+        # which don't have corresponding dispatcher entries, we need
+        # to filter those out, e.g aten.add.float_int
+        if  torch._C._dispatch_has_kernel(op_overload.name()):
+            registry[op_overload] = fn
 
 
 def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
@@ -99,21 +116,11 @@ def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
         if registry is None:
             registry = global_decomposition_table[type]
 
-        def add_op_to_table(aten_op):
-            overloads = []
-            if isinstance(aten_op, OpOverload):
-                overloads.append(aten_op)
-            else:
-                assert isinstance(aten_op, OpOverloadPacket)
-                for ol in aten_op.overloads():
-                    overloads.append(getattr(aten_op, ol))
-            for op_overload in overloads:
-                if op_overload in registry:
-                    raise RuntimeError(f"duplicate registrations for {op_overload}")
-                registry[op_overload] = fn
+        def register(op):
+            _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once
-        tree_map(add_op_to_table, aten_op)
+        tree_map(register, aten_op)
         return fn
 
     return decomposition_decorator

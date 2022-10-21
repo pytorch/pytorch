@@ -4,7 +4,7 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._decomp import global_decomposition_table, meta_table
+from torch._decomp import global_decomposition_table, meta_table, _add_op_to_registry
 from torch._ops import OpOverload, OpOverloadPacket
 from torch._prims_common import (
     check,
@@ -27,22 +27,13 @@ _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", 
 
 
 def register_meta(op):
-    def wrapper(f):
-        def add_func(aten_op):
-            overloads = []
-            if isinstance(aten_op, OpOverload):
-                overloads.append(aten_op)
-            else:
-                assert isinstance(aten_op, OpOverloadPacket)
-                for ol in aten_op.overloads():
-                    overloads.append(getattr(aten_op, ol))
-            for op_overload in overloads:
-                if op_overload in meta_table:
-                    raise RuntimeError(f"duplicate registrations for {op_overload}")
-                meta_table[op_overload] = f
+    def wrapper(fn):
 
-        tree_map(add_func, op)
-        return f
+        def register(op):
+            _add_op_to_registry(meta_table, op, fn)
+
+        tree_map(register, op)
+        return fn
 
     return wrapper
 
@@ -1656,12 +1647,7 @@ def activate_meta():
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
-        # TODO: factor this logic into OpOverload or Library API
-        name = op_overload._schema.name
-        if op_overload._schema.overload_name:
-            name += "." + op_overload._schema.overload_name
-
-        dispatch_key_registration = torch._C._dispatch_dump(name)
+        dispatch_key_registration = torch._C._dispatch_dump(op_overload.name())
 
         if "CompositeImplicitAutograd" in dispatch_key_registration:
             # Internally, we shouldn't be registering meta kernels for any operators that
@@ -1677,7 +1663,7 @@ def activate_meta():
             # We shouldn't do this, because the output will report as not having aliased storages.
             # All view ops have meta kernels in C++ today, so we should use those instead.
             pass
-        elif name in {
+        elif op_overload.name() in {
             "aten::empty_strided",  # causing infinite recursion, test/test_meta.py
             "aten::clone",  # causing infinite recursion,
             "aten::_to_copy",  # causing infinite recursion, test/test_serialization.py -k test_tensor_subclass_getstate_overwrite
@@ -1692,6 +1678,7 @@ def activate_meta():
             "aten::diag_embed",  # RuntimeError: Stride mismatch! Strides are (180, 30, 1, 6) and (180, 30, 5, 1) (mismatched at 2)! test/test_ops.py -k test_fake_autocast_diag_embed_cuda_float32
             "aten::copy_",  # Exception not raiseed, test/test_torch.py -k test_storage_meta_errors_cpu_int64
             "aten::constant_pad_nd",  # requires_grad mismatch, test/test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
+            "aten::masked_fill.Scalar",  # Stride mismatch! test/test_ops.py -k test_fake_crossref_backward_amp_nanquantile_cuda_float32
         }:
             pass
         else:

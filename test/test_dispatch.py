@@ -765,8 +765,9 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
     # no longer exists
     def test_find_dangling_impls(self):
         dangling_impls = C._dispatch_find_dangling_impls()
+        print(dangling_impls)
         self.assertEqual(
-            242,
+            0,
             len(dangling_impls),
             msg=f"Expect zero dangling impls, but found: {dangling_impls}"
         )
@@ -783,14 +784,14 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         )
 
         impls = C._dispatch_find_dangling_impls()
-        self.assertEqual(243, len(impls))
-#         self.assertEqual(
-#             '''\
-# name: __test::foo
-# schema: (none)
-# CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
-# '''.format(extension_path),
-#             impls[0])
+        self.assertEqual(1, len(impls))
+        self.assertEqual(
+            '''\
+name: __test::foo
+schema: (none)
+CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
+'''.format(extension_path),
+            impls[0])
 
     def test_dispatch_print_registrations_for_dispatch_key_invalid(self):
         with self.assertRaisesRegex(
