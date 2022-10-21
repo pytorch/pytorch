@@ -213,6 +213,8 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    if "inductor" in compiler_name:
+        fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
