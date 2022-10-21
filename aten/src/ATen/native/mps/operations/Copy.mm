@@ -187,17 +187,18 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   return dst_;
 }
 
-// Copies tensor from cpu to mps backed by strided-contiguous data
+// Copies tensor from cpu to mps backed by identical strided-contiguous data
 static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
 {
   MPSStream* stream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  TORCH_CHECK(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
   auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
   auto src_byte_offset = src.storage_offset() * src.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst);
   const size_t size_to_copy = src.nbytes();
   const void* host_src = static_cast<char *>(src.storage().data()) + src_byte_offset;
+
+  TORCH_CHECK(src.dtype() == dst.dtype() && src.strides() == dst.strides() && is_strided_contiguous(src));
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
@@ -218,15 +219,25 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
 
 static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
 {
+  // Typecast to dst_ if needed and expand, which is a no-op
   Tensor src = (src_.dtype() != dst_.dtype() ? src_.to(dst_.dtype()) : src_).expand_as(dst_);
+
+  // If src is not contiguously strided it must be cloned
+  // It does not mean that tensor is contiguous, but rather
+  // that it could be represented as 1d view
   if (!is_strided_contiguous(src)) {
     src = src.clone();
+    TORCH_INTERNAL_ASSERT(is_strided_contiguous(src));
   }
   Tensor dst = dst_;
   bool needs_copy = false;
-  if (!is_strided_contiguous(dst_)) {
+  // If src and dst_ strides do not match, it means that
+  // either dst_ is not representable as 1d view or its stride order is different
+  // in that case create an empty storage like src, copy it to device and then do
+  // reshaping on the device
+  if (src.strides() == dst_.strides()) {
     needs_copy = true;
-    dst = dst_.clone();
+    dst = at::empty_like(src, at::device(at::kMPS));
   }
   copy_to_mps_stride_contig(dst, src, non_blocking && !needs_copy);
   return needs_copy? dst_.copy_(dst) : dst_;
