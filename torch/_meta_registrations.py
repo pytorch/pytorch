@@ -1693,6 +1693,14 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
         get_operator_enum(reduce_, use_new_options)
 
 
+@register_meta([aten.scatter.src, aten.scatter_.src], register_dispatcher=False)
+def scatter__src_meta(self, dim, index, src):
+    wrapped_dim = maybe_wrap_dim(dim, self.dim())
+    scatter_gather_dtype_check("scatter", self, index, src)
+    scatter_shape_check(self, wrapped_dim, index, src)
+    return self.new_empty(self.shape)
+
+
 @register_meta(aten.scatter_add.default, register_dispatcher=False)
 def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
