@@ -42,7 +42,7 @@ _all__ = [
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',
-    'register_activation_post_process_hook',
+    '_register_activation_post_process_hook',
     # Observers
     'ObserverBase', 'WeightObserver', 'HistogramObserver',
     'observer', 'default_observer',
