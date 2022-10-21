@@ -13,6 +13,7 @@ from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
+    from sympy.printing.precedence import precedence  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -130,12 +131,26 @@ class PySymInt(object):
                 self.shape_env.expr_to_id[self.ref_id] = set()
             self.shape_env.expr_to_id[self.ref_id].add((self.expr, self.kind, self.idx))
 
-    def wrap(self, num): # Node is a torch._C.SymIntNode
-        # breakpoint()
+    
+    @property
+    def expr(self):
+        self._update_expr()
+        return self._expr
+
+    def __init__(self, expr, shape_env, constant=None):
+        self._expr = expr
+        self.shape_env = shape_env
+        self.constant = constant
+
+
+    def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
         return PySymInt(self.expr, self.shape_env, constant=self.constant, ref_id=self.ref_id, kind=self.kind, idx=self.idx)
+
+    def _update_expr(self):
+        self._expr = self.shape_env.replace(self._expr)
 
     def __str__(self):
         return f"{self.expr}"
@@ -196,6 +211,18 @@ if HAS_SYMPY:
         """
         nargs = (2,)
 
+        def _sympystr(self, printer):
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer._print(lhs)
+            rhs_str = printer._print(rhs)
+            if precedence(lhs) < precedence(sympy.div):
+                lhs_str = f"({lhs_str})"
+            if precedence(rhs) < precedence(sympy.div):
+                rhs_str = f"({rhs_str})"
+
+            return f"{lhs_str}//{rhs_str}"
+
         @classmethod
         def eval(cls, base, divisor):
             if base == 0:
@@ -252,12 +279,14 @@ magic_methods = {
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
     'ceil': lambda a: Ceil(a),
+    'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
 }
 
 unary_magic_methods = {
-    'ceil'
+    'ceil',
+    'neg'
 }
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
