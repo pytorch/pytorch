@@ -72,7 +72,6 @@ def is_in_onnx_export() -> bool:
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
 # Skip check due to cannot import IValue from torch._C
 _params_dict = {}  # type: ignore[var-annotated]
-_custom_onnxscript = list()  # type: ignore[var-annotated]
 
 
 @contextlib.contextmanager
@@ -1598,7 +1597,7 @@ def _export(
                     model_file_location,
                     node_attr_to_name,
                 )
-            proto = _add_onnxscript_fn(proto)
+            proto = _add_onnxscript_fn(proto, graph, custom_opsets)
             if verbose:
                 torch.onnx.log("Exported graph: ", graph)
             if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
@@ -1663,17 +1662,47 @@ def _export(
 
 
 @_beartype.beartype
-def _add_onnxscript_fn(model_proto: bytes) -> bytes:
-    # avoid onnx to be dependency
+def _add_onnxscript_fn(
+    model_bytes: bytes, graph: _C.Graph, custom_opsets: Mapping[str, int]
+) -> bytes:
+    """Insert model-included custom onnx-script function into ModelProto"""
+
+    # TODO(titaiwang): remove this when onnx becomes dependency
     try:
         import onnx
     except Exception:
         raise errors.OnnxExporterError("Module onnx is not installed!")
-    model = onnx.load_model_from_string(model_proto)
-    if _custom_onnxscript is not None:
-        model.functions.extend(_custom_onnxscript)
-    model_proto = model.SerializeToString()
-    return model_proto
+
+    onnx_function_list = list()
+    # Iterate graph nodes to insert only the included custom
+    # function_proto into model_proto
+    for node in graph.nodes():
+        if symbolic_helper._is_custom_domain(node):
+            domain_op = node.kind()
+            domain, opname = domain_op.split("::")
+            specified_version = custom_opsets.get(domain, 1)
+            onnx_function_group = registration.registry.get_function_group(domain_op)
+            if onnx_function_group is not None:
+                onnx_fn = onnx_function_group.get(specified_version)
+                if onnx_fn is not None:
+                    # TODO: to_function_proto is onnx-script API and can be annotated
+                    # after onnx-script is dependency
+                    onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
+                    continue
+
+            raise errors.UnsupportedOperatorError(
+                domain,
+                opname,
+                specified_version,
+                onnx_function_group.get_min_supported()
+                if onnx_function_group
+                else None,
+            )
+    if onnx_function_list:
+        model_proto = onnx.load_model_from_string(model_bytes)
+        model_proto.functions.extend(onnx_function_list)
+        model_bytes = model_proto.SerializeToString()
+    return model_bytes
 
 
 @_beartype.beartype
@@ -1959,7 +1988,6 @@ def register_custom_op_symbolic(
     symbolic_name: str,
     symbolic_fn: Callable,
     opset_version: int,
-    onnxscript_fn: Optional[Callable] = None,
 ):
     """Registers a symbolic function for a custom operator.
 
@@ -1982,9 +2010,6 @@ def register_custom_op_symbolic(
         symbolic_name = f"aten{symbolic_name}"
 
     _verify_custom_op_name(symbolic_name)
-    if onnxscript_fn is not None:
-        local_func = onnxscript_fn.to_function_proto()  # type: ignore[attr-defined]
-        _custom_onnxscript.append(local_func)
 
     registration.custom_onnx_symbolic(
         symbolic_name,
