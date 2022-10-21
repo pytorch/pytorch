@@ -205,7 +205,7 @@ struct Config<CallType::PyCall> {
   static constexpr EventType event_type = EventType::PyCall;
 };
 
-template <typename Key, typename Cls, typename Info>
+template <typename Key, typename Cls, typename ParameterInfo>
 struct ExtendedPyCallConfig {
   using key_t = Key;
   using cls_t = Cls;
@@ -213,7 +213,7 @@ struct ExtendedPyCallConfig {
 
   struct ClsAndParameters {
     cls_t cls_;
-    std::vector<typename Info::ParameterInfo> parameters_;
+    std::vector<ParameterInfo> parameters_;
   };
 
   struct Cache {
@@ -228,12 +228,16 @@ struct ExtendedPyCallConfig {
 };
 
 template <>
-struct Config<CallType::PyModuleCall>
-    : ExtendedPyCallConfig<PyModuleSelf, PyModuleCls, NNModuleInfo> {};
+struct Config<CallType::PyModuleCall> : ExtendedPyCallConfig<
+                                            PyModuleSelf,
+                                            PyModuleCls,
+                                            NNModuleInfo::ParameterInfo> {};
 
 template <>
-struct Config<CallType::PyOptimizerCall>
-    : ExtendedPyCallConfig<PyOptimizerSelf, PyOptimizerCls, OptimizerInfo> {};
+struct Config<CallType::PyOptimizerCall> : ExtendedPyCallConfig<
+                                               PyOptimizerSelf,
+                                               PyOptimizerCls,
+                                               OptimizerInfo::ParameterInfo> {};
 
 template <>
 struct Config<CallType::PyCCall> {
