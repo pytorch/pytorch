@@ -84,7 +84,7 @@ jobs:
                   --pr-head-sha "$PR_HEAD_SHA"
       - name: Upload result to S3
         run: |
-          # shellcheck disable=SC1091
+          # shellcheck source=/dev/null
           . "${SETUP_SCRIPT}"
           conda activate pr-ci
           python3 pytorch/.github/scripts/run_torchbench.py \
