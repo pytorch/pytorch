@@ -412,11 +412,11 @@ class Module:
     _parameters: Dict[str, Optional[Parameter]]
     _buffers: Dict[str, Optional[Tensor]]
     _non_persistent_buffers_set: Set[str]
-    _backward_pre_hooks: OrderedDict[int, Callable]
-    _backward_hooks: OrderedDict[int, Callable]
+    _backward_pre_hooks: Dict[int, Callable]
+    _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
-    _forward_hooks: OrderedDict[int, Callable]
-    _forward_pre_hooks: OrderedDict[int, Callable]
+    _forward_hooks: Dict[int, Callable]
+    _forward_pre_hooks: Dict[int, Callable]
     _state_dict_hooks: Dict[int, Callable]
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
@@ -1146,7 +1146,7 @@ class Module:
         handle = hooks.RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
-            self._backward_pre_hooks.move_to_end(handle.id, last=False)
+            self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def register_backward_hook(
@@ -1216,7 +1216,7 @@ class Module:
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         if prepend:
-            self._backward_hooks.move_to_end(handle.id, last=False)
+            self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def _get_backward_hooks(self):
@@ -1312,7 +1312,7 @@ class Module:
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
         self._forward_pre_hooks[handle.id] = hook
         if prepend:
-            self._forward_pre_hooks.move_to_end(handle.id, last=False)
+            self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def register_forward_hook(
@@ -1339,7 +1339,7 @@ class Module:
         handle = hooks.RemovableHandle(self._forward_hooks)
         self._forward_hooks[handle.id] = hook
         if prepend:
-            self._forward_hooks.move_to_end(handle.id, last=False)
+            self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def _slow_forward(self, *input, **kwargs):
