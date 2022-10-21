@@ -248,7 +248,7 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 `backend_config` configurations used in this step:
 ```
 BackendConfig(nniqat.LinearReLU)
-    .set_observation_type(ObservationType.OUTPUT_USE_DIFFFERENT_OBSERVER_AS_INPUT)
+    .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)
     .set_dtype_configs([
         DTypeConfig(input_dtype=torch.quint8, output_dtype = torch.quint8, weight_dtype = torch.qint8, bias_dtype = torch.float32)]
     )

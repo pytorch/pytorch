@@ -1,5 +1,5 @@
 ## FX Pass Infrastructure
-This folder contains the pass infarstructure and passes for transforming fx.Graph.
+This folder contains the pass infrastructure and passes for transforming fx.Graph.
 
 
 ## Code Structure

@@ -127,7 +127,7 @@ its methods or attributes.
 
 **Uses of tensor constants**. Most constants are inlined as literals, like
 strings or ints. But since tensors are potentially very large, when
-`PythonPrint` encouters a constant tensor it will emit a reference to a
+`PythonPrint` encounters a constant tensor it will emit a reference to a
 global `CONSTANTS` table (like `foo = CONSTANTS.c0`).
 
 When importing, the importer will know how to resolve this reference into an
