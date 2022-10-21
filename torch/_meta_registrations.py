@@ -4,6 +4,7 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
+from torch._decomp import meta_table as meta_table
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -23,8 +24,6 @@ from torch.utils._pytree import tree_map
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
-
-meta_table = {}
 
 
 def register_meta(op, register_dispatcher=True):
@@ -85,6 +84,11 @@ def meta_randperm(n, *, generator=None, out):
 
 @register_meta(aten.randint.default)
 def meta_randint(high, size, *, dtype=torch.long, **kwargs):
+    return torch.empty(size, dtype=dtype, **kwargs)
+
+
+@register_meta(aten.randint.low)
+def meta_randint_low(low, high, size, *, dtype=torch.long, **kwargs):
     return torch.empty(size, dtype=dtype, **kwargs)
 
 
