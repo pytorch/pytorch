@@ -3740,7 +3740,7 @@ Examples::
 add_docstr(
     torch.as_strided_scatter,
     r"""
-as_strided_scatter(input, src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(input, src, size, stride, storage_offset=None) -> Tensor
 
 Embeds the values of the :attr:`src` tensor into :attr:`input` along
 the elements corresponding to the result of calling
