@@ -3097,7 +3097,7 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
-        elif config.tune_layout:
+        elif config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
             output_layout_str = tuned_conv_layout(
