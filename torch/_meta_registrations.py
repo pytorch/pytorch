@@ -1754,12 +1754,26 @@ def upsample_nearest2d_backward_vec_meta(grad_output, output_size, input_size, s
     mem_format = utils.suggest_memory_format(grad_output)
     return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
+def rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden):
+    check(input_gates.ndim == 2, lambda: f"{input_gates.ndim} != 2")
+    check(input_gates.shape == hidden_gates.shape, lambda: f"{input_gates.shape} != {hidden_gates.shape}")
+    gates_size = input_gates.size(1)
+    if input_bias is not None:
+        check(input_bias.ndim == 1, lambda: f"{input_bias.ndim} != 1")
+        check(input_bias.numel() == gates_size, lambda: f"{input_bias.numel()} != {gates_size}")
+        check(input_bias.shape == hidden_bias.shape, lambda: f"{input_bias.shape} != {hidden_bias.shape}")
+    check(prev_hidden.ndim == 2, lambda: f"{prev_hidden.ndim} != 2")
+    expected_prev_hidden_numel = input_gates.size(0) * gates_size // factor
+    check(prev_hidden.numel() == expected_prev_hidden_numel, lambda: f"{prev_hidden.numel()} != {input_gates.size(0)} * {gates_size} // {factor} (aka {expected_prev_hidden_numel})")
+    check(all(x.device == input_gates.device for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]), lambda: "expected all inputs to be same device")
+
 @register_meta(aten._thnn_fused_lstm_cell.default)
 def _thnn_fused_lstm_cell_meta(input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None):
-    workspace = torch.empty_like(input_gates).to(memory_format=torch.contiguous_format)
-    hy = torch.empty_like(cx).to(memory_format=torch.contiguous_format)
-    cy = torch.empty_like(cx).to(memory_format=torch.contiguous_format)
-    return (workspace, hy, cy)
+    rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 4, cx)
+    workspace = torch.empty_like(input_gates, memory_format=torch.contiguous_format)
+    hy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    cy = torch.empty_like(cx, memory_format=torch.contiguous_format)
+    return (hy, cy, workspace)
 
 
 def zero_numel_check_dims(self, dim, fn_name):
