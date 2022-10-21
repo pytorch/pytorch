@@ -251,6 +251,30 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
+def reason_onnx_runtime_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX Runtime doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX Runtime"
+
+
+def reason_onnx_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by the ONNX Spec"
+
+
+def reason_jit_tracer_error(info: str) -> str:
+    """Formats the reason: JIT tracer errors."""
+    return f"JIT tracer error on {info}"
+
+
+def reason_flaky() -> str:
+    """Formats the reason: test is flaky."""
+    return "flaky test"
+
+
 # Modify this section ##########################################################
 # NOTE: Modify this section as more ops are supported. The list should be sorted
 # alphabetically.
@@ -281,10 +305,13 @@ ALLOWLIST_OP = frozenset(
 # A: Use skip if we don't care about the test passing or if the test is flaky.
 #    Use xfail if we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    dont_care(torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
-    skip(torch.ceil, dtypes=[torch.float64], reason="Ceil on f64 not supported by ONNX Runtime"),
-    dont_care(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
-    xfail(torch.t, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    dont_care(
+        torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
+        reason=reason_onnx_does_not_support("Ceil")
+    ),
+    skip(torch.ceil, dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
+    dont_care(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
+    xfail(torch.t, dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
 )
 # fmt: on
 
