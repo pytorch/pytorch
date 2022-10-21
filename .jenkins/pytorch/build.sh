@@ -62,9 +62,6 @@ elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
-# TODO: Don't run this...
-pip_install -r requirements.txt || true
-
 # Enable LLVM dependency for TensorExpr testing
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export USE_LLVM=/opt/rocm/llvm
@@ -74,13 +71,11 @@ else
   export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 fi
 
-# TODO: Don't install this here
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
@@ -230,7 +225,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install "$(echo dist/*.whl)[opt-einsum]"
+    pip_install_whl "$(echo dist/*.whl)"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
