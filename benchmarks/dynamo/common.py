@@ -587,40 +587,6 @@ def try_script(model, example_inputs):
         return None
 
 
-def speedup_experiment_ts(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of TorchScript and optimize_for_inference.
-
-    Writes to ./baseline_ts.csv
-    """
-    if args.training:
-        return baselines(
-            [
-                ("eager", model),
-                ("ts", try_script(model, example_inputs)),
-            ],
-            model_iter_fn,
-            example_inputs,
-            args,
-        )
-
-    return baselines(
-        [
-            ("eager", model),
-            ("ts", try_script(model, example_inputs)),
-            (
-                "ofi",
-                backends.ofi(try_script(model, example_inputs), example_inputs),
-            ),
-            # ("nnc", backends.nnc(try_script(model, example_inputs), example_inputs)),
-            # ("nvfuser", backends.nvfuser(try_script(model, example_inputs), example_inputs)),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
-
-
 def speedup_experiment_sr(args, model_iter_fn, model, example_inputs):
     """
     Measure baseline performance (without using TorchDynamo) of static runtime.
@@ -1454,9 +1420,6 @@ def parse_args():
         "--overhead", action="store_true", help=help(overhead_experiment)
     )
     group.add_argument(
-        "--speedup-ts", action="store_true", help=help(speedup_experiment_ts)
-    )
-    group.add_argument(
         "--speedup-sr", action="store_true", help=help(speedup_experiment_sr)
     )
     group.add_argument(
@@ -1713,9 +1676,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.speedup_ts:
-        experiment = speedup_experiment_ts
-        output_filename = "baseline_ts.csv"
     elif args.speedup_sr:
         experiment = speedup_experiment_sr
         output_filename = "baseline_sr.csv"
