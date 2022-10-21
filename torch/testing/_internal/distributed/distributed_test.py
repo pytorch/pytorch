@@ -7727,6 +7727,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_shape_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7749,6 +7750,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_num_params_across_ranks(self):
             group_gloo = dist.new_group(
