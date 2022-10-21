@@ -90,6 +90,24 @@ struct TORCH_API RawTensorMetadataBase {
   uint32_t dim_;
 };
 
+// ============================================================================
+// == weak_intrusive_ptr and the ABA problem for TensorImpl* ==================
+// ============================================================================
+// Tracking `TensorImpl`s is an important part of identity tracking, because
+// a Tensor might change storage; however when it does we want to retain the
+// fact that the old and new storage belong to the same logical Tensor. We
+// cannot take an owning reference to the Tensor because that would change
+// program semantics by extending the lifetime of the Tensor. However if we
+// store a raw TensorImpl* pointer the TensorImpl might be deleted and a new
+// TensorImpl might be created that reuses the address. (ABA problem)
+//
+// Fortunately, there is a feature of `c10::intrusive_ptr` that we can use to
+// prevent address reuse for the duration of profiling: the weak intrusive ptr.
+// When a Tensor's refcount reaches zero but there are outstanding weak
+// references (`weakcount_ > 0`) it will free the underlying managed resources
+// by calling `target_->release_resources()`, but it will not call `delete`.
+// (Instead, `delete` is called when the last weak reference is destroyed.)
+// This means that we can safely use address identity to track `TensorImpls`.
 struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata() = default;
   RawTensorMetadata(const RawTensorMetadata&) = default;
@@ -102,6 +120,9 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   c10::optional<c10::weak_intrusive_ptr<c10::TensorImpl>> weak_self_;
 };
 
+// During post processing we convert `weak_intrusive_ptr`s to
+// `TensorImplAddress` since we no longer need to keep the underlying
+// `intrusive_ptr`s alive.
 struct TensorMetadata : public RawTensorMetadataBase {
   explicit TensorMetadata(const RawTensorMetadata& r)
       : RawTensorMetadataBase(r), impl_{r.weak_self_->_unsafe_get_target()} {}
