@@ -489,6 +489,10 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   SymFloatNode ge(const SymIntNode& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
+  virtual double guard_float(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_float")(file, line).cast<double>();
+  }
   SymIntNode ceil() override;
 
   SymIntNode floor() override;
@@ -2086,7 +2090,10 @@ void initJITBindings(PyObject* module) {
             }
             return py::none();
           })
-      .def("__str__", [](c10::SymFloatNode a) { return a->str(); });
+      .def("__str__", [](c10::SymFloatNode a) { return a->str(); })
+      .def(
+          "guard_float",
+          [](c10::SymFloatNode a) { return a->guard_float(nullptr, 0); });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

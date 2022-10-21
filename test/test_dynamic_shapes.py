@@ -331,6 +331,20 @@ class TestPySymInt(TestCase):
         self.assertIs(r.dtype, torch.int64)
 
     @skipIfNoSympy
+    def test_tensor_constructor_with_symint_symfloat(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        self.assertIsInstance(a0, CPP_SYMINT_CLASS)
+        r = torch.tensor(a0)
+        self.assertEqual(r.item(), 2)
+        b = a0 * 1.0
+        s = torch.tensor(b)
+        self.assertEqual(s.item(), 2.0)
+
+        self.assertRaisesRegex(RuntimeError, "can not be called", lambda: torch.tensor([a0, a0]))
+        self.assertRaisesRegex(RuntimeError, "can not be called", lambda: torch.tensor([b, b]))
+
+    @skipIfNoSympy
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)

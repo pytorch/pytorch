@@ -182,6 +182,12 @@ class PySymFloat:
     def __str__(self):
         return f"{self.expr}"
 
+    # You can manually trigger a guard with this function
+    def guard_float(self, file, line):
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
+        return float(self.shape_env.evaluate_expr(self.expr))
+
 if HAS_SYMPY:
     class FloorDiv(sympy.Function):
         """

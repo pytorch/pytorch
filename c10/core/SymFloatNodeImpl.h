@@ -125,6 +125,9 @@ class C10_API SymFloatNodeImpl : public c10::intrusive_ptr_target {
     os << str();
     return os;
   };
+  virtual double guard_float(const char* file, int64_t line) {
+    TORCH_CHECK(false, "NYI");
+  };
 };
 
 } // namespace c10
