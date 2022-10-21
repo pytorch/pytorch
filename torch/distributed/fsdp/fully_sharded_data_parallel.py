@@ -1092,11 +1092,18 @@ class FullyShardedDataParallel(nn.Module):
         self.params: List[FlatParameter] = []
         self._fsdp_wrapped_module = module
         if params_to_flatten:
-            handle = FlatParamHandle(params_to_flatten, module, self.compute_device, config, use_orig_params)
+            handle = FlatParamHandle(
+                params_to_flatten,
+                module,
+                self.compute_device,
+                config,
+                self.process_group,
+                use_orig_params,
+            )
             self._handles.append(handle)
             self.params.append(handle.flat_param)
             self._register_param_handle(handle)
-            handle.shard(self.process_group)
+            handle.shard()
             if self.cpu_offload.offload_params and handle.flat_param.device != torch.device("cpu"):
                 handle.flat_param_to(torch.device("cpu"))
         if not use_orig_params:
