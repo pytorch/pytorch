@@ -765,7 +765,6 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
     # no longer exists
     def test_find_dangling_impls(self):
         dangling_impls = C._dispatch_find_dangling_impls()
-        print(dangling_impls)
         self.assertEqual(
             0,
             len(dangling_impls),

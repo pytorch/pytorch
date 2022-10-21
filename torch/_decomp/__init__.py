@@ -26,14 +26,21 @@ decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
 meta_table = global_decomposition_table["meta"]
 
+
 def _add_op_to_registry(registry, op, fn):
+    """
+    This is an internal API for adding an op to the decomposition table.
+
+    If op is OpOverload, it will be added to the registry directly.
+    If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
+    """
     overloads = []
     if isinstance(op, OpOverload):
         overloads.append(op)
     else:
         assert isinstance(op, OpOverloadPacket)
         for ol in op.overloads():
-                overloads.append(getattr(op, ol))
+            overloads.append(getattr(op, ol))
 
     for op_overload in overloads:
         if op_overload in registry:
@@ -42,7 +49,7 @@ def _add_op_to_registry(registry, op, fn):
         # TorchScript dumps a bunch of extra nonsense overloads
         # which don't have corresponding dispatcher entries, we need
         # to filter those out, e.g aten.add.float_int
-        if  torch._C._dispatch_has_kernel(op_overload.name()):
+        if torch._C._dispatch_has_kernel(op_overload.name()):
             registry[op_overload] = fn
 
 

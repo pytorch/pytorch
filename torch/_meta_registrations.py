@@ -4,8 +4,8 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._decomp import global_decomposition_table, meta_table, _add_op_to_registry
-from torch._ops import OpOverload, OpOverloadPacket
+from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
+from torch._ops import OpOverload
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -28,7 +28,6 @@ _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", 
 
 def register_meta(op):
     def wrapper(fn):
-
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
 
@@ -1103,9 +1102,7 @@ def meta_zero_(self):
     return self
 
 
-@register_meta(
-    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar]
-)
+@register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
     return self
 
@@ -1635,6 +1632,8 @@ def activate_meta():
 
     activate_meta_table = {}
 
+    # For a given op, we pick the most specific decomp function from
+    # global_decomp_table in the precedence order of meta > post_autograd > pre_autograd
     for type in ["meta", "post_autograd", "pre_autograd"]:
         registry = global_decomposition_table[type]
 
@@ -1679,6 +1678,9 @@ def activate_meta():
             "aten::copy_",  # Exception not raiseed, test/test_torch.py -k test_storage_meta_errors_cpu_int64
             "aten::constant_pad_nd",  # requires_grad mismatch, test/test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
             "aten::masked_fill.Scalar",  # Stride mismatch! test/test_ops.py -k test_fake_crossref_backward_amp_nanquantile_cuda_float32
+            "aten::tril",  # Stride mismatch! test/test_ops.py -k test_fake_crossref_backward_amp_ormqr_cuda_float32
+            "aten::triu",  # Stride mismatch! test/test_ops.py -k test_fake_crossref_backward_amp_lu_solve_cuda_float32
+            "aten::rot90",  # requires_gradient mismatch! test/test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
         }:
             pass
         else:

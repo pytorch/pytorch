@@ -1033,8 +1033,8 @@ def forward(self, a_1):
     add = torch.ops.aten.add.Tensor(a_1, 1);  a_1 = None
     resize = torch.ops.aten.resize_.default(add, [5, 5])
     view = torch.ops.aten.view.default(add, [25]);  add = None
-    fill = torch.ops.aten.fill.Scalar(view, 1);  view = None
-    view_1 = torch.ops.aten.view.default(fill, [5, 5]);  fill = None
+    fill = torch.ops.aten.fill_.Scalar(view, 1)
+    view_1 = torch.ops.aten.view.default(view, [5, 5]);  view = None
     add_1 = torch.ops.aten.add.Tensor(view_1, 1)
     return (view_1, add_1)
     """)
