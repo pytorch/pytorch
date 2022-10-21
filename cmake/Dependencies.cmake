@@ -1273,8 +1273,9 @@ if(USE_ROCM)
   # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
   # Currently only active for Ubuntu 20.04 and greater versions.
   if(UNIX)
-    execute_process(COMMAND bash -c "cat /etc/os-release | grep -e '^NAME=' | awk -F\\\" '{print $2}'" OUTPUT_VARIABLE OS_DISTRO OUTPUT_STRIP_TRAILING_WHITESPACE)
-    execute_process(COMMAND bash -c "cat /etc/os-release | grep VERSION_ID | awk -F\\\" '{print $2}'" OUTPUT_VARIABLE OS_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE)
+    file(STRINGS /etc/os-release OS_RELEASE)
+    string(REGEX REPLACE "NAME=\"([A-Za-z]+).*" "\\1" OS_DISTRO ${OS_RELEASE})
+    string(REGEX REPLACE ".*VERSION_ID=\"([0-9\.]+).*" "\\1" OS_VERSION ${OS_RELEASE})
     if(OS_DISTRO STREQUAL "Ubuntu" AND OS_VERSION VERSION_GREATER_EQUAL "20.04")
       find_library(LIBTINFO_LOC tinfo NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH)
       if(LIBTINFO_LOC)
