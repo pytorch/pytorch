@@ -123,7 +123,6 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
         return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
   for (const auto i : c10::irange(output.size())) {{
-    out_clone.push_back(output[i].clone());
     out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
   }}
   return out_clone;"""
