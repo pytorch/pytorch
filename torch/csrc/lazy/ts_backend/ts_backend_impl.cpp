@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
@@ -273,6 +274,9 @@ void InitTorchScriptBackend() {
   register_ts_ltc_eager_fallback();
   static std::unique_ptr<BackendRegistrar> s_registrar;
   s_registrar = std::make_unique<BackendRegistrar>(GetTSBackendImpl());
+
+  static LazyGraphExecutor* executor = new LazyGraphExecutor();
+  LazyGraphExecutor::Register(executor);
 }
 
 } // namespace lazy
