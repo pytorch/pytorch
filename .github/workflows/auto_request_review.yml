@@ -6,6 +6,8 @@ on:
 
 jobs:
   auto-request-review:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
     name: Auto Request Review
     runs-on: ubuntu-latest
     steps:
