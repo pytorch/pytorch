@@ -183,7 +183,7 @@ def group_norm(
     """
     utils.check(
         input.ndim >= 2,
-        lambda: f"Expected at least 2 dimensions for input tensor but recieved {input.ndim}",
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
 
     batch_size = input.shape[0]

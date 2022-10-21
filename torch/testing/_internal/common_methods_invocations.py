@@ -3335,13 +3335,11 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         channels = input_shape[1] if len(input_shape) > 1 else 0
         weight_tensor = make_arg(channels)
         bias_tensor = make_arg(channels)
-        print(input_shape)
 
         # Checking for permutations of weights and biases as `None`
-        weights = [weight_tensor, weight_tensor, None, None]
-        biases = [bias_tensor, None, bias_tensor, None]
-
-        for weight, bias in zip(weights, biases):
+        weights = [weight_tensor, None]
+        biases = [bias_tensor, None]
+        for weight, bias in itertools.product(weights, biases):
             kwargs = {
                 'weight': weight,
                 'bias': bias,
@@ -3485,10 +3483,12 @@ def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwar
 def error_inputs_group_norm(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
 
-    err_msg1 = "Expected at least 2 dimensions for input tensor but recieved"
+    # check that input has minimum number of dimensions
+    err_msg1 = "Expected at least 2 dimensions for input tensor but received"
     s1 = SampleInput(make_arg((1)), args=(1,))
     yield ErrorInput(s1, error_regex=err_msg1)
 
+    # check that the channels dimension is compatible with number of groups
     err_msg2 = "Expected number of channels in input to be divisible by num_groups, but got input of shape"
     s2 = SampleInput(make_arg((2, 7, 4)), args=(2,))
     yield ErrorInput(s2, error_regex=err_msg2)

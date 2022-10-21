@@ -2732,6 +2732,13 @@ def _normalize(
     return out, mean, rstd
 
 
+# remove all specified dimensions
+def _squeeze_multiple(x: TensorLikeType, dimensions: List[int]) -> TensorLikeType:
+    for idx in reversed(sorted(dimensions)):
+        x = squeeze(x, dimensions)
+    return x
+
+
 @register_decomposition(torch.ops.aten.native_group_norm.default, disable_meta=True)
 def native_group_norm(
     input: Tensor,
@@ -2745,7 +2752,7 @@ def native_group_norm(
 ) -> Tuple[Tensor, Tensor, Tensor]:
     utils.check(
         input.ndim >= 2,
-        lambda: f"Expected at least 2 dimensions for input tensor but recieved {input.ndim}",
+        lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
     utils.check(
         num_channels % num_groups == 0,
@@ -2781,8 +2788,8 @@ def native_group_norm(
     if rstd.dtype != input.dtype:
         rstd = prims.convert_element_type(rstd, input.dtype)
 
-    mean = prims.squeeze(mean, reduction_dims)
-    rstd = prims.squeeze(rstd, reduction_dims)
+    mean = _squeeze_multiple(mean, reduction_dims)
+    rstd = _squeeze_multiple(rstd, reduction_dims)
 
     return (out, mean, rstd)
 
