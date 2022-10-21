@@ -4070,13 +4070,30 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v) {
+
+  if (!grad_o.defined() && !grad_a.defined()) {
+    return {};
+  }
+
   Tensor a = at::tanh(at::matmul(q, k.transpose(0, 1)));
-  Tensor q_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - a.pow(2)), k) +
-               at::matmul(grad_a * (1 - a.pow(2)), k);
-  Tensor k_b = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - a.pow(2)).transpose(0, 1), q) +
-               at::matmul(grad_a * (1 - a.pow(2)).transpose(0, 1), q);
-  Tensor v_b = at::matmul(a.transpose(0, 1), grad_o);
-  return std::tuple<Tensor, Tensor, Tensor>(q_b, k_b, v_b);
+
+  if (grad_o.defined()) {
+    Tensor q_o = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - a.pow(2)), k);
+    Tensor k_o = at::matmul(at::matmul(grad_o, v.transpose(0, 1)) * (1 - a.pow(2)).transpose(0, 1), q);
+    Tensor v_o = at::matmul(a.transpose(0, 1), grad_o);
+
+    if (!grad_a.defined()) {
+      return std::tuple<Tensor, Tensor, Tensor>(q_o, k_o, v_o);
+    }
+    Tensor q_a = at::matmul(grad_a * (1 - a.pow(2)), k);
+    Tensor k_a = at::matmul(grad_a * (1 - a.pow(2)).transpose(0, 1), q);
+    return std::tuple<Tensor, Tensor, Tensor>(q_o + q_a, k_o + k_a, v_o);
+  }
+
+  // only grad_a is defined
+  Tensor q_a = at::matmul(grad_a * (1 - a.pow(2)), k);
+  Tensor k_a = at::matmul(grad_a * (1 - a.pow(2)).transpose(0, 1), q);
+  return std::tuple<Tensor, Tensor, Tensor>(q_a, k_a, at::zeros({1}, a.options()));
 }
 
 std::tuple<Tensor, Tensor> slogdet_jvp(

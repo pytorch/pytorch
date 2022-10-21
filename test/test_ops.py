@@ -1821,7 +1821,8 @@ fake_autocast_device_skips = defaultdict(dict)
 
 # TODO: investigate/fix
 fake_autocast_device_skips["cpu"] = set(
-    ("linalg.pinv",)
+    ("linalg.pinv",
+     "attn",)
 )
 
 

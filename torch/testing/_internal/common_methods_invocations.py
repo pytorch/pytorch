@@ -13282,7 +13282,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_attn,
            decorators=[DecorateInfo(toleranceOverride({
-                                    torch.float32: tol(atol=5e-05, rtol=3e-06),
+                                    torch.float32: tol(atol=1e-04, rtol=3e-05),
                                     torch.complex64: tol(atol=1e-02, rtol=5e-05)}),
                                     'TestCommon', 'test_noncontiguous_samples')],
            ),
