@@ -1,8 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, List
 
-from tabulate import tabulate
-
 import torch
 import torch.fx.traceback as fx_traceback
 from torch import fx
@@ -35,7 +33,12 @@ def pretty_print_buckets(buckets: List[Bucket]):
         rows.append((idx, bucket.size, bucket.params[0]))
         for param in bucket.params[1:]:
             rows.append((None, None, param))
-    print(tabulate(rows, headers=headers, tablefmt="simple_grid"))
+    try:
+        from tabulate import tabulate
+
+        print(tabulate(rows, headers=headers, tablefmt="simple_grid"))
+    except ImportError:
+        print("Please `pip install tabulate` in order to pretty-print ddp bucket sizes")
 
 
 class DDPOptimizer:
