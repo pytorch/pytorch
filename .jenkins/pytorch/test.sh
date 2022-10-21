@@ -97,10 +97,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  export BUILD_SPLIT_CUDA=ON
-fi
-
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
