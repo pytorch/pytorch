@@ -204,7 +204,10 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
             functorch.compile.config.use_fake_tensor = False
         if args.verbose:
             dynamo.config.verbose = True
-        dynamo_ctx = dynamo.optimize(args.dynamo)
+        def print_compile(gm, ex):
+            print(f"print_compile:\n{str(gm.graph)}\n-----------------------------------------")
+            return gm
+        dynamo_ctx = dynamo.optimize(print_compile if args.dynamo == "print" else args.dynamo)
         model = dynamo_ctx(model)
 
     # warmup
