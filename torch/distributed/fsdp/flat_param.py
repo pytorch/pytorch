@@ -841,18 +841,46 @@ class FlatParamHandle:
 
     @torch.no_grad()
     def unshard_grad(self):
+        """
+        Unshards the handle's ``FlatParameter`` 's gradient. If all ranks have
+        ``None`` gradient, then all original parameters will as well. This
+        method performs an all-reduce and an all-gather. The additional
+        all-reduce is tolerable since this method is not meant to be used on
+        the computation critical path.
+
+        Postcondition: ``_saved_grad_shard`` is defined and contains the value
+        to set ``flat_param.grad`` after gradients are resharded.
+        """
         if not self.uses_sharded_strategy:
             self._use_unsharded_grad_views()
             return
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
+
+        # Check if all ranks have a `None` gradient
+        num_grad_none = torch.zeros(1, dtype=torch.int32, device=self.device)
+        num_grad_none[0] = flat_param.grad is None
+        dist.all_reduce(num_grad_none, group=self.process_group)
+        if num_grad_none[0] == self.world_size:
+            flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
+            self._use_unsharded_grad_views()
+            return
+
         padded_unsharded_grad = torch.empty(
             flat_param._padded_unsharded_size,  # type: ignore[attr-defined]
             device=self.device,
         )
         if flat_param.grad is None:
+            # In the case that only some ranks have `None` gradient, we use
+            # zeros to approximate as a best effort attempt
+            if self._debug_level == dist.DebugLevel.DETAIL:
+                warnings.warn(
+                    f"[Rank {self.rank}] Only some but not all ranks have a "
+                    "`None` `FlatParameter` gradient, so FSDP is using zeros to "
+                    "approximate those ranks' sharded gradients being `None`"
+                )
             flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
-            sharded_grad = torch.zeros_like(flat_param)  # type: ignore[attr-defined]
+            sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)  # type: ignore[attr-defined]
         else:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
