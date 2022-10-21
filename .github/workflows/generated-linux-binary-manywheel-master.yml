@@ -43,7 +43,7 @@ jobs:
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6-85cc684c48fda572f4ad39821e9733031f5edfc4
       DESIRED_PYTHON: "3.7"
       build_name: manywheel-py3_7-cuda11_6
       build_environment: linux-binary-manywheel
