@@ -55,11 +55,6 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.config, "fake_tensor_propagation", False
             )
         )
-        cls._exit_stack.enter_context(
-            unittest.mock.patch.object(
-                torch._dynamo.config, "raise_on_assertion_error", True
-            )
-        )
 
     test_sgd = make_test(torch.optim.SGD, lr=0.01)
     # lgbfs has data-dependent control and internally iterates

@@ -597,6 +597,5 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    torch._dynamo.config.raise_on_assertion_error = True
     if has_triton() and not TEST_WITH_ROCM:
         run_tests()

@@ -434,8 +434,7 @@ class OutputGraph(fx.Tracer):
             log.warning(e, exc_info=True)
             log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
-            if config.raise_on_backend_error:
-                raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):
