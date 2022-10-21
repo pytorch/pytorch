@@ -1631,7 +1631,7 @@ class FullyShardedDataParallel(nn.Module):
         return self._fsdp_wrapped_module.module
 
     def __getattr__(self, name: str) -> Any:
-        """Forward missing attributes to wrapped module."""
+        """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
@@ -2538,7 +2538,7 @@ class FullyShardedDataParallel(nn.Module):
             self._state_dict_type == StateDictType.SHARDED_STATE_DICT
         ):
             if (
-                self._fsdp_wrapped_module.flat_param is not None and
+                self._fsdp_wrapped_module.has_params and
                 not self._fsdp_wrapped_module.handle.uses_sharded_strategy
             ):
                 raise RuntimeError(
@@ -2606,8 +2606,8 @@ class FullyShardedDataParallel(nn.Module):
         _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP_WRAPPED_MODULE}.")
         fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{FLAT_PARAM}"
         if fqn not in state_dict:
-            assert getattr(self._fsdp_wrapped_module, FLAT_PARAM, None) is None, (
-                "No flat parameter in state_dict but self._fsdp_wrapped_module.flat_param is not None"
+            assert not self._fsdp_wrapped_module.has_params, (
+                "No `FlatParameter` in `state_dict` for this FSDP instance but it has parameters"
             )
             return
         load_tensor = state_dict[fqn]
@@ -2622,7 +2622,7 @@ class FullyShardedDataParallel(nn.Module):
 
         # Get the metada of the flat_param to decide whether to pad the loaded
         # tensor.
-        flat_param = self._fsdp_wrapped_module.flat_param
+        flat_param = self._handles[0].flat_param
         assert flat_param is not None
         if flat_param._shard_numel_padded not in (0, flat_param.numel()):
             assert load_tensor.numel() < flat_param.numel(), (
@@ -2694,7 +2694,7 @@ class FullyShardedDataParallel(nn.Module):
             nonsharded_tensors.append(tensor)
 
         # Create a new flat_param from the loaded, non-sharded tensors.
-        flat_param = self._fsdp_wrapped_module.flat_param
+        flat_param = self._handles[0].flat_param
         loaded_flat_param = FlatParamHandle.flatten_params(nonsharded_tensors, requires_grad=False)
 
         # Get the chunk from the loaded flat_param for the local rank.
