@@ -10,10 +10,10 @@ Usage:
 
     pytest test/onnx/test_op_consistancy.py -k ceil
 
-NOTE:
+Note:
 
-When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS and
-ALLOWLIST_OP lists.
+    When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS and
+    ALLOWLIST_OP lists. See "Modify this section"
 
 """
 import contextlib
@@ -23,7 +23,16 @@ import io
 import itertools
 import unittest
 from collections import namedtuple
-from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
+from typing import (
+    AbstractSet,
+    Callable,
+    Collection,
+    Iterable,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import onnx
 
@@ -114,7 +123,7 @@ DecorateMeta = namedtuple(
 
 
 def xfail(
-    op,
+    op_name: str,
     variant_name: str = "",
     *,
     device_type: Optional[str] = None,
@@ -123,7 +132,7 @@ def xfail(
 ):
     """Expects a OpInfo test to fail."""
     return DecorateMeta(
-        op_name=op.__name__,
+        op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.expectedFailure,
         device_type=device_type,
@@ -133,7 +142,7 @@ def xfail(
 
 
 def dont_care(
-    op,
+    op_name: str,
     variant_name: str = "",
     *,
     device_type: Optional[str] = None,
@@ -147,7 +156,7 @@ def dont_care(
     update the test to expect the new behavior, leveraging XfailOpset.
     """
     return DecorateMeta(
-        op_name=op.__name__,
+        op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.skip(f"Don't care: {reason}"),
         device_type=device_type,
@@ -157,7 +166,7 @@ def dont_care(
 
 
 def skip(
-    op,
+    op_name: str,
     variant_name: str = "",
     *,
     device_type: Optional[str] = None,
@@ -166,7 +175,7 @@ def skip(
 ):
     """Skips a test case in OpInfo. It should be eventually fixed."""
     return DecorateMeta(
-        op_name=op.__name__,
+        op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.skip(f"To fix: {reason}"),
         device_type=device_type,
@@ -179,14 +188,11 @@ def skip(
 class XfailOpset:
     """Expects a OpInfo test to fail on specific ONNX opsets."""
 
-    op: Any
+    op_name: str
     opsets: Collection[Union[int, Callable[[int], bool]]]
     dtypes: Optional[Collection[torch.dtype]] = None
     exception: Optional[Exception] = None
     reason: str = "unspecified"
-
-    def __post_init__(self):
-        self.op_name = self.op.__name__
 
     def _contains_opset(self, opset: int) -> bool:
         return any(
@@ -231,6 +237,19 @@ def skip_ops(
         return fn
 
     return wrapped
+
+
+def get_torch_op_name(op: Union[str, Callable]) -> str:
+    """Returns the name of the torch function corresponding to the given op."""
+    if callable(op):
+        module_name = op.__module__.split("torch.", 1)
+        op_name = op.__name__
+        if len(module_name) == 2:
+            # Remove the torch. prefix
+            op_name = f"{module_name[1]}.{op_name}"
+        return op_name
+    # Already a string
+    return op
 
 
 def opsets_before(opset: int) -> Callable[[int], bool]:
@@ -281,21 +300,24 @@ def reason_flaky() -> str:
 #
 # For example, to add a test for torch.ceil:
 # 1.  Add `torch.ceil` to ALLOWLIST_OP then run pytest.
+#         You can also add a string, e.g. "ceil" or "__radd__".
 # 2a. If the test fails, fix the error or add a new entry to EXPECTED_SKIPS_OR_FAILS.
 # 2b. If the test is expected to fail only on certain opsets, add a new entry to
 #     EXPECTED_OPSET_FAILS.
 
 # Ops to be tested for consistency between onnx and pytorch
-ALLOWLIST_OP = frozenset(
-    op.__name__
-    for op in (
-        torch.ceil,
-        torch.div,
-        torch.floor_divide,
-        torch.remainder,
-        torch.sqrt,
-        torch.t,
-        torch.true_divide,
+ALLOWLIST_OP: AbstractSet[str] = frozenset(
+    map(
+        get_torch_op_name,
+        (
+            torch.ceil,
+            torch.div,
+            torch.floor_divide,
+            torch.remainder,
+            torch.sqrt,
+            torch.t,
+            torch.true_divide,
+        ),
     )
 )
 
@@ -312,51 +334,51 @@ ALLOWLIST_OP = frozenset(
 #    Use xfail if a test fails now and we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     dont_care(
-        torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
+        "ceil", dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
         reason=reason_onnx_does_not_support("Ceil")
     ),
-    skip(torch.ceil, dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
+    skip("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
     xfail(
-        torch.div, variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES,
+        "div", variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES,
         reason=reason_jit_tracer_error("complex types")
     ),
     xfail(
-        torch.div, variant_name="floor_rounding", dtypes=COMPLEX_TYPES,
+        "div", variant_name="floor_rounding", dtypes=COMPLEX_TYPES,
         reason=reason_jit_tracer_error("complex types")
     ),
     xfail(
-        torch.div, variant_name="trunc_rounding", dtypes=(torch.float16,) + COMPLEX_TYPES,
+        "div", variant_name="trunc_rounding", dtypes=(torch.float16,) + COMPLEX_TYPES,
         reason=reason_jit_tracer_error("f16 and complex types")
     ),
     skip(
-        torch.div, variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16],
+        "div", variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16],
         reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
     skip(
-        torch.div, variant_name="floor_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
+        "div", variant_name="floor_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
         reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
     skip(
-        torch.div, variant_name="floor_rounding", dtypes=[torch.float64],
+        "div", variant_name="floor_rounding", dtypes=[torch.float64],
         reason=reason_onnx_runtime_does_not_support("Div", ["f64"])
     ),
     skip(
-        torch.div, variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
+        "div", variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
         reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
-    xfail(torch.floor_divide, dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
-    skip(torch.floor_divide, dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
-    skip(torch.remainder, dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
-    dont_care(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
-    xfail(torch.t, dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
-    xfail(torch.true_divide, dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
+    xfail("floor_divide", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
+    skip("floor_divide", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
+    skip("remainder", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
+    dont_care("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
+    xfail("t", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
+    xfail("true_divide", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
 )
 # fmt: on
 
 # Expected opset specific fails for ops that do not support specific opsets
 EXPECTED_OPSET_FAILS: Tuple[XfailOpset, ...] = (
     XfailOpset(
-        torch.remainder,
+        "remainder",
         dtypes=[torch.uint8, torch.int8, torch.int16],
         opsets=[opsets_before(11)],
         reason="Sub not defined for u8, i16 before opset 14. Mod is used after 11 so we support from opset 11.",
