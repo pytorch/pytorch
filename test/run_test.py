@@ -292,6 +292,7 @@ CI_SERIAL_LIST = [
     'test_modules',  # failed test due to mismatched elements
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
+    'test_decomp',  # results in a lot of errors in mem leak check
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
