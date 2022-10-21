@@ -783,8 +783,6 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     def debug_wrapper(gm, example_inputs, **kwargs):
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
-            # Ensure that we fail when backend fails
-            config.raise_on_backend_error = True
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
 

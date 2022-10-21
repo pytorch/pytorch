@@ -1462,20 +1462,9 @@ def parse_args():
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
-        "--raise-on-assertion-error",
+        "--suppress-errors",
         action="store_true",
-        help="Fail a benchmark if torch._dynamo triggers an internal assertion",
-    )
-    parser.add_argument(
-        "--raise-on-backend-error",
-        action="store_true",
-        help="Fail a benchmark if backend throws an exception",
-    )
-    parser.add_argument(
-        "--raise-on-any",
-        "--raise",
-        action="store_true",
-        help="Raise on assertion or backend errors",
+        help="Suppress errors instead of raising them",
     )
     parser.add_argument(
         "--output",
@@ -1668,7 +1657,7 @@ def main(runner, original_dir=None):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
-        args.raise_on_any = True
+        args.suppress_errors = False
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1732,12 +1721,7 @@ def main(runner, original_dir=None):
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
 
-    torch._dynamo.config.raise_on_assertion_error = (
-        args.raise_on_assertion_error or args.raise_on_any
-    )
-    torch._dynamo.config.raise_on_backend_error = (
-        args.raise_on_backend_error or args.raise_on_any
-    )
+    torch._dynamo.config.suppress_errors = args.suppress_errors
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass
