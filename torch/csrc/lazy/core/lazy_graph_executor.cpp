@@ -679,7 +679,7 @@ std::vector<Value> LazyGraphExecutor::CollectRoots(
   return roots;
 }
 
-void LazyGraphExecutor::ExtractIRAndPrepareXlaData(
+void LazyGraphExecutor::ExtractIRAndPrepareTensorData(
     std::vector<LazyTensorPtr>* tensors,
     const SyncTensorsConfig& config,
     c10::ArrayRef<size_t> indices,
@@ -725,7 +725,7 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
       handle = tensor_data_vec[i];
       // Note: We are not using SetHandleData method here since that method
       // resets the ir_value. We have already done the resetting as part
-      // of ExtractIRAndPrepareXlaData to overlap with previous execution.
+      // of ExtractIRAndPrepareTensorData to overlap with previous execution.
       tensor->data()->handle = handle;
       tensor->data()->view = nullptr;
       tensor->data()->tensor_data = c10::nullopt;
@@ -934,7 +934,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       "ScheduleSyncTensorsGraph", *tensors, &coll.indices);
   std::vector<Value> ir_values;
   std::vector<BackendDataPtr> tensor_data_vec;
-  ExtractIRAndPrepareXlaData(
+  ExtractIRAndPrepareTensorData(
       tensors, coll.config, coll.indices, ir_values, tensor_data_vec);
   PostOrderData po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
