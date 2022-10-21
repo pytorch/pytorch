@@ -3,16 +3,19 @@ import functools
 import getpass
 import hashlib
 import logging
+import multiprocessing
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sysconfig
 import tempfile
 import types
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
-from time import time
+from threading import Thread
+from time import sleep, time
 from typing import Any, Dict
 
 import torch
@@ -279,7 +282,31 @@ class AsyncCompile:
         # are forked
         cuda_properties._properties()
         assert config.compile_threads > 1
-        return ProcessPoolExecutor(config.compile_threads)
+        orig_ppid = os.getpid()
+
+        # if this process dies abnormally (e.g. segfault)
+        # it will not shut down the workers. Instead
+        # the workers will have their parent reassigned to the
+        # init process. This launches a separate thread to
+        # watch for the worker getting reassigned,
+        # and cleans it up in this case.
+        def init():
+            def run():
+                while True:
+                    sleep(1)
+                    if orig_ppid != os.getppid():
+                        os.kill(os.getpid(), signal.SIGKILL)
+
+            global _watchdog_thread
+            _watchdog_thread = Thread(target=run, daemon=True)
+            _watchdog_thread.start()
+
+        # we rely on 'fork' because we cannot control whether users
+        # have an `if __name__ == '__main__'` in their main process.
+        fork_context = multiprocessing.get_context("fork")
+        return ProcessPoolExecutor(
+            config.compile_threads, mp_context=fork_context, initializer=init
+        )
 
     @classmethod
     def warm_pool(cls):
