@@ -232,7 +232,7 @@ def get_quantize_node_info(
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
         return None
-    return node_type, quantize_op, qparams
+    return node_type, quantize_op, qparams  # type: ignore[return-value]
 
 # TODO: looks like this is not used, remove
 def quantize_node(
