@@ -86,6 +86,7 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "log_softmax",
     "nan_to_num",
     "neg",
     "positive",
@@ -98,6 +99,7 @@ __all__ = [
     "sin",
     "sinc",
     "sinh",
+    "softmax",
     "sqrt",
     "square",
     "tan",
@@ -229,6 +231,7 @@ __all__ = [
     "meshgrid",
     "movedim",
     "narrow",
+    "narrow_copy",
     "native_layer_norm",
     "permute",
     "ravel",
@@ -241,6 +244,7 @@ __all__ = [
     "swap_axes",  # alias for transpose
     "squeeze",
     "t",
+    "T",
     "tensor_split",
     "transpose",
     "unfold",
@@ -649,15 +653,15 @@ def log10(a):
     return prims.log10(a)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def log_softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
-    computation_dtype = utils.get_computation_dtype(a.dtype)
+    computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
@@ -2688,6 +2692,16 @@ def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeTy
     return prims.slice_in_dim(a, start, start + length, axis=dim)
 
 
+@register_decomposition(torch.ops.aten.narrow_copy)
+@out_wrapper()
+def narrow_copy(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
+    # TODO: This must return a sparse tensor if the input is sparse, but refs
+    # have no sparse support.  See narrow_copy_sparse in core.
+    if a.is_sparse:
+        raise NotImplementedError("narrow_copy ref doesn't support sparse tensors")
+    return torch.clone(torch.narrow(a=a, dim=dim, start=start, length=length))  # type: ignore[call-overload]
+
+
 def _normalize(
     a: Tensor, norm_dims: DimsType, eps: float
 ) -> Tuple[Tensor, Tensor, Tensor]:
@@ -3105,17 +3119,16 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def softmax(
     a: TensorLikeType,
     dim: int,
-    *,
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     result_dtype = dtype or a.dtype
-    computation_dtype = utils.get_computation_dtype(a.dtype)
+    computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    assert isinstance(a_, TensorLike)  # to avoid MyPy error for amax
     a_max = amax(a_, dim, keepdim=True)
     a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
@@ -3549,6 +3562,19 @@ def t(a: TensorLikeType):
             f"t() expects a tensor with <= 2 dimensions, but self is {a.ndim}D"
         )
     return torch.transpose(a, 0, 0 if a.ndim < 2 else 1)
+
+
+# CompositeImplicitAutograd - don't register decomp
+def T(a: TensorLikeType) -> TensorLikeType:
+    # n != 2 && n != 0 is deprecated in regular PyTorch.
+    check(
+        a.ndim in (0, 2),
+        lambda: (
+            "The use of `x.T` on tensors of dimension other than 0 or 2 "
+            "to reverse their shape is not supported."
+        ),
+    )
+    return a.t()
 
 
 @register_decomposition(torch.ops.aten.transpose, disable_meta=True)
@@ -4747,6 +4773,7 @@ def bucketize(
     return start.to(dtype=out_dtype)
 
 
+import torch._refs._conversions
 import torch._refs.fft
 import torch._refs.linalg
 import torch._refs.nn.functional
