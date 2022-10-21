@@ -1372,7 +1372,12 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(d_id, c_id_new)
 
     @staticmethod
-    def _format_allocations(prof: torch.profiler.profile):
+    def _format_allocations(profiled_code):
+        gc.collect()
+        with profile(profile_memory=True, record_shapes=True) as prof:
+            profiled_code()
+            gc.collect()
+
         root_events = prof.profiler.kineto_results.experimental_event_tree()
         events = sorted(_utils.traverse_dfs(root_events), key=lambda x: x.start_time_ns)
         allocations = tuple(
@@ -1388,16 +1393,19 @@ class TestTorchTidyProfiler(TestCase):
         ), " " * 12)
 
     def test_tensorimpl_invalidation_set(self) -> None:
-        with profile(profile_memory=True, record_shapes=True) as p:
+        def profiled_code(add_empty_set: bool):
             x = torch.ones((1,))
+
+            # Determines if new storage is created before or after the old one
+            # is destroyed.
+            if add_empty_set:
+                x.set_()
+
             x.set_(torch.ones((1,)).storage())
             x.view_as(x)
 
-            del x
-            gc.collect()
-
         self.assertExpectedInline(
-            self._format_allocations(p),
+            self._format_allocations(lambda: profiled_code(add_empty_set=False)),
             """\
                 0      Allocation
                 0      Allocation
@@ -1405,19 +1413,8 @@ class TestTorchTidyProfiler(TestCase):
                 0      Free"""
         )
 
-    def test_tensorimpl_invalidation_set_breaking(self) -> None:
-        with profile(profile_memory=True, record_shapes=True) as p:
-            x = torch.ones((1,))
-            x.set_()
-
-            x.set_(torch.ones((1,)).storage())
-            x.view_as(x)
-
-            del x
-            gc.collect()
-
         self.assertExpectedInline(
-            self._format_allocations(p),
+            self._format_allocations(lambda: profiled_code(add_empty_set=True)),
             """\
                 0      Allocation
                 0      Free
@@ -1426,7 +1423,7 @@ class TestTorchTidyProfiler(TestCase):
         )
 
     def test_tensorimpl_invalidation_keep_alive(self) -> None:
-        with profile(profile_memory=True, record_shapes=True) as p:
+        def profiled_code(add_empty_set: bool):
             x = torch.ones((1,))
             x_storages = [x.storage()]
             for _ in range(3):
@@ -1443,6 +1440,11 @@ class TestTorchTidyProfiler(TestCase):
                 x_storages.pop()
                 gc.collect()
 
+            # Determines if new storage is created before or after the old one
+            # is destroyed.
+            if add_empty_set:
+                x.set_()
+
             for _ in range(3):
                 x.set_(torch.ones((1,)).storage())
             x.view_as(x)
@@ -1451,7 +1453,7 @@ class TestTorchTidyProfiler(TestCase):
             gc.collect()
 
         self.assertExpectedInline(
-            self._format_allocations(p),
+            self._format_allocations(lambda: profiled_code(add_empty_set=False)),
             """\
                 0      Allocation
                 0      Allocation
@@ -1469,34 +1471,8 @@ class TestTorchTidyProfiler(TestCase):
                 0      Free"""
         )
 
-    def test_tensorimpl_invalidation_keep_alive_break(self) -> None:
-        with profile(profile_memory=True, record_shapes=True) as p:
-            x = torch.ones((1,))
-            x_storages = [x.storage()]
-            for _ in range(3):
-                x.set_()
-                x.set_(torch.ones((1,)).storage())
-                x_storages.append(x.storage())
-            x.view_as(x)
-
-            # Free storage in a deterministic fashion.
-            while x_storages:
-                x_storages.pop()
-                gc.collect()
-
-            # All storage associated with `x` has been freed, but the
-            # TensorImpl is still live.
-            x.set_()
-
-            for _ in range(3):
-                x.set_(torch.ones((1,)).storage())
-            x.view_as(x)
-
-            del x
-            gc.collect()
-
         self.assertExpectedInline(
-            self._format_allocations(p),
+            self._format_allocations(lambda: profiled_code(add_empty_set=True)),
             """\
                 0      Allocation
                 0      Allocation
@@ -1515,7 +1491,7 @@ class TestTorchTidyProfiler(TestCase):
         )
 
     def test_tensorimpl_invalidation_full(self) -> None:
-        with profile(profile_memory=True, record_shapes=True) as p:
+        def profiled_code():
             x = torch.ones((1,))
             x_storages = [x.storage()]
             for _ in range(3):
@@ -1540,11 +1516,8 @@ class TestTorchTidyProfiler(TestCase):
                 x.resize_((1 + i,))
             x.view_as(x)
 
-            del x
-            gc.collect()
-
         self.assertExpectedInline(
-            self._format_allocations(p),
+            self._format_allocations(profiled_code),
             """\
                 0      Allocation
                 0      Allocation
@@ -1575,14 +1548,14 @@ class TestTorchTidyProfiler(TestCase):
         )
 
     def test_tensorimpl_invalidation_scalar_args(self) -> None:
-        with profile(profile_memory=True, record_shapes=True) as p:
+        def profiled_code():
             with torch.no_grad():
                 x = torch.ones((1,))
                 for _ in range(10):
                     x.add_(2)
 
         self.assertExpectedInline(
-            self._format_allocations(p),
+            self._format_allocations(profiled_code),
             """\
                 0      Allocation
                 1      Allocation
@@ -1624,7 +1597,8 @@ class TestTorchTidyProfiler(TestCase):
                19      Allocation
                20      Allocation
                20      Free
-               19      Free""")
+               19      Free
+                0      Free""")
 
 
     def test_module_and_optimizer_ids(self) -> None:
@@ -1965,6 +1939,9 @@ class TestTorchTidyProfiler(TestCase):
                     p.storage_data_ptr: {name: s.storage_data_ptr for name, s in state}
                     for (p, _, state) in opt_.parameters
                 }
+
+                # Make sure the profiler collected all optimizer state and check
+                # that the address recorded by the profiler is correct.
                 for parameter, parameter_state in opt.state.items():
                     self.assertEqual(
                         {name: value.storage().data_ptr() for name, value in parameter_state.items()},
