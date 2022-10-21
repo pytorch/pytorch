@@ -31,6 +31,7 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 from ..utils import (
+    clone_input,
     getfile,
     global_key_name,
     is_namedtuple,
@@ -514,12 +515,20 @@ class VariableBuilder:
                         source=None,
                         # Guards are added inside register_attr_or_module
                     )
+
+                # For example_value, this input could be an intermediate tensor
+                # from a graph break, where this tensor has requires_grad field
+                # set to True. If we just pass on the value, it would seem like
+                # a leaf variable for this subgraph, and can unnecessary raise
+                # assertions like "inplace mutation of leaf variable".
+                # To workaround, we clone the tensor for the example_value, which
+                # sets the requires_grad field to True only if its not a leaf.
                 tensor_variable = TensorVariable.create(
                     tx=self.tx,
                     proxy=self.tx.output.create_graph_input(
                         re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
                     ),
-                    example_value=value,
+                    example_value=clone_input(value),
                     guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
                     should_specialize=self.tensor_should_specialize(),
                 )
