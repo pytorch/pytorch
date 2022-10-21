@@ -129,7 +129,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         auto elem_type = w.type->containedType(0);
         auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
-        for (const IValue item : lst) {
+        for (const IValue& item : lst) {
           Work elem = {elem_type, item};
           to_process.emplace_back(std::move(elem));
         }

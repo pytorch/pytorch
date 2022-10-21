@@ -1233,6 +1233,16 @@ def sample_inputs_multilabel_margin_loss(op_info, device, dtype, requires_grad, 
 def get_independent_tensor(tensor):
     return tensor.clone().requires_grad_(tensor.requires_grad)
 
+def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
+    low = 2
+    high = 10
+
+    for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
+        # With high
+        yield SampleInput(high, sample.input.shape, *sample.args, **sample.kwargs)
+        # With low and high
+        yield SampleInput(low, high, sample.input.shape, *sample.args, **sample.kwargs)
+
 def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
     low = 2
     high = 10
@@ -3069,12 +3079,8 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
 
     assert fn is not None
 
-    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input,
-                   torch.nn.functional.conv_transpose2d: torch.nn.grad.conv2d_input,
-                   torch.nn.functional.conv_transpose3d: torch.nn.grad.conv3d_input}
-    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3,
-                       torch.nn.functional.conv_transpose2d: 4,
-                       torch.nn.functional.conv_transpose3d: 5}
+    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input}
+    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3}
 
     # Input for `ref` is ndarray.
     input, weight = torch.from_numpy(input), torch.from_numpy(weight)
@@ -3084,10 +3090,7 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
         input = input.unsqueeze(0)
 
     if bias is not None:
-        bias = torch.from_numpy(bias)
-        unsqueeze_dims = input.ndim - 2
-        for _ in range(unsqueeze_dims):
-            bias = bias.unsqueeze(1)
+        bias = torch.from_numpy(bias).unsqueeze(1)
 
     grad_output = input
     # Get the input shape for grad_fn.
@@ -3154,7 +3157,8 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
         ((2, 8, 4, 4), (8, 1, 3, 3), None, {'groups': 4}),
-        ((1, 4, 5, 5), (4, 8, 3, 3), None, {})
+        ((1, 4, 5, 5), (4, 8, 3, 3), None,
+         {})
     )
 
     for input_shape, weight, bias, kwargs in cases:
@@ -3513,9 +3517,9 @@ def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kw
 def sample_inputs_hardswish(self, device, dtype, requires_grad, **kwargs):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
-    tensors = [SampleInput(make_tensor((N * 2, N * 2), device=device, dtype=dtype,
-               requires_grad=requires_grad, low=-5, high=5)) for _ in range(1, N)]
-    return tensors
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       requires_grad=requires_grad, low=-5, high=5)
+    return (SampleInput(make_arg((N * 2, N * 2))) for _ in range(1, N))
 
 def sample_inputs_linear(self, device, dtype, requires_grad, **kwargs):
     features_options = [[3, 4], [8, 8]]
@@ -4692,21 +4696,19 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     tensor_1d = partial(make_tensor, (S,), device=device, dtype=dtype,
                         requires_grad=requires_grad)
 
-    return [
-        SampleInput(tensor_nd()),
-        SampleInput(tensor_nd(), dim=1),
-        SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True),
-        SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False),
+    yield SampleInput(tensor_nd())
+    yield SampleInput(tensor_nd(), dim=1)
+    yield SampleInput(tensor_nd(), dim=1, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True)
+    yield SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False)
 
-        SampleInput(tensor_nd(), dim=(1,), correction=S // 2),
-        SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True),
+    yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
+    yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
+    yield SampleInput(tensor_nd(), dim=None, correction=None)
 
-        # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-        SampleInput(tensor_nd(), True),
-        SampleInput(tensor_nd(), False),
-        SampleInput(tensor_nd(), dim=None, correction=None),
-    ]
+    # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+    yield SampleInput(tensor_nd(), True)
+    yield SampleInput(tensor_nd(), False)
 
 
 def _generate_correlation_inputs(device, dtype, requires_grad, **kwargs):
@@ -5253,7 +5255,6 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
         (shape, dict(ignore_index=1)),
     ]
 
-    sample_inputs = []
     for (input_shape, kwargs), probabilities_target in itertools.product(input_shape_and_kwargs, (False, True)):
         input = make_tensor(input_shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -5283,9 +5284,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 # make sure at least one item in target is not ignored
                 target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
 
-        sample_inputs.append(SampleInput(input, args=(target,), kwargs=kwargs))
-
-    return sample_inputs
+        yield SampleInput(input, target, **kwargs)
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -5391,6 +5390,8 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S)))
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None,
+                       high=None, requires_grad=requires_grad)
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5405,15 +5406,13 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False
                   ((S, S, M, M), (S, S, M, S)),
                   ((S, S, M, M), (M,)),
                   ((M,), (S, S, M, S)))
-    sample_inputs = []
     for lhs_shape, rhs_shape in test_cases:
-        lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-        rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
+        lhs = make_arg(lhs_shape)
+        rhs = make_arg(rhs_shape)
         if not is_rmatmul:
-            sample_inputs.append(SampleInput(lhs, args=(rhs,)))
+            yield SampleInput(lhs, rhs)
         else:
-            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
-    return tuple(sample_inputs)
+            yield SampleInput(rhs, lhs)
 
 
 def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
@@ -9961,7 +9960,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_std_var,
@@ -9969,7 +9972,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
-           supports_fwgrad_bwgrad=True),
+           supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+           )),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
            ref=np.meshgrid,
@@ -10641,12 +10648,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv_transpose2d',
            aten_name='conv_transpose2d',
            aliases=('conv_transpose2d',),
-           # `ref` for this function is backward of
-           # corresponding `conv*d`
-           ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
-           dtypes=floating_and_complex_types_and(torch.int64),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
-                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           dtypes=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16,
+                                           *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10655,32 +10659,11 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=2e-05, rtol=5e-05), }),
-                   'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
-               DecorateInfo(
-                   toleranceOverride({torch.complex32: tol(atol=5e-2, rtol=5e-2)}),
-                   "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
-               DecorateInfo(
-                   toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
-                   'TestCommon', 'test_complex_half_reference_testing')],
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-               # RuntimeError: UNSUPPORTED DTYPE: complex
-               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
-                            dtypes=(torch.complex64, torch.complex128)),
-               # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
-                            dtypes=(torch.int64,)),
-               # Reference: https://github.com/pytorch/pytorch/issues/86356
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
-                            dtypes=(torch.double, torch.cdouble)),
-               # AssertionError: None mismatch: torch.complex64 is not None
-               DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules', 'test_custom_rules',
-                            dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose3d',
@@ -10737,6 +10720,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-3, rtol=1e-3)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-3)}),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda',
                ),
            ),
            skips=(
@@ -11602,11 +11589,11 @@ op_db: List[OpInfo] = [
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # This test fails on trunk CUDA 10.2 tests, can be removed when we stop 10.2 support
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta',
+            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_symbolic_dispatch_meta',
+            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_symbolic_dispatch_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
@@ -11891,7 +11878,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestMeta",
-                "test_meta",
+                "test_meta_outplace",
             ),
             # https://github.com/pytorch/pytorch/issues/84335
             DecorateInfo(
@@ -12232,8 +12219,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # Not implemented
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace', device_type='cuda'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
            )),
     UnaryUfuncInfo('neg',
@@ -14066,6 +14053,32 @@ op_db: List[OpInfo] = [
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
+    OpInfo('randint',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           op=lambda *args, **kwargs:
+               wrapper_set_seed(torch.randint, *args, **kwargs),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_randint,
+           supports_autograd=False,
+           skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               # CPU randint generates different values based on the strides of out tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # randint fails to warn when resizing its out tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('randint_like',
            dtypes=all_types_and(torch.half, torch.bfloat16),
            op=lambda inp, *args, **kwargs:
@@ -15439,6 +15452,10 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_out",
                 device_type="meta",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-3)}),
+                'TestInductorOpInfo', 'test_comprehensive', device_type='cuda',
             ),
         ),
     ),
