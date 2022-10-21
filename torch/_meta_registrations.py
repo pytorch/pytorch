@@ -1646,9 +1646,7 @@ def activate_meta():
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
-        dispatch_key_registration = torch._C._dispatch_dump(op_overload.name())
-
-        if "CompositeImplicitAutograd" in dispatch_key_registration:
+        if torch._C._dispatch_has_kernel_for_dispatch_key(op_overload.name(), "CompositeImplicitAutograd"):
             # Internally, we shouldn't be registering meta kernels for any operators that
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
