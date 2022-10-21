@@ -90,7 +90,7 @@ master_doc = 'index'
 project = 'functorch'
 copyright = 'PyTorch Contributors'
 author = 'PyTorch Contributors'
-functorch_version = str(functorch.__version__)
+functorch_version = '1.13'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
