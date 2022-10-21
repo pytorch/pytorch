@@ -310,7 +310,18 @@ class TORCH_CUDA_CU_API BestEffortReplay {
     return leaf_vec_;
   }
 
-  DisjointSets<IterDomain*> getDisjointSets();
+  // Get a disjoint sets representing the equivalence of IterDomains. The
+  // equivalence is defined by forwarding and replay. Two IterDomains are
+  // equivalent if:
+  // - They are mapped together through forwarding, or
+  // - They are mapped together through replay
+  // For example, if I have the following producer-consumer pair:
+  //   T0[I0, I1]
+  //   T1[(I0'*b1)*b2, I1'] = broadcast(T0)
+  // Then there will be two equivalent sets"
+  //   - {I1, I1'}
+  //   - {I0, I0', I0'*b1, (I0'*b1)*b2}
+  DisjointSets<IterDomain*> getIterDomainEquivalence();
 
   // Runs a best effort replay that ignores broadcast axes that appear in
   // consumer that are not mapped to producer in root_map.

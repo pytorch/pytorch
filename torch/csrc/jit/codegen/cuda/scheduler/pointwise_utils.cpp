@@ -12,7 +12,10 @@ bool DomainMap::areAllInputIdsMappedTo(TensorView* input_tv, TensorView* tv)
   // Get concrete IDs for input root or rfactor domain
   std::unordered_set<IterDomain*> in_concrete_ids;
   for (auto in_id : input_tv->getMaybeRFactorDomain()) {
-    auto concrete = ca_map_.getConcreteMappedID(in_id, IdMappingMode::EXACT);
+    // Permissive map is required for the transpose scheduler to support cases
+    // like T0[I0, b] + T1[b, I1]
+    auto concrete =
+        ca_map_.getConcreteMappedID(in_id, IdMappingMode::PERMISSIVE);
     if (!concrete->isBroadcast() && !in_id->isReduction() &&
         !concrete->isTrivialReduction()) {
       in_concrete_ids.insert(concrete);

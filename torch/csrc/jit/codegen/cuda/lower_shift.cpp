@@ -638,7 +638,11 @@ bool extentCompare(
     Cmp cmp,
     const DisjointSets<IterDomain*>& permissive_map) {
   TORCH_INTERNAL_ASSERT(
-      permissive_map.strictAreMapped(id1, id2), "Invalid axes to compare");
+      permissive_map.strictAreMapped(id1, id2),
+      "Invalid axes to compare: ",
+      id1->toString(),
+      ", ",
+      id2->toString());
 
   // It's invalid to compare two axes and when only either of them has
   // halo.

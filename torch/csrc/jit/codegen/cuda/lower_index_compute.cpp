@@ -731,36 +731,18 @@ void LoopIndexingAnalysis::constructLoopDomains() {
               !concrete_id_to_consumer_.count(concrete_id) &&
               // Use permissive map so the selected ID indeed represents the
               // loop.
-              // Note: see PR https://github.com/csarofeen/pytorch/pull/1960
-              //  and issue https://github.com/csarofeen/pytorch/issues/1873
               // This mapping look up is part of a staged indexing scheme.
               //  When we find a replayed exact id that exactly map to the loop
               //  id, this means that we can resolve indexing involved in this
               //  loop "locally", i.e. only with and with only the iterdomains
-              //  on the
-              //
-              //  given consumer tv.
+              //  on the given consumer tv.
               //  When we cannot find an exact mapping, the permissive mapping
-              //  would
-              //   help defering the indexing resolution for this loop nest
+              //  would help defering the indexing resolution for this loop nest
               //   level to other iterdomain expressions from tv's that are
               //   further concretized and usually they are further down the
               //   consumer chain of the given consumer tv.
-              //
-              //  Intuitively exact mapping of two iterdomains should imply
-              //  permissive mapping
-              //   of them as well and if that was the case, only looking up
-              //   permissive mapping would be enough to address both of the
-              //   cases above.
-              //  FIXME: But currently exact mapping does not imply permissive
-              //  mapping (See issue:
-              //       https://github.com/csarofeen/pytorch/issues/1963)
-              // Which means we should check both exact and permissive mapping
-              // here.
-              (GpuLower::current()->caMap()->areMapped(
-                   concrete_id, loop_id, IdMappingMode::EXACT) ||
-               GpuLower::current()->caMap()->areMapped(
-                   concrete_id, loop_id, IdMappingMode::PERMISSIVE));
+              GpuLower::current()->caMap()->areMapped(
+                  concrete_id, loop_id, IdMappingMode::PERMISSIVE);
         });
 
     TORCH_INTERNAL_ASSERT(

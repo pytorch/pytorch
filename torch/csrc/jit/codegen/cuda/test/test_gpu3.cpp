@@ -6157,6 +6157,8 @@ TEST_F(NVFuserTest, FusionEmpty_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionMappingRelation_CUDA) {
+  // See https://github.com/csarofeen/pytorch/pull/1960
+  // and https://github.com/csarofeen/pytorch/pull/2113
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -6179,13 +6181,10 @@ TEST_F(NVFuserTest, FusionMappingRelation_CUDA) {
 
   ComputeAtMap ca_map(fusion);
 
-  // FIXME: This is the concerning part that would motivate some
-  //  more formalization on concrete/permissive mapping:
-  //   exact mapping should ideally imply permissive mapping.
   auto tv4_inner_node = tv4->axis(0)->definition()->input(1)->as<IterDomain>();
   TORCH_CHECK(
       ca_map.areMapped(tv2->axis(0), tv4_inner_node, IdMappingMode::EXACT));
-  TORCH_CHECK(!ca_map.areMapped(
+  TORCH_CHECK(ca_map.areMapped(
       tv2->axis(0), tv4_inner_node, IdMappingMode::PERMISSIVE));
 
   auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
@@ -6614,7 +6613,7 @@ TEST_F(NVFuserTest, FusionRepro2094_CUDA) {
     fusion->addInput(tv1);
     auto tv2 = TensorViewBuilder()
                    .ndims(2)
-                   .shape({-1, -1})
+                   .shape(std::vector<int64_t>{-1, -1})
                    .contiguity({true, true})
                    .dtype(DataType::Half)
                    .build();

@@ -935,11 +935,8 @@ TEST_F(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
   TensorView* tv0 = makeConcreteTensor({bid_x, tid_x, 1});
   fusion.addInput(tv0);
 
-  TensorView* tv1 = reductionOp(
-      BinaryOpType::Add, {red_dim}, IrBuilder::create<Double>(0), tv0);
-
-  TensorView* tv2 =
-      reductionOp(BinaryOpType::Add, {1}, IrBuilder::create<Double>(0), tv1);
+  TensorView* tv1 = sum(tv0, {red_dim});
+  TensorView* tv2 = squeeze(tv1, std::vector<bool>{false, true});
   fusion.addOutput(tv2);
 
   const auto options =

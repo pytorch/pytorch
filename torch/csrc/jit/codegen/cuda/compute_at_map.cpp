@@ -15,7 +15,9 @@ namespace cuda {
 namespace {
 
 // Is the provided IterDomain an Leaf of provided TensorView and within its
-// computeAtPosition
+// computeAtPosition.
+// If outside computeAt axis, we don't want to directly map consumer/producer in
+// the loop mapping as they are not sharing the same loop.
 bool idIsAComputeAtLeafDomain(IterDomain* id, TensorView* tv) {
   auto begin = tv->domain()->domain().begin();
   auto end = tv->domain()->domain().begin() + tv->getComputeAtPosition();
@@ -320,16 +322,8 @@ void IterDomainGraph::build(Fusion* fusion) {
 
   // Initialize a node for every iteration domain
   for (auto tv : ir_utils::allTvs(fusion)) {
-    const auto& root_domain = tv->getRootDomain();
     const auto& domain = tv->domain()->domain();
-
-    // Grab all values in the history of the tensor view's domain
-    auto all_vals = DependencyCheck::getAllValsBetween(
-        {root_domain.begin(), root_domain.end()},
-        {domain.begin(), domain.end()});
-
-    // Filter so we only have iteration domains (ignore Ints used in split)
-    auto all_ids = ir_utils::filterByType<IterDomain>(all_vals);
+    auto all_ids = ir_utils::allIDsOf(tv);
 
     // Check is this domain is a consumer of a view-like operation
     bool view_like_domain = tv->domain()->hasViewLikeRFactor();
@@ -421,27 +415,14 @@ void IterDomainGraph::build(Fusion* fusion) {
       auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
 
       for (auto p_tv : tv_inputs) {
-        // If outside computeAt axis, we don't want to directly map
-        // consumer/producer as their thread mappings could change as long as
-        // it's across shared/global memory.
         auto pairwise_map = PairwiseRootDomainMap(p_tv, c_tv);
-        const auto& permissive_c2p_root_map =
-            pairwise_map.mapConsumerToProducer(c_tv->domain(), p_tv->domain());
 
         // Look for matching ID transformations in producer and consumer, replay
-        // producer as consumer. We want to replay producer as consumer instead
-        // of the other way around since consumer may have some broadcasted axes
-        // producer doesn't have merged into loops producer may use. If we did
-        // consumer as producer we wouldn't have this information in the
-        // mapping. If we're using this map for indexing, we do not want to
-        // propagate broadcast mismatches. If we're using it to identify loop
-        // nests, we do want to propagate mismatches.
-        auto permissive_replay_PasC =
-            BestEffortReplay::replayPasC(p_tv, c_tv, -1, pairwise_map);
-
-        const auto& permissive_c2p_map = permissive_replay_PasC.getReplay();
+        // producer as consumer. We use the symmetric API of BestEffortReplay so
+        // that both broadcast and squeeze are handled correctly.
         const auto permissive_disjoint_sets =
-            permissive_replay_PasC.getDisjointSets();
+            BestEffortReplay::replayPasC(p_tv, c_tv, -1, pairwise_map)
+                .getIterDomainEquivalence();
 
         // For exact mapings do not map any broadcast dimensions to
         // non-broadcast dimensions. Prevent any broadcasted axes being mapped
@@ -472,43 +453,44 @@ void IterDomainGraph::build(Fusion* fusion) {
           mapMaybeSwizzleOp(exact_nodes_, c_id);
         }
 
-        for (auto entry : permissive_c2p_map) {
-          auto c_id = entry.first;
-          auto p_id = entry.second;
-          if (idIsAComputeAtLeafDomain(p_id, p_tv)) {
-            loop_nodes_.mapEntries(c_id, p_id);
-          } else {
-            // When there are trivial reductions merged with other dims, `p_id`
-            // might not be a compute at leaf domain of `p_tv`, but it actually
-            // has an equivalent compute at leaf domain. For that case, we map
-            // the equivalent compute at leaf domain.
-            for (int i = 0; i < p_tv->getComputeAtPosition(); i++) {
-              auto id = p_tv->axis(i);
-              if (permissive_disjoint_sets.permissiveAreMapped(p_id, id)) {
-                loop_nodes_.mapEntries(c_id, id);
+        auto p_ids_vec = ir_utils::allIDsOf(p_tv);
+        auto c_ids_vec = ir_utils::allIDsOf(c_tv);
+        std::unordered_set<IterDomain*> p_ids(
+            p_ids_vec.begin(), p_ids_vec.end());
+        std::unordered_set<IterDomain*> c_ids(
+            c_ids_vec.begin(), c_ids_vec.end());
+
+        for (auto& dset : permissive_disjoint_sets.disjointSets()) {
+          auto& vec = dset->vector();
+          for (auto i : c10::irange(vec.size())) {
+            auto id1 = vec[i];
+            permissive_nodes_.mapEntries(id1, vec[0]);
+
+            // Add the swizzle inputs to the same
+            //  disjoint set as well if either c_id
+            //  or p_id is swizzle output.
+            mapMaybeSwizzleOp(permissive_nodes_, id1);
+
+            for (auto j : c10::irange(i + 1, vec.size())) {
+              auto id2 = vec[j];
+              if (p_ids.count(id1) && c_ids.count(id2)) {
+                consumers_.at(id1).pushBack(id2);
+                producers_.at(id2).pushBack(id1);
+                if (idIsAComputeAtLeafDomain(id1, p_tv) &&
+                    idIsALeafDomain(id2, c_tv)) {
+                  loop_nodes_.mapEntries(id1, id2);
+                }
+              }
+              if (c_ids.count(id1) && p_ids.count(id2)) {
+                producers_.at(id1).pushBack(id2);
+                consumers_.at(id2).pushBack(id1);
+                if (idIsAComputeAtLeafDomain(id2, p_tv) &&
+                    idIsALeafDomain(id1, c_tv)) {
+                  loop_nodes_.mapEntries(id1, id2);
+                }
               }
             }
           }
-          permissive_nodes_.mapEntries(c_id, p_id);
-          consumers_.at(p_id).pushBack(c_id);
-          producers_.at(c_id).pushBack(p_id);
-
-          // Add the swizzle inputs to the same
-          //  disjoint set as well if either c_id
-          //  or p_id is swizzle output.
-          mapMaybeSwizzleOp(permissive_nodes_, p_id);
-          mapMaybeSwizzleOp(permissive_nodes_, c_id);
-        }
-
-        // Make sure we always get root mapping for the permissive map.
-        // Because of forwarding we could otherwise miss some root mappings.
-        for (auto entry : permissive_c2p_root_map) {
-          auto c_id = entry.first;
-          auto p_id = entry.second;
-          // Map the id's together
-          permissive_nodes_.mapEntries(c_id, p_id);
-          consumers_.at(p_id).pushBack(c_id);
-          producers_.at(c_id).pushBack(p_id);
         }
       }
     }

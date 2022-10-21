@@ -708,7 +708,7 @@ int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
 
   auto disjoint_sets =
       BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_map)
-          .getDisjointSets();
+          .getIterDomainEquivalence();
 
   int mismatched_consumer_pos = 0;
   int mismatched_producer_pos = 0;
@@ -781,7 +781,7 @@ int TransformReplay::getMatchedLeafPosWithoutReplayCasP(
 
   auto disjoint_sets =
       BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_map)
-          .getDisjointSets();
+          .getIterDomainEquivalence();
 
   int mismatched_producer_pos = 0;
   int mismatched_consumer_pos = 0;

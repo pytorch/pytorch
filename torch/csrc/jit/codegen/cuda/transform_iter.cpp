@@ -1131,7 +1131,7 @@ void BestEffortReplay::skipSwizzles(
   }
 }
 
-DisjointSets<IterDomain*> BestEffortReplay::getDisjointSets() {
+DisjointSets<IterDomain*> BestEffortReplay::getIterDomainEquivalence() {
   DisjointSets<IterDomain*> result;
   const std::unordered_map<IterDomain*, IterDomain*>* maps[3] = {
       &target2replay_id_map_, &replay_forward_id_map_, &target_forward_id_map_};

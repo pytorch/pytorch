@@ -340,6 +340,10 @@ TORCH_CUDA_CU_API bool isSqueezeInput(const TensorView* tv);
 // Test if the given ID in the given tensor is squeezed
 TORCH_CUDA_CU_API bool isSqueezedID(const TensorView* tv, const IterDomain* id);
 
+// Get all IDs of a tensor. Returned values are topologicaly ordered, and
+// unique.
+TORCH_CUDA_CU_API std::vector<IterDomain*> allIDsOf(const TensorView* tv);
+
 } // namespace ir_utils
 } // namespace cuda
 } // namespace fuser

@@ -363,7 +363,7 @@ unsigned int getConsumerPosAlignedToProducerCA(
   auto disjoint_sets =
       BestEffortReplay::replayPasC(
           producer, consumer, -1, PairwiseRootDomainMap(producer, consumer))
-          .getDisjointSets();
+          .getIterDomainEquivalence();
 
   // Find the innermost position of consumer that has
   //  been mapped within the producer ca axis.

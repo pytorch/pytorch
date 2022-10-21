@@ -1065,6 +1065,18 @@ bool isSqueezedID(const TensorView* tv, const IterDomain* id) {
   return false;
 }
 
+std::vector<IterDomain*> allIDsOf(const TensorView* tv) {
+  const auto& root_domain = tv->getRootDomain();
+  const auto& domain = tv->domain()->domain();
+  // Grab all values in the history of the tensor view's domain
+  auto all_vals = DependencyCheck::getAllValsBetween(
+      {root_domain.begin(), root_domain.end()}, {domain.begin(), domain.end()});
+
+  // Filter so we only have iteration domains (ignore Ints used in split)
+  auto all_ids = ir_utils::filterByType<IterDomain>(all_vals);
+  return std::vector<IterDomain*>(all_ids.begin(), all_ids.end());
+}
+
 } // namespace ir_utils
 } // namespace cuda
 } // namespace fuser
