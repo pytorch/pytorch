@@ -1137,6 +1137,17 @@ class Module:
             Modifying inputs inplace is not allowed when using backward hooks and
             will raise an error.
 
+        Args:
+            hook (Callable): The user-defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``backward_pre`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``backward_pre`` hooks
+                on this :class:`torch.nn.modules.Module`. Note that global
+                ``backward_pre`` hooks registered with
+                :func:`register_module_full_backward_pre_hook` will fire before
+                all hooks registered by this method.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -1198,6 +1209,17 @@ class Module:
         .. warning ::
             Modifying inputs or outputs inplace is not allowed when using backward hooks and
             will raise an error.
+
+        Args:
+            hook (Callable): The user-defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``backward`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``backward`` hooks on
+                this :class:`torch.nn.modules.Module`. Note that global
+                ``backward`` hooks registered with
+                :func:`register_module_full_backward_hook` will fire before
+                all hooks registered by this method.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1304,6 +1326,17 @@ class Module:
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
 
+        Args:
+            hook (Callable): The user defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``forward_pre`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``forward_pre`` hooks
+                on this :class:`torch.nn.modules.Module`. Note that global
+                ``forward_pre`` hooks registered with
+                :func:`register_module_forward_pre_hook` will fire before all
+                hooks registered by this method.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -1330,6 +1363,17 @@ class Module:
         The hook can modify the output. It can modify the input inplace but
         it will not have effect on forward since this is called after
         :func:`forward` is called.
+
+        Args:
+            hook (Callable): The user defined hook to be registered.
+            prepend (bool): If true, the provided ``hook`` will be fired before
+                all existing ``forward`` hooks on this
+                :class:`torch.nn.modules.Module`. Otherwise, the provided
+                ``hook`` will be fired after all existing ``forward`` hooks on
+                this :class:`torch.nn.modules.Module`. Note that global
+                ``forward`` hooks registered with
+                :func:`register_module_forward_hook` will fire before all hooks
+                registered by this method.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
