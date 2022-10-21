@@ -1,19 +1,16 @@
 import contextlib
 import dis
 import functools
-import importlib
 import logging
 import os.path
-import sys
 import types
 import unittest
 from unittest.mock import patch
 
 import torch
-import torch.testing._internal.common_utils
 from torch import fx
 
-from . import config, eval_frame, optimize_assert, reset, utils
+from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -27,37 +24,6 @@ unsupported = eval_frame.unsupported
 three = 3
 
 log = logging.getLogger(__name__)
-
-
-def run_tests(needs=()):
-    return  # TEMPORARY: disable all tests
-
-    from torch.testing._internal.common_utils import (
-        IS_WINDOWS,
-        run_tests,
-        TEST_WITH_CROSSREF,
-        TEST_WITH_TORCHDYNAMO,
-    )
-
-    if (
-        TEST_WITH_TORCHDYNAMO
-        or IS_WINDOWS
-        or TEST_WITH_CROSSREF
-        or sys.version_info >= (3, 11)
-    ):
-        return  # skip testing
-
-    if isinstance(needs, str):
-        needs = (needs,)
-    for need in needs:
-        if need == "cuda" and not torch.cuda.is_available():
-            return
-        else:
-            try:
-                importlib.import_module(need)
-            except ImportError:
-                return
-    run_tests()
 
 
 def clone_me(x):
@@ -184,7 +150,7 @@ class CompileCounterWithBackend:
         self.backend = backend
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        from torchdynamo.eval_frame import lookup_backend
+        from torch._dynamo.eval_frame import lookup_backend
 
         self.frame_count += 1
         for node in gm.graph.nodes:
@@ -227,36 +193,6 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     self.assertEqual(actual.frame_count, 1)
     if expected_ops is not None:
         self.assertEqual(actual.op_count, expected_ops)
-
-
-class TestCase(torch.testing._internal.common_utils.TestCase):
-    @classmethod
-    def tearDownClass(cls):
-        cls._exit_stack.close()
-        super().tearDownClass()
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls._exit_stack = contextlib.ExitStack()
-        cls._exit_stack.enter_context(
-            patch.object(config, "raise_on_backend_error", True)
-        )
-        cls._exit_stack.enter_context(
-            patch.object(config, "raise_on_ctx_manager_usage", True)
-        )
-
-    def setUp(self):
-        super().setUp()
-        reset()
-        utils.counters.clear()
-
-    def tearDown(self):
-        for k, v in utils.counters.items():
-            print(k, v.most_common())
-        reset()
-        utils.counters.clear()
-        super().tearDown()
 
 
 def dummy_fx_compile(gm: fx.GraphModule, example_inputs):

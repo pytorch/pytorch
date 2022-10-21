@@ -297,7 +297,7 @@ void check_inputs(
 } // namespace detail
 
 AutoNcclGroup::AutoNcclGroup() {
-  (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
+  (c10::cuda::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
@@ -307,7 +307,7 @@ AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupEnd());
 #endif
-  (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
+  (c10::cuda::getFreeMutex())->unlock();
 }
 
 bool is_available(TensorList tensors) {

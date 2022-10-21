@@ -9,6 +9,7 @@ from typing import Any
 
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import requires_static_shapes
@@ -53,7 +54,7 @@ def inline_unused(x):
     return x + 5.6
 
 
-class FunctionTests(torch._dynamo.testing.TestCase):
+class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -670,6 +671,6 @@ class FunctionTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

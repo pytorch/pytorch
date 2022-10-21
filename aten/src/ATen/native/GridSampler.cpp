@@ -1,16 +1,34 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/GridSampler.h>
 #include <ATen/native/GridSamplerUtils.h>
-#include <ATen/ATen.h>
-#include <ATen/Device.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <c10/core/Layout.h>
-#include <ATen/cpu/vml.h>
-#include <ATen/native/IndexingUtils.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_grid_sampler_2d_cpu_fallback_backward_native.h>
+#include <ATen/ops/_grid_sampler_2d_cpu_fallback_native.h>
+#include <ATen/ops/cudnn_grid_sampler.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/grid_sampler_2d.h>
+#include <ATen/ops/grid_sampler_2d_backward_native.h>
+#include <ATen/ops/grid_sampler_2d_native.h>
+#include <ATen/ops/grid_sampler_3d.h>
+#include <ATen/ops/grid_sampler_3d_backward_native.h>
+#include <ATen/ops/grid_sampler_3d_native.h>
+#include <ATen/ops/grid_sampler_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at { namespace native {
 
