@@ -13,6 +13,11 @@ from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
+from torch.fx.experimental.symbolic_shapes import (
+    guard_int_hack_please_dont_use,
+    sym_float,
+    sym_int,
+)
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -1085,6 +1090,37 @@ def split_with_sizes(
         splits.append(self.narrow(dim, start_idx, length))
         start_idx += length
     return splits
+
+
+@register_decomposition(aten.squeeze_.default, disable_meta=True)
+def squeeze_default(self: Tensor) -> Tensor:
+    n_dims = self.dim()
+    size = self.size()
+    assert n_dims == len(size)
+    reduction_axes = []
+    for i in range(0, n_dims):
+        if size[i] == 1:
+            reduction_axes.append(i)
+    if len(reduction_axes) == 0:
+        return self
+    return torch.sum(self, reduction_axes, False, dtype=self.dtype)
+
+
+@register_decomposition(aten.squeeze_.dim, disable_meta=True)
+def squeeze_dim(self: Tensor, dim: int) -> Tensor:
+    n_dims = self.dim()
+    size = self.size()
+    assert n_dims == len(size)
+    if n_dims == 0:
+        return self
+
+    if dim < 0:
+        dim = n_dims + dim
+    assert dim >= 0 and dim < n_dims
+
+    if size[dim] == 1:
+        return torch.sum(self, [dim], False, dtype=self.dtype)
+    return self
 
 
 @register_decomposition(aten.split.Tensor, disable_meta=True)
