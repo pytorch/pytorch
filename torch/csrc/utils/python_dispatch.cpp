@@ -340,6 +340,23 @@ void initDispatchBindings(PyObject* module) {
     return states;
   });
 
+  m.def("_dispatch_get_all_op_names", []() -> std::vector<std::string> {
+    auto op_names = c10::Dispatcher::singleton().getAllOpNames();
+
+    std::vector<std::string> names;
+    names.reserve(op_names.size());
+    for (auto& op : op_names) {
+      std::stringstream ss;
+      ss << op.name;
+      if (!op.overload_name.empty()) {
+        ss << "." << op.overload_name;
+      }
+      names.push_back(ss.str());
+    }
+
+    return names;
+  });
+
   m.def(
       "_dispatch_tls_set_dispatch_key_excluded",
       [](c10::DispatchKey dispatch_key, bool desired_state) {
