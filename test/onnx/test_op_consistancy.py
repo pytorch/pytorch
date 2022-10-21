@@ -251,6 +251,30 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
+def reason_onnx_runtime_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX Runtime doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX Runtime"
+
+
+def reason_onnx_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by the ONNX Spec"
+
+
+def reason_jit_tracer_error(info: str) -> str:
+    """Formats the reason: JIT tracer errors."""
+    return f"JIT tracer error on {info}"
+
+
+def reason_flaky() -> str:
+    """Formats the reason: test is flaky."""
+    return "flaky test"
+
+
 # Modify this section ##########################################################
 # NOTE: Modify this section as more ops are supported. The list should be sorted
 # alphabetically.
@@ -285,36 +309,45 @@ ALLOWLIST_OP = frozenset(
 # A: Use skip if we don't care about the test passing or if the test is flaky.
 #    Use xfail if we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    dont_care(torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
-    skip(torch.ceil, dtypes=[torch.float64], reason="Ceil on f64 not supported by ONNX Runtime"),
-    xfail(torch.div, variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
-    xfail(torch.div, variant_name="floor_rounding", dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    dont_care(
+        torch.ceil, dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
+        reason=reason_onnx_does_not_support("Ceil")
+    ),
+    skip(torch.ceil, dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
+    xfail(
+        torch.div, variant_name="no_rounding_mode", dtypes=COMPLEX_TYPES,
+        reason=reason_jit_tracer_error("complex types")
+    ),
+    xfail(
+        torch.div, variant_name="floor_rounding", dtypes=COMPLEX_TYPES,
+        reason=reason_jit_tracer_error("complex types")
+    ),
     xfail(
         torch.div, variant_name="trunc_rounding", dtypes=(torch.float16,) + COMPLEX_TYPES,
-        reason="jit tracer error for f16 and complex types"
+        reason=reason_jit_tracer_error("f16 and complex types")
     ),
     skip(
         torch.div, variant_name="no_rounding_mode", dtypes=[torch.uint8, torch.int8, torch.int16],
-        reason="Div on u8, i8, i16 not implemented in onnx runtime"
+        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
     skip(
         torch.div, variant_name="floor_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
-        reason="Div on u8, i8, i16 not implemented in onnx runtime"
+        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
     skip(
         torch.div, variant_name="floor_rounding", dtypes=[torch.float64],
-        reason="Div on f64 not implemented in onnx runtime"
+        reason=reason_onnx_runtime_does_not_support("Div", ["f64"])
     ),
     skip(
         torch.div, variant_name="trunc_rounding", dtypes=[torch.uint8, torch.int8, torch.int16],
-        reason="Div on u8, i8, i16 not implemented in onnx runtime"
+        reason=reason_onnx_runtime_does_not_support("Div", ["u8", "i8", "i16"])
     ),
-    xfail(torch.floor_divide, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
-    skip(torch.floor_divide, dtypes=[torch.float64], reason="Floor on f64 not supported by ONNX Runtime"),
-    skip(torch.remainder, dtypes=[torch.float64], reason="Floor on f64 not supported by ONNX Runtime"),
-    dont_care(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason="not supported by onnx"),
-    xfail(torch.t, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
-    xfail(torch.true_divide, dtypes=COMPLEX_TYPES, reason="jit tracer error for complex types"),
+    xfail(torch.floor_divide, dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
+    skip(torch.floor_divide, dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
+    skip(torch.remainder, dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
+    dont_care(torch.sqrt, dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
+    xfail(torch.t, dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
+    xfail(torch.true_divide, dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
 )
 # fmt: on
 
