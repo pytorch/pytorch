@@ -5,9 +5,8 @@ import torch
 class AttentionFunction(autograd.Function):
     @staticmethod
     def attn(ctx, q, k, v):
-        x = torch.matmul(q, k.transpose(0, 1))
-        a = torch.tanh(x)
-        ctx.save_for_backward(q, k, v, x, a)
+        a = torch.tanh(torch.matmul(q, k.T))
+        ctx.save_for_backward(q, k, v, a)
         o = torch.matmul(a, v)
         return o, a
 
@@ -20,6 +19,7 @@ class AttentionFunction(autograd.Function):
         assert len(v.size()) == 2, f"input v must be 2D but instead has {len(v.size())} dims"
         assert q.size(0) == k.size(0) and k.size(0) == v.size(0), "all inputs must have the same first dimension"
         assert q.size(1) == k.size(1), "q and k must share the same size for their second dimension"
+        ctx.set_materialize_grads(False)
         return AttentionFunction.attn(ctx, q, k, v)
 
     # This function has TWO outputs, so it gets TWO gradients :D
@@ -30,24 +30,21 @@ class AttentionFunction(autograd.Function):
         # None. Thanks to the fact that additional trailing Nones are
         # ignored, the return statement is simple even when the function has
         # optional inputs.
-        q, k, v, x, a = ctx.saved_tensors
+        q, k, v, a = ctx.saved_tensors
         total_q = total_k = total_v = None
 
         # These needs_input_grad checks are optional and there only to
         # improve efficiency. If you want to make your code simpler, you can
         # skip them. Returning gradients for inputs that don't require it is
         # not an error.
+        i = grad_o @ v.T
+        j = 1 - a ** 2
         if ctx.needs_input_grad[0]:
-            grad_oq = ((grad_o @ v.transpose(0, 1)) * (1 - torch.tanh(x) ** 2)) @ k
-            grad_aq = (grad_a * (1 - torch.tanh(x) ** 2)) @ k
-            total_q = grad_oq + grad_aq
+            total_q = (i * j) @ k + (grad_a * j) @ k
         if ctx.needs_input_grad[1]:
-            # I used to have these be transposed at the end but that didn't pass the tests
-            grad_ok = ((grad_o @ v.transpose(0, 1)) * (1 - torch.tanh(x) ** 2)).transpose(0, 1) @ q
-            grad_ak = (grad_a * (1 - torch.tanh(x) ** 2)).transpose(0, 1) @ q
-            total_k = grad_ok + grad_ak
+            total_k = (i * j).T @ q + (grad_a * j).T @ q
         if ctx.needs_input_grad[2]:
-            total_v = a.transpose(0, 1) @ grad_o
+            total_v = a.T @ grad_o
 
         return total_q, total_k, total_v
 
@@ -68,5 +65,5 @@ q = torch.rand(2, 3, requires_grad=True, dtype=torch.float64)
 k = torch.rand(2, 3, requires_grad=True, dtype=torch.float64)
 v = torch.rand(2, 4, requires_grad=True, dtype=torch.float64)
 input = (q, k, v)
-test = autograd.gradcheck(AttentionFunction.apply, input, eps=1e-6, atol=1e-4)
+test = autograd.gradcheck(AttentionFunction.apply, input)
 print(test)
