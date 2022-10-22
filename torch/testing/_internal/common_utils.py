@@ -940,6 +940,9 @@ if TEST_WITH_TORCHDYNAMO:
     torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.cache_size_limit = 8
+    # TODO: Remove this; this is grandfathered in because we suppressed errors
+    # on test suite previously
+    torch._dynamo.config.suppress_errors = True
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
