@@ -263,6 +263,31 @@ class CppVecOverrides(OpOverrides):
             quote = f"static_cast<{DTYPE_TO_CPP[dtype]}>({repr(val)})"
         return f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({quote})"
 
+    @staticmethod
+    def relu(x):
+        return f"at::vec::clamp_min({x}, decltype({x})(0))"
+
+    @staticmethod
+    def sigmoid(x):
+        return f"decltype({x})(1)/(decltype({x})(1) + {x}.neg().exp())"
+
+    @staticmethod
+    def neg(x):
+        return f"{x}.neg()"
+
+    @staticmethod
+    def floordiv(a, b):
+        # a and b are integer type
+        _t = f"decltype({a})"
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < {_t}(0)) != ({b} < {_t}(0)) ? ({rem} != {_t}(0) ? {quot} - {_t}(1) : {quot}) : {quot})"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # a and b are integer type
+        return f"{a} / {b}"
+
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""

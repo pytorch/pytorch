@@ -130,14 +130,6 @@ std::string get_privateuse1_backend(bool lower_case) {
   // set, and will never be written to.
   auto backend_name =
       name_registered ? privateuse1_backend_name : "privateuseone";
-  if (!lower_case) {
-    // The string is guaranteed to be stored in lowercase.
-    std::transform(
-        backend_name.begin(),
-        backend_name.end(),
-        backend_name.begin(),
-        [](unsigned char c) { return std::toupper(c); });
-  }
   return backend_name;
 }
 
@@ -148,13 +140,6 @@ void register_privateuse1_backend(std::string backend_name) {
           privateuse1_backend_name == backend_name,
       "torch.register_privateuse1_backend() has already been set! Current backend: ",
       privateuse1_backend_name);
-  // Mild perf improvement: guarantee that we store a lower case string, so we
-  // don't need to convert it to lower case every time someone prints it.
-  std::transform(
-      backend_name.begin(),
-      backend_name.end(),
-      backend_name.begin(),
-      [](unsigned char c) { return std::tolower(c); });
 
   privateuse1_backend_name = backend_name;
   // Invariant: once this flag is set, privateuse1_backend_name is NEVER written
