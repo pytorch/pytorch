@@ -395,6 +395,7 @@ class ListIteratorVariable(VariableTracker):
     def __init__(self, items, index: int = 0, **kwargs):
         super(ListIteratorVariable, self).__init__(**kwargs)
         assert isinstance(items, list)
+        assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
 
