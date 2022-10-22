@@ -161,6 +161,13 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(isinstance(fake_x.grad, FakeTensor))
 
+    def test_fake_is_leaf(self):
+        x = torch.rand([4, 4], requires_grad=True)
+        y = x + x
+        mode = FakeTensorMode()
+        fake_y = mode.from_tensor(y)
+        self.assertFalse(fake_y.is_leaf)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
         with FakeTensorMode():

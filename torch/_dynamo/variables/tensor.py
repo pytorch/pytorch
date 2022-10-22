@@ -214,7 +214,6 @@ class TensorVariable(VariableTracker):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
             parameter_value = initial_example_value if is_parameter else None
 
-            example_value = _clone_input(example_value)
             proxy.node.meta["example_value"] = example_value
             specialized_props = cls.specialize(example_value)
             if use_fake_tensors and isinstance(example_value, FakeTensor):

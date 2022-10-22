@@ -227,6 +227,13 @@ class FakeTensorConverter(object):
             out.requires_grad_(t.requires_grad)
             if make_constant:
                 self.add_constant_storage_mapping(out)
+
+        # We need `is_leaf` metadata to be consistent
+        # See Note [Fake up some autograd history]
+        if t.requires_grad and not t.is_leaf:
+            with torch.enable_grad():
+                out = out.clone()
+
         if type(t) is torch.nn.Parameter:
             assert not make_constant
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
