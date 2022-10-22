@@ -203,7 +203,19 @@ class TensorVariable(VariableTracker):
                     example_value = _get_real_value(proxy.node, tx.output)
 
             else:
-                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+                # This path is taken when the TensorVariable object is created
+                # with a tensor value. This node is going to act as a placholder
+                # node for the future subgraph.
+
+                # This input could be an intermediate tensor from a graph break,
+                # where this tensor has requires_grad field set to True. If we
+                # just pass on the value, it would seem like a leaf variable for
+                # this subgraph, and can unnecessary raise assertions like
+                # "inplace mutation of leaf variable".  To workaround, we clone
+                # the tensor for the example_value, which sets the requires_grad
+                # field to True only if its not a leaf.
+                example_value = _clone_input(example_value)
+                proxy.tracer.real_value_cache[proxy.node] = example_value
                 if use_fake_tensors:
                     fake_wrapper = functools.partial(
                         wrap_to_fake_tensor, fake_mode=tx.fake_mode

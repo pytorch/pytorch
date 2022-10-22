@@ -2732,6 +2732,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
+    def test_intermediate_tensor_inplace(self):
+        def fn(x, a):
+            y = x.cos()
+            torch._dynamo.graph_break()
+            y += a
+            return y
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.randn(4, requires_grad=True)
+        a = torch.randn(4, requires_grad=True)
+        ref = fn(x, a)
+        res = opt_fn(x, a)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod

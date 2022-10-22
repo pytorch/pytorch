@@ -386,6 +386,7 @@ def clone_tensor(x):
 
 def clone_input(x):
     """copy while preserving strides"""
+    is_param = isinstance(x, torch.nn.Parameter)
     with torch.no_grad():
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
@@ -404,6 +405,8 @@ def clone_input(x):
                 result.requires_grad_(x.requires_grad)
             if x.is_leaf and x.grad is not None:
                 result.grad = clone_input(x.grad)
+            if is_param:
+                result = torch.nn.Parameter(result)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
@@ -413,6 +416,8 @@ def clone_input(x):
                 y.requires_grad_(x.requires_grad)
             if x.is_leaf and x.grad is not None:
                 y.grad = clone_input(x.grad)
+            if is_param:
+                y = torch.nn.Parameter(y)
             return y
         return result
 
