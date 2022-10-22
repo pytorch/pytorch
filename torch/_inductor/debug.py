@@ -19,7 +19,6 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
 from . import config, ir
-from .codecache import cache_dir
 from .scheduler import (
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
@@ -182,7 +181,11 @@ class DebugContext:
     @staticmethod
     def create_debug_dir():
         for n in DebugContext._counter:
-            dirname = os.path.join(cache_dir(), f"debug.{os.getpid()}.{n}")
+            dirname = os.path.join(
+                dynamo_utils.get_debug_dir(),
+                "torchinductor",
+                f"debug.{os.getpid()}.{n}",
+            )
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
                 return dirname
