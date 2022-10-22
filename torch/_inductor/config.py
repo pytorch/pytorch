@@ -1,4 +1,5 @@
 import os
+import sys
 
 # add some debug printouts
 debug = False
@@ -53,7 +54,7 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = min(32, os.cpu_count())
+compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")
