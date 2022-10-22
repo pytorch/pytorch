@@ -7974,7 +7974,12 @@ op_db: List[OpInfo] = [
                     decorators=(
                         DecorateInfo(
                             toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
-                            'TestBinaryUfuncs', 'test_reference_numerics'),
+                            'TestBinaryUfuncs', 'test_reference_numerics'
+                        ),
+                        DecorateInfo(
+                            toleranceOverride({torch.float16: tol(atol=1e-2, rtol=1e-2)}),
+                            'TestConsistency', 'test_output_match',
+                        ),
                     ),
                     skips=(
                         # boolean alpha not handled properly
@@ -10785,6 +10790,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-4, rtol=3e-5)}),
+                   'TestConsistency', 'test_output_match',
                ),
            ),
            skips=(
