@@ -34,7 +34,6 @@ def make_test(fn):
     nargs = len(inspect.signature(fn).parameters)
 
     def test_fn(self):
-        print("FN", fn)
         return torch._dynamo.testing.standard_test(self, fn=fn, nargs=nargs)
 
     return test_fn
