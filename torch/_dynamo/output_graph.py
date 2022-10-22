@@ -424,7 +424,6 @@ class OutputGraph(fx.Tracer):
         return cg.get_instructions()
 
     def call_user_compiler(self, gm):
-        # print(gm.code)
         try:
             name = (
                 self.compiler_fn.__name__
