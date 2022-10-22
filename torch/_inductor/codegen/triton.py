@@ -115,27 +115,15 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def abs(x):
-        return f"tl.abs({x})"
-
-    @staticmethod
-    def libdevice_abs(x):
-        return f"tl.libdevice.abs({x})"
+        return f"tl.libdevice.abs({x}) if ({x}).dtype is tl.float64 else tl.abs({x})"
 
     @staticmethod
     def exp(x):
-        return f"tl.exp({x})"
-
-    @staticmethod
-    def libdevice_exp(x):
-        return f"tl.libdevice.exp({x})"
+        return f"tl.libdevice.exp({x}) if ({x}).dtype is tl.float64 else tl.exp({x})"
 
     @staticmethod
     def sqrt(x):
-        return f"tl.sqrt({x})"
-
-    @staticmethod
-    def libdevice_sqrt(x):
-        return f"tl.libdevice.sqrt({x})"
+        return f"tl.libdevice.sqrt({x}) if ({x}).dtype is tl.float64 else tl.sqrt({x})"
 
     @staticmethod
     def relu(x):
@@ -167,19 +155,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def cos(x):
-        return f"tl.cos({x})"
-
-    @staticmethod
-    def libdevice_cos(x):
-        return f"tl.libdevice.cos({x})"
+        return f"tl.libdevice.cos({x}) if ({x}).dtype is tl.float64 else tl.cos({x})"
 
     @staticmethod
     def sin(x):
-        return f"tl.sin({x})"
-
-    @staticmethod
-    def libdevice_sin(x):
-        return f"tl.libdevice.sin({x})"
+        return f"tl.libdevice.sin({x}) if ({x}).dtype is tl.float64 else tl.sin({x})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -218,14 +198,6 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
-    def sigmoid(x):
-        return f"tl.sigmoid({x})"
-
-    @staticmethod
-    def libdevice_sigmoid(x):
-        return f"1/(1 + tl.libdevice.exp(-({x})))"
-
-    @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
         return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
@@ -240,11 +212,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.log({x})"
-
-    @staticmethod
-    def libdevice_log(x):
-        return f"tl.libdevice.log({x})"
+        return f"tl.libdevice.log({x}) if ({x}).dtype is tl.float64 else tl.log({x})"
 
     @staticmethod
     def isinf(x):
