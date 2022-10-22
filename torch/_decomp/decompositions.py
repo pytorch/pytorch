@@ -1087,46 +1087,6 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.squeeze_.default, disable_meta=True)
-def squeeze_default(self):
-    n_dims = self.dim()
-    size = self.size()
-    assert n_dims == len(size)
-    sizes = []
-    strides = []
-
-    stride = self.stride()
-    for i in range(0, n_dims):
-        size_at_i = size[i]
-        if size_at_i != 1:
-            sizes.append(size_at_i)
-            strides.append(stride[i])
-    return torch.as_strided(self, sizes, strides)
-
-
-@register_decomposition(aten.squeeze_.dim, disable_meta=True)
-def squeeze_dim(self, dim: int):
-    n_dims = self.dim()
-    size = self.size()
-    assert n_dims == len(size)
-    if n_dims == 0:
-        return self
-
-    if dim < 0:
-        dim = n_dims + dim
-    assert dim >= 0 and dim < n_dims
-
-    stride = self.stride()
-
-    if size[dim] == 1:
-        l_size = list(size)
-        l_stride = list(stride)
-        del l_size[dim]
-        del l_stride[dim]
-        return torch.as_strided(self, l_size, l_stride)
-    return self
-
-
 @register_decomposition(aten.split.Tensor, disable_meta=True)
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
