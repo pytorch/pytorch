@@ -862,7 +862,7 @@ class DistributedDataParallel(Module, Joinable):
             # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
             (m, p)
             for m, p in modules_and_parameters
-            if p not in memo and not memo.add(p)  # type: ignore
+            if p not in memo and not memo.add(p)  # type: ignore[func-returns-value]
         ]
 
         # Build list of parameters.
@@ -1043,7 +1043,7 @@ class DistributedDataParallel(Module, Joinable):
                 self.use_side_stream_for_tensor_copies,
             )
             with self._inside_ddp_forward():
-                return module_to_run(*inputs[0], **kwargs[0])  # type: ignore
+                return module_to_run(*inputs[0], **kwargs[0])  # type: ignore[index]
         else:
             with self._inside_ddp_forward():
                 return module_to_run(*inputs, **kwargs)
@@ -1062,7 +1062,7 @@ class DistributedDataParallel(Module, Joinable):
             work = Join.notify_join_context(self)
             if work:
                 self.reducer._set_forward_pass_work_handle(
-                    work, self._divide_by_initial_world_size  # type: ignore
+                    work, self._divide_by_initial_world_size  # type: ignore[arg-type]
                 )
 
             # Calling _rebuild_buckets before forward compuation,
@@ -1170,7 +1170,7 @@ class DistributedDataParallel(Module, Joinable):
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
         if self._use_replicated_tensor_module:
-            self._replicated_tensor_module.train(mode)  # type: ignore
+            self._replicated_tensor_module.train(mode)  # type: ignore[union-attr]
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
