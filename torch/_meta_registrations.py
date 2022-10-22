@@ -1115,6 +1115,9 @@ def meta_zero_(self):
 def meta_fill_(self, val):
     return self
 
+@register_meta([aten.fill.Tensor, aten.fill.Scalar], register_dispatcher=False)
+def meta_fill(self, val):
+    return self.new_empty(self.shape)
 
 @register_meta(aten.relu_.default, register_dispatcher=False)
 def meta_relu_(self):
