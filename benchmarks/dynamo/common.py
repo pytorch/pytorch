@@ -147,6 +147,10 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "cait_m36_384",  # fp64_OOM
     "coat_lite_mini",  # time out
     "convit_base",  # fp64_OOM
+    "gernet_l",  # accuracy
+    "gluon_xception65",
+    "lcnet_0500",  # accuracy
+    "levit_128",  # levit_128
     "rexnet_100",  # accuracy
     "swin_base_patch4_window7_224",
     "twins_pcpvt_base",  # time out
@@ -1462,20 +1466,9 @@ def parse_args():
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
-        "--raise-on-assertion-error",
+        "--suppress-errors",
         action="store_true",
-        help="Fail a benchmark if torch._dynamo triggers an internal assertion",
-    )
-    parser.add_argument(
-        "--raise-on-backend-error",
-        action="store_true",
-        help="Fail a benchmark if backend throws an exception",
-    )
-    parser.add_argument(
-        "--raise-on-any",
-        "--raise",
-        action="store_true",
-        help="Raise on assertion or backend errors",
+        help="Suppress errors instead of raising them",
     )
     parser.add_argument(
         "--output",
@@ -1668,7 +1661,7 @@ def main(runner, original_dir=None):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
-        args.raise_on_any = True
+        args.suppress_errors = False
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1732,12 +1725,7 @@ def main(runner, original_dir=None):
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
 
-    torch._dynamo.config.raise_on_assertion_error = (
-        args.raise_on_assertion_error or args.raise_on_any
-    )
-    torch._dynamo.config.raise_on_backend_error = (
-        args.raise_on_backend_error or args.raise_on_any
-    )
+    torch._dynamo.config.suppress_errors = args.suppress_errors
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass
