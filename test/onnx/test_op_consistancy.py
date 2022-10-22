@@ -375,15 +375,15 @@ class TestConsistency(common_utils.TestCase):
 
     This is a parameterized test suite.
     """
-
     @common_device_type.ops(OPS_DB, allowed_dtypes=SUPPORTED_DTYPES)
+    @common_utils.parametrize("opset", TESTED_OPSETS)
     @skip_ops(
         OPS_DB,
         "TestConsistency",
         "test_output_match",
         skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
     )
-    def test_output_match(self, device: str, dtype: torch.dtype, op):
+    def test_output_match(self, device: str, dtype: torch.dtype, op, opset: int):
         assert device == "cpu"
 
         if op.name not in ALLOWLIST_OP:
@@ -398,12 +398,21 @@ class TestConsistency(common_utils.TestCase):
             requires_grad=False,
         )
 
-        for i, (opset, cpu_sample) in enumerate(
-            itertools.product(TESTED_OPSETS, samples)
-        ):
+        if dtype == torch.bfloat16 and opset < 13:
+            # Always skip bfloat16 for opsets before 13 because onnx started
+            # supporting bfloat16 from opset 13.
+            self.skipTest("bfloat16 not supported before opset 13")
+
+        context_manager = contextlib.nullcontext()
+        # Skip opset specific fails
+        if op.name in expected_opset_fails_name_mapping:
+            fail = expected_opset_fails_name_mapping[op.name]
+            if fail.should_fail(opset, dtype):
+                context_manager = self.assertRaises(fail.exception or Exception)
+
+        for i, cpu_sample in enumerate(samples):
             # Provide the repr to subtest because tensors are not serializable in parallel test runs
             with self.subTest(
-                opset=opset,
                 sample_num=i,
                 input=repr(cpu_sample.input),
                 args=repr(cpu_sample.args),
@@ -411,17 +420,6 @@ class TestConsistency(common_utils.TestCase):
             ):
                 model = SingleOpModel(op, cpu_sample.kwargs)
                 model.eval()
-
-                context_manager = contextlib.nullcontext()
-                # Skip opset specific fails
-                if op.name in expected_opset_fails_name_mapping:
-                    fail = expected_opset_fails_name_mapping[op.name]
-                    if fail.should_fail(opset, dtype):
-                        context_manager = self.assertRaises(fail.exception or Exception)
-                if dtype == torch.bfloat16 and opset < 13:
-                    # Always skip bfloat16 for opsets before 13 because onnx started
-                    # supporting bfloat16 from opset 13.
-                    context_manager = self.assertRaises(Exception)
 
                 # Run the test
                 inputs = (cpu_sample.input, *cpu_sample.args)
