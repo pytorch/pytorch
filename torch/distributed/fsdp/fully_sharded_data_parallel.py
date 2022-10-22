@@ -52,8 +52,6 @@ from torch.distributed.utils import (
     _sync_params_and_buffers,
     _to_kwargs,
 )
-from torch.nn.parameter import Parameter
-
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
