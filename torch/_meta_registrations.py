@@ -1111,7 +1111,7 @@ def meta_zero_(self):
     return self
 
 
-@register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
+@register_meta([aten.fill_.Tensor, aten.fill_.Scalar], register_dispatcher=False)
 def meta_fill_(self, val):
     return self
 
