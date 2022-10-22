@@ -290,6 +290,7 @@ ALLOW_LIST = [
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_tensor", datetime.date(2022, 10, 15)),
     ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
+    ("aten::_torch_cuda_cu_linker_symbol_op", datetime.date(2022, 11, 1)),
 
 ]
 
