@@ -15160,7 +15160,7 @@ class TestNNDeviceType(NNTestCase):
         conv2(input_large)
 
     @onlyCUDA
-    @largeTensorTest('24GB')
+    @largeTensorTest('40GB')
     @largeTensorTest('24GB', 'cpu')
     def test_conv3d_64bit_indexing(self, device):
         x = torch.rand(1, 32, 512, 512, 256)
