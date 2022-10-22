@@ -11,8 +11,10 @@ from typing import Any, Callable, Dict, List, Optional
 import torch.nn
 from torch import fx
 
-from . import config, logging as torchdynamo_logging, variables
-from .bytecode_transformation import create_instruction, Instruction, unique_id
+from . import config
+from . import logging as torchdynamo_logging
+from . import variables
+from .bytecode_transformation import Instruction, create_instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
@@ -429,10 +431,6 @@ class OutputGraph(fx.Tracer):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            log.warning("-" * 40 + "\n")
-            log.warning("TORCHDYNAMO: backend compiler failed\n")
-            log.warning(e, exc_info=True)
-            log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn

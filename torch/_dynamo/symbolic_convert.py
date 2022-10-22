@@ -17,26 +17,24 @@ from unittest.mock import patch
 
 import torch
 
-from . import (
-    allowed_functions,
-    config,
-    exc,
-    logging as torchdynamo_logging,
-    side_effects,
-    skipfiles,
-    variables,
+from . import allowed_functions, config, exc
+from . import logging as torchdynamo_logging
+from . import side_effects, skipfiles, variables
+from .allowed_functions import (
+    is_allowed,
+    is_builtin_callable,
+    is_builtin_constant,
 )
-from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import (
+    Instruction,
     cleaned_instructions,
     create_instruction,
-    Instruction,
     is_generator,
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented, Unsupported
+from .exc import BackendCompilerFailed, Unsupported, unimplemented
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
@@ -54,7 +52,7 @@ from .utils import (
     graph_break_dup_warning_checker,
     istype,
 )
-from .variables.base import MutableLocal, typestr, VariableTracker
+from .variables.base import MutableLocal, VariableTracker, typestr
 from .variables.builder import VariableBuilder
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -321,6 +319,8 @@ class InstructionTranslatorBase(object):
                 unimplemented(f"missing: {inst.opname}")
             getattr(self, inst.opname)(inst)
             return inst.opname != "RETURN_VALUE"
+        except BackendCompilerFailed:
+            raise
         except Unsupported as exc:
             exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
@@ -349,10 +349,11 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
+        except BackendCompilerFailed:
+            raise
         except Exception as e:
             if config.replay_record_enabled:
                 e.exec_record = self.exec_recorder.get_record()
-
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the

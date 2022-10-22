@@ -811,9 +811,8 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
-                        "Compiled Fx GraphModule failed with following error. Setting up minifier."
+                        "Compiled Fx GraphModule failed. Creating script to minify the error."
                     )
-                    log.exception(exc)
                     if config.repro_level == 1:
                         dump_state_fn = functools.partial(
                             dump_backend_state, compiler_name=compiler_name
@@ -827,7 +826,8 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError("Issue deteced. Repro at minifier_launcher.py.")
+                    exc.is_minified = True
+                    raise
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -853,9 +853,8 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     except Exception as exc:
         orig_failure = str(exc)
         log.warning(
-            "Compiled Fx GraphModule failed with following error. Starting minifier."
+            "Compiled Fx GraphModule failed. Creating script to minify the error."
         )
-        log.exception(exc)
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name
         )
@@ -877,7 +876,6 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 @register_backend
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
-
     from torchdynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
