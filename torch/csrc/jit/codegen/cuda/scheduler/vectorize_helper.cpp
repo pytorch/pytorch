@@ -74,6 +74,10 @@ IterDomain* mergeInnermostDomains(
   return is_merge_done ? merged_id : nullptr;
 }
 
+namespace {
+//! Collect maximum vectorization word size of a tensor whose
+//! innermost domain is leaf_merged_domain. Contig merging is taken
+//! into account to expand vectorization if possible.
 size_t collectMaxVectorizeSizeWithContigMerge(
     TensorView* tv,
     IterDomain* leaf_merged_domain,
@@ -148,6 +152,7 @@ size_t collectMaxVectorizeSizeWithContigMerge(
 
   return vector_size;
 }
+} // namespace
 
 //! Attempt to expand vectorized domains to contig merged domains. Break point
 //! identifies the point in which you can't propagate contiguous merges. For

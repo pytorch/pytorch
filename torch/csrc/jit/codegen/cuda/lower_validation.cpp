@@ -505,7 +505,8 @@ class VectorizeValidator : public OptInDispatch {
     // be divisible by the vector word size. The domain is usually
     // just one of the root domains, but can be a merged domain of
     // contiguous domains. Those domains are saved in
-    // VectorizedSetInfo.contig_root_ids at the time of indexing.
+    // VectorizedSetInfo.contig_root_ids in
+    // fillConsumerVectorizedContigRootDomains called in lower_index_compute.
     GpuLower::current()->vectorizedSetInfo().emplace_back(vectorized_set_info);
   }
 };

@@ -360,16 +360,6 @@ struct BroadcastMultipleInformation {
 TORCH_CUDA_CU_API BroadcastMultipleInformation
 getBroadcastMultiples(TensorView* reference_tv, DataType index_type);
 
-//! Collect maximum vectorization word size of a tensor whose
-//! innermost domain is leaf_merged_domain. Contig merging is taken
-//! into account to expand vectorization if possible.
-size_t collectMaxVectorizeSizeWithContigMerge(
-    TensorView* tv,
-    IterDomain* leaf_merged_domain,
-    size_t max_word_size_in_byte,
-    ExpressionEvaluator& expression_evaluator,
-    DataType index_type);
-
 namespace matmul_utils {
 //! Utilities in this namespace facilitates scheduling matmul kernels with
 //!  hierarchichal tiling specified in MatMulTileOptions.

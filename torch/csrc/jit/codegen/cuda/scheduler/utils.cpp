@@ -2261,8 +2261,7 @@ std::unordered_map<int, int> domainReorderAsRfactorMap(TensorView* tv) {
           merge->toString());
 
       reordered_ids.erase(reordered_ids.begin() + pos0);
-      pos1--;
-      reordered_ids[pos1] = merge->out();
+      reordered_ids[--pos1] = merge->out();
     }
   }
 
