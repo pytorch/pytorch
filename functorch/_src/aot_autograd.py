@@ -490,6 +490,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     return compiled_function
 
+
 @dynamo_timed
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
@@ -535,9 +536,8 @@ def create_aot_dispatcher_function(
 
     if config.use_dynamic_shapes:
         assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
-    
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
+    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
     fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
@@ -758,6 +758,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
         :attr:`mod`, but with forward and backward graph compiled.
 
     """
+
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return stateless.functional_call(mod, params_and_buffers, args, kwargs)
@@ -795,6 +796,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
     :func:`aot_module_simplified` removes these overheads.
     """
     #########################################################
+
     params = {
         **dict(_named_parameters(mod, remove_duplicate=False)),
         **dict(_named_buffers(mod, remove_duplicate=False)),

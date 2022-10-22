@@ -115,13 +115,9 @@ class PySymInt(object):
         self._expr = expr
         self.shape_env = shape_env
         self.constant = constant
-        # breakpoint()
         self.ref_id = ref_id
-        # if not self.ref_id:
-            # breakpoint()
         self.kind = kind
         self.idx = idx
-        # pair =ref_id, idx
         if self.ref_id and str(self.expr) not in ('False', 'True'):
             if self.expr not in self.shape_env.expr_to_id:
                 self.shape_env.expr_to_id[self.expr] = set()
@@ -171,7 +167,6 @@ class PySymInt(object):
         return PySymFloat(self.expr, self.shape_env)
 
     def __bool__(self):
-        # breakpoint()
         return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
 
 class PySymFloat:
@@ -289,7 +284,6 @@ def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
 
     def magic_impl(self, other):
-        # breakpoint()
         if method in ["min", "max"]:
             op = getattr(builtins, method)
         else:
@@ -405,7 +399,6 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-        # breakpoint()
         size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):

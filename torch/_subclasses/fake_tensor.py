@@ -514,7 +514,6 @@ class FakeTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # need to handle here to avoid infinite recursion
         # see [in_kernel_invocation]
-        # breakpoint()
         if func == torch.ops.prim.device.default:
             assert len(args) == 1 and isinstance(args[0], FakeTensor)
             if args[0].fake_mode.in_kernel_invocation:
@@ -646,10 +645,8 @@ class FakeTensorMode(TorchDispatchMode):
         self.in_kernel_invocation = False
 
         self.shape_env = shape_env
-        # breakpoint()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        # breakpoint()
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
