@@ -234,7 +234,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_nested(
         return std::make_tuple(Tensor(), Tensor());
     }
 }
-
+namespace{
 
 /**
  * This function is used to calculate two pieces of metadata that are needed
@@ -338,6 +338,7 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
   return true;
 }
 
+} // namespace
 std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
     const Tensor& query,
     const Tensor& key,
