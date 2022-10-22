@@ -11,5 +11,5 @@ six
 pillow
 libuv
 pkg-config
-conda-forge::certifi
-conda-forge::wheel=0.36.2
+certifi
+wheel=0.36.2
