@@ -291,6 +291,13 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
@@ -300,6 +307,13 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, tau=2.78),
         reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
@@ -309,5 +323,12 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, std=1.92),
         reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
 ]
