@@ -5223,6 +5223,20 @@ class TestQuantizeFx(QuantizationTestCase):
         # make sure this runs
         m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=backend_config)
 
+    def test_get_default_qconfig_valid_backend(self):
+        """ Checks that AssertionError is raised when non expected backend input is specified
+        """
+        invalid_backends = ["imaginary_backend", 3]
+        for invalid_backend in invalid_backends:
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig = get_default_qconfig(invalid_backend)
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig = get_default_qat_qconfig(invalid_backend)
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig_mapping = get_default_qconfig_mapping(invalid_backend)
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig_mapping = get_default_qat_qconfig_mapping(invalid_backend)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
