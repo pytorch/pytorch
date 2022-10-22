@@ -222,7 +222,8 @@ def clone_if_tensor(x):
         return x.clone()
     return x
 
-
+# Helper function to compare output of `vmap` against the
+# `for-loop` version.
 def _compute_quantities_for_vmap_test(
         op, orig_batched_args, orig_kwarg_values, in_dims,
         out_dim, batch_size, compute_loop_out=True,
@@ -273,6 +274,8 @@ def _compute_quantities_for_vmap_test(
     yield (loop_out, batched_out, expected, output)
 
 
+# Function with more friendly return types
+# compared to `_compute_quantities_for_vmap_test`
 def compute_quantities_for_vmap_test(
         op, orig_batched_args, orig_kwarg_values, in_dims,
         out_dim=0, batch_size=2, compute_loop_out=True,
@@ -305,7 +308,6 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm
                 op, batched_args, kwarg_values, in_dims, out_dim, batch_size,
                 compute_loop_out=False):
             assert quantities[0] is None
-            # yield (expected_batched, ) + quantities[1:]
             yield (expected_batched, quantities[1])
             yield (quantities[2], quantities[3])
 
