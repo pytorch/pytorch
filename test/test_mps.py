@@ -7691,11 +7691,8 @@ class TestConsistency(TestCase):
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
     @ops(op_db, allowed_dtypes=MPS_DTYPES)
+    @onlyMPS
     def test_output_match(self, device, dtype, op):
-        self.assertEqual(device, "cpu")
-        if not torch.backends.mps.is_available():
-            self.skipTest("MPS is not available")
-
         key = op.name + op.variant_test_name
         if key in self.BLOCKLIST:
             if self.BLOCKLIST[key] is None or dtype in self.BLOCKLIST[key]:
@@ -7721,7 +7718,7 @@ class TestConsistency(TestCase):
                 run_grad_test = False
 
         def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+            return op.sample_inputs("cpu", dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
 
         all_forward_pass = True
@@ -7733,7 +7730,7 @@ class TestConsistency(TestCase):
             forward_failed = False
             try:
                 mps_sample = cpu_sample.transform(
-                    lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+                    lambda x: x.detach().to(device).requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
                 # TODO: This checks only the function variant. We should also check the method and inplace version
                 # when they exist
@@ -7874,11 +7871,7 @@ class TestCommon(TestCase):
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
-# TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
-# This requires mps to be properly registered in the device generic test framework which is not the
-# case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
-# to achieve this.
-instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
+instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True)
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
 
 if __name__ == "__main__":
