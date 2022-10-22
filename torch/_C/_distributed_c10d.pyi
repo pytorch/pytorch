@@ -33,7 +33,7 @@ kDefaultBucketBytesCap = (
 )  # kDefaultBucketBytesCap from reducer.hpp
 kDefaultFirstBucketBytes = (
     1024 * 1024
-)  # kDefaultFirstBucketBytes in reducer.hpp
+)  # kDefaultFirstBucketBytes from reducer.hpp
 
 class Reducer:
     def __init__(
