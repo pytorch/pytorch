@@ -11,6 +11,7 @@ from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 class ToyModel(nn.Module):
@@ -71,8 +72,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
 
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager(self):
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
         ddp_m = torch._dynamo.optimize("aot_eager")(ddp_m)
@@ -82,8 +81,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
     @unittest.skip("crashes with inductor on cuda currently")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
         ddp_m = torch._dynamo.optimize("inductor")(ddp_m)
@@ -93,8 +90,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
     @unittest.expectedFailure  # FSDP + faketensor is broken
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_aot_eager(self):
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
         m, inputs, correct_outputs = self.get_model()
         fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
         fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
@@ -104,8 +99,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
     @unittest.expectedFailure  # FSDP + faketensor is broken
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_inductor(self):
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-
         m, inputs, correct_outputs = self.get_model()
         fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
         fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
@@ -120,7 +113,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         the user-provided compiler is called by the DDPOptimizer which is
         doing the graph splitting
         """
-
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
