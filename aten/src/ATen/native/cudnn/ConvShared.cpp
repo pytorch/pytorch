@@ -1,11 +1,29 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/Context.h>
 #include <ATen/cuda/EmptyTensor.h>
+#include <ATen/TensorGeometry.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
 
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/ConvShared.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cudnn_convolution_add_relu_native.h>
+#include <ATen/ops/cudnn_convolution_native.h>
+#include <ATen/ops/cudnn_convolution_relu_native.h>
+#include <ATen/ops/cudnn_convolution_transpose_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 // NOTE [cuDNN API version]
 //

@@ -91,6 +91,7 @@ jobs:
         run: |
           # Install dependencies
           brew install libomp
+          brew link --force libomp
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}

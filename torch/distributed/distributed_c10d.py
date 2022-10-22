@@ -32,7 +32,7 @@ from torch._C._distributed_c10d import (
     Work
 )
 from torch._six import string_classes
-
+from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
@@ -231,6 +231,17 @@ class Backend(object):
 # TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
 _backend: str = Backend.UNDEFINED
 dist_backend = Backend
+
+
+# NOTE(crcrpar): [ReduceOp static class attributes to support `isinstance`]
+#   A ReduceOp instance of `PREMUL_SUM` is supposed to be created via `_make_nccl_premul_sum`
+#   while the other `op`s (meaning RedOpType members) can be directly passed to c10d reduce collectives.
+#   I changed `ReduceOp` to struct from enum class and introduced RedOpType enum class for PREMUL_SUM,
+#   which broke an implicit contract of ReduceOp being enum-like with which users apply isinstance to
+#   `op`, for example, `isinstance(ReduceOp.SUM, ReduceOp)`: https://github.com/pytorch/pytorch/issues/87191
+DENY_LIST = ("PREMUL_SUM", )
+for _red_op_name, _red_op_value in ReduceOp.RedOpType.__members__.items():
+    setattr(ReduceOp, _red_op_name, _red_op_value if _red_op_name in DENY_LIST else ReduceOp(_red_op_value))
 
 
 class _reduce_op(object):
@@ -2556,6 +2567,27 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
+    .. note:: Note that all Tensors in scatter_list must have the same size.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> tensor_size = 2
+        >>> t_ones = torch.ones(tensor_size)
+        >>> t_fives = torch.ones(tensor_size) * 5
+        >>> output_tensor = torch.zeros(tensor_size)
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     # Only tensors, all of which must be the same size.
+        >>>     scatter_list = [t_ones, t_fives]
+        >>> else:
+        >>>     scatter_list = None
+        >>> dist.scatter(output_tensor, scatter_list, src=0)
+        >>> # Rank i gets scatter_list[i]. For example, on rank 1:
+        >>> output_tensor
+        tensor([5., 5.])
+
     """
     _check_single_tensor(tensor, "tensor")
 
@@ -3300,15 +3332,17 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         group_rank = global_rank
 
     backend = Backend(backend)
-    pg = _new_process_group_helper(
-        group_world_size,
-        group_rank,
-        ranks,
-        backend,
-        default_store,
-        pg_options=pg_options,
-        timeout=timeout,
-    )
+
+    with record_function(f"## process_group:init with ranks: {ranks}"):
+        pg = _new_process_group_helper(
+            group_world_size,
+            group_rank,
+            ranks,
+            backend,
+            default_store,
+            pg_options=pg_options,
+            timeout=timeout,
+        )
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {
