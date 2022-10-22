@@ -339,7 +339,7 @@ Check this module for more information.
         elif goal.type == BaseCType(symIntArrayRefT):
             try:
                 r = direct_solve(NamedCType(goal.name, BaseCType(intArrayRefT)))
-                return f"c10::fromIntArrayRef({r})"
+                return f"c10::fromIntArrayRefSlow({r})"
             except UnsatError:
                 return direct_solve(NamedCType(goal.name, longSymVec_ctype))
         elif goal.type == BaseCType(SymIntT):
@@ -371,7 +371,7 @@ Check this module for more information.
             argname = direct_solve(
                 NamedCType(goal.name, BaseCType(optionalIntArrayRefT))
             )
-            return f"{argname}.has_value() ? c10::make_optional(c10::fromIntArrayRef(*{argname})) : c10::nullopt"
+            return f"{argname}.has_value() ? c10::make_optional(c10::fromIntArrayRefSlow(*{argname})) : c10::nullopt"
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):

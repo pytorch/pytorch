@@ -11,6 +11,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -385,6 +386,10 @@ const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
   return current_graph_task ? &current_graph_task->nodes_in_graph_ : nullptr;
 }
 
+int get_current_graph_task_id() {
+  return current_graph_task ? current_graph_task->id_ : -1;
+}
+
 bool get_current_graph_task_keep_graph() {
   return current_graph_task ? current_graph_task->keep_graph_ : true;
 }
@@ -461,7 +466,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // NB: The ThreadLocalStateGuard doesn't set the grad_mode because
         // GraphTask always saves ThreadLocalState without grad_mode.
         at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
-        c10::Warning::WarningHandlerGuard warnings_guard(
+        c10::WarningUtils::WarningHandlerGuard warnings_guard(
             &local_graph_task->warning_handler_);
 
         try {
@@ -778,7 +783,8 @@ void validate_outputs(
       // Strided when metadata is SparseCsr
       if (!grad.is_sparse() &&
           !(grad.layout() == at::kStrided &&
-            metadata.layout() == at::kSparseCsr)) {
+            (at::sparse_csr::is_sparse_compressed(metadata.layout()) ||
+             metadata.layout() == at::kSparse))) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
@@ -1255,7 +1261,9 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
 auto Engine::ready_queue(
     std::shared_ptr<ReadyQueue> cpu_ready_queue,
     at::Device device) -> std::shared_ptr<ReadyQueue> {
-  if (should_run_in_cpu_ready_queue(device.type())) {
+  bool multithreading_disabled =
+      !c10::AutogradState::get_tls_state().get_multithreading_enabled();
+  if (multithreading_disabled || should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
