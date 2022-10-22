@@ -411,10 +411,10 @@ set(GENERATED_TESTING_PYTHON
   )
 
 set(GENERATED_ONNX_EXPORTER_H
-  "${TORCH_SRC_DIR}/torch/csrc/onnx/diagnostics/generated/rules.h"
+  "${TORCH_SRC_DIR}/csrc/onnx/diagnostics/generated/rules.h"
   )
 set(GENERATED_ONNX_EXPORTER_PYTHON
-  "${TORCH_SRC_DIR}/torch/onnx/_internal/diagnostics/generated/_rules.py"
+  "${TORCH_SRC_DIR}/onnx/_internal/diagnostics/generated/_rules.py"
   )
 
 set(TORCH_GENERATED_CODE
