@@ -6,12 +6,12 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import torch
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import (TestCase, run_tests, is_iterable_of_tensors,
-                                                  IS_MACOS, IS_ARM64, parametrize, TEST_WITH_ASAN)
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
+    IS_ARM64, parametrize, TEST_WITH_ASAN
+import torch
 from torch import Tensor
 import functools
 from torch.testing._internal.common_cuda import with_tf32_off
@@ -705,9 +705,8 @@ class TestOperators(TestCase):
             is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
             generator = get_fallback_and_vmap_exhaustive(
                 vjp_of_vjp, args_and_cotangents, {}, is_batch_norm_and_training=is_batch_norm_and_training)
-            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
-                self.assertEqual(vmap_expected, vmap_actual)
-                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out)
 
     vmapvjp_fail = vjp_fail.union({
         # -------------------- ALLOWED FAILURES --------------------------------
@@ -799,9 +798,8 @@ class TestOperators(TestCase):
             is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
             generator = get_fallback_and_vmap_exhaustive(
                 fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
-            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
-                self.assertEqual(vmap_expected, vmap_actual)
-                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out)
 
     vmapjvpall_fail = {
         # -------------------- ALLOWED FAILURES --------------------------------
@@ -890,9 +888,8 @@ class TestOperators(TestCase):
             is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
             generator = get_fallback_and_vmap_exhaustive(
                 fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
-            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
-                self.assertEqual(vmap_expected, vmap_actual)
-                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out)
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
@@ -964,7 +961,7 @@ class TestOperators(TestCase):
                 args = tuple(arg_values) + tuple(kwarg_values)
                 fn, args = get_jvp_variant_primals_tangents(op, sample)
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwarg_values)
-                for _ in get_fallback_and_vmap_exhaustive(
+                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
                         fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                     pass
         check_vmap_fallback(self, test, op, dry_run=False)
@@ -1075,12 +1072,12 @@ class TestOperators(TestCase):
                 cotangents = get_sample_cotangents(op, sample)
                 fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
                 is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
-                for _ in get_fallback_and_vmap_exhaustive(
+                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
                         fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                     pass
                 for a_op in op.aliases:
                     fn, args = get_vjp_fn_and_args_with_cotangents(a_op, sample, cotangents)
-                    for _ in get_fallback_and_vmap_exhaustive(
+                    for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
                             fn, args, {}, is_batch_norm_and_training=is_batch_norm_and_training, compute_loop_out=False):
                         pass
 
@@ -1433,9 +1430,8 @@ class TestOperators(TestCase):
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
             generator = get_fallback_and_vmap_exhaustive(
                 jvp_of_vjp, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
-            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
-                self.assertEqual(vmap_expected, vmap_actual)
-                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out)
 
 
     def _make_extremal_inputs(self, shape, device):
@@ -1673,9 +1669,8 @@ class TestOperators(TestCase):
             is_batch_norm_and_training = is_batch_norm_training(op, sample_input.kwargs)
             generator = get_fallback_and_vmap_exhaustive(
                 compute_grad, (cotangents,), {}, is_batch_norm_and_training=is_batch_norm_and_training)
-            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
-                self.assertEqual(vmap_expected, vmap_actual)
-                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out)
 
     def test_vmapvmapjvp_linalg_solve(self):
         ops = [op for op in op_db if op.name == "linalg.solve"]

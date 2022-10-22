@@ -223,9 +223,9 @@ def clone_if_tensor(x):
     return x
 
 
-def compute_quantities_for_vmap_test(
+def _compute_quantities_for_vmap_test(
         op, orig_batched_args, orig_kwarg_values, in_dims,
-        out_dim=0, batch_size=2, compute_loop_out=True,
+        out_dim, batch_size, compute_loop_out=True,
         clone_inputs=False):
 
     def maybe_clone_inputs():
@@ -273,6 +273,16 @@ def compute_quantities_for_vmap_test(
     yield (loop_out, batched_out, expected, output)
 
 
+def compute_quantities_for_vmap_test(
+        op, orig_batched_args, orig_kwarg_values, in_dims,
+        out_dim=0, batch_size=2, compute_loop_out=True,
+        clone_inputs=False):
+    for quantities in _compute_quantities_for_vmap_test(op, orig_batched_args, orig_kwarg_values, in_dims,
+                                                        out_dim, batch_size, compute_loop_out, clone_inputs):
+        yield (quantities[0], quantities[1])
+        yield (quantities[2], quantities[3])
+
+
 def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm_and_training=False, compute_loop_out=True):
     out_dim = 0
     batch_size = 2
@@ -291,11 +301,13 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm
     expected_batched = pytree.tree_map(make_batched, expected_unbatched)
     generator = generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training)
     for batched_args, in_dims, kwarg_values in generator:
-        for quantities in compute_quantities_for_vmap_test(
+        for quantities in _compute_quantities_for_vmap_test(
                 op, batched_args, kwarg_values, in_dims, out_dim, batch_size,
                 compute_loop_out=False):
             assert quantities[0] is None
-            yield (expected_batched, ) + quantities[1:]
+            # yield (expected_batched, ) + quantities[1:]
+            yield (expected_batched, quantities[1])
+            yield (quantities[2], quantities[3])
 
 
 def opinfo_in_dict(opinfo, d):
