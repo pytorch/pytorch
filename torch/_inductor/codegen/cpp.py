@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import functools
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
 
@@ -10,7 +11,8 @@ import torch
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
-from ..utils import sympy_product, sympy_subs
+from ..codegen.wrapper import WrapperCodeGen
+from ..utils import sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -738,11 +740,15 @@ class CppVecKernelChecker(CppVecKernel):
         metrics.generated_kernel_count -= 1
         metrics.generated_cpp_vec_kernel_count -= 1
 
+        # Used to recorde the graph wrapper code as the wrapper_code status could be
+        # changed during graph run.
+        self._org_wrapper_code = None
+
         self.simd_vec = True
         self.fast_vec_list = []
-        for dict_obj in CppVecOverrides.__dict__:
-            if isinstance(CppVecOverrides.__dict__[dict_obj], staticmethod):
-                self.fast_vec_list.append(dict_obj)
+        for k, v in CppVecOverrides.__dict__.items():
+            if isinstance(v, staticmethod):
+                self.fast_vec_list.append(k)
         self.exit_stack = contextlib.ExitStack()
 
     def is_legal_data_access(self, var: sympy.Symbol, index: sympy.Expr):
@@ -789,9 +795,21 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        assert self._org_wrapper_code is not None
+        # Restore the wrapper_code
+        V.graph.wrapper_code = self._org_wrapper_code
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
+        # Recorde the graph wrapper code. The wrapper_code status could be
+        # changed during graph run. Regarding this checker, we also need to
+        # run the graph but we don't expect to change any status that would
+        # impact the code generation. Hence, we record the graph wapper code
+        # and replace it with a dummy warpper_code and then restore to the
+        # original one as long as the checker is finished.
+        self._org_wrapper_code = V.graph.wrapper_code
+        V.graph.wrapper_code = WrapperCodeGen()
+
         class VecCheckerProxy:
             @staticmethod
             def __getattr__(name):
@@ -856,7 +874,12 @@ class CppKernelProxy(CppKernel):
         self.simd_vec_kernel.simd = False
         self.simd_vec_kernel.fast_vec = True
 
-        # loop_with_tail.tail_loop.simd_omp = True
+        loop_with_tail.tail_loop.simd_omp = True
+        # We chope the loop into two cubes by the config.cpp.simdlen - main loop and tail loop.
+        # Regarding the main loop, it is straightforward that it could be vectorized with
+        # config.cpp.simdlen. But for the tail loop, it still could be vectorized. For example,
+        # if the config.cpp.simdlen is 8(256bits), then the tail loop still could be vectorized
+        # as 4(128bits).
         loop_with_tail.tail_loop.simd_len = int(config.cpp.simdlen / 2)
         loop_with_tail.tail_loop.simd_vec = False
 
@@ -983,7 +1006,7 @@ class CppScheduling:
         ).group
 
         with CppVecKernelChecker(
-            self.kernel_group.args, self.kernel_group.ws.num_threads
+            deepcopy(self.kernel_group.args), self.kernel_group.ws.num_threads
         ) as kernel_checker:
             vars, reduction_vars = kernel_checker.set_ranges(group, reduction_group)
             for node in nodes:
