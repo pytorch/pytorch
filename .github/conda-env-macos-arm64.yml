@@ -1,0 +1,17 @@
+dependencies:
+  - numpy=1.22.3
+  - pyyaml=6.0
+  - setuptools=61.2.0
+  - cmake=3.22.1
+  - cffi
+  - ninja
+  - typing_extensions
+  - dataclasses
+  - pip
+  - six
+  - certifi wheel=0.36.2
+  - pillow
+  - libuv
+  - pkg-config
+  - conda-forge::certifi
+  - conda-forge::wheel=0.36.2
