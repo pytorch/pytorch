@@ -79,7 +79,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @unittest.skip("crashes with inductor on cuda currently")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
         from torch.nn.parallel import DistributedDataParallel as DDP
