@@ -1,4 +1,5 @@
-from typing import Any, List
+from dataclasses import dataclass, field
+from typing import Any, List, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -18,6 +19,28 @@ def args_str(args):
         return str(args)
 
 
+@dataclass
+class Bucket:
+    size: int = 0
+    params: List[str] = field(default_factory=list)
+    nodes: List[fx.Node] = field(default_factory=list)
+
+
+def pretty_print_buckets(buckets: List[Bucket]):
+    headers = ("Index", "Size (b)", "Param Names")
+    rows = []
+    for idx, bucket in enumerate(reversed(buckets)):
+        rows.append((idx, bucket.size, bucket.params[0]))
+        for param in bucket.params[1:]:
+            rows.append((None, None, param))
+    try:
+        from tabulate import tabulate
+
+        print(tabulate(rows, headers=headers, tablefmt="simple_grid"))
+    except ImportError:
+        print("Please `pip install tabulate` in order to pretty-print ddp bucket sizes")
+
+
 class DDPOptimizer:
     def __init__(
         self,
@@ -25,8 +48,20 @@ class DDPOptimizer:
         parameters_to_ignore: List[str],
         backend_compile_fn,
         debug=False,
+        first_bucket_cap: Optional[int] = None,
     ):
+        if first_bucket_cap is not None:
+            self.first_bucket_cap = first_bucket_cap
+        elif torch.distributed.is_available():
+            # this constant comes from C10D lib which is not always built
+            self.first_bucket_cap = torch.distributed._DEFAULT_FIRST_BUCKET_BYTES
+        else:
+            self.first_bucket_cap = bucket_bytes_cap
+
         self.bucket_bytes_cap = bucket_bytes_cap
+        assert (
+            self.first_bucket_cap <= self.bucket_bytes_cap
+        ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
         self.parameters_to_ignore = parameters_to_ignore
         self.backend_compile_fn = backend_compile_fn
         self.debug = debug
@@ -35,76 +70,69 @@ class DDPOptimizer:
         """
         TODO:
         - handle params_and_buffers_to_ignore
-        - handle kwargs
         """
 
         # 1: compute the partition map according to DDP bucket logic
-        bucket_bytes = 0
-        bucket_actual_sizes = []
-        node_splits = [[]]
+        buckets = [Bucket()]  # (size, param_names)
         for node in reversed(gm.graph.nodes):
-            if node.op == "output" or node.op == "placeholder":
+            if node.op in ("output", "placeholder"):
                 continue
 
-            if bucket_bytes >= self.bucket_bytes_cap:
-                bucket_actual_sizes.insert(0, bucket_bytes)
-                bucket_bytes = 0
-                node_splits.insert(0, [])
+            if (
+                buckets[0].size >= self.bucket_bytes_cap
+                or len(buckets) == 1
+                and buckets[0].size >= self.first_bucket_cap
+            ):
+                buckets.insert(0, Bucket())
 
-            elif node.op == "call_module":
+            if node.op == "call_module":
                 target = gm.get_submodule(node.target)
-                params_size_b = sum(
-                    [
-                        p.storage().nbytes()
-                        for p in target.parameters()
-                        if p.requires_grad
-                    ]
-                )
-                bucket_bytes += params_size_b
-                # print(f"accumulated {params_size_b} b from {node}")
+                for name, p in target.named_parameters():
+                    if p.requires_grad:
+                        buckets[0].size += p.storage().nbytes()
+                        # TODO correct FQ name?
+                        buckets[0].params.append(f"{node}_{name}")
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if maybe_param.requires_grad:
-                    bucket_bytes += maybe_param.storage().nbytes()
-            else:
-                # TODO(whc) confirm this:
-                # (e.g. call_method, call_function aren't expected to 'have' parameters)
-                pass
+                    buckets[0].size += maybe_param.storage().nbytes()
+                    buckets[0].params.append(node.target)
 
-            node_splits[0].append(node)
+            # All nodes have to be mapped to a bucket, even if they don't have their own params
+            buckets[0].nodes.append(node)
 
-        if len(node_splits) == 1:
-            if self.debug:
-                print(
-                    "DDPOptimizer did not split graphs."
-                    f" Accumulated {bucket_bytes} bytes, and bucket cap is {self.bucket_bytes_cap}"
-                )
-            return self.backend_compile_fn(gm, example_inputs)
-
-        if len(bucket_actual_sizes) < len(node_splits):
-            bucket_actual_sizes.insert(0, bucket_bytes)
-
+        # stash buckets for testing/debugging purposes
+        self.buckets = buckets
         if self.debug:
             print(
-                f"DDPOptimizer used bucket cap {self.bucket_bytes_cap}"
-                f" and split graphs into parameter sizes {', '.join([str(b) for b in bucket_actual_sizes])}"
+                f"DDPOptimizer used bucket cap {self.bucket_bytes_cap} and produced the following buckets:"
             )
+            pretty_print_buckets(buckets)
+
+        if len(buckets) == 1:
+            # bypass split/fuse logic if there is only one bucket
+            return self.backend_compile_fn(gm, example_inputs)
 
         # 2: partition the graphmodule according to bucket capacity
         partition_map = {}
-        for p, nodes in enumerate(node_splits):
-            for node in nodes:
-                partition_map[node] = p
+        for idx, b in enumerate(buckets):
+            for node in b.nodes:
+                partition_map[node] = idx
 
         split_gm = fx.passes.split_module.split_module(
             gm, None, lambda node: partition_map[node]
         )
         if self.debug:
-            with open("debug_ddp_optimizer.log", "w") as dump_file:
-                dump_file.write("---orig graph---")
-                dump_file.write(str(gm.graph))
-                dump_file.write("\n---split graph---")
-                dump_file.write(str(split_gm.graph))
+            print("---orig graph---")
+            print(str(gm.graph))
+            print("\n---split graph---")
+            print(str(split_gm.graph))
+            for name, module in split_gm.named_modules():
+                if "." not in name:
+                    # only print the submod graphs, not their children
+                    print(f"\n---{name} graph---")
+                    print(str(module.graph))
+            print("---------------")
 
         # 3: compile each of the partitioned submodules using the user-provided compiler
         class SubmodCompiler(torch.fx.interpreter.Interpreter):
@@ -171,7 +199,6 @@ class DDPOptimizer:
                         self.module.delete_submodule(n.target)
                         n.target = "compiled_" + n.target
                         self.module.add_submodule(n.target, compiled_submod)
-
                     # then we execute the modified node using the usual logic
                     return getattr(self, n.op)(n.target, args, kwargs)
 
@@ -180,8 +207,8 @@ class DDPOptimizer:
         split_gm.recompile()
 
         if self.debug:
-            with open("debug_ddp_optimizer.log", "a") as dump_file:
-                dump_file.write("\n---final graph---")
-                dump_file.write(str(split_gm.graph))
+            print("\n---final graph---")
+            print(str(split_gm.graph))
+            print("---------------")
 
         return split_gm
