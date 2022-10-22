@@ -11,6 +11,7 @@ import torch.utils.hooks as hooks
 from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
+from torch.utils import _pytree
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -1390,7 +1391,12 @@ class Module:
                     result = hook_result
 
         if bw_hook:
-            result = bw_hook.setup_output_hook(result)
+            # Modules can return results as dict, list, tuple, etc.
+            # Use tree_flatten to flatten the result to a normalized
+            # structure.
+            result_flatten, spec = _pytree.tree_flatten(result)
+            result_flatten = bw_hook.setup_output_hook(result_flatten)
+            result = _pytree.tree_unflatten(result_flatten, spec)
 
         # Handle the non-full backward hooks
         if non_full_backward_hooks:

@@ -200,15 +200,8 @@ class BackwardHook(object):
                     self.grad_outputs = None
             grad_fn.register_hook(hook)
 
-        is_tuple = True
-        if not isinstance(args, tuple):
-            args = (args,)
-            is_tuple = False
-
         res, output_idx = self._apply_on_tensors(fn, args)
         self.n_outputs = len(args)
         self.output_tensors_index = output_idx
 
-        if not is_tuple:
-            res = res[0]
         return res

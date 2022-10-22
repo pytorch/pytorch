@@ -236,8 +236,7 @@ class TestNN(NNTestCase):
         for b in net.buffers():
             self.assertTrue(b.storage().is_shared())
 
-    def _test_hooks(self, backward_register_fn):
-        module = nn.Sigmoid()
+    def _test_hooks(self, module, get_out_for_bw_fn, backward_register_fn, forward_checks=True):
         input = torch.ones(5, 5, requires_grad=True)
 
         counter = {
@@ -246,11 +245,12 @@ class TestNN(NNTestCase):
         }
 
         def fw_hook(inc, h_module, input, output):
-            self.assertIsInstance(input, tuple)
-            self.assertTrue(isinstance(output, torch.Tensor))
-            self.assertTrue(h_module is module)
-            self.assertEqual(input[0], torch.ones(5, 5))
-            self.assertEqual(output, torch.empty(5, 5).fill_(1 / (1 + 1 / math.e)))
+            if forward_checks:
+                self.assertIsInstance(input, tuple)
+                self.assertTrue(isinstance(output, torch.Tensor))
+                self.assertTrue(h_module is module)
+                self.assertEqual(input[0], torch.ones(5, 5))
+                self.assertEqual(output, torch.empty(5, 5).fill_(1 / (1 + 1 / math.e)))
             counter['forwards'] += inc
 
         def bw_hook(inc, h_module, grad_input, grad_output):
@@ -283,11 +283,11 @@ class TestNN(NNTestCase):
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 0)
 
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        get_out_for_bw_fn(output).backward(torch.ones(5, 5) * 2, retain_graph=True)
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 1)
 
-        output.backward(torch.ones(5, 5) * 2, retain_graph=True)
+        get_out_for_bw_fn(output).backward(torch.ones(5, 5) * 2, retain_graph=True)
         self.assertEqual(counter['forwards'], 3)
         self.assertEqual(counter['backwards'], 2)
 
@@ -299,19 +299,19 @@ class TestNN(NNTestCase):
 
         test2_bwd = getattr(module, backward_register_fn)(lambda *args: bw_hook_fn(2, *args))
 
-        module(input).backward(torch.ones(5, 5) * 2)
+        get_out_for_bw_fn(module(input)).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 9)
         self.assertEqual(counter['backwards'], 5)
 
         test2_bwd.remove()
 
-        module(input).backward(torch.ones(5, 5) * 2)
+        get_out_for_bw_fn(module(input)).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 12)
         self.assertEqual(counter['backwards'], 6)
 
         test2_fwd.remove()
 
-        module(input).backward(torch.ones(5, 5) * 2)
+        get_out_for_bw_fn(module(input)).backward(torch.ones(5, 5) * 2)
         self.assertEqual(counter['forwards'], 13)
         self.assertEqual(counter['backwards'], 7)
 
@@ -320,9 +320,40 @@ class TestNN(NNTestCase):
 
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hooks(self):
-        self._test_hooks("register_backward_hook")
-        self._test_hooks("register_full_backward_hook")
-        self._test_hooks("register_full_backward_pre_hook")
+        self._test_hooks(nn.Sigmoid(), lambda out: out, "register_backward_hook")
+        self._test_hooks(nn.Sigmoid(), lambda out: out, "register_full_backward_hook")
+        self._test_hooks(nn.Sigmoid(), lambda out: out, "register_full_backward_pre_hook")
+
+        class ModuleReturningDict(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.sigmoid(x)
+                return {'x': x}
+
+        self._test_hooks(ModuleReturningDict(), lambda out: out['x'], "register_backward_hook",
+                         forward_checks=False)
+        self._test_hooks(ModuleReturningDict(), lambda out: out['x'], "register_full_backward_hook",
+                         forward_checks=False)
+        self._test_hooks(ModuleReturningDict(), lambda out: out['x'], "register_full_backward_pre_hook",
+                         forward_checks=False)
+
+        class ModuleReturningList(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.sigmoid(x)
+                return [x, x]
+
+        self._test_hooks(ModuleReturningList(), lambda out: out[0], "register_backward_hook",
+                         forward_checks=False)
+        self._test_hooks(ModuleReturningList(), lambda out: out[0], "register_full_backward_hook",
+                         forward_checks=False)
+        self._test_hooks(ModuleReturningList(), lambda out: out[0], "register_full_backward_pre_hook",
+                         forward_checks=False)
+
 
     def test_hook_cpp(self):
         bn = nn.BatchNorm1d(5)
