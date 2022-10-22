@@ -1234,22 +1234,14 @@ def get_independent_tensor(tensor):
     return tensor.clone().requires_grad_(tensor.requires_grad)
 
 def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
-    samples = []
     low = 2
     high = 10
 
     for sample in sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
         # With high
-        samples.append(SampleInput(
-            high,
-            args=(sample.input.shape,) + sample.args,
-            kwargs=sample.kwargs))
+        yield SampleInput(high, sample.input.shape, *sample.args, **sample.kwargs)
         # With low and high
-        samples.append(SampleInput(
-            low,
-            args=(high, sample.input.shape) + sample.args,
-            kwargs=sample.kwargs))
-    return tuple(samples)
+        yield SampleInput(low, high, sample.input.shape, *sample.args, **sample.kwargs)
 
 def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
     low = 2
