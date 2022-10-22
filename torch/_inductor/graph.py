@@ -210,8 +210,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        if example.dim() != 0:
-            self.device_types.add(example.device.type)
+        self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -345,3 +344,12 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(node, ir.NoneAsConstantBuffer)
             and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]
+
+    def is_unspec_arg(self, name):
+        # dynamo wraps unspec variable as 0d CPU tensor,
+        # need to convert to scalar during codegen (triton only)
+        return (
+            name in self.graph_inputs.keys()
+            and self.graph_inputs[name].get_numel() == 1
+            and self.graph_inputs[name].get_device().type == "cpu"
+        )

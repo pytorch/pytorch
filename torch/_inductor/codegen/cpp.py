@@ -275,6 +275,30 @@ class CppVecOverrides(OpOverrides):
         return f"at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({quote})"
 
     @staticmethod
+    def relu(x):
+        return f"at::vec::clamp_min({x}, decltype({x})(0))"
+
+    @staticmethod
+    def sigmoid(x):
+        return f"decltype({x})(1)/(decltype({x})(1) + {x}.neg().exp())"
+
+    @staticmethod
+    def neg(x):
+        return f"{x}.neg()"
+
+    @staticmethod
+    def floordiv(a, b):
+        # a and b are integer type
+        _t = f"decltype({a})"
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < {_t}(0)) != ({b} < {_t}(0)) ? ({rem} != {_t}(0) ? {quot} - {_t}(1) : {quot}) : {quot})"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # a and b are integer type
+        return f"{a} / {b}"
+
     def minimum(a, b):
         return f"at::vec::minimum({a}, {b})"
 
@@ -649,6 +673,7 @@ class CppVecKernel(CppKernel):
     def __init__(self, args, num_threads):
         super(CppVecKernel, self).__init__(args, num_threads)
         self.simd_len = config.cpp.simdlen
+        self.reduction_omp_dec: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
 
     def is_single_step_var(self, var: sympy.Symbol, index: sympy.Expr):
@@ -702,6 +727,25 @@ class CppVecKernel(CppKernel):
         assert src_dtype == torch.float
         reduce_map = {"max": "maximum", "min": "minimum"}
 
+        vec_ns = "at::vec"
+        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+
+        if reduction_type not in self.reduction_omp_dec:
+            vec_reduc_prefix = f"#pragma omp declare reduction("
+            vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
+            if reduction_type == "sum":
+                vec_reduc_prefix += "omp_out += omp_in"
+            else:
+                vec_reduc_prefix += f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
+            vec_reduc_prefix += ")"
+            vec_reduc_prefix += " initializer("
+            vec_reduc_prefix += "omp_priv={{"
+            vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
+            vec_reduc_prefix += "}})"
+            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_prefix.writeline(vec_reduc_prefix)
+
+
         tmpvar = self.cse.generate(
             self.loads, f"reduction {name} {cexpr(index)}", write=False
         )
@@ -719,8 +763,6 @@ class CppVecKernel(CppKernel):
             None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
-        vec_ns = "at::vec"
-        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
         reduce_all_body = "{"
         if reduction_type == "sum":
             reduce_all_body += "return x + y;"
@@ -933,12 +975,6 @@ class CppKernelProxy(CppKernel):
                 self.simd_vec_kernel.call_ranges[reduction_depth:], threads
             )
 
-            # Does not support parallelizing the vectorized reduction as the
-            # most inner loop will be vectorized.
-            # TODO: To support the case
-            if reduction_par_depth and len(loops_nest_reduce.loops) == 1:
-                return self.simd_omp_kernel.codegen_loops(code, worksharing)
-
         with contextlib.ExitStack() as stack:
             if par_depth:
                 worksharing.parallel(threads)
@@ -977,7 +1013,6 @@ class CppKernelProxy(CppKernel):
                 code.splice(self.simd_vec_kernel.reduction_prefix)
 
                 if reduction_par_depth:
-                    assert reduction_par_depth <= len(reduce_loops)
                     worksharing.parallel(threads)
 
                 with contextlib.ExitStack() as stack:
@@ -1001,6 +1036,7 @@ class CppKernelProxy(CppKernel):
                     gen_vectorized_loop(
                         loop_with_tail.main_loop, loop_with_tail.main_loop_body, True
                     )
+
                     gen_vectorized_loop(
                         loop_with_tail.tail_loop, loop_with_tail.tail_loop_body, False
                     )
@@ -1233,8 +1269,9 @@ class LoopLevel:
 
     def lines(self):
         if self.reduction_vars:
+            suffix = "_vec" if self.simd_vec else ""
             reduction = " " + " ".join(
-                f"reduction({RTYPE_TO_CPP[rtype]}:{var})"
+                f"reduction({RTYPE_TO_CPP[rtype]}:{var}{suffix})"
                 for var, rtype in self.reduction_vars.items()
             )
         else:
@@ -1305,19 +1342,14 @@ class LoopNest:
         main_loop_range = ir.IndexingDiv(most_inner_loop.size, sympy_factor)
 
         main_loop = LoopLevel(most_inner_loop.var, main_loop_range)
-        not_reduction_loop = not bool(most_inner_loop.reduction_vars)
-        main_loop.parallel = (
-            1 if most_inner_loop.parallel > 0 and not_reduction_loop else 0
-        )
+        main_loop.parallel = most_inner_loop.parallel
         main_loop.collapsed = False
         main_loop.reduction_vars = most_inner_loop.reduction_vars
 
         offset = main_loop_range * sympy_factor
         tail_loop = LoopLevel(most_inner_loop.var, most_inner_loop.size)
         tail_loop.offset = offset
-        tail_loop.parallel = (
-            1 if most_inner_loop.parallel > 0 and not_reduction_loop else 0
-        )
+        tail_loop.parallel = most_inner_loop.parallel
         tail_loop.collapsed = False
         tail_loop.reduction_vars = most_inner_loop.reduction_vars
 
