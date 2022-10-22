@@ -93,14 +93,14 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.8
-          environment-file: .github/conda-env-${{ runner.os }}-${{ runner.arch }}
+          environment-file: .github/conda-env-${{ runner.os }}-${{ runner.arch }}.yml
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
-          environment-file: .github/conda-env-${{ runner.os }}-${{ runner.arch }}
+          environment-file: .github/conda-env-${{ runner.os }}-${{ runner.arch }}.yml
 
       - name: Start monitoring script
         id: monitor-script
