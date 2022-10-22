@@ -14,4 +14,4 @@ pillow
 libuv
 pkg-config
 certifi
-wheel=0.36.2
+wheel=0.37.1
