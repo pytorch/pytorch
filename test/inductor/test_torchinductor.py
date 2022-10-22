@@ -167,7 +167,6 @@ def compute_grads(args, kwrags, results, grads):
 
 
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
-@patch("torch._dynamo.config.raise_on_backend_error", True)
 def check_model(
     self: TestCase,
     model,
@@ -3802,7 +3801,6 @@ class CommonTemplate:
         self.common(forward, args)
 
     @requires_cuda()
-    @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs(self):
         def fn(x, y):
             return x + y, x * y, x / y
@@ -3818,16 +3816,15 @@ class CommonTemplate:
         self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @requires_cuda()
-    @patch.object(config.triton, "cudagraphs", True)
-    def test_unspec_inputs_cudagraphs(self):
+    def test_unspec_inputs_fp16(self):
         def fn(x, y):
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
-            rand_strided((2, 3), (3, 1), device="cuda"),
-            rand_strided((), (), device="cpu"),
+            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
+            rand_strided((), (), dtype=torch.float16, device="cpu"),
         )
         self.assertTrue(same(opt(*inputs), fn(*inputs)))
         inputs = (inputs[1], inputs[0])
@@ -4040,6 +4037,29 @@ if HAS_CUDA:
                 torch.ones(shape, dtype=dtype, device="cuda") for (shape, dtype) in inps
             ]
             mod = make_fx(forward)(*inps)
+            compiled = compile_fx_inner(mod, inps)
+            compiled(inps)
+
+        # https://github.com/pytorch/torchdynamo/issues/1681#issuecomment-1283433527
+        @requires_cuda()
+        def test_unspec_inputs_interop(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, x, y):
+                    unsqueeze = torch.ops.aten.unsqueeze.default(x, 4)
+                    permute = torch.ops.aten.permute.default(unsqueeze, [0, 1, 2, 4, 3])
+                    add = torch.ops.aten.add.Tensor(y, 1)
+                    return [permute, add]
+
+            inps = [
+                rand_strided(
+                    (12, 3, 512, 64), (64, 196608, 768, 1), torch.float32, "cuda"
+                ),
+                rand_strided((), (), torch.int64, "cpu"),
+            ]
+            mod = make_fx(Repro().to(device="cuda"))(*inps)
             compiled = compile_fx_inner(mod, inps)
             compiled(inps)
 
