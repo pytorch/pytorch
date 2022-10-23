@@ -591,7 +591,6 @@ class CheckFunctionManager:
                     if not evaluation:
                         expr_as_str = f"not {expr_as_str}"
 
-                    print(expr_as_str)
                     code_parts.append(expr_as_str)
                     verbose_code_parts.append(expr_as_str)
 
