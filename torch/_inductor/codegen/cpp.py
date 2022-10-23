@@ -299,6 +299,7 @@ class CppVecOverrides(OpOverrides):
         # a and b are integer type
         return f"{a} / {b}"
 
+    @staticmethod
     def minimum(a, b):
         return f"at::vec::minimum({a}, {b})"
 
@@ -731,12 +732,14 @@ class CppVecKernel(CppKernel):
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
 
         if reduction_type not in self.reduction_omp_dec:
-            vec_reduc_prefix = f"#pragma omp declare reduction("
+            vec_reduc_prefix = "#pragma omp declare reduction("
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
             if reduction_type == "sum":
                 vec_reduc_prefix += "omp_out += omp_in"
             else:
-                vec_reduc_prefix += f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
+                vec_reduc_prefix += (
+                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
+                )
             vec_reduc_prefix += ")"
             vec_reduc_prefix += " initializer("
             vec_reduc_prefix += "omp_priv={{"
@@ -744,7 +747,6 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += "}})"
             self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
             self.reduction_prefix.writeline(vec_reduc_prefix)
-
 
         tmpvar = self.cse.generate(
             self.loads, f"reduction {name} {cexpr(index)}", write=False
