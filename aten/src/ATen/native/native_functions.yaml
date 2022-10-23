@@ -985,6 +985,8 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   tags: nondeterministic_seeded
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: bernoulli
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias=None) -> Tensor
 
