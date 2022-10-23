@@ -1889,6 +1889,18 @@ def upsample_bilinear2d_backward_vec_meta(grad_output, output_size, input_size, 
     mem_format = utils.suggest_memory_format(grad_output)
     return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
+@register_meta(aten.topk.default, register_dispatcher=False)
+def topk_meta(self, k, dim=-1, largest=True, sorted=True):
+    dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
+    check(k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1), lambda: "selected index k out of range")
+    sliceSize = 1 if self.dim() == 0 else self.size(dim)
+    check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
+
+    topKSize = list(self.shape)
+    if len(topKSize) > 0:
+        topKSize[dim] = k
+    return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
