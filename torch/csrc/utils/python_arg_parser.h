@@ -443,7 +443,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 
 inline bool PythonArgs::has_torch_function() {
   return !this->signature.overloaded_args.empty() ||
-      at::impl::PythonTorchFunctionTLS::get_mode();
+      at::impl::torch_function_mode_enabled();
 }
 
 inline std::string PythonArgs::get_func_name() {
