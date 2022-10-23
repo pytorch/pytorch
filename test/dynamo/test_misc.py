@@ -725,7 +725,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     @patch.object(
         torch._dynamo.config, "dynamic_shapes", False
-    )  #  aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
+    )  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
