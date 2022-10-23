@@ -170,6 +170,7 @@ USE_PYTEST_LIST = [
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
     "test_deploy",
+    "distributed/test_c10d_error_logger.py"
 ]
 
 WINDOWS_BLOCKLIST = [
