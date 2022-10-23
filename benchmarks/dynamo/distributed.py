@@ -1,7 +1,6 @@
 import argparse
 from functools import partial
 
-import functorch.compile
 import numpy as np
 import tabulate
 import torch
