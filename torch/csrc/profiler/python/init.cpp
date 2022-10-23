@@ -191,7 +191,9 @@ void initPythonBindings(PyObject* module) {
             return out;
           })
       .def_property_readonly(
-          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
+          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); })
+      .def_readonly("self_ptr", &NNModuleInfo::self_)
+      .def_readonly("cls_ptr", &NNModuleInfo::cls_);
 
   py::class_<OptimizerInfo>(m, "_OptimizerInfo")
       .def_readonly("self_ptr", &OptimizerInfo::self_)
