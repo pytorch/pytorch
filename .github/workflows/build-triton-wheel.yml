@@ -98,3 +98,31 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+  upload-wheel:
+    runs-on: ubuntu-22.04
+    needs: build-wheel
+    container:
+      image: continuumio/miniconda3:4.12.0
+    strategy:
+      fail-fast: false
+      matrix:
+        py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
+    env:
+      GITHUB_TOKEN: ${{ secrets.github-token }}
+    steps:
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: "pytorch-triton-${{ matrix.py_vers }}"
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Upload binaries
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          # When running these on pull_request events these should be blank
+          AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
+          UPLOAD_BUCKET: "s3://pytorch"
+        run: |
+            set -ex
+            s3_dir="${UPLOAD_BUCKET}/whl/nightly/"
+            aws s3 cp --no-progress --acl public-read "${PKG_DIR}/*.whl" "${s3_dir}"
