@@ -5605,6 +5605,14 @@ class TestNLLLoss(TestCase):
             helper(3, 8, dtype)
             helper(8, 3, dtype)
 
+    # Test argsort
+    def test_argsort(self):
+        def helper(stable, dim, descending):
+            argsort_mps_result = torch.argsort(stable, dim, descending).to("mps")
+            argsort_cpu_result = torch.argsort(stable, dim, descending).to("cpu")
+
+            self.assertEqual(argsort_mps_result, argsort_cpu_result)
+
     # Test diag
     def test_diag(self):
         def helper(shape, diag=0):
