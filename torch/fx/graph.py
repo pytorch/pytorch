@@ -160,7 +160,7 @@ class _Namespace:
             candidate = f'{base}_{num}'
 
         self._used_names.add(candidate)
-        self._base_count[base] = num + 1
+        self._base_count[base] = num
         if obj is None:
             self._unassociated_names.add(candidate)
         else:
