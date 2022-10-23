@@ -89,6 +89,7 @@ def full_backward_pre_hook(
 
 class TestModuleHooks(TestCase):
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_forward_hooks(self):
         fired_hooks: List[int] = []
         model = ToyModel()
@@ -109,6 +110,7 @@ class TestModuleHooks(TestCase):
         model(x).sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_forward_pre_hooks(self):
         fired_hooks: List[int] = []
         model = ToyModel()
@@ -129,6 +131,7 @@ class TestModuleHooks(TestCase):
         model(x).sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_full_backward_hooks(self):
         fired_hooks: List[int] = []
         model = ToyModel()
@@ -149,7 +152,7 @@ class TestModuleHooks(TestCase):
         model(x).sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture backward-pre hooks")
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_full_backward_pre_hooks(self):
         fired_hooks: List[int] = []
         model = ToyModel()
@@ -170,7 +173,7 @@ class TestModuleHooks(TestCase):
         model(x).sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture backward hooks")
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_mixed_hooks(self):
         fired_hooks: List[int] = []
         model = ToyModel()
