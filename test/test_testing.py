@@ -68,7 +68,7 @@ class TestTesting(TestCase):
 
             self.longMessage = True
             extra_msg = "sentinel"
-            with self.assertRaisesRegex(AssertionError, re.escape(f"{default_msg} : {extra_msg}")):
+            with self.assertRaisesRegex(AssertionError, re.escape(f"{default_msg}\n{extra_msg}")):
                 self.assertEqual(actual, expected, msg=extra_msg)
         finally:
             self.longMessage = long_message
