@@ -126,7 +126,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    @unittest.expectedFailure  # Fails with inductor (submod_0 no output...?)
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
