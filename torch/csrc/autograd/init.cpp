@@ -28,6 +28,7 @@
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_torch_function_mode.h>
 
 #include <set>
 #include <unordered_set>
@@ -606,24 +607,11 @@ static PyObject* python_exit_dual_level(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_torch_function_mode(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (arg == Py_None) {
-    at::impl::PythonTorchFunctionTLS::set_mode(nullptr);
-  } else {
-    Py_INCREF(arg);
-    at::impl::PythonTorchFunctionTLS::set_mode(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS;
-}
-
 static PyObject* is_torch_function_mode_enabled(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  if (at::impl::function_mode_enabled()) {
+  if (at::impl::torch_function_mode_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -680,19 +668,6 @@ static PyObject* len_torch_function_stack(
   const auto len = at::impl::PythonTorchFunctionTLS::stack_len();
   return utils::wrap(static_cast<int64_t>(len));
   END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (arg == Py_None) {
-    c10::impl::TorchDispatchModeTLS::set_mode(nullptr);
-  } else {
-    Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::set_mode(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS;
 }
 
 static PyObject* push_on_torch_dispatch_stack(
@@ -795,7 +770,6 @@ static PyMethodDef methods[] = { // NOLINT
      is_torch_function_mode_enabled,
      METH_NOARGS,
      nullptr},
-    {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
     {"_push_on_torch_function_stack",
      push_on_torch_function_stack,
      METH_O,
@@ -812,7 +786,6 @@ static PyMethodDef methods[] = { // NOLINT
      len_torch_function_stack,
      METH_NOARGS,
      nullptr},
-    {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
     {"_push_on_torch_dispatch_stack",
      push_on_torch_dispatch_stack,
      METH_O,
