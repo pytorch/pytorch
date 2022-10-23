@@ -441,6 +441,20 @@ PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
       c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
   END_HANDLE_TH_ERRORS
 }
+static PyObject* THModule_rename_privateuse1_backend(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_rename_privateuse1_backend expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  const std::string backend_name = THPUtils_unpackString(arg);
+  c10::register_privateuse1_backend(backend_name);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 
 PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
@@ -990,6 +1004,10 @@ static PyMethodDef TorchMethods[] = {
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
+    {"_rename_privateuse1_backend",
+     THModule_rename_privateuse1_backend,
+     METH_O,
+     nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
