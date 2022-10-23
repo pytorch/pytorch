@@ -357,7 +357,6 @@ class TorchVariable(VariableTracker):
                     if isinstance(x.value, numpy.generic):
                         x.value = x.value.item()
 
-            breakpoint()
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(

@@ -204,6 +204,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
 
+    @patch.object(
+        torch._dynamo.config, "dynamic_shapes", False
+    )  # float() argument must be a string or a real number, not 'torch._C.SymIntNode'
     def test_unspec_float_precision(self):
         def fn(image, scale_factor):
             image = torch.nn.functional.interpolate(

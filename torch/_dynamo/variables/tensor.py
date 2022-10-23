@@ -1,11 +1,11 @@
 import copy
+import ctypes
 import functools
 import itertools
 import math
 import numbers
 import operator
 from typing import Dict, List
-import ctypes
 
 import torch.fx
 import torch.random
@@ -49,7 +49,6 @@ class _missing:
 def _run_node(output_graph, node, args, kwargs, nnmodule):
     op = node.op
     if op == "call_function":
-        breakpoint()
         return node.target(*args, **kwargs)
     elif op == "call_method":
         return getattr(args[0], node.target)(*args[1:], **kwargs)
@@ -200,7 +199,6 @@ class TensorVariable(VariableTracker):
         with preserve_rng_state():
             if example_value is None:
                 if use_fake_tensors:
-                    # breakpoint()
                     example_value = _get_fake_value(proxy.node, tx)
                 else:
                     example_value = _get_real_value(proxy.node, tx.output)
@@ -585,7 +583,6 @@ class DynamicShapeVariable(TensorVariable):
     """
 
     def __init__(self, proxy, dyn_shape, **kwargs):
-        breakpoint()
         super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
         self.dyn_shape = dyn_shape
 
