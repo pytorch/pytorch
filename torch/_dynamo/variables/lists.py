@@ -395,7 +395,10 @@ class ListIteratorVariable(VariableTracker):
     def __init__(self, items, index: int = 0, **kwargs):
         super(ListIteratorVariable, self).__init__(**kwargs)
         assert isinstance(items, list)
-        assert all(isinstance(x, VariableTracker) for x in items)
+        # Removing this check as it slows things down too much
+        # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492
+
+        # assert all(isinstance(x, VariableTracker) for x in items)
         self.items = items
         self.index = index
 
