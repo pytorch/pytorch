@@ -428,9 +428,9 @@ class ShapeEnv(object):
                 )[0]
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
-        return [self.create_symintnode(x, id(ex), "size", idx) for idx, x in enumerate(size)], [self.create_symintnode(x, id(ex), "stride", idx) for idx, x in enumerate(stride)]  # type: ignore[arg-type]
+        return [self.create_symintnode(x, id(ex), "size", idx) for idx, x in enumerate(size)], [self.create_symintnode(x, id(ex), "stride", idx) for idx, x in enumerate(stride)]  # type: ignore[arg-type] # noqa: B950
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int], ref_id: Optional[int]=None, kind: Optional[str]=None, idx: Optional[int]=None):
+    def create_symintnode(self, expr: Union["sympy.Expr", int], ref_id: Optional[int] = None, kind: Optional[str] = None, idx: Optional[int] = None):  # noqa: B950
         py_sym_int = PySymInt(expr, self, ref_id=ref_id, kind=kind, idx=idx)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         return cpp_sym_int
