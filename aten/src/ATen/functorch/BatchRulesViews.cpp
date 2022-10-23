@@ -506,7 +506,7 @@ std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, 
 }
 
 Tensor trace_decomp(const Tensor& tensor) {
-  return tensor.diag().sum();
+  return tensor.diagonal().sum();
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
