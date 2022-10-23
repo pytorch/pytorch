@@ -127,7 +127,7 @@ class PySymInt(object):
                 self.shape_env.expr_to_id[self.ref_id] = set()
             self.shape_env.expr_to_id[self.ref_id].add((self.expr, self.kind, self.idx))
 
-    
+
     @property
     def expr(self):
         self._update_expr()
@@ -178,11 +178,11 @@ class PySymFloat:
         if self.ref_id and str(self.expr) not in ('False', 'True'):
             if self.expr not in self.shape_env.expr_to_id:
                 self.shape_env.expr_to_id[self.expr] = set()
-            self.shape_env.expr_to_id[self.expr].add((self.ref_id, self.kind, self.idx))
+            self.shape_env.expr_to_id[self.expr].add((self.ref_id, None, None))
 
             if self.ref_id not in self.shape_env.expr_to_id:
                 self.shape_env.expr_to_id[self.ref_id] = set()
-            self.shape_env.expr_to_id[self.ref_id].add((self.expr, self.kind, self.idx))
+            self.shape_env.expr_to_id[self.ref_id].add((self.expr, None, None))
 
     def wrap(self, num):
         return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
@@ -430,7 +430,7 @@ class ShapeEnv(object):
         assert all(x is not None for x in stride)
         return [self.create_symintnode(x, id(ex), "size", idx) for idx, x in enumerate(size)], [self.create_symintnode(x, id(ex), "stride", idx) for idx, x in enumerate(stride)]  # type: ignore[arg-type]
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int], ref_id: int, kind: str, idx: int):
+    def create_symintnode(self, expr: Union["sympy.Expr", int], ref_id: Optional[int]=None, kind: Optional[str]=None, idx: Optional[int]=None):
         py_sym_int = PySymInt(expr, self, ref_id=ref_id, kind=kind, idx=idx)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         return cpp_sym_int
