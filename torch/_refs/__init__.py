@@ -219,6 +219,7 @@ __all__ = [
     "constant_pad_nd",
     "contiguous",
     "diag_embed",
+    "diag",
     "diagonal",
     "diagonal_copy",
     "dsplit",
@@ -3481,6 +3482,22 @@ def vsplit(
 
     split_sizes = indices_or_sections
     return tensor_split(a, split_sizes, 0)
+
+
+@register_decomposition(torch.ops.aten.diag.out)
+@out_wrapper()
+def diag(
+    self: TensorLikeType,
+    offset: int = 0,
+) -> TensorLikeType:
+    ndim = self.dim()
+    utils.check(
+        ndim in (1, 2), lambda: f"diag(): Supports 1D or 2D tensors. Got {ndim}D"
+    )
+    if ndim == 1:
+        return torch.diag_embed(self, offset)
+    else:
+        return torch.diagonal_copy(self, offset)
 
 
 @register_decomposition(torch.ops.aten.diagonal, disable_meta=True)
