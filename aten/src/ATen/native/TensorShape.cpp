@@ -3709,8 +3709,16 @@ at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayR
 
 
 at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
-  auto tmp = self.diagonal(offset, dim1, dim2);
-  out.copy_(tmp);
+  TORCH_CHECK(
+    out.device() == self.device(),
+    "diagonal_copy: Expected out and self tensors to be on the same device, but got ",
+    "out on ", out.device(), " and self on ", self.device());
+  auto result = self.diagonal(offset, dim1, dim2);
+  at::native::resize_output(out, result.sizes());
+  TORCH_CHECK(
+      canCast(result.scalar_type(), out.scalar_type()),
+      "diagonal_copy: result type ", result.scalar_type(), " can't be cast to the desired out= type ", out.scalar_type());
+  out.copy_(result);
   return out;
 }
 

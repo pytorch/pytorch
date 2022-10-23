@@ -1003,6 +1003,7 @@ symbolic_aot_autograd_failures = {
     xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diagonal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('diagonal_copy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diagonal_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition

@@ -295,6 +295,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "reflection_pad3d",
     "linalg_cholesky_ex",
     "linalg_eig",
+    "diagonal_copy",
     "select_backward",
     "diagonal_backward",
     "slice_backward",
