@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
-    foreach_reduce_op_db)
+    foreach_reduce_op_db, foreach_lerp_op_db)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, integral_types, complex_types,
     floating_types_and, floating_types, integral_types_and,
@@ -693,6 +693,40 @@ class TestForeach(TestCase):
             self.assertTrue(all(torch.isinf(e) for e in expect))
         self.assertEqual(expect, actual, equal_nan=False)
 
+    def _test_lerp_impl(self, device, dtype, opinfo, use_tensors_as_weight, N, is_fastpath):
+        op, ref, inplace_op, _ = self._get_funcs(opinfo, 1)
+        inputs = [
+            opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath)
+            for _ in range(2 + use_tensors_as_weight)
+        ]
+        weight = random.random() if not use_tensors_as_weight else None
+        kwargs = ref_kwargs = {} if use_tensors_as_weight else {"weight": weight}
+
+        if (
+            dtype in integral_types() or
+            dtype == torch.bool or
+            (not self.is_cuda and dtype == torch.half)
+        ):
+            with self.assertRaises(RuntimeError):
+                op(inputs, self.is_cuda, is_fastpath, **kwargs)
+            return
+        actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
+        expected = ref(inputs, **ref_kwargs)
+        self.assertEqual(actual, expected)
+
+        inplace_inputs = [[t.clone() for t in inputs[0]]] + inputs[1:]
+        inplace_actual = inplace_op(inplace_inputs, self.is_cuda, is_fastpath, **kwargs)
+        self.assertEqual(inplace_actual, expected)
+
+    @ops(foreach_lerp_op_db)
+    def test_lerp_fastpath(self, device, dtype, op):
+        for use_tensors_as_weight, N in itertools.product((True, False), N_values):
+            self._test_lerp_impl(device, dtype, op, use_tensors_as_weight, N, True)
+
+    @ops(foreach_lerp_op_db, dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    def test_lerp_slowpath(self, device, dtype, op):
+        for use_tensors_as_weight, N in itertools.product((True, False), N_values):
+            self._test_lerp_impl(device, dtype, op, use_tensors_as_weight, N, False)
 
 instantiate_device_type_tests(TestForeach, globals())
 

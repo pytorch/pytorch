@@ -7918,6 +7918,14 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ),
 ]
 
+foreach_lerp_op_db: List[ForeachFuncInfo] = [
+    ForeachFuncInfo(
+        "lerp",
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
+    ),
+]
+
 def reference_sign(x):
     if x.dtype == np.bool_:
         # `np.sign` doesn't support `bool`.
