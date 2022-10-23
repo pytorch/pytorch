@@ -22,7 +22,7 @@ from torch._dynamo.utils import clone_inputs
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-def setup_torchbench_env():
+def setup_torchbench_cwd():
     original_dir = abspath(os.getcwd())
 
     os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
@@ -42,10 +42,9 @@ def setup_torchbench_env():
         torchbench_dir = abspath(torchbench_dir)
         os.chdir(torchbench_dir)
         sys.path.append(torchbench_dir)
+
     return original_dir
 
-
-original_dir = setup_torchbench_env()
 
 # Some models have large dataset that doesn't fit in memory. Lower the batch
 # size to test the accuracy.
@@ -331,7 +330,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        mod.zero_grad(True)
+        self.optimizer_zero_grad()
         with self.autocast():
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
@@ -344,6 +343,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
 if __name__ == "__main__":
 
+    original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)

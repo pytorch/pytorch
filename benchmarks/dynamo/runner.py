@@ -255,6 +255,9 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.quick:
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
+
+                    if testing == "performance" and compiler == "inductor":
+                        cmd = f"{cmd} --cold_start_latency"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
@@ -815,6 +818,7 @@ class DashboardUpdater:
                 self.args.dashboard_gh_cli_path,
                 "issue",
                 "comment",
+                "--repo=https://github.com/pytorch/torchdynamo.git",
                 "681",
                 "-b",
                 comment,

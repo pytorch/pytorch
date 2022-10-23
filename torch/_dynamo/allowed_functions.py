@@ -125,13 +125,11 @@ def _allowed_function_ids():
         disallowed_modules = (
             "torch.optim.",
             "torch.nn.modules.rnn.",
-            "torch.nn.modules.",
             "torch._dynamo.",
             "torch._C._dynamo.",
             "torch._inductor.",
             "torch._C.inductor.",
             "torch.fx.",
-            "torch.distributed.fsdp."
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)

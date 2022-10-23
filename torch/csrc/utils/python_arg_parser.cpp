@@ -26,11 +26,13 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Tensor", ParameterType::TENSOR},
     {"Scalar", ParameterType::SCALAR},
     {"int64_t", ParameterType::INT64},
+    {"SymInt", ParameterType::SYM_INT},
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
     {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
+    {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
     {"Generator", ParameterType::GENERATOR},
     {"bool", ParameterType::BOOL},
@@ -44,9 +46,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Stream", ParameterType::STREAM},
     {"std::string", ParameterType::STRING},
     {"c10::string_view", ParameterType::STRING},
-    {"SymInt", ParameterType::SYM_INT},
     {"Dimname", ParameterType::DIMNAME},
-    {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
 };
@@ -289,27 +289,41 @@ auto handle_torch_function_no_python_arg_parser(
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
   PyObject* mode_obj = nullptr;
+
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  auto get_mode = [&]() {
-    return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
-                             : c10::impl::TorchDispatchModeTLS::get_mode();
+  auto get_stack_len = [&]() {
+    return is_torch_function ? at::impl::PythonTorchFunctionTLS::stack_len()
+                             : c10::impl::TorchDispatchModeTLS::stack_len();
   };
 
-  const auto& maybe_mode = get_mode();
-  if (maybe_mode) {
-    mode_obj = maybe_mode->ptr(getPyInterpreter());
-    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
-    TORCH_INTERNAL_ASSERT(args != nullptr);
+  if (get_stack_len() > 0) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
     if (is_torch_function) {
       tf_g.emplace();
+      mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
     } else {
       td_g.emplace();
+      mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
     }
+    py::object torch_function =
+        PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
+    if (!torch_function) {
+      TORCH_INTERNAL_ASSERT(0);
+    }
+    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
+    TORCH_INTERNAL_ASSERT(args != nullptr);
+
+    TORCH_CHECK(
+        PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
+            .is(py::reinterpret_borrow<py::object>(mode_obj)),
+        "Defining your mode's `",
+        torch_function_name_str,
+        "` as a classmethod is not supported, please make it a plain method");
+
     // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
     // because the nullptr terminates the argument list ick ick ick.
     if (kwargs == nullptr) {
@@ -393,18 +407,6 @@ auto handle_torch_function_no_python_arg_parser(
       }
     }
     ss << "]";
-    if (mode_obj) {
-      // Note [Paranoid check mode is same]
-      // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      // If a user forcibly changes the mode in a non-lexical way
-      // in the inner context, the mode could be invalid here.  So just be
-      // a bit safe, it doesn't cost us anything since this is error reporting
-      const auto& maybe_mode = get_mode();
-      TORCH_INTERNAL_ASSERT(
-          maybe_mode && mode_obj == maybe_mode->ptr(getPyInterpreter()));
-      ss << " nor was it found on the currently active mode "
-         << py::repr(mode_obj);
-    }
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();
@@ -817,17 +819,14 @@ auto FunctionParameter::check(
       return THPStream_Check(obj);
     case ParameterType::STRING:
       return THPUtils_checkString(obj);
+    case ParameterType::SCALAR_LIST:
+      return is_scalar_list(obj);
+    case ParameterType::SYM_INT:
+      return is_int_or_symint(obj);
+    case ParameterType::SYM_INT_LIST:
+      return is_int_or_symint_list(obj, size);
     default:
       throw std::runtime_error("unknown parameter type");
-    case ParameterType::SCALAR_LIST: {
-      return is_scalar_list(obj);
-    }
-    case ParameterType::SYM_INT: {
-      return is_int_or_symint(obj);
-    }
-    case ParameterType::SYM_INT_LIST: {
-      return is_int_or_symint_list(obj, size);
-    }
   }
 }
 
@@ -1005,7 +1004,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
       throw std::runtime_error(
           "default value for Tensor must be none, got: " + str);
     }
-  } else if (type_ == ParameterType::INT64) {
+  } else if (type_ == ParameterType::INT64 || type_ == ParameterType::SYM_INT) {
     default_int = atol(str.c_str());
   } else if (type_ == ParameterType::BOOL) {
     default_bool = (str == "True" || str == "true");
@@ -1021,7 +1020,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value())
                                               : at::Scalar(atof(str.c_str()));
     }
-  } else if (type_ == ParameterType::INT_LIST) {
+  } else if (
+      type_ == ParameterType::INT_LIST ||
+      type_ == ParameterType::SYM_INT_LIST) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
     }
@@ -1059,6 +1060,31 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_string = parse_string_literal(str);
     }
+  }
+  // These types weren't handled here before. Adding a default error
+  // led to a lot of test failures so adding this skip for now.
+  // We should correctly handle these though because it might be causing
+  // silent failures.
+  else if (type_ == ParameterType::TENSOR_LIST) { // NOLINT
+    // throw std::runtime_error("Invalid Tensor List");
+  } else if (type_ == ParameterType::GENERATOR) { // NOLINT
+    // throw std::runtime_error("ParameterType::GENERATOR");
+  } else if (type_ == ParameterType::PYOBJECT) { // NOLINT
+    // throw std::runtime_error("ParameterType::PYOBJECT");
+  } else if (type_ == ParameterType::MEMORY_FORMAT) { // NOLINT
+    // throw std::runtime_error("ParameterType::MEMORY_FORMAT");
+  } else if (type_ == ParameterType::DIMNAME) { // NOLINT
+    // throw std::runtime_error("ParameterType::DIMNAME");
+  } else if (type_ == ParameterType::DIMNAME_LIST) { // NOLINT
+    // throw std::runtime_error("ParameterType::DIMNAME_LIST");
+  } else if (type_ == ParameterType::SCALAR_LIST) { // NOLINT
+    // throw std::runtime_error("ParameterType::SCALAR_LIST");
+  } else if (type_ == ParameterType::STORAGE) { // NOLINT
+    // throw std::runtime_error("ParameterType::STORAGE");
+  } else if (type_ == ParameterType::QSCHEME) { // NOLINT
+    // throw std::runtime_error("ParameterType::QSCHEME");
+  } else {
+    throw std::runtime_error("unknown parameter type");
   }
 }
 
