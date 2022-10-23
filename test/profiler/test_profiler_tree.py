@@ -138,11 +138,6 @@ class ProfilerTree:
 
     @staticmethod
     def fmt_name(name: str) -> str:
-        # torch::autograd::Node relies on c10::demangle to generate names, and
-        # Windows demangles to include `struct` in the name.
-        if IS_WINDOWS:
-            name = name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
-
         match = re.match(r"^(.*)\.py\(([0-9]+)\): (.*)$", name)
         if match:
             filename, _, fn = match.groups()

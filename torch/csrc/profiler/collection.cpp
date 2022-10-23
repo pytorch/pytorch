@@ -296,6 +296,19 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
+  // `AccumulateGrad` is an important marker for profile analysis; however the
+  // annotation relies on `c10::demangle` which is platform dependent. In
+  // particular, Windows will add a "struct " prefix.
+  const std::string accumulate_grad = "torch::autograd::AccumulateGrad";
+  const std::string windows_pattern = std::string("struct ") + accumulate_grad;
+  for (auto& event : op_events_) {
+    auto& name = event.basic_fields_.name_;
+    auto position = name.find(windows_pattern);
+    if (position != std::string::npos) {
+      name.replace(position, windows_pattern.size(), accumulate_grad);
+    }
+  }
+
   auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
 
   // TODO: CTAD will take care of template args when we move to C++17
