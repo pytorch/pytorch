@@ -31,6 +31,7 @@ TensorAndID = Tuple["TensorKey", int]
 
 
 class Category(enum.Enum):
+    INPUT = enum.auto()
     TEMPORARY = enum.auto()
     GRADIENT = enum.auto()
 
@@ -480,6 +481,10 @@ class MemoryProfile:
         self._categories = CategoryDict()
 
         self._set_gradients_and_temporaries()
+        self._set_inputs()
+
+    def _is_gradient(self, *args, **kwargs) -> bool:
+        return self._categories.get(*args, **kwargs) == Category.GRADIENT
 
     def _category_snapshot(self) -> Dict[TensorAndID, Optional[Category]]:
         all_tensor_versions: Set[TensorAndID] = set()
@@ -513,3 +518,73 @@ class MemoryProfile:
         for node in self._data_flow_graph.flow_nodes:
             for i in node.intermediates:
                 self._categories.set_by_key(i, Category.TEMPORARY)
+
+    def _set_inputs(self) -> None:
+        """Mark inputs based on which Tensors are updated using gradients.
+
+        The process for differentiating between inputs and activations is more
+        involved. Most Tensors in a training loop transitively depend on at
+        least one gradient: parameters depend on them through updates, and
+        activations and optimizer state depend on them transitively through
+        parameters. Critically, we do not need to know which Tensors are
+        parameters to apply this method; we can simply walk the data flow graph
+        to build the set of all values which depend on a gradient and then
+        obtain the set of inputs by taking the conjugate.
+
+        There is, however, one hiccup. The first time we see a parameter is
+        generally on the forward pass of the first step. We know from
+        inspection of the data flow graph that v1 of that Tensor depends on
+        a gradient (provided we profile an optimizer step), but not v0. To
+        address this problem we weaken the definition of "depends on a
+        gradient" to "any version of this Tensor depends on a gradient",
+        which in turn strengthens the criteria for the input set enough to
+        filter the activations in the forward pass of the first step.
+
+        Note that this weakened definition requires us to loop over the data
+        flow graph multiple times because it allows dependency information to
+        flow backward through edges and removes the guarantee that nodes are
+        topologically sorted. (Or indeed, even that a valid topological order
+        exists.) Put another way, we have converted an acyclic data flow graph
+        into a cyclic graph and we are attempting to partition cycles involving
+        a gradient from the rest of the graph.
+        """
+
+        # Partition the graph based on gradient updates.
+        depends_on_gradient: Set[int] = set()
+        while True:
+            start_size = len(depends_on_gradient)
+            for node in self._data_flow_graph.flow_nodes:
+                ids = tuple(
+                    key.id
+                    for key, (_, version) in node.inputs.items()
+                    if self._is_gradient(key, version) or key.id in depends_on_gradient
+                )
+
+                if ids:
+                    depends_on_gradient.update(ids)
+                    depends_on_gradient.update(key.id for key in node.outputs)
+
+            # We are guaranteed to exit because there is a finite set of
+            # TensorAndID pairs. In practice we do not expect to loop more than
+            # three times: once to identify the core parameter update loop,
+            # once to fold the first step into that loop, and a third time
+            # where no new elements are added.
+            if len(depends_on_gradient) == start_size:
+                break
+
+        # Flood backwards to identify viable inputs.
+        produces_gradient: Set[TensorAndID] = set()
+        for node in reversed(self._data_flow_graph.flow_nodes):
+            inputs = {(key, version) for key, (_, version) in node.inputs.items()}
+            if any(
+                self._is_gradient(*i) or i in produces_gradient
+                for i in node.outputs.items()
+            ):
+                produces_gradient |= inputs
+
+        # A Tensor is an input if it does not have a logical dependence on a
+        # gradient (which filters out activations since parameter inputs will
+        # exclude the forward pass) but is provably an input to the model.
+        for key, version in produces_gradient:
+            if key.id not in depends_on_gradient:
+                self._categories.setdefault_by_version(key, version, Category.INPUT)
