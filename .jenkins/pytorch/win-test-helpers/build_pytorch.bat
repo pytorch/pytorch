@@ -135,10 +135,6 @@ if "%REBUILD%" == "" (
     if not errorlevel 0 exit /b
   )
 )
-:: tests if BUILD_ENVIRONMENT contains cuda11 as a substring
-if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
-   set BUILD_SPLIT_CUDA=ON
-)
 
 python setup.py bdist_wheel && sccache --show-stats && python -c "import os, glob; os.system('python -mpip install ' + glob.glob('dist/*.whl')[0] + '[opt-einsum]')" (
   if "%BUILD_ENVIRONMENT%"=="" (
