@@ -1903,10 +1903,10 @@ def _where_meta(
 ) -> TensorLikeType:
 
     return _elementwise_meta(
+        pred.to(a.dtype),
         a,
         b,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-        args_with_fixed_dtypes=(pred,),
     )
 
 
