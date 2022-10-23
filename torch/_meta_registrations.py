@@ -867,6 +867,7 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
+# TODO: this shouldn't be necessary
 @register_meta([aten.add.Tensor], register_dispatcher=False)
 def meta_add(self, other, *, alpha=1):
     check(
@@ -880,12 +881,6 @@ def meta_add(self, other, *, alpha=1):
         self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     return self.new_empty(out_shape, dtype=out_dtype)
-
-
-@register_meta([aten.add_.Tensor], register_dispatcher=False)
-def meta_add_(self, other, *, alpha=1):
-    self = meta_add(self, other, alpha=alpha)
-    return self
 
 
 @register_meta([aten.convolution_backward.default])
