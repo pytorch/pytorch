@@ -429,17 +429,8 @@ def _compile(
             guard_export_fn(output.guards)
 
         return guarded_code
-    except (
-        Unsupported,
-        TorchRuntimeError,
-        BackendCompilerFailed,
-        AssertionError,
-    ) as e:
-        exception_handler(e, code, frame)
+    except Exception:
         raise
-    except Exception as e:
-        exception_handler(e, code, frame)
-        raise InternalTorchDynamoError() from e
 
 
 def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
