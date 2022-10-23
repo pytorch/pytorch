@@ -15,6 +15,7 @@ import numpy as np
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -29,7 +30,6 @@ from .utils import (
     tuple_iterator_getitem,
     tuple_iterator_len,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -567,7 +567,9 @@ class CheckFunctionManager:
                             if kind == "stride":
                                 stride_parts.append((val, tensor_id, idx))
 
-                expression_and_evaluation = [(guard[0], guard[1]) for guard in self.shape_env.guards]
+                expression_and_evaluation = [
+                    (guard[0], guard[1]) for guard in self.shape_env.guards
+                ]
                 finished_expressions = []
                 for expression, evaluation in expression_and_evaluation:
                     expr_as_str = str(expression)
@@ -582,12 +584,13 @@ class CheckFunctionManager:
                         )
 
                     for key in self.shape_env.replacements.keys():
-                        assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
-                            
-                    # breakpoint()
+                        assert (
+                            str(key) not in expr_as_str
+                        ), f"Unknown shape symbol {key}. "
+
                     if not evaluation:
                         expr_as_str = f"not {expr_as_str}"
-                    
+
                     print(expr_as_str)
                     code_parts.append(expr_as_str)
                     verbose_code_parts.append(expr_as_str)
@@ -616,7 +619,7 @@ class CheckFunctionManager:
                 ("tensor_check_names", tensor_check_names),
                 ("Eq", sympy.Eq),
                 ("Mod", sympy.Mod),
-                ("FloorDiv", FloorDiv)
+                ("FloorDiv", FloorDiv),
             ]
         )
         closure_vars.update(CLOSURE_VARS)
