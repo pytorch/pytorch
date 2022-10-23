@@ -521,7 +521,49 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 
-    # def _expression_parser(self, expr, name_to_size, name_to_stride):
+    def _parse_symbolic_shape_expressions(self, tensor_check_names, tensor_check_ids):
+        id_to_name_map = {}
+        size_parts = []
+        stride_parts = []
+        finished_expressions = []
+        if config.dynamic_shapes:
+            for name in tensor_check_names:
+                tensor_id = tensor_check_ids[name]
+                id_to_name_map[tensor_id] = name
+                if tensor_id in self.shape_env.expr_to_id:
+                    values_and_kind_list = self.shape_env.expr_to_id[tensor_id]
+                    for (val, kind, idx) in values_and_kind_list:
+                        val = str(val)
+                        if val in ("0", "1"):
+                            continue
+                        if kind == "size":
+                            size_parts.append((val, tensor_id, idx))
+                        if kind == "stride":
+                            stride_parts.append((val, tensor_id, idx))
+
+            expression_and_evaluation = [
+                (guard[0], guard[1]) for guard in self.shape_env.guards
+            ]
+            for expression, evaluation in expression_and_evaluation:
+                expr_as_str = str(expression)
+                for key, tensor_id, idx in size_parts:
+                    expr_as_str = expr_as_str.replace(
+                        key, f"{id_to_name_map[tensor_id]}.size()[{idx}]"
+                    )
+
+                for key, tensor_id, idx in stride_parts:
+                    expr_as_str = expr_as_str.replace(
+                        key, f"{id_to_name_map[tensor_id]}.stride()[{idx}]"
+                    )
+
+                for key in self.shape_env.replacements.keys():
+                    assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
+
+                if not evaluation:
+                    expr_as_str = f"not {expr_as_str}"
+
+                finished_expressions.append(expr_as_str)
+        return finished_expressions
 
     def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
@@ -549,50 +591,12 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
-            id_to_name_map = {}
-            size_parts = []
-            stride_parts = []
-            if config.dynamic_shapes:
-                for name in tensor_check_names:
-                    tensor_id = tensor_check_ids[name]
-                    id_to_name_map[tensor_id] = name
-                    if tensor_id in self.shape_env.expr_to_id:
-                        values_and_kind_list = self.shape_env.expr_to_id[tensor_id]
-                        for (val, kind, idx) in values_and_kind_list:
-                            val = str(val)
-                            if val in ("0", "1"):
-                                continue
-                            if kind == "size":
-                                size_parts.append((val, tensor_id, idx))
-                            if kind == "stride":
-                                stride_parts.append((val, tensor_id, idx))
-
-                expression_and_evaluation = [
-                    (guard[0], guard[1]) for guard in self.shape_env.guards
-                ]
-                finished_expressions = []
-                for expression, evaluation in expression_and_evaluation:
-                    expr_as_str = str(expression)
-                    for key, tensor_id, idx in size_parts:
-                        expr_as_str = expr_as_str.replace(
-                            key, f"{id_to_name_map[tensor_id]}.size()[{idx}]"
-                        )
-
-                    for key, tensor_id, idx in stride_parts:
-                        expr_as_str = expr_as_str.replace(
-                            key, f"{id_to_name_map[tensor_id]}.stride()[{idx}]"
-                        )
-
-                    for key in self.shape_env.replacements.keys():
-                        assert (
-                            str(key) not in expr_as_str
-                        ), f"Unknown shape symbol {key}. "
-
-                    if not evaluation:
-                        expr_as_str = f"not {expr_as_str}"
-
-                    code_parts.append(expr_as_str)
-                    verbose_code_parts.append(expr_as_str)
+            finished_expressions = self._parse_symbolic_shape_expressions(
+                tensor_check_names, tensor_check_ids
+            )
+            for expression in finished_expressions:
+                code_parts.append(expression)
+                verbose_code_parts.append(expression)
 
             tensor_check_examples = (
                 local_builder.tensor_check_examples
