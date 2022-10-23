@@ -1905,6 +1905,10 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
+@register_meta(aten.scalar_tensor.default, register_dispatcher=False)
+def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
+    return torch.empty((), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
