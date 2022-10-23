@@ -115,23 +115,7 @@ class PySymInt(object):
         self._expr = expr
         self.shape_env = shape_env
         self.constant = constant
-<<<<<<< HEAD
 
-=======
-        self.ref_id = ref_id
-        self.kind = kind
-        self.idx = idx
-        if self.ref_id and str(self.expr) not in ('False', 'True'):
-            if self.expr not in self.shape_env.expr_to_id:
-                self.shape_env.expr_to_id[self.expr] = set()
-            self.shape_env.expr_to_id[self.expr].add((self.ref_id, self.kind, self.idx))
-
-            if self.ref_id not in self.shape_env.expr_to_id:
-                self.shape_env.expr_to_id[self.ref_id] = set()
-            self.shape_env.expr_to_id[self.ref_id].add((self.expr, self.kind, self.idx))
-
-    
->>>>>>> rms
     @property
     def expr(self):
         self._update_expr()
@@ -392,10 +376,7 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
-<<<<<<< HEAD
 
-=======
->>>>>>> rms
         size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):

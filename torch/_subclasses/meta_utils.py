@@ -144,9 +144,9 @@ class MetaConverter:
 
         make_symbolic = shape_env is not None
 
-        def sym(x, ref_id):
+        def sym(x, ref_id, kind):
             if make_symbolic:
-                return shape_env.create_symbol(x)
+                return shape_env.create_symintnode(shape_env.create_symbol(x), ref_id=ref_id, kind=kind, idx=None)
             else:
                 return x
 
@@ -211,7 +211,7 @@ class MetaConverter:
 
                     with torch.enable_grad():
                         sizes, strides = sym_sizes_strides(t)
-                        r = base.as_strided(sizes, strides, sym(t.storage_offset(), id(t)))
+                        r = base.as_strided(sizes, strides, sym(t.storage_offset(), id(t), kind="offset"))
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
@@ -237,7 +237,7 @@ class MetaConverter:
                     with no_dispatch():
                         sizes, strides = sym_sizes_strides(t)
                         with torch.no_grad():
-                            r.set_(s, sym(t.storage_offset(), id(t)), sizes, strides)
+                            r.set_(s, sym(t.storage_offset(), id(t), kind="offset"), sizes, strides)
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
