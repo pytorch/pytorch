@@ -97,10 +97,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  export BUILD_SPLIT_CUDA=ON
-fi
-
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
@@ -285,7 +281,7 @@ test_inductor_timm_shard() {
   TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 3 --partition-id "$1" \
+    --device cuda --inductor --float32 --total-partitions 8 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
@@ -734,6 +730,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
+  install_filelock
+  install_triton
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -753,6 +751,11 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
+# Inductor CI sharding:
+# 1: unit test
+# 2: Huggingface
+# 3-10: TIMM
+# 11-12: TorchBench
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
@@ -764,52 +767,30 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SH
   install_triton
   install_huggingface
   test_inductor_huggingface_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 3 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 11 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_timm
-  test_inductor_timm_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 4 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_timm
-  test_inductor_timm_shard 1
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 5 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_timm
-  test_inductor_timm_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 6 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  id=$((SHARD_NUMBER-3))
+  test_inductor_timm_shard $id
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 13 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchtext
   install_torchvision
   install_filelock
   install_triton
   checkout_install_torchbench
-  test_inductor_torchbench_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 7 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchtext
-  install_torchvision
-  install_filelock
-  install_triton
-  install_timm
-  checkout_install_torchbench
-  test_inductor_torchbench_shard 1
+  id=$((SHARD_NUMBER-11))
+  test_inductor_torchbench_shard $id
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -818,9 +799,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -838,9 +817,7 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   install_monkeytype
   test_python
   test_aten
