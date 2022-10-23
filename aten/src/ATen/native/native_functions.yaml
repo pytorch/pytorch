@@ -1294,11 +1294,15 @@
     CompositeImplicitAutograd: chunk
     NestedTensorCPU, NestedTensorCUDA: chunk_nested_tensor
 
-- func: tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]
+- func: tensor_split.sections(Tensor(a -> *) self, SymInt sections, int dim=0) -> Tensor(a)[]
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: tensor_split_sections_symint
 
-- func: tensor_split.indices(Tensor(a -> *) self, int[] indices, int dim=0) -> Tensor(a)[]
+- func: tensor_split.indices(Tensor(a -> *) self, SymInt[] indices, int dim=0) -> Tensor(a)[]
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: tensor_split_indices_symint
 
 - func: tensor_split.tensor_indices_or_sections(Tensor(a -> *) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
   variants: function, method
