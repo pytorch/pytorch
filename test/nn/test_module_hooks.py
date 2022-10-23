@@ -1,5 +1,9 @@
 # Owner(s): ["module: nn"]
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+    skipIfTorchDynamo,
+)
 
 import torch
 import torch.nn as nn
@@ -145,6 +149,7 @@ class TestModuleHooks(TestCase):
         model(x).sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture backward-pre hooks")
     def test_full_backward_pre_hooks(self):
         fired_hooks: List[int] = []
         model = ToyModel()
@@ -165,6 +170,7 @@ class TestModuleHooks(TestCase):
         model(x).sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture backward hooks")
     def test_mixed_hooks(self):
         fired_hooks: List[int] = []
         model = ToyModel()
