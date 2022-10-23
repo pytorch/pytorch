@@ -5,6 +5,7 @@ import math
 import numbers
 import operator
 from typing import Dict, List
+import ctypes
 
 import torch.fx
 import torch.random
@@ -48,6 +49,7 @@ class _missing:
 def _run_node(output_graph, node, args, kwargs, nnmodule):
     op = node.op
     if op == "call_function":
+        breakpoint()
         return node.target(*args, **kwargs)
     elif op == "call_method":
         return getattr(args[0], node.target)(*args[1:], **kwargs)
@@ -198,6 +200,7 @@ class TensorVariable(VariableTracker):
         with preserve_rng_state():
             if example_value is None:
                 if use_fake_tensors:
+                    # breakpoint()
                     example_value = _get_fake_value(proxy.node, tx)
                 else:
                     example_value = _get_real_value(proxy.node, tx.output)
@@ -241,14 +244,14 @@ class TensorVariable(VariableTracker):
             return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
             sizes = []
             for i, v in enumerate(example_value):
                 proxy_i = proxy[i]
                 proxy_i.node.meta["example_value"] = v
-                sizes.append(DynamicShapeVariable(proxy_i, int))
+                sizes.append(DynamicShapeVariable(proxy_i, v))
             return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
@@ -258,7 +261,7 @@ class TensorVariable(VariableTracker):
             getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and all(
             [isinstance(x, int) for x in example_value]
         ):
@@ -341,7 +344,6 @@ class TensorVariable(VariableTracker):
             proxy.node.meta["example_value"] = example_value
             return cls(proxy, **options)
         else:
-            breakpoint()
             raise AssertionError(
                 "torch.* op returned non-Tensor "
                 + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}"
@@ -582,12 +584,13 @@ class DynamicShapeVariable(TensorVariable):
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
 
-    def __init__(self, proxy, dyn_shape_cls, **kwargs):
+    def __init__(self, proxy, dyn_shape, **kwargs):
+        breakpoint()
         super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
-        self.dyn_shape_cls = dyn_shape_cls
+        self.dyn_shape = dyn_shape
 
     def python_type(self):
-        return self.dyn_shape_cls
+        return type(self.dyn_shape)
 
     def unpack_var_sequence(self, tx):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)

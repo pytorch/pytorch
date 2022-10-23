@@ -2190,7 +2190,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         def f(x, a):
             return min(x.shape[0], a)
 
-        result = f(torch.ones(6), 3)
+        result = f(torch.tensor([1, 1, 1, 1, 1, 1]), 3)
         self.assertEqual(result, 3)
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)

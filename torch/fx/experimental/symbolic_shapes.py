@@ -175,15 +175,14 @@ class PySymFloat:
         self.shape_env = shape_env
         self.constant = constant
         self.ref_id = ref_id
-        if self.expr in self.shape_env.expr_to_id:
-            assert self.shape_env.expr_to_id[self.expr] == self.ref_id, "Bro im straight up not having a good time right now"
-        if self.expr not in self.shape_env.expr_to_id:
-            self.shape_env.expr_to_id[self.expr] = set()
-        self.shape_env.expr_to_id[self.expr].add(self.ref_id)
+        if self.ref_id and str(self.expr) not in ('False', 'True'):
+            if self.expr not in self.shape_env.expr_to_id:
+                self.shape_env.expr_to_id[self.expr] = set()
+            self.shape_env.expr_to_id[self.expr].add((self.ref_id, self.kind, self.idx))
 
-        if self.expr not in self.shape_env.expr_to_id:
-            self.shape_env.expr_to_id[self.ref_id] = ()
-        self.shape_env.expr_to_id[self.ref_id].add(self.expr)
+            if self.ref_id not in self.shape_env.expr_to_id:
+                self.shape_env.expr_to_id[self.ref_id] = set()
+            self.shape_env.expr_to_id[self.ref_id].add((self.expr, self.kind, self.idx))
 
     def wrap(self, num):
         return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
