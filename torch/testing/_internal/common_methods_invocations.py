@@ -17461,6 +17461,21 @@ python_ref_db = [
                          dtypes=(torch.uint8,), device_type="cpu"),
         )
     ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.xlogy",
+        torch_opinfo_name="xlogy",
+        supports_one_python_scalar=True,
+        supports_nvfuser=False,
+    ),
+    #
+    # Elementwise Binary Special OpInfos
+    #
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.special.xlog1py",
+        torch_opinfo_name="special.xlog1py",
+        supports_one_python_scalar=True,
+        supports_nvfuser=False,
+    ),
     #
     # Data Conversion & Data Movement Opinfos
     #
