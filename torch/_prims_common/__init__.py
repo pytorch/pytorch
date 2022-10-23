@@ -5,7 +5,6 @@ from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
 import weakref
-
 import torch
 
 # nvFuser imports are conditional on being compiled with CUDA
@@ -48,7 +47,15 @@ NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
 # NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
 NumberType = Union[bool, int, float, complex]
+
 Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
+# I don't call it Integral because numbers.Integral includes bool, but IntLike
+# does not
+Dim = int
+IntLike = (int, torch.SymIntNode)
+FloatLike = (float, torch.SymFloatNode)
+IntWithoutSymInt = int
+FloatWithoutSymFloat = float
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
@@ -434,8 +441,8 @@ def validate_idx(rank: int, idx: int):
     Assumes the index is already canonicalized.
     """
 
-    assert isinstance(idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(idx, Dim)
+    assert isinstance(rank, Dim)
 
     assert idx >= 0 and idx < rank or idx == 0
 
@@ -451,8 +458,8 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
     for the given shape.
     """
 
-    assert isinstance(ex_idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(ex_idx, Dim)
+    assert isinstance(rank, Dim)
     assert ex_idx > 0 and ex_idx <= rank
 
 
@@ -501,7 +508,7 @@ def canonicalize_dims(rank: int, indices: int) -> int:
 
 
 def canonicalize_dims(rank, indices):
-    if isinstance(indices, int):
+    if isinstance(indices, Dim):
         return canonicalize_dim(rank, indices)
 
     return tuple(canonicalize_dim(rank, x) for x in indices)
@@ -558,15 +565,12 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             if device is None:
                 device = arg.device
 
-            if device != arg.device:
-                msg = (
-                    "Tensor on device "
-                    + str(arg.device)
-                    + " is not on the expected device "
-                    + str(device)
-                    + "!"
-                )
-                raise RuntimeError(msg)
+            check(
+                device == arg.device,
+                lambda: (
+                    f"Expected all tensors to be on the same device, but "
+                    f"found at least two devices, {device} and {arg.device}!"
+                ))
         else:
             msg = (
                 "Unexpected type when checking for same device, " + str(type(arg)) + "!"
@@ -704,12 +708,14 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
     if dim is not None:
+        # Convert to list to produce a compatible error message with core
+        # PyTorch, which prints sequences in square brackets.
+        shape = list(shape)
         check(
             newsize != 0,
-            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
-            f"unspecified dimension size -1 can be any value and is ambiguous",
+            lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                     f"unspecified dimension size -1 can be any value and is ambiguous"),
         )
-        shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
 
@@ -798,15 +804,14 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float
+    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
-        # TODO: type error here is real, replace with sym_int
-        return lambda x: int(x)  # type: ignore[arg-type]
+        return sym_int
     if dtype in _float_dtypes:
         return sym_float
     if dtype in _complex_dtypes:
@@ -1441,7 +1446,8 @@ def set_correction(
         correction = 1
     elif correction is None and unbiased is not None:
         correction = 0 if unbiased is False else 1
-    if not isinstance(correction, int):
+    # NB: we don't actually support symint here, but it's harmless to accept
+    if not isinstance(correction, IntLike):
         raise ValueError("correction argument should be integer")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")

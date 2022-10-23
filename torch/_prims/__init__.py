@@ -16,8 +16,10 @@ from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims_common import (
     check,
+    Dim,
     DimsSequenceType,
     DimsType,
+    IntLike,
     Number,
     NumberType,
     RETURN_TYPE,
@@ -929,7 +931,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
-    is_integral = isinstance(a, (bool, int)) or (
+    is_integral = isinstance(a, (bool, int, torch.SymIntNode)) or (
         isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype)
     )
 
@@ -1198,7 +1200,7 @@ def _broadcast_in_dim_meta(
     # (no relative reordering of dims) of integers and
     # each dimension must be within the new shape
     def _greater_than_reduce(acc, x):
-        assert isinstance(x, int)
+        assert isinstance(x, Dim)
         assert x > acc
         assert x < len(shape)
 
@@ -1799,6 +1801,18 @@ def collapse(a: Tensor, start: int, end: int) -> Tensor:
 
 # TODO: review stride logic
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
+    # Tensors must have the same number of dimensions
+    first_dims = tensors[0].ndim
+    for second in tensors[1:]:
+        second_dims = second.ndim
+        check(
+            first_dims == second_dims,
+            lambda: (
+                f"Tensors must have same number of dimensions: got "
+                f"{first_dims} and {second_dims}"
+            ),
+        )
+
     # Verifies same shape (except in the concat dimension)
     shape = tensors[0].shape
     concat_length = 0
@@ -1806,11 +1820,14 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
-            elif length != common_length:
-                raise RuntimeError(
-                    f"Sizes of tensors must match except in dimension {dim}. "
-                    "Expected {common_length} but got {length} for tensor number "
-                    "{tensor_idx} in the list"
+            else:
+                check(
+                    length == common_length,
+                    lambda: (
+                        f"Sizes of tensors must match except in dimension {dim}. "
+                        f"Expected size {common_length} but got size {length} for tensor number "
+                        f"{tensor_idx} in the list"
+                    ),
                 )
 
     new_shape = list(tensors[0].shape).copy()
@@ -2319,7 +2336,7 @@ def _arange_meta(
     )
     if dtype is not None:
         pass
-    elif all(isinstance(arg, int) for arg in (start, end, step)):
+    elif all(isinstance(arg, IntLike) for arg in (start, end, step)):
         dtype = torch.int64
     else:
         dtype = torch.get_default_dtype()

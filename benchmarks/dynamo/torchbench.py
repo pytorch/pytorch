@@ -9,7 +9,11 @@ import warnings
 from os.path import abspath, exists
 
 import torch
-from common import BenchmarkRunner, main
+
+try:
+    from .common import BenchmarkRunner, main
+except ImportError:
+    from common import BenchmarkRunner, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
@@ -17,25 +21,29 @@ from torch._dynamo.utils import clone_inputs
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
 
-os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-for torchbench_dir in (
-    "./torchbenchmark",
-    "../torchbenchmark",
-    "../torchbench",
-    "../benchmark",
-    "../../torchbenchmark",
-    "../../torchbench",
-    "../../benchmark",
-):
+
+def setup_torchbench_cwd():
+    original_dir = abspath(os.getcwd())
+
+    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
+    for torchbench_dir in (
+        "./torchbenchmark",
+        "../torchbenchmark",
+        "../torchbench",
+        "../benchmark",
+        "../../torchbenchmark",
+        "../../torchbench",
+        "../../benchmark",
+    ):
+        if exists(torchbench_dir):
+            break
+
     if exists(torchbench_dir):
-        break
+        torchbench_dir = abspath(torchbench_dir)
+        os.chdir(torchbench_dir)
+        sys.path.append(torchbench_dir)
 
-assert exists(torchbench_dir), "../../torchbenchmark does not exist"
-original_dir = abspath(os.getcwd())
-torchbench_dir = abspath(torchbench_dir)
-
-os.chdir(torchbench_dir)
-sys.path.append(torchbench_dir)
+    return original_dir
 
 
 # Some models have large dataset that doesn't fit in memory. Lower the batch
@@ -237,6 +245,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
 
+        # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
+        torch.backends.__allow_nonbracketed_mutation_flag = True
         if is_training:
             benchmark = benchmark_cls(
                 test="train", device=device, jit=False, batch_size=batch_size
@@ -320,7 +330,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        mod.zero_grad(True)
+        self.optimizer_zero_grad()
         with self.autocast():
             pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
@@ -333,6 +343,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
 if __name__ == "__main__":
 
+    original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)

@@ -285,8 +285,10 @@ TORCH_META_FUNC(amax)
 (const Tensor& self, IntArrayRef dim, bool keepdim) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
-    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-            self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+    TORCH_CHECK(
+      self.scalar_type() == maybe_result.scalar_type(),
+      "Attempting to cast from ", self.scalar_type(), " to out tensor with dtype ", maybe_result.scalar_type(),
+      ", but this can't be cast because it is not safe!");
   }
   if (self.numel() == 0) {
     at::native::zero_numel_check_dims(self, dim, "amax()");
@@ -299,8 +301,10 @@ TORCH_META_FUNC(amin)
 (const Tensor& self, IntArrayRef dim, bool keepdim) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
-    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-                self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+    TORCH_CHECK(
+      self.scalar_type() == maybe_result.scalar_type(),
+      "Attempting to cast from ", self.scalar_type(), " to out tensor with dtype ", maybe_result.scalar_type(),
+      ", but this can't be cast because it is not safe!");
   }
   if (self.numel() == 0) {
     at::native::zero_numel_check_dims(self, dim, "amin()");
@@ -2024,14 +2028,19 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
+Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, at::IntArrayRef sizes, bool keepdim) {
+    return at::native::value_selecting_reduction_backward_symint(grad, dim, indices, c10::fromIntArrayRefSlow(sizes), keepdim);
+}
+
+
 // max(dim), min(dim), topk(dim), mode(dim), are examples of reduction
 // functions that select values. value_selecting_reduction_backward is the
 // backward function for those operators; it propagates the grad to the
 // specific value locations referred to at `indices`.
-Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+Tensor value_selecting_reduction_backward_symint(const Tensor& grad, int64_t dim, const Tensor& indices, c10::SymIntArrayRef sizes, bool keepdim) {
   auto inplace_scatter_if_not_tensor_subclass =
       [&](const Tensor& grad_out, const Tensor& indices_) {
-        auto grad_in = at::zeros(sizes, grad_out.options());
+        auto grad_in = at::zeros_symint(sizes, grad_out.options());
         if (areAnyTensorSubclassLike({grad, indices})) {
           return grad_in.scatter(dim, indices_, grad_out);
         }

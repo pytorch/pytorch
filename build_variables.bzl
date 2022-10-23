@@ -131,6 +131,7 @@ libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 
 # The profilers are not needed in the lite interpreter build.
 libtorch_profiler_sources = [
+    "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/collection.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
@@ -140,7 +141,6 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/execution_graph_observer.cpp",
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
-    "torch/csrc/profiler/standalone/profiler_legacy.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
@@ -1399,6 +1399,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
     "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SpectralOps.cpp",
+    "aten/src/ATen/native/nested/NestedTensorFactories.cpp",
     "aten/src/ATen/native/nested/NestedTensorMath.cpp",
     "aten/src/ATen/native/nested/NestedTensorAliases.cpp",
     "aten/src/ATen/native/nested/NestedTensorTransformerFunctions.cpp",
