@@ -1574,7 +1574,7 @@ class TestTorchTidyProfiler(TestCase):
                 out = []
             for node in nodes:
                 if isinstance(node.extra_fields, _ExtraFields_PyCall) and node.extra_fields.module:
-                    if node.extra_fields.module.params:
+                    if node.extra_fields.module.parameters:
                         out.append(node.extra_fields.module)
                 flat_out_extrafields(node.children, out)
             return out
@@ -1589,7 +1589,7 @@ class TestTorchTidyProfiler(TestCase):
         modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
         self.assertEqual(len(modules), 2, f"Expected two parameter list, but got {len(modules)}")
 
-        params = [(n, p.storage_data_ptr, g.storage_data_ptr) for module in modules for (n, p, g) in module.params]
+        params = [(n, p.storage_data_ptr, g.storage_data_ptr) for module in modules for (n, p, g) in module.parameters]
         expected = [(name, val.storage().data_ptr(), val.grad.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
         expected += [(name, val.storage().data_ptr(), val.grad.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
@@ -1599,29 +1599,34 @@ class TestTorchTidyProfiler(TestCase):
             out = []
         for node in nodes:
             if (isinstance(node.extra_fields, _ExtraFields_PyCall) and
-                    node.extra_fields.optimizer and node.extra_fields.optimizer.param_addrs):
+                    node.extra_fields.optimizer and node.extra_fields.optimizer.parameters):
                 # avoiding OptInfo duplicates from iterations
-                addr = node.extra_fields.optimizer.param_addrs[0].storage_data_ptr
-                if not [o for o in out if addr == o.param_addrs[0].storage_data_ptr]:
+                addr = node.extra_fields.optimizer.parameters[0][0].storage_data_ptr
+                if not [o for o in out if addr == o.parameters[0][0].storage_data_ptr]:
                     out.append(node.extra_fields.optimizer)
             self._flat_out_extrafields(node.children, out)
         return out
 
     def _check_results(self, opt, opts, check_items=False):
         self.assertEqual(len(opts), 1, f"Expected 1 optimizer: len(opts): {len(opts)}")
-        self.assertEqual(id(opt), opts[0].self, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self})")
+        self.assertEqual(id(opt), opts[0].self_ptr, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self_ptr})")
         if check_items:
             self.assertEqual(len(opt.param_groups), len(opts))
             for group, opt_ in zip(opt.param_groups, opts):
                 self.assertEqual(
                     [(v.storage().data_ptr()) for v in group.get("params", [])],
-                    [(o.storage_data_ptr) for o in opt_.param_addrs]
+                    [(o.storage_data_ptr) for (o, _, _) in opt_.parameters]
                 )
             for opt_ in opts:
-                self.assertEqual(
-                    [(name, val.storage().data_ptr()) for dic in opt.state.values() for name, val in dic.items()],
-                    [(n, p.storage_data_ptr) for (n, p) in opt_.opt_state]
-                )
+                observed_state = {
+                    p.storage_data_ptr: {name: s.storage_data_ptr for name, s in state}
+                    for (p, _, state) in opt_.parameters
+                }
+                for parameter, parameter_state in opt.state.items():
+                    self.assertEqual(
+                        {name: value.storage().data_ptr() for name, value in parameter_state.items()},
+                        observed_state.get(parameter.storage().data_ptr(), [])
+                    )
 
     def test_optimizer(self):
         inputs = torch.rand(10)
