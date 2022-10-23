@@ -9432,6 +9432,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: argsort_stable
+    MPS: argsort_stable_mps
   autogen: argsort.stable_out
 
 - func: argsort.dimname(Tensor self, Dimname dim, bool descending=False) -> Tensor
