@@ -1,4 +1,5 @@
 import os
+import sys
 
 # add some debug printouts
 debug = False
@@ -7,7 +8,9 @@ debug = False
 dce = False
 
 # assume input tensors are dynamic
-dynamic_shapes = True
+dynamic_shapes = (
+    os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+)  # Use dynamic shapes if torchdynamo dynamic shapes is set
 
 # assume weight tensors are fixed size
 static_weight_shapes = True
@@ -19,7 +22,7 @@ size_asserts = True
 pick_loop_orders = True
 
 # generate inplace computations
-inplace_buffers = False
+inplace_buffers = True
 
 # codegen benchmark harness
 benchmark_harness = True
@@ -51,7 +54,7 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
-compile_threads = 1
+compile_threads = min(32, os.cpu_count()) if sys.platform != "win32" else 1
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = __name__.replace(".config", "")

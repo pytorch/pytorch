@@ -14,7 +14,7 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
-from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, unique
+from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, sympy_symbol, unique
 from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -78,15 +78,6 @@ class OpOverrides:
     @staticmethod
     def constant(value, dtype):
         return repr(value)
-
-    @staticmethod
-    def sigmoid(x):
-        x = ops.exp(f"-{x}")
-        return f"1 / (1 + {x})"
-
-    @staticmethod
-    def silu(x):
-        return f"{x} * {ops.sigmoid(x)}"
 
     @staticmethod
     def reciprocal(x):
@@ -208,7 +199,10 @@ class DeferredLine:
         self.line = line
 
     def __call__(self):
-        if self.name not in V.graph.removed_buffers:
+        if (
+            self.name not in V.graph.removed_buffers
+            and self.name not in V.graph.inplaced_to_remove
+        ):
             return self.line
         return None
 
@@ -299,11 +293,18 @@ class KernelArgs:
         return self._lookup("out_ptr", self.output_buffers, name)
 
     def make_inplace(self, input_name, output_name):
-        buf = InplacedBuffer(
-            f"in_out_ptr{len(self.inplace_buffers)}", [input_name, output_name]
-        )
-        self.inplace_buffers[input_name] = buf
-        self.inplace_buffers[output_name] = buf
+        assert output_name not in self.inplace_buffers
+        if input_name in self.inplace_buffers:
+            buf = self.inplace_buffers[input_name]
+            buf.other_names.append(output_name)
+            self.inplace_buffers[output_name] = buf
+        else:
+            buf = InplacedBuffer(
+                f"in_out_ptr{len(unique(self.inplace_buffers.values()))}",
+                [input_name, output_name],
+            )
+            self.inplace_buffers[input_name] = buf
+            self.inplace_buffers[output_name] = buf
 
     def size(self, name):
         if str(name) == "seed":
@@ -331,12 +332,11 @@ class KernelArgs:
         call_args = []
         arg_defs = []
         for inplaced in unique(self.inplace_buffers.values()):
-            outer = inplaced.other_names[0]
+            outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
             arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            name = inplaced.other_names[-1]
-            call_args.append(f"c_void_p({name}.data_ptr())")
+            call_args.append(f"c_void_p({outer}.data_ptr())")
         for outer, inner in self.input_buffers.items():
             if outer in self.inplace_buffers:
                 continue
@@ -379,12 +379,14 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
-            precompile_args.append(SizeArg(inner, sympy.expand(outer)))
+            precompile_args.append(SizeArg(inner, sympy_symbol(outer)))
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
             for other in inplaced.other_names:
+                if other in V.graph.inplaced_to_remove:
+                    continue
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
                 if other in self.output_buffers:
@@ -533,7 +535,7 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(index_var):
-                return sympy.Symbol(str(index_var))
+                return sympy_symbol(str(index_var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

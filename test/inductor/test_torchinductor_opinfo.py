@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipCUDAMemoryLeakCheckIf,
     suppress_warnings,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -119,10 +120,6 @@ inductor_skips = defaultdict(dict)
 
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
-    "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
-    "reciprocal": {b8, i32, i64},  # segfault
-    "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
-    "lu_unpack": {b8, f16, f32, f64, i32, i64},  # segfault
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
 }
 
@@ -134,26 +131,32 @@ inductor_skips["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     "broadcast_tensors": {f16, f32, f64},
     "dsplit": {f16, f32, f64},
-    # Call parameter type does not match function signature!
-    "masked.logsumexp": {f64},
-    "erf": {f64},
-    "logsumexp": {f64},
-    "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
-    "nn.functional.binary_cross_entropy_with_logits": {f64},
-    "nn.functional.gelu": {f64},
-    "nn.functional.glu": {f64},
-    "nn.functional.poisson_nll_loss": {f64},
-    "nn.functional.tanhshrink": {f16, f64},
-    "nn.functional.conv_transpose3d": {f16, f64},
-    "nn.functional._scaled_dot_product_attention": {f64},
-    "nn.functional.triplet_margin_loss": {f16},
-    "special.ndtr": {f64},
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
     "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary": {b8, f16, f32, f64, i32, i64},
     "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
     "jiterator_unary": {b8, f16, f32, f64, i32, i64},
+    # Disabled on migration to core
+    "linalg.pinv.singular": {f32, f64},
+    "linalg.householder_product": {f32},
+    # These might be passing now?
+    "T": {b8, f16, f32, f64, i32, i64},
+    "H": {b8, f16, f32, f64, i32, i64},
+    "__getitem__": {b8, f16, f32, f64, i32, i64},
+    "acos": {b8, f16, f32, f64, i32, i64},
+    "acosh": {b8, f16, f32, f64, i32, i64},
+    "nn.functional.conv_transpose3d": {f16},
+    "max.reduction_with_dim": {i32, i64},
+    "min.reduction_with_dim": {i32, i64},
+    "linalg.lu": {f32, f64},
+    "lu_unpack": {f32, f64},
+    "native_batch_norm": {f16, f32, f64},
+    "native_layer_norm": {f16, f32, f64},
+    # Issues on sm86 periodic job (complex numbers)
+    "cdouble": {b8, f16, f32, f64, i32, i64},
+    "cfloat": {b8, f16, f32, f64, i32, i64},
+    "randint": {b8, f16, f32, f64, i32, i64},
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -213,7 +216,9 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.lstsq.grad_oriented": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
-    "linalg.svd": {f32, f64},
+    "linalg.lu_solve": {f32, f64},
+    "lu_solve": {f32, f64},
+    "lu_unpack": {f32, f64},
     "logdet": {f32, f64},
     "masked.norm": {f16},
     "masked_fill": {f16},
@@ -256,7 +261,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "sgn": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "stft": {f32, f64},
-    "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to": {b8, f16, f32, f64, i32, i64},
@@ -291,7 +295,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
-    "erf": {b8},
     "fft.fft": {f16, f32, f64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
@@ -325,7 +328,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.matrix_rank": {f32, f64},
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.hermitian": {f32, f64},
-    "linalg.svd": {f32, f64},
+    "lu_unpack": {f32, f64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
@@ -334,7 +337,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f16},
-    "nn.functional._scaled_dot_product_attention": {f64},
     "nn.functional.ctc_loss": {f32, f64},
     "nn.functional.grid_sample": {f16},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
@@ -358,7 +360,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "segment_reduce.offsets": {f16, f32, f64},
     "sgn": {f16, f32, f64},
     "stft": {f32, f64},
-    "svd": {f32, f64},
     "svd_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to": {b8, f16, f32, f64, i32, i64},
@@ -367,29 +368,21 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique": {b8, f16, f32, f64, i32, i64},
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     "view_as_complex": {f16, f32, f64},
+    # AssertionError: Tensor-likes are not close!
+    "erf": {b8, f64},
+    "nn.functional.gelu": {f64},
+    "nn.functional.triplet_margin_loss": {f16},
 }
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "amax": {f16, f32, f64},
-    "amin": {f16, f32, f64},
     "asin": {f16},
     "cumprod": {f16},
     "linalg.vector_norm": {f64, f64},
     "linalg.householder_product": {f32},
-    "linalg.lu": {f32, f64},
     "kron": {f16},
-    "masked.amax": {f16, f32, f64},
-    "masked.amin": {f16, f32, f64},
-    "max.reduction_no_dim": {f16, f32, f64},
-    "median": {f16, f32, f64},
-    "min.reduction_no_dim": {f16, f32, f64},
-    "nan_to_num": {f16, f32, f64},
-    "nanmean": {f16, f32, f64},
-    "nanmedian": {f16, f32, f64},
     "nanquantile": {f32, f64},
-    "nansum": {f16, f32, f64},
     "native_batch_norm": {f16, f32, f64},
     "native_layer_norm": {f16, f32, f64},
     "nn.functional._scaled_dot_product_attention": {f16},
@@ -401,7 +394,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.normalize": {f16},
     "nn.functional.softsign": {f16},
     "nn.functional.local_response_norm": {f16},
-    "norm.inf": {f64},
     "outer": {f16},
     "quantile": {f32, f64},
     "scatter_reduce.amax": {f16, f32, f64},
@@ -446,6 +438,7 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
     "linalg.solve_triangular": {"check_gradient": False},
@@ -461,6 +454,8 @@ inductor_all_samples = {
     "index_copy",
     "scatter_reduce.sum",
     "select_scatter",
+    "squeeze",
+    "unsqueeze",
 }
 
 
@@ -617,6 +612,5 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    torch._dynamo.config.raise_on_assertion_error = True
-    if has_triton():
+    if has_triton() and not TEST_WITH_ROCM:
         run_tests()

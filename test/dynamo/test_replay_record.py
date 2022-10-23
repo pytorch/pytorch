@@ -5,7 +5,7 @@ import shutil
 import unittest
 
 import torch
-
+import torch._dynamo.test_case
 import torch._dynamo.testing
 
 try:
@@ -16,7 +16,7 @@ except ImportError:
 requires_dill = unittest.skipIf(dill is None, "requires dill")
 
 
-class ReplayRecordTests(torch._dynamo.testing.TestCase):
+class ReplayRecordTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -26,16 +26,24 @@ class ReplayRecordTests(torch._dynamo.testing.TestCase):
             )
         )
         cls._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "print_graph_breaks", True)
+        )
+        # Most of the tests are checking to see if errors got logged, so we
+        # ask for errors to be suppressed
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", True)
+        )
+        cls._exit_stack.enter_context(
             unittest.mock.patch.object(
                 torch._dynamo.config,
-                "replay_record_dir_name",
-                "/tmp/torch._dynamo_error_records/",
+                "debug_dir_root",
+                "/tmp/_torchdynamo_debug_/",
             )
         )
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(torch._dynamo.config.replay_record_dir_name, ignore_errors=True)
+        shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
         cls._exit_stack.close()
 
     def check_replay(self, fn, *args, exp_exc_name=None):
@@ -181,6 +189,6 @@ class ReplayRecordTests(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()
