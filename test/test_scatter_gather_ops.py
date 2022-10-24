@@ -292,6 +292,26 @@ class TestScatterGather(TestCase):
         helper(50, 100, 17)
         helper(50, 100, 1)
 
+    @onlyCPU
+    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
+    def test_gather_expanded_index(self, device, dtype):
+        def helper(dim_size, idx_size, slice_size):
+            input = torch.randn(dim_size, slice_size)
+            input2 = input.clone()
+            idx = torch.randint(0, dim_size, (idx_size, 1))
+
+            # Test the fast path on gather when index is expanded
+            idx = idx.expand(-1, slice_size)
+            idx2 = idx.contiguous()
+
+            out = torch.gather(input, 0, idx)
+            out2 = torch.gather(input2, 0, idx2)
+
+            self.assertEqual(out, out2)
+
+        helper(50, 100, 17)
+        helper(50, 100, 7)
+
 # Generic Device Test Framework instantation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
 #   for details.
