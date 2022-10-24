@@ -4859,15 +4859,15 @@ Tensor sparse_constructor_values_backward(
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
 // in pads])
-Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
+Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   auto negated_pad = pad.vec();
   // NOLINTNEXTLINE(modernize-use-transparent-functors)
   std::transform(
       negated_pad.cbegin(),
       negated_pad.cend(),
       negated_pad.begin(),
-      std::negate<int64_t>());
-  return at::constant_pad_nd(grad, negated_pad, 0);
+      std::negate<c10::SymInt>());
+  return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 
 Tensor embedding_dense_double_backward(

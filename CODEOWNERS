@@ -96,6 +96,12 @@ test/test_binary_ufuncs.py @mruberry @ngimel
 test/test_reductions.py @mruberry @ngimel
 test/test_type_promotion.py @mruberry @ngimel
 
+# functorch-related things
+# This list is for people wanting to be notified every time there's a change
+# Useful for e.g. auditing xfails that other folks add to tests
+test/functorch/test_ops.py @zou3519
+test/functorch/test_vmap.py @zou3519
+
 # torch MPS
 test/test_mps.py @kulinseth
 aten/src/ATen/mps/ @kulinseth
@@ -106,11 +112,3 @@ torch/csrc/autograd/profiler* @robieta
 torch/autograd/profiler* @robieta
 torch/csrc/profiler/ @robieta
 torch/profiler/ @robieta
-
-# TorchDynamo
-benchmarks/dynamo @jansel @voznesenskym
-test/dynamo @jansel @voznesenskym
-test/inductor @jansel @voznesenskym
-torch/csrc/dynamo @jansel @voznesenskym
-torch/_dynamo @jansel @voznesenskym
-torch/_inductor @jansel @voznesenskym
