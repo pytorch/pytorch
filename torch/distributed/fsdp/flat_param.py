@@ -264,7 +264,9 @@ class FlatParameter(nn.Parameter):
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
                 _set_fsdp_flattened(param)
-            self._tensors: Optional[List[Optional[Tensor]]] = [None for _ in range(len(self._params))]
+            self._tensors: Optional[List[Optional[Tensor]]] = [
+                None for _ in range(len(self._params))
+            ]
         else:
             self._params = None
             self._shared_params = None
@@ -837,7 +839,9 @@ class FlatParamHandle:
             # autograd. We use them in the pre-backward as well to support
             # reentrant activation checkpointing, which needs the views to be
             # tracked by autograd in the backward pass's recomputed forward.
-            self._use_unsharded_views(as_params=(not in_forward and not in_pre_backward))
+            self._use_unsharded_views(
+                as_params=(not in_forward and not in_pre_backward)
+            )
         elif in_forward:
             self._use_unsharded_views(as_params=False)
 
@@ -873,9 +877,13 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-        dist.all_gather_into_tensor(padded_unsharded_grad, sharded_grad, self.process_group)
+        dist.all_gather_into_tensor(
+            padded_unsharded_grad, sharded_grad, self.process_group
+        )
         unsharded_size = self.flat_param._unpadded_unsharded_size
-        flat_param.grad = padded_unsharded_grad[:unsharded_size.numel()].view(unsharded_size)
+        flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
+            unsharded_size
+        )
         self._use_unsharded_grad_views()
 
     def reshard_grad(self):
@@ -925,7 +933,7 @@ class FlatParamHandle:
                 else:
                     p_assert(
                         hasattr(flat_param, "_cpu_grad"),
-                        "`_cpu_grad` should be defined if the gradient is on CPU"
+                        "`_cpu_grad` should be defined if the gradient is on CPU",
                     )
                     sharded_grad = flat_param._cpu_grad  # type: ignore[attr-defined]
                 # If user specified to keep the gradient in low precision, then
@@ -956,12 +964,15 @@ class FlatParamHandle:
         Prepares the gradient for optimizer computation by moving the sharded
         gradient to the ``.grad`` attribute.
         """
+
         def cast_grad_to_param_dtype_if_needed(flat_param):
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
                 # This cast is meaningful when `param_dtype` is a low precision
                 # dtype.
-                flat_param.grad.data = flat_param.grad.to(self._config.low_prec_param_dtype)
+                flat_param.grad.data = flat_param.grad.to(
+                    self._config.low_prec_param_dtype
+                )
 
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
@@ -1173,10 +1184,10 @@ class FlatParamHandle:
                         tensor = self.flat_param._tensors[i]
                         p_assert(
                             tensor is not None,
-                            "Expects `Tensor` to have been saved in forward"
+                            "Expects `Tensor` to have been saved in forward",
                         )
                         tensor.data = view  # type: ignore[union-attr]
-                        assert tensor is not None
+                        assert tensor is not None  # mypy
                         param_var = tensor
                 setattr(module, param_name, param_var)
         for i, (
@@ -1553,7 +1564,10 @@ class FlatParamHandle:
         Returns if ``tensor`` is *currently* sharded. For ``NO_SHARD``, we
         choose to have this always return ``False`` for clarity.
         """
-        if not hasattr(self.flat_param, "_sharded_size") or not self.uses_sharded_strategy:
+        if (
+            not hasattr(self.flat_param, "_sharded_size")
+            or not self.uses_sharded_strategy
+        ):
             # `_sharded_size` is defined iff `handle.shard()` has been called
             return False
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
