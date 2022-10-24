@@ -5253,6 +5253,8 @@ class TestQuantizeFx(QuantizationTestCase):
         model = M().eval()
         # we set a global default_qconfig, which will be ignored since the backend
         # we defined doesn't support anything
+        # this is to make sure we don't validate the qconfig when BackendConfig does not
+        # have fixed qparam op related configurations
         qconfig_mapping = QConfigMapping().set_global(default_qconfig)
         backend_config = BackendConfig()
         # make sure this runs
