@@ -1,16 +1,22 @@
 #pragma once
 
 #include <ATen/ExpandUtils.h>
-#include <ATen/Functions.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
-// TODO: try to remove this
-// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/alias.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <ATen/core/List.h>
 
@@ -223,7 +229,7 @@ static inline Tensor applySlice(
     // the slice.
     SymInt length = (self_device == at::kCPU || self_device == at::kCUDA)
         ? (*self_sizes)[dim]
-        : self.size(dim);
+        : self.sym_size(dim);
     if (!disable_slice_optimization && start == 0 && length == stop &&
         step == 1) {
       return self;
@@ -384,7 +390,7 @@ static inline Tensor scalarToTensor(
 // To match numpy semantics:
 // As a special case for backwards compatibility,
 // strip away unit dimensions from the left of 'src'
-static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
+static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
   for (const auto i : c10::irange(sizes.size())) {
     if (sizes[i] != 1) {
@@ -397,7 +403,7 @@ static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
 }
 
 static inline void copy_to(const Tensor& dst, const Tensor& src) {
-  if (dst.sizes().equals(src.sizes())) {
+  if (dst.sym_sizes().equals(src.sym_sizes())) {
     // A shortcut to avoid generating hard-coded constant sizes during tracing.
     // This is not a perfect solution: when src & dst have different shapes,
     // constants will still appear. Users can workaround that case by
@@ -408,7 +414,7 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     dst.fill_(src);
     return;
   }
-  auto src_view = src.view(slicePrefix1sSize(src.sizes()));
+  auto src_view = src.view_symint(slicePrefix1sSize(src.sym_sizes()));
   c10::MaybeOwned<Tensor> b_src = expand_inplace(dst, src_view, "setitem");
   dst.copy_(*b_src);
 }
@@ -714,11 +720,11 @@ static inline void set_item(
     return;
   }
 
-  IntArrayRef valueSizes = value.sizes();
-  IntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
+  SymIntArrayRef valueSizes = value.sym_sizes();
+  SymIntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
   Tensor valuesSliced;
   if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view(slicedValueSizes);
+    valuesSliced = value.view_symint(slicedValueSizes);
   } else {
     valuesSliced = value;
   }
