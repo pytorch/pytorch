@@ -887,6 +887,11 @@ class FakeTensorMode(TorchDispatchMode):
             aten.as_strided_.default,
             aten.zeros.default,
             aten.detach.default,
+            aten.zero.default,
+            aten.squeeze_copy.dim,
+            # TODO: I think there are a lot more things that could be
+            # in this list; all the _copy ops should be OK to directly
+            # call this way
             aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
 
