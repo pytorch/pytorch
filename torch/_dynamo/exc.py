@@ -1,6 +1,7 @@
 import os
 import textwrap
 
+from . import config
 from .utils import counters
 
 
@@ -40,12 +41,16 @@ class BackendCompilerFailed(TorchDynamoException):
     def __init__(self, backend_fn, inner_exception):
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
-        super().__init__(
-            f"{self.backend_name} raised {type(inner_exception).__name__}: {inner_exception}"
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    torchdynamo.config.suppress_errors = True"
-        )
+
+        msg = f"{self.backend_name} raised {type(inner_exception).__name__}: {inner_exception}"
+        if not config.suppress_errors:
+            msg += (
+                "\n\n"
+                "You can suppress this exception and fall back to eager by setting:\n"
+                "    torchdynamo.config.suppress_errors = True"
+            )
+
+        super().__init__(msg)
 
 
 class Unsupported(TorchDynamoException):

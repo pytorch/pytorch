@@ -243,13 +243,26 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     return msg
 
 
+def augment_exc_message(exc, msg):
+    new_msg = exc.args[0] + msg
+    exc.args = (new_msg,) + exc.args[1:]
+
+
 def exception_handler(e, code, frame=None):
     record_filename = None
     if hasattr(e, "exec_record"):
         record_filename = gen_record_file_name(e, code)
         write_record_to_file(record_filename, e.exec_record)
 
-    log.error(format_error_msg(e, code, record_filename, frame))
+    # Only log the exception if we are going to suppress it
+    # if aren't suppressing it, a higher level except block will handle it
+    if config.suppress_errors:
+        log.error(format_error_msg(e, code, record_filename, frame))
+    else:
+        pass
+        # augment_exc_message(
+        #    e,
+        # )
 
 
 def convert_frame_assert(
