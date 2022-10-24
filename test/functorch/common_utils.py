@@ -264,14 +264,14 @@ def _compute_quantities_for_vmap_test(
         return op(*args, **kwargs)
 
     dummy = torch.ones(batch_size, 1)
-    expected = pytree.tree_map(add_bdim_if_tensor, batched_out)
+    vmapvmap_expected = pytree.tree_map(add_bdim_if_tensor, batched_out)
 
     inner_in_dims = (0,) + pytree.tree_map(lambda x: None, in_dims)
     outer_in_dims = (0,) + in_dims
     batched_args, kwarg_values = maybe_clone_inputs()
-    output = vmap(vmap(f, inner_in_dims), outer_in_dims)(dummy, *batched_args, **kwarg_values)
+    vmapvmap_output = vmap(vmap(f, inner_in_dims), outer_in_dims)(dummy, *batched_args, **kwarg_values)
 
-    yield (loop_out, batched_out, expected, output)
+    yield (batched_out, loop_out, vmapvmap_output, vmapvmap_expected)
 
 
 # Function with more friendly return types
