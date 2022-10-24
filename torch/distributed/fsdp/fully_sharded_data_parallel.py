@@ -3398,13 +3398,8 @@ class FullyShardedDataParallel(nn.Module):
 
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
-<<<<<<< HEAD
-                self._unshard(_handles)
-                torch.cuda.current_stream().wait_stream(self._streams["unshard"])
-=======
                 self._unshard(_handles, self._streams["unshard"], self._streams["pre_unshard"])
-                self._streams["computation"].wait_stream(self._streams["unshard"])
->>>>>>> 14835dd35de... [FSDP] `summon_full_params()` in computation stream
+                torch.cuda.current_stream().wait_stream(self._streams["unshard"])
 
                 # Set this to `False` to ensure that a mistargeted prefetch
                 # does not actually unshard these handles
