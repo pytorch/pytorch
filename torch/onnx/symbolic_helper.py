@@ -431,12 +431,12 @@ def _if_scalar_type_as(self, tensor):
     if isinstance(self, _C.Value):
         return self
 
-    scalar_type = _type_utils.JitScalarType.from_value(tensor, raises=False)
-    if scalar_type:
+    try:
+        scalar_type = _type_utils.JitScalarType.from_value(tensor)
         ty = scalar_type.scalar_name().lower()
         return getattr(self, ty)()
-
-    return self
+    except errors.OnnxExporterError:
+        return self
 
 
 @_beartype.beartype
@@ -667,7 +667,11 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
                 g, index, g.op("Constant", value_t=torch.LongTensor([1]))
             )
 
-    index_scalar_type = _type_utils.JitScalarType.from_value(index, raises=False)
+    try:
+        index_scalar_type = _type_utils.JitScalarType.from_value(index)
+    except errors.OnnxExporterError:
+        index_scalar_type = None
+
     if index_scalar_type is None or index_scalar_type.scalar_name() not in {
         "Long",
         "Int",
@@ -698,19 +702,25 @@ def _slice_helper(
 
 @_beartype.beartype
 def _is_fp(value) -> bool:
-    return _type_utils.JitScalarType.from_value(value, raises=False) in {
-        _type_utils.JitScalarType.FLOAT,
-        _type_utils.JitScalarType.DOUBLE,
-        _type_utils.JitScalarType.HALF,
-        _type_utils.JitScalarType.BFLOAT16,
-    }
+    try:
+        return _type_utils.JitScalarType.from_value(value) in {
+            _type_utils.JitScalarType.FLOAT,
+            _type_utils.JitScalarType.DOUBLE,
+            _type_utils.JitScalarType.HALF,
+            _type_utils.JitScalarType.BFLOAT16,
+        }
+    except errors.OnnxExporterError:
+        return False
 
 
 @_beartype.beartype
 def _is_bool(value) -> bool:
-    return _type_utils.JitScalarType.from_value(value, raises=False) in {
-        _type_utils.JitScalarType.BOOL
-    }
+    try:
+        return _type_utils.JitScalarType.from_value(value) in {
+            _type_utils.JitScalarType.BOOL
+        }
+    except errors.OnnxExporterError:
+        return False
 
 
 @_beartype.beartype

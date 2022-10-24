@@ -94,8 +94,9 @@ def _apply_params(*args, **kwargs):
 @symbolic_helper.parse_args("v", "f", "f")
 @_beartype.beartype
 def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val: float):
-    scalar_type = _type_utils.JitScalarType.from_value(self, raises=False)
-    if scalar_type is None:
+    try:
+        scalar_type = _type_utils.JitScalarType.from_value(self)
+    except errors.OnnxExporterError:
         scalar_type = _type_utils.JitScalarType.FLOAT
     min_val = g.op(
         "Constant",
@@ -113,7 +114,12 @@ def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val:
 @_onnx_symbolic("aten::clamp")
 @_beartype.beartype
 def clamp(g: jit_utils.GraphContext, self, min, max):
-    scalar_type = _type_utils.JitScalarType.from_value(self, raises=False)
+    try:
+        scalar_type = _type_utils.JitScalarType.from_value(self)
+        min = _cast_if_not_none(min, scalar_type)
+        max = _cast_if_not_none(max, scalar_type)
+    except errors.OnnxExporterError:
+        pass
 
     @_beartype.beartype
     def _cast_if_not_none(tensor, dtype):
@@ -125,10 +131,6 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
             )
         else:
             return tensor
-
-    if scalar_type is not None:
-        min = _cast_if_not_none(min, scalar_type)
-        max = _cast_if_not_none(max, scalar_type)
 
     if symbolic_helper._is_none(min):
         return clamp_max(g, self, max)
@@ -178,8 +180,9 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 @_beartype.beartype
 def relu6(g: jit_utils.GraphContext, input):
     relu_ = opset9._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
-    scalar_type = _type_utils.JitScalarType.from_value(input, raises=False)
-    if scalar_type is None:
+    try:
+        scalar_type = _type_utils.JitScalarType.from_value(input)
+    except errors.OnnxExporterError:
         scalar_type = _type_utils.JitScalarType.FLOAT
     min_val = g.op(
         "Constant",
@@ -293,11 +296,12 @@ def index_put(
         values = opset9.expand(g, values, values_shape, None)
     values = symbolic_helper._reshape_helper(g, values, values_shape)
 
-    scalar_type = _type_utils.JitScalarType.from_value(self, raises=False)
-    if scalar_type is not None and scalar_type != _type_utils.JitScalarType.from_value(
-        values
-    ):
-        values = g.op("Cast", values, to_i=scalar_type.onnx_type())
+    try:
+        scalar_type = _type_utils.JitScalarType.from_value(self)
+        if scalar_type != _type_utils.JitScalarType.from_value(values):
+            values = g.op("Cast", values, to_i=scalar_type.onnx_type())
+    except errors.OnnxExporterError:
+        scalar_type = None
 
     if accumulate:
         zeros = g.op(

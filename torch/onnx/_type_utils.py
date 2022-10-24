@@ -134,48 +134,38 @@ class JitScalarType(enum.IntEnum):
 
     # TODO: `value: torch._C.Value` type annotation raises (CI machines only):
     #       NameError: name '_C' is not defined
-    # TODO: Return type Optional[JitScalarType] or Union[JitScalarType, None] raises (CI machines only):
-    #       NameError: name 'JitScalarType' is not defined
     # In both cases, using typing.TypeVar or string literals didn't work
     @classmethod
     @_beartype.beartype
-    def from_value(cls, value, allow_list_type: bool = True, raises: bool = True):
-        """Convert a torch dtype to JitScalarType.
+    def from_value(cls, value) -> JitScalarType:
+        """Create a JitScalarType from a torch._C.Value underlying scalar type.
 
         Args:
             value: A `torch._C.Value` object to fetch scalar type from.
-            allow_list_type: specifies whether type can be fetched from `torch.LisType` records
-            raises: `raises==True` raises exception, otherwise `None` is returned
 
         Returns:
-            JitScalarType when raises==True and Union[JitScalarType, None] otherwise.
+            JitScalarType.
 
         Raises:
             OnnxExporterError: if value is None.
-            SymbolicValueError: when raises=True and value.type().scalarType() does not exist
+            SymbolicValueError: when value.type().scalarType() does not exist
 
         """
 
         if value is None:
-            if raises:
-                raise errors.OnnxExporterError(
-                    "Cannot determine scalar type for `None` instance."
-                )
-            else:
-                return None
+            raise errors.OnnxExporterError(
+                "Cannot determine scalar type for `None` instance."
+            )
         elif isinstance(value, torch.Tensor):
             return JitScalarType.from_dtype(value.dtype)
-        elif allow_list_type and isinstance(value.type(), torch.ListType):
+        elif isinstance(value.type(), torch.ListType):
             return JitScalarType.from_dtype(value.type().getElementType().dtype())
         scalar_type = value.type().scalarType()
         if scalar_type is None:
-            if raises:
-                raise errors.SymbolicValueError(
-                    f"Cannot determine scalar type for this '{type(value.type())}' instance.",
-                    value,
-                )
-            else:
-                return None
+            raise errors.SymbolicValueError(
+                f"Cannot determine scalar type for this '{type(value.type())}' instance.",
+                value,
+            )
         return JitScalarType.from_name(scalar_type)
 
     @_beartype.beartype
