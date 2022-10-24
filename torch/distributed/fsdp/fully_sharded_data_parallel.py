@@ -3616,6 +3616,11 @@ class FullyShardedDataParallel(nn.Module):
                 orig_grad_data.record_stream(self._streams["post_backward"])
 
                 if handle._use_orig_params:
+                    # Since the handle's `FlatParameter` completed its gradient
+                    # computation, we should reset the gradient noneness mask
+                    handle._reset_is_grad_none()
+                    # Delay using sharded gradient views until after the
+                    # reduce-scatter instead of immediately after resharding
                     handle._use_sharded_grad_views()
 
     def _cast_grad_to_param_dtype(
