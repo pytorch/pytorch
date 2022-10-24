@@ -44,6 +44,9 @@ quantized_decomposed_lib.define(
 def dequantize_per_tensor(input, scale, zero_point, quant_min, quant_max, dtype):
     assert input.dtype == dtype, f"Expecting input to have dtype: {dtype}"
     if dtype in [torch.uint8, torch.int8]:
+        # TODO: investigate why
+        # (input - zero_point).to(torch.float32) * scale
+        # failed the test
         return (input.to(torch.float32) - zero_point) * scale
     else:
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
