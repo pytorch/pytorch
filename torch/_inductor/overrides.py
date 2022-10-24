@@ -125,7 +125,7 @@ class ConvUnary2d(nn.Conv2d):
         return self._conv_forward(input, self.weight, self.bias)
 
 
-def fuse_conv_unary_eval(conv: nn.Module, unary: nn.Module):
+def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
@@ -295,7 +295,7 @@ def rand_like(x, **kwargs):
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
 
 
-computation_op_unary_op_fusion_map = {nn.Conv2d: fuse_conv_unary_eval}
+computation_op_unary_op_fusion_map = {nn.Conv2d: fused_conv_unary_eval}
 
 
 unary_modules_map = {
