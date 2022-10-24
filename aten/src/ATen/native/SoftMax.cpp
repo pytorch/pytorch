@@ -198,7 +198,7 @@ void host_softmax(
             if (mask_type_ == 0) {
                 // Optimized case: attention mask of shape LxL
                 // outer_idx goes over BxHxL, mask_outer_idx goes over L.
-                mask_outer_idx = outer_idx % (input.size(2));
+                mask_outer_idx = outer_idx % input.size(2);
             } else if (mask_type_ == 1) {
                 // Optimized case: padding mask of shape BxL
                 // outer_idx goes over BxHxL, mask_outer_idx goes over B.
@@ -602,13 +602,12 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
   };
 
   if (mask_type == 2) {
-      TORCH_CHECK(input_.sizes() == mask_.sizes(),
+      TORCH_CHECK(input_.sizes() == mask.sizes(),
                   "For mask_type == 2 mask shape should match input shape")
   } else if (mask_type == 1) {
       // Padding mask of shape (B, L)
       TORCH_CHECK((input_.sizes()[0] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
                   "For mask_type == 1 mask shape should be (B, L)");
-
       if (dim_ != input_.dim() - 1) {
             // We only process padding mask in the optimized way if softmax is applied along the last dimesion,
             // otherwise we need to expand the mask into a generic 4D one
@@ -616,15 +615,14 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             mask = at::expand_inplace(input_, mask)->contiguous();
             mask_type = 2;
       }
-
   } else if (mask_type == 0) {
-          // Attention mask of shape (L, L)
+      // Attention mask of shape (L, L)
       TORCH_CHECK((mask.dim() == 2) && (input_.sizes()[2] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
                   "For mask_type == 0 mask shape should be (L, L)");
       if (dim_ != input_.dim() - 1) {
             // We only process attention mask in a optimized way if softmax is applied along the last dimesion,
             // otherwise we need to expand the mask into a generic 4D one
-            mask = mask_.view({1, 1, input_.sizes()[2], input_.sizes()[2]});
+            mask = mask.view({1, 1, input_.sizes()[2], input_.sizes()[2]});
             mask = at::expand_inplace(input_, mask)->contiguous();
             mask_type = 2;
       }
