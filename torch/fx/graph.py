@@ -1,3 +1,4 @@
+from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
@@ -120,7 +121,8 @@ class _Namespace:
     def __init__(self):
         self._obj_to_name: Dict[Any, str] = {}
         self._unassociated_names = set()
-        self._used_names: Dict[str, int] = {}
+        self._used_names: Set[str] = set()
+        self._base_count: Dict[str, int] = defaultdict(int)
 
         self._illegal_char_regex = re.compile('[^0-9a-zA-Z_]+')
         self._name_suffix_regex = re.compile(r"(.*)_(\d+)$")
@@ -150,13 +152,15 @@ class _Namespace:
             num = int(num_str)
 
         candidate = base if num is None else f'{base}_{num}'
-        num = num if num else 0
+        if not num:
+            num = self._base_count[base]
 
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
             num += 1
             candidate = f'{base}_{num}'
 
-        self._used_names.setdefault(candidate, 0)
+        self._used_names.add(candidate)
+        self._base_count[base] = num
         if obj is None:
             self._unassociated_names.add(candidate)
         else:
