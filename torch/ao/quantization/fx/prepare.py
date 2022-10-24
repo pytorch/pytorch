@@ -1392,7 +1392,10 @@ def insert_observers_for_model(
 
     return results_node
 
-def _validate_fixed_qparams_qconfigs(model: GraphModule, node_name_to_qconfig: Dict[str, QConfigAny], backend_config: BackendConfig):
+def _validate_fixed_qparams_qconfigs(
+        model: GraphModule,
+        node_name_to_qconfig: Dict[str, QConfigAny],
+        backend_config: BackendConfig):
     """
     Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
     """
