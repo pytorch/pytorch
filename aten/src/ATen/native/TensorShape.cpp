@@ -743,14 +743,14 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
-  const auto dim_size = self.size(dim_);
+  const auto dim_size = self.sym_size(dim_);
   std::vector<Tensor> splits(sections);
-  int64_t min_split_size = dim_size / sections;
-  int64_t num_splits_one_extra = dim_size % sections;
-  int64_t start_idx = 0;
+  auto min_split_size = dim_size / sections;
+  auto num_splits_one_extra = dim_size % sections;
+  c10::SymInt start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
-    int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
-    splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
+    auto split_size = (num_splits_one_extra > split_idx) ? (min_split_size + 1) : min_split_size;
+    splits[split_idx] = at::slice_symint(self, dim_, start_idx, start_idx + split_size);
     start_idx += split_size;
   }
   return splits;
@@ -2829,30 +2829,30 @@ Tensor & t_(Tensor & self) {
   return self.transpose_(0, self.dim() < 2 ? 0 : 1);
 }
 
-std::tuple<DimVector, DimVector>
+std::tuple<SymDimVector, SymDimVector>
 inferSqueezeGeometry(const Tensor &tensor) {
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
-    if(tensor.sizes()[d] != 1) {
-      sizes.push_back(tensor.sizes()[d]);
-      strides.push_back(tensor.strides()[d]);
+    if(tensor.sym_sizes()[d] != 1) {
+      sizes.push_back(tensor.sym_sizes()[d]);
+      strides.push_back(tensor.sym_strides()[d]);
     }
   }
 
   return std::make_tuple(std::move(sizes), std::move(strides));
 }
 
-std::tuple<DimVector, DimVector>
+std::tuple<SymDimVector, SymDimVector>
 inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
 
   for(const auto d : c10::irange(tensor.dim())) {
-    if(d != dim || tensor.sizes()[dim] != 1) {
-      sizes.push_back(tensor.sizes()[d]);
-      strides.push_back(tensor.strides()[d]);
+    if(d != dim || tensor.sym_sizes()[dim] != 1) {
+      sizes.push_back(tensor.sym_sizes()[d]);
+      strides.push_back(tensor.sym_strides()[d]);
     }
   }
   return std::make_tuple(std::move(sizes), std::move(strides));
@@ -2882,8 +2882,8 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
 Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  DimVector sizes;
-  DimVector strides;
+  SymDimVector sizes;
+  SymDimVector strides;
   std::tie(sizes, strides) = dim.has_value() ? inferSqueezeGeometry(self, dim.value()) : inferSqueezeGeometry(self);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
@@ -2904,7 +2904,9 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
                                                   axis,
                                                   quantizer->scalar_type());
   }
-  auto result = make_qtensor(self, sizes, strides, quantizer);
+  // TODO: quantized Tensor support for SymInt needs to be added but basic building blocs
+  // are missing for now.
+  auto result = make_qtensor(self, c10::asIntArrayRefSlow(sizes), c10::asIntArrayRefSlow(strides), quantizer);
   if (dim.has_value()) {
     namedinference::propagate_names_except(result, self, {dim.value()});
   } else {
@@ -2917,7 +2919,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::optional<int64_t> dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  at::Tensor result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  at::Tensor result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
@@ -2933,11 +2935,11 @@ Tensor squeeze_quantized(const Tensor& self) {
 Tensor squeeze(const Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, dims);
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided(self.sizes(), self.strides());
+  if (dims == 0 || self.sym_sizes()[dim] != 1) {
+    return self.as_strided_symint(self.sym_sizes(), self.sym_strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided_symint(std::get<0>(g), std::get<1>(g));
   namedinference::propagate_names_except(result, self, {dim});
   return result;
 }
@@ -2950,7 +2952,7 @@ Tensor squeeze_quantized(const Tensor& self, int64_t dim) {
 
 Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
 
@@ -2958,12 +2960,12 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, self.dim());
 
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    self.as_strided_(self.sizes(), self.strides());
+  if (dims == 0 || self.sym_sizes()[dim] != 1) {
+    self.as_strided__symint(self.sym_sizes(), self.sym_strides());
     return self;
   }
   auto g = inferSqueezeGeometry(self, dim);
-  self.as_strided_(std::get<0>(g), std::get<1>(g));
+  self.as_strided__symint(std::get<0>(g), std::get<1>(g));
   return self;
 }
 
@@ -3388,72 +3390,29 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   return self.as_strided(sizes, strides);
 }
 
-template <typename scalar_t>
-void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
-  TORCH_CHECK(self.dim() == 1 || self.dim() == 2, "matrix or a vector expected");
-
-  auto self_data = self.data_ptr<scalar_t>();
-  if (self.dim() == 1) {
-    auto self_size = self.size(0);
-    auto self_stride = self.stride(0);
-    int64_t sz = self_size + std::abs(dimension);
-
-    at::native::resize_output(result, {sz, sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    auto r_stride_1 = result.stride(1);
-    r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
-
-    for (const auto i : c10::irange(self_size)) {
-      r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
-    }
+Tensor diag(const Tensor& self, int64_t offset) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "diag(): Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    return at::diag_embed(self, offset);
   } else {
-    auto self_stride_0 = self.stride(0);
-    auto self_stride_1 = self.stride(1);
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t sz;
-    if (dimension >= 0) {
-      sz = std::min(self.size(0), self.size(1) - dimension);
-    } else {
-      sz = std::min(self.size(0) + dimension, self.size(1));
-    }
-
-    at::native::resize_output(result, {sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    self_data += (dimension >= 0 ? dimension * self_stride_1 : -dimension * self_stride_0);
-    for (const auto i : c10::irange(sz)) {
-      r_data[i * r_stride_0] = self_data[i * (self_stride_0 + self_stride_1)];
-    }
+    // We return a copy of the diagonal
+    return at::diagonal_copy(self, offset);
   }
 }
 
-Tensor diag(const Tensor& self, int64_t dimension) {
-  Tensor result = at::empty({0}, self.options());
-  at::diag_out(result, self, dimension);
-  return result;
-}
-
-Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kBool, self.scalar_type(), "diag", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
-  return result;
-}
-
-Tensor diag_backward_symint(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
-  auto ndimension = input_sizes.size();
-  AT_ASSERT(ndimension == 1 || ndimension == 2);
-
-  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
-    return grad.diag(diagonal);
+Tensor& diag_out(const Tensor& self, int64_t offset, Tensor& out) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    TORCH_CHECK(
+        canCast(self.scalar_type(), out.scalar_type()),
+        "diag: result type ", self.scalar_type(), " can't be cast to the desired out= type ",
+        out.scalar_type());
+    return at::diag_embed_out(out, self, offset);
+  } else {
+    return at::diagonal_copy_out(out, self, offset);
   }
-
-  // Input was a matrix but was not square
-  return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -3707,8 +3666,16 @@ at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayR
 
 
 at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
-  auto tmp = self.diagonal(offset, dim1, dim2);
-  out.copy_(tmp);
+  TORCH_CHECK(
+    out.device() == self.device(),
+    "diagonal_copy: Expected out and self tensors to be on the same device, but got ",
+    "out on ", out.device(), " and self on ", self.device());
+  auto result = self.diagonal(offset, dim1, dim2);
+  at::native::resize_output(out, result.sizes());
+  TORCH_CHECK(
+      canCast(result.scalar_type(), out.scalar_type()),
+      "diagonal_copy: result type ", result.scalar_type(), " can't be cast to the desired out= type ", out.scalar_type());
+  out.copy_(result);
   return out;
 }
 

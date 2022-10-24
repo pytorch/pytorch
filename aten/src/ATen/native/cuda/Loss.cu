@@ -152,9 +152,7 @@ namespace {
 
 constexpr int NLL_LOSS_THREADS = 32;
 
-// TODO(crcrpar): Think about removing this dispatch, and introducing canUse32BitIndexMath
-// NOTE(crcrpar): ATen/native/cuda/Loss.cu's nll loss implementation doesn't have the following dispatch for `target`, which only hardcode int64_t
-//   With this dispatch, `target` could be Byte and `ignore_index` could be int64_t, which doesn't sound quite reasonable.
+// NOTE(crcrpar): `Byte` support was added for https://github.com/pytorch/pytorch/issues/59765.
 #define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                     \
   AT_DISPATCH_SWITCH(TYPE, NAME,                                              \
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
@@ -170,7 +168,7 @@ __global__ void nll_loss_forward_no_reduce_cuda_kernel(
     int64_t n_classes,
     int64_t ignore_index) {
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int cur_target = target[index];
+    index_t cur_target = target[index];
     if (cur_target == ignore_index) {
       output[index] = static_cast<scalar_t>(0);
       continue;
@@ -194,7 +192,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
     int64_t ignore_index) {
   CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0);
 
-  int64_t t = static_cast<int64_t>(*target);
+  const index_t t = *target;
   if (t != ignore_index) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     const auto cur_weight = weights != nullptr ? weights[t] : scalar_t{1};
@@ -237,7 +235,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
-    int64_t t = target[i];
+    index_t t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       scalar_t cur_weight =
@@ -407,7 +405,7 @@ __global__ void nll_loss_backward_no_reduce_cuda_kernel(
   int64_t ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int64_t cur_target = static_cast<int64_t>(target[index]);
+    index_t cur_target = target[index];
     if (cur_target == ignore_index) {
       continue;
     }
@@ -428,13 +426,17 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   int64_t n_classes,
   int64_t ignore_index
 ) {
-  const int64_t t = *target;
+  const index_t t = *target;
   if (t != ignore_index) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     const auto grad = -(size_average ? *grad_output / *total_weight : *grad_output);
     grad_input[t] = weights != nullptr ? weights[t] * grad : grad;
   }
 }
+
+template <typename T> struct bwd_index_type { using type = T; };
+template<> struct bwd_index_type<uint8_t> { using type = int; };
+template<> struct bwd_index_type<int64_t> { using type = uint64_t; };
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
@@ -448,15 +450,16 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     int ndim,
     int64_t n_classes,
     int64_t ignore_index) {
+  using bwd_index_t = typename bwd_index_type<index_t>::type;
   const auto grad = -(size_average ? *grad_output / *total_weight
                                    : *grad_output);
 
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
-    const int64_t t = target[i];
+    const index_t t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       // NOTE(crcrpar): this index could overflow in int64_t as `t` itself can be close to the max.
-      const uint64_t index = static_cast<uint64_t>(i) * ndim + t;
+      const bwd_index_t index = static_cast<bwd_index_t>(i) * ndim + t;
       CUDA_KERNEL_ASSERT(index >= 0);
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;
     }

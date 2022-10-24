@@ -164,7 +164,7 @@ def _safe_copy_out(
         utils.check(
             copy_from.dtype == copy_to.dtype,
             lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
-            "but got {copy_to.dtype} instead",
+            f"but got {copy_to.dtype} instead",
         )
     else:
         utils.check(
