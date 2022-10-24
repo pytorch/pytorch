@@ -134,7 +134,7 @@ class PySymInt(object):
             self.expr = None  # Populated after association
 
         def __hash__(self):
-            return hash((self.ref_id, self.kind, self.idx, self.expr))
+            return hash((self.ref_id, self.kind, self.idx))
 
 
     def __init__(self, expr, shape_env, constant=None, tensor_ref: Optional[TensorReference] = None):
@@ -163,7 +163,7 @@ class PySymInt(object):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
-        return PySymInt(self.expr, self.shape_env, constant=self.constant, tensor_ref=copy.deepcopy(self.tensor_ref))
+        return PySymInt(self.expr, self.shape_env, constant=self.constant, tensor_ref=self.tensor_ref)
 
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)

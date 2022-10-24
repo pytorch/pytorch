@@ -477,7 +477,6 @@ class TensorVariable(VariableTracker):
         kwargs = dict(kwargs)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
