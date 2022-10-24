@@ -18,6 +18,7 @@ from sympy import Expr, Integer
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import is_boolean_dtype, is_float_dtype
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -2824,7 +2825,7 @@ class FallbackKernel(ExternKernelAlloc):
         return list(map(repr, self.unflatten_args(tensor_args, constant_args))) + kwargs
 
     @classmethod
-    def create(cls, kernel, *args, **kwargs):
+    def run_kernel(cls, kernel, *args, **kwargs):
         args_flat, args_spec = pytree.tree_flatten(args)
 
         is_arg_tensor = []
@@ -2868,9 +2869,11 @@ class FallbackKernel(ExternKernelAlloc):
             ).zero_()
             example_args.append(arg)
 
-        example_output = kernel(
-            *unflatten_args(example_args, non_tensor_args), **kwargs
-        )
+        return kernel(*unflatten_args(example_args, non_tensor_args), **kwargs)
+
+    @classmethod
+    def create(cls, kernel, *args, **kwargs):
+        example_output = cls.run_kernel(kernel, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
@@ -2978,76 +2981,22 @@ class Convolution(ExternKernelAlloc):
     ):
         x = cls.require_stride1(cls.realize_input(x))
         weight = cls.require_stride1(cls.realize_input(weight))
-        stride = tuple(stride_)
-        padding = tuple(padding_)
-        dilation = tuple(dilation_)
-        assert isinstance(transposed, bool)
-        output_padding = tuple(output_padding_)
-        assert isinstance(groups, int)
 
-        weight_shape = [
-            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
-            for s in weight.get_size()
-        ]
-
-        out_channels, in_channels1, *kernel_size = weight_shape
-        in_channels1 = in_channels1 * groups
-        if transposed:
-            out_channels, in_channels1 = in_channels1, out_channels
-
-        if bias is not None:
-            bias = cls.require_stride1(cls.realize_input(bias))
-            (bias_shape,) = [
-                sympy.Integer(V.graph.sizevars.guard_static_shape(s))
-                for s in bias.get_size()
-            ]
-            assert bias_shape == out_channels, f"{bias_shape} == {out_channels}"
-
-        if len(x.get_size()) == 1 + len(kernel_size):
-            in_channels2, *input_size = x.get_size()
-            in_channels_stride, *_ = x.get_stride()
-            output_size = []
-        else:
-            assert len(x.get_size()) == 2 + len(kernel_size)
-            batch, in_channels2, *input_size = x.get_size()
-            _, in_channels_stride, *_ = x.get_stride()
-            output_size = [batch]
-
-        V.graph.sizevars.guard_equals(in_channels1, in_channels2)
-
-        output_size.append(out_channels)
-
-        assert (
-            len(stride)
-            == len(padding)
-            == len(dilation)
-            == len(output_padding)
-            == len(kernel_size)
-            == len(input_size)
-        )
-        for i in range(len(stride)):
-            if transposed:
-                output_size.append(
-                    (input_size[i] - 1) * stride[i]
-                    - 2 * padding[i]
-                    + dilation[i] * (kernel_size[i] - 1)
-                    + output_padding[i]
-                    + 1
-                )
-            else:
-                output_size.append(
-                    IndexingDiv(
-                        input_size[i]
-                        + 2 * padding[i]
-                        - dilation[i] * (kernel_size[i] - 1)
-                        - 1
-                        + stride[i],
-                        stride[i],
-                    )
-                    + 2 * output_padding[i]
-                )
-            output_size[-1] = sympy.Integer(
-                V.graph.sizevars.guard_static_shape(output_size[-1])
+        # TODO - enable FakeTensorMode for propagation more globally. incorrect stride metas for fallback
+        # kernels will lead to runtime failures
+        with FakeTensorMode():
+            output = cls.run_kernel(
+                cls,
+                aten.convolution,
+                x,
+                weight,
+                bias,
+                stride_,
+                padding_,
+                dilation_,
+                transposed,
+                output_padding_,
+                groups,
             )
 
         # choose runtime kernel
@@ -3102,30 +3051,13 @@ class Convolution(ExternKernelAlloc):
                 x.get_device(),
                 x.get_dtype(),
             )
-        else:
-            output_layout_str = "torch.contiguous_format"
-            # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
-            # which align with aten.convolutuion path(cpu only support 2d case now).
-            # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
 
-            # CUDA channels_last path depend on cudnn version, see
-            # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
-            valid_device = True
-            if (
-                x.get_device() == "cuda"
-                and torch.backends.cudnn.is_available()
-                and torch.backends.cudnn.version() < 8302
-            ):
-                valid_device = False
-            if (
-                valid_device
-                and len(x.get_size()) == 4
-                and (
-                    x.get_layout().is_channels_last_stride_ordered()
-                    or weight.get_layout().is_channels_last_stride_ordered()
-                )
-            ):
-                output_layout_str = "torch.channels_last"
+        else:
+            output_layout_str = (
+                "torch.contiguous_format"
+                if output.is_contiguous()
+                else "torch.channels_last"
+            )
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
