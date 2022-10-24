@@ -473,6 +473,15 @@ Tensor & nll_loss2d_out(const Tensor & self, const Tensor & target, const c10::o
   return std::get<0>(at::nll_loss2d_forward_out(output, total_weight, self, target, weight, reduction, ignore_index));
 }
 
+Tensor nll_loss2d_symint(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
+}
+
+// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
 Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

@@ -142,8 +142,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     .check_all_same_dtype(false)
     .promote_inputs_to_common_dtype(false)
     .build();
-
-  cpu_kernel(iter, [=](scalar_t input, param_t mean, param_t invstd, param_t weight, param_t bias) {
+  cpu_kernel(iter, [=](scalar_t input, param_t mean, param_t invstd, param_t weight, param_t bias) -> scalar_t {
     return ((input - mean) * invstd) * weight + bias;
   });
   return std::make_tuple(output, save_mean, save_invstd);

@@ -2,7 +2,7 @@
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and defines mathematical operations over these tensors.
-Additionally, it provides many utilities for efficient serializing of
+Additionally, it provides many utilities for efficient serialization of
 Tensors and arbitrary types, and other useful utilities.
 
 It has a CUDA counterpart, that enables you to run your tensor computations
@@ -846,6 +846,7 @@ from torch import fft as fft
 from torch import futures as futures
 from torch import nested as nested
 from torch import nn as nn
+from torch.signal import windows as windows
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
@@ -873,12 +874,12 @@ from torch import profiler as profiler
 
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
-import torch.nn.intrinsic
 from torch import ao as ao
 # nn.quant* depends on ao -- so should be after those.
 import torch.nn.quantizable
 import torch.nn.quantized
 import torch.nn.qat
+import torch.nn.intrinsic
 
 _C._init_names(list(torch._storage_classes))
 

@@ -60,11 +60,22 @@ vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-    : view_(new vTensorStorage{
+    : view_(std::make_shared<vTensorStorage>(
           context,
           sizes,
-          options,
-      }) {}
+          StorageType::TEXTURE_3D,
+          options)) {}
+
+vTensor::vTensor(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const StorageType storage_type,
+    const TensorOptions& options)
+    : view_(std::make_shared<vTensorStorage>(
+          context,
+          sizes,
+          storage_type,
+          options)) {}
 
 vTensor::vTensor(
     api::Context* const context,
@@ -72,8 +83,28 @@ vTensor::vTensor(
     const TensorOptions& options,
     double q_scale,
     int64_t q_zero_point)
-    : view_(
-          new vTensorStorage{context, sizes, options, q_scale, q_zero_point}) {}
+    : view_(std::make_shared<vTensorStorage>(
+          context,
+          sizes,
+          StorageType::TEXTURE_3D,
+          options,
+          q_scale,
+          q_zero_point)) {}
+
+vTensor::vTensor(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const StorageType storage_type,
+    const TensorOptions& options,
+    double q_scale,
+    int64_t q_zero_point)
+    : view_(std::make_shared<vTensorStorage>(
+          context,
+          sizes,
+          storage_type,
+          options,
+          q_scale,
+          q_zero_point)) {}
 
 api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
@@ -99,7 +130,8 @@ api::VulkanImage& vTensor::image(
 api::VulkanImage allocate_image(
     api::Context* const context_ptr,
     api::utils::uvec3& extents,
-    const caffe2::TypeMeta dtype) {
+    StorageType storage_type,
+    const VkFormat image_format) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
   api::ImageSampler::Properties sampler_props{
@@ -109,22 +141,48 @@ api::VulkanImage allocate_image(
       VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
   };
 
+  VkImageType image_type = VK_IMAGE_TYPE_3D;
+  VkImageViewType image_view_type = VK_IMAGE_VIEW_TYPE_3D;
+
+  switch (storage_type) {
+    case StorageType::TEXTURE_3D:
+      image_type = VK_IMAGE_TYPE_3D;
+      image_view_type = VK_IMAGE_VIEW_TYPE_3D;
+      break;
+    case StorageType::TEXTURE_2D:
+      image_type = VK_IMAGE_TYPE_2D;
+      image_view_type = VK_IMAGE_VIEW_TYPE_2D;
+      break;
+  }
+
   VkSampler sampler = adapter_ptr->sampler_cache().retrieve(sampler_props);
 
-  return adapter_ptr->vma().create_image3d(
-      api::create_extent3d(extents), sampler_props, sampler, dtype, true);
+  return adapter_ptr->vma().create_image(
+      api::create_extent3d(extents),
+      image_format,
+      image_type,
+      image_view_type,
+      sampler_props,
+      sampler,
+      true);
 }
 
 vTensorStorage::vTensorStorage(
     api::Context* const context,
     const IntArrayRef sizes,
+    const StorageType storage_type,
     const TensorOptions& options)
     : context_(context),
       extents_(image_extents(sizes)),
       options_(options),
       sizes_(sizes),
       strides_(sizes.size()),
-      image_(allocate_image(context_, extents_, options_.dtype())),
+      storage_type_{storage_type},
+      image_(allocate_image(
+          context_,
+          extents_,
+          storage_type_,
+          api::vk_format(options_.dtype()))),
       last_access_{} {
   ops::verify(options);
 }
@@ -132,6 +190,7 @@ vTensorStorage::vTensorStorage(
 vTensorStorage::vTensorStorage(
     api::Context* const context,
     const IntArrayRef sizes,
+    const StorageType storage_type,
     const TensorOptions& options,
     double q_scale_in,
     int64_t q_zero_point_in)
@@ -143,7 +202,12 @@ vTensorStorage::vTensorStorage(
       is_quantized_{true},
       q_scale{q_scale_in},
       q_zero_point{q_zero_point_in},
-      image_(allocate_image(context_, extents_, options_.dtype())),
+      storage_type_{storage_type},
+      image_(allocate_image(
+          context_,
+          extents_,
+          storage_type_,
+          api::vk_format(options_.dtype()))),
       last_access_{} {
   ops::verify(options);
 }

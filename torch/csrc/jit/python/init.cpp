@@ -139,8 +139,13 @@ static c10::SymIntNode toSymIntNode(c10::SymIntNode a, py::object b) {
 }
 
 static c10::SymFloatNode toSymFloatNode(c10::SymFloatNode a, py::object b) {
-  return torch::is_symfloat_node(b) ? b.cast<c10::SymFloatNode>()
-                                    : a->wrap(b.cast<double>());
+  if (torch::is_symfloat_node(b)) {
+    return b.cast<c10::SymFloatNode>();
+  } else if (torch::is_symint_node(b)) {
+    return b.cast<c10::SymIntNode>()->sym_float();
+  } else {
+    return a->wrap(b.cast<double>());
+  }
 }
 
 class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
@@ -242,7 +247,18 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return dispatch_common_(__FUNCTION__, other);
   }
 
+  virtual SymIntNode min(const SymIntNode& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+  virtual SymIntNode max(const SymIntNode& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
   virtual SymIntNode ceil() override {
+    return dispatch_common_(__FUNCTION__);
+  }
+
+  virtual SymIntNode neg() override {
     return dispatch_common_(__FUNCTION__);
   }
 
@@ -291,6 +307,10 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   }
 
   SymFloatNode truediv(const SymFloatNode& other) override {
+    return dispatch_common_(__FUNCTION__, other);
+  }
+
+  SymFloatNode pow(const SymFloatNode& other) override {
     return dispatch_common_(__FUNCTION__, other);
   }
 
@@ -1386,7 +1406,7 @@ void initJITBindings(PyObject* module) {
               "__radd__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 auto snb = toSymIntNode(a, b);
-                return a->add(snb);
+                return snb->add(a);
               })
           .def(
               "__sub__",
@@ -1410,7 +1430,7 @@ void initJITBindings(PyObject* module) {
               "__rmul__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 auto snb = toSymIntNode(a, b);
-                return a->mul(snb);
+                return snb->mul(a);
               })
           .def(
               "__truediv__",
@@ -1449,6 +1469,18 @@ void initJITBindings(PyObject* module) {
                 return snb->mod(a);
               })
           .def(
+              "__pow__",
+              [](c10::SymIntNode a, py::object b) -> py::object {
+                if (PyFloat_Check(b.ptr())) {
+                  auto float_a = a->sym_float();
+                  return py::cast(
+                      float_a->pow(float_a->wrap(py::cast<double>(b))));
+                }
+                // TODO: integer pow
+                return py::reinterpret_borrow<py::object>(Py_NotImplemented);
+              })
+          // TODO: rpow
+          .def(
               "__eq__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 auto snb = toSymIntNode(a, b);
@@ -1481,6 +1513,21 @@ void initJITBindings(PyObject* module) {
           .def(
               "__ceil__",
               [](c10::SymIntNode a) -> c10::SymIntNode { return a->ceil(); })
+          .def(
+              "__neg__",
+              [](c10::SymIntNode a) -> c10::SymIntNode { return a->neg(); })
+          .def(
+              "__min__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->min(snb);
+              })
+          .def(
+              "__max__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return a->max(snb);
+              })
           .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
           .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
           // Intentionally don't set file line, as the Python backtrace matters
@@ -1515,7 +1562,7 @@ void initJITBindings(PyObject* module) {
           "__radd__",
           [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
             auto snb = toSymFloatNode(a, b);
-            return a->add(snb);
+            return snb->add(a);
           })
       .def(
           "__sub__",
@@ -1533,7 +1580,7 @@ void initJITBindings(PyObject* module) {
           "__rmul__",
           [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
             auto snb = toSymFloatNode(a, b);
-            return a->mul(snb);
+            return snb->mul(a);
           })
       .def(
           "__truediv__",
@@ -1576,6 +1623,18 @@ void initJITBindings(PyObject* module) {
           [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
             auto snb = toSymFloatNode(a, b);
             return a->ge(snb);
+          })
+      .def(
+          "__pow__",
+          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
+            auto snb = toSymFloatNode(a, b);
+            return a->pow(snb);
+          })
+      .def(
+          "__rpow__",
+          [](c10::SymFloatNode a, py::object b) -> c10::SymFloatNode {
+            auto snb = toSymFloatNode(a, b);
+            return snb->pow(a);
           })
       .def(
           "__ceil__",
