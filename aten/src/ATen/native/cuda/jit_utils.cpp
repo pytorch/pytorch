@@ -893,6 +893,8 @@ void codegenOutputQuery(
     max_dev_version = CUDAVersion(7, 5);
   } else if (nvrtc_version == CUDAVersion(11, 0)) { // 11.0 supports 3-8.0
     max_dev_version = CUDAVersion(8, 0);
+  } else if (nvrtc_major == 11 && nvrtc_minor < 8) {
+    max_dev_version = CUDAVersion(8, 6);
   } else {
     // If the driver version is unknown (i.e. newer than this code)
     // assume the driver supports this device
