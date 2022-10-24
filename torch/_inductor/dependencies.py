@@ -16,8 +16,6 @@ log = logging.getLogger(__name__)
 
 Dep = Union["MemoryDep", "StarDep"]
 
-MAX_EXPR_LENGTH = 1000
-
 
 class MemoryDep(typing.NamedTuple):
     name: str
