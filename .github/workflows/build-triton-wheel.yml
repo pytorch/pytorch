@@ -24,7 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
+        # py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
+        py_vers: [ "3.7" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -106,7 +107,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
+        # py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
+        py_vers: [ "3.7" ]
     env:
       GITHUB_TOKEN: ${{ secrets.github-token }}
     steps:
@@ -125,5 +127,6 @@ jobs:
         run: |
             set -ex
             pip install -q awscli
+            ls -lah "${PKG_DIR}"
             s3_dir="${UPLOAD_BUCKET}/whl/nightly/"
             aws s3 cp --no-progress --acl public-read "${PKG_DIR}/*.whl" "${s3_dir}"
