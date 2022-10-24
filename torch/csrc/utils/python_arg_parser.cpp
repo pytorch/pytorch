@@ -289,27 +289,41 @@ auto handle_torch_function_no_python_arg_parser(
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
   PyObject* mode_obj = nullptr;
+
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
-  auto get_mode = [&]() {
-    return is_torch_function ? at::impl::PythonTorchFunctionTLS::get_mode()
-                             : c10::impl::TorchDispatchModeTLS::get_mode();
+  auto get_stack_len = [&]() {
+    return is_torch_function ? at::impl::PythonTorchFunctionTLS::stack_len()
+                             : c10::impl::TorchDispatchModeTLS::stack_len();
   };
 
-  const auto& maybe_mode = get_mode();
-  if (maybe_mode) {
-    mode_obj = maybe_mode->ptr(getPyInterpreter());
-    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
-    TORCH_INTERNAL_ASSERT(args != nullptr);
+  if (get_stack_len() > 0) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
     if (is_torch_function) {
       tf_g.emplace();
+      mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
     } else {
       td_g.emplace();
+      mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
     }
+    py::object torch_function =
+        PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
+    if (!torch_function) {
+      TORCH_INTERNAL_ASSERT(0);
+    }
+    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
+    TORCH_INTERNAL_ASSERT(args != nullptr);
+
+    TORCH_CHECK(
+        PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
+            .is(py::reinterpret_borrow<py::object>(mode_obj)),
+        "Defining your mode's `",
+        torch_function_name_str,
+        "` as a classmethod is not supported, please make it a plain method");
+
     // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
     // because the nullptr terminates the argument list ick ick ick.
     if (kwargs == nullptr) {
@@ -393,18 +407,6 @@ auto handle_torch_function_no_python_arg_parser(
       }
     }
     ss << "]";
-    if (mode_obj) {
-      // Note [Paranoid check mode is same]
-      // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-      // If a user forcibly changes the mode in a non-lexical way
-      // in the inner context, the mode could be invalid here.  So just be
-      // a bit safe, it doesn't cost us anything since this is error reporting
-      const auto& maybe_mode = get_mode();
-      TORCH_INTERNAL_ASSERT(
-          maybe_mode && mode_obj == maybe_mode->ptr(getPyInterpreter()));
-      ss << " nor was it found on the currently active mode "
-         << py::repr(mode_obj);
-    }
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();

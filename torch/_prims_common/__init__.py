@@ -47,7 +47,15 @@ NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
 # NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
 NumberType = Union[bool, int, float, complex]
+
 Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
+# I don't call it Integral because numbers.Integral includes bool, but IntLike
+# does not
+Dim = int
+IntLike = (int, torch.SymIntNode)
+FloatLike = (float, torch.SymFloatNode)
+IntWithoutSymInt = int
+FloatWithoutSymFloat = float
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
@@ -433,8 +441,8 @@ def validate_idx(rank: int, idx: int):
     Assumes the index is already canonicalized.
     """
 
-    assert isinstance(idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(idx, Dim)
+    assert isinstance(rank, Dim)
 
     assert idx >= 0 and idx < rank or idx == 0
 
@@ -450,8 +458,8 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
     for the given shape.
     """
 
-    assert isinstance(ex_idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(ex_idx, Dim)
+    assert isinstance(rank, Dim)
     assert ex_idx > 0 and ex_idx <= rank
 
 
@@ -500,7 +508,7 @@ def canonicalize_dims(rank: int, indices: int) -> int:
 
 
 def canonicalize_dims(rank, indices):
-    if isinstance(indices, int):
+    if isinstance(indices, Dim):
         return canonicalize_dim(rank, indices)
 
     return tuple(canonicalize_dim(rank, x) for x in indices)
@@ -1439,7 +1447,8 @@ def set_correction(
         correction = 1
     elif correction is None and unbiased is not None:
         correction = 0 if unbiased is False else 1
-    if not isinstance(correction, int):
+    # NB: we don't actually support symint here, but it's harmless to accept
+    if not isinstance(correction, IntLike):
         raise ValueError("correction argument should be integer")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")
