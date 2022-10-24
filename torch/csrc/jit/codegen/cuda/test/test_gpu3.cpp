@@ -3419,6 +3419,49 @@ TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
     tv->axis(-1)->parallelize(ParallelType::Serial);
   }
 
+  // Welford inputs and outputs should not be aliased. See PR #2118.
+  class AliasChecker : public kir::IrVisitor {
+   public:
+    using kir::IrVisitor::handle;
+
+    void handle(kir::Allocate* alloc) final {
+      if (alloc->alias() == nullptr) {
+        return;
+      }
+      auto tv = dynamic_cast<TensorView*>(alloc->buffer());
+      auto alias_tv = dynamic_cast<TensorView*>(alloc->alias()->buffer());
+      if (tv != nullptr && alias_tv != nullptr) {
+        alias_map_.emplace(tv, alias_tv);
+        alias_map_.emplace(alias_tv, tv);
+      }
+    }
+
+    void handle(kir::GridWelford* gwop) final {
+      for (auto out_ti : ir_utils::filterByType<kir::TensorIndex>(
+               gwop->welford_op()->outputs())) {
+        auto out_tv = out_ti->view();
+        if (alias_map_.count(out_tv) == 0) {
+          continue;
+        }
+        auto alias_tv = alias_map_.at(out_tv);
+        for (auto inp_ti : ir_utils::filterByType<kir::TensorIndex>(
+                 gwop->welford_op()->inputs())) {
+          TORCH_CHECK(
+              inp_ti->view() != alias_tv,
+              "Invalid alias found between GridWelford input and output. Out tv: ",
+              out_tv->toString(),
+              ", In tv: ",
+              alias_tv->toString());
+        }
+      }
+    }
+
+    std::unordered_map<TensorView*, TensorView*> alias_map_;
+  } checker;
+
+  GpuLower gpulw(&fusion);
+  checker.handle(gpulw.kernel()->topLevelExprs());
+
   FusionExecutor fe;
   fe.compileFusion(&fusion, {}, LaunchParams());
 

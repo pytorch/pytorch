@@ -309,10 +309,14 @@ class BufferLiveInterval {
     last_read_pos_ = pos;
     TORCH_INTERNAL_ASSERT(
         first_write_pos_ > 0,
-        "lower_alias_memory: a read seen before any write")
+        "lower_alias_memory: a read seen before any write");
     TORCH_INTERNAL_ASSERT(
-        pos > first_write_pos_,
-        "lower_alias_memory: marking a read before write");
+        pos >= first_write_pos_,
+        "lower_alias_memory: marking a read (",
+        pos,
+        ") before write (",
+        first_write_pos_,
+        ")");
     all_read_pos_.push_back(pos);
   }
 
@@ -418,7 +422,7 @@ using AllocationInfoList = std::vector<AllocationInfoPtr>;
 //!  `outer_live_interval`,
 //!   Inner interval marks the exprs that are the first write and last read of
 //!   the buffer.
-//!   Outer interval marks the begining of the loop of first write and end of
+//!   Outer interval marks the beginning of the loop of first write and end of
 //!   the loop of last read, both at the same loop level as the buffer
 //!   allocation.
 class BufferUseDefInfo {
@@ -666,15 +670,28 @@ class BufferUseDefInfo {
     for (auto output_tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(output_tv);
       if (maybe_alloc_info.has_value()) {
+        // Reductions use outputs as read-write parameters, so their
+        // outputs need to be marked as read as well (except for trivial
+        // reductions)
+        const bool is_read_write = ir_utils::isReductionOp(expr) &&
+            std::any_of(output_tv->getMaybeRFactorDomain().begin(),
+                        output_tv->getMaybeRFactorDomain().end(),
+                        [](IterDomain* id) {
+                          return id->isReduction() && !id->isTrivialReduction();
+                        });
         maybe_alloc_info.value()->inner_live_interval->markWrite(current_pos_);
+        if (is_read_write) {
+          maybe_alloc_info.value()->inner_live_interval->markRead(current_pos_);
+        }
         auto outer_loop_info =
             ascendLoopNestToSameLevelAs(maybe_alloc_info.value());
-        if (outer_loop_info) {
-          maybe_alloc_info.value()->outer_live_interval->markWrite(
-              outer_loop_info->start_pos);
-        } else {
-          maybe_alloc_info.value()->outer_live_interval->markWrite(
-              current_pos_);
+        auto write_pos =
+            outer_loop_info ? outer_loop_info->start_pos : current_pos_;
+        maybe_alloc_info.value()->outer_live_interval->markWrite(write_pos);
+        if (is_read_write) {
+          auto read_pos =
+              outer_loop_info ? outer_loop_info->end_pos : current_pos_;
+          maybe_alloc_info.value()->outer_live_interval->markRead(read_pos);
         }
       }
     }
