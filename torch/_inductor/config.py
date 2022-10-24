@@ -30,11 +30,11 @@ benchmark_harness = True
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threashold
-realize_reads_remat_threshold = 4
-
+realize_reads_threshold = 4
 realize_bytes_threshold = 2000
-realize_reads_threshold = 8
 
+# Threshold to prevent excessive accumulation of ops in one buffer during lowering
+realize_acc_reads_threshold = 8
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False

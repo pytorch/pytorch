@@ -3361,7 +3361,7 @@ class StorageBox(MutableBox):
 
     def has_exceeded_max_reads(self):
         return isinstance(self.data, Pointwise) and (
-            self.num_reads() > config.realize_reads_threshold
+            self.num_reads() > config.realize_acc_reads_threshold
             or len(self.inner_fn_str()) > config.realize_bytes_threshold
         )
 
@@ -3383,7 +3383,7 @@ class StorageBox(MutableBox):
             users > 1
             and isinstance(self.data, (Pointwise, Reduction))
             and (
-                self.num_reads() > config.realize_reads_remat_threshold
+                self.num_reads() > config.realize_reads_threshold
                 or len(self.inner_fn_str()) > config.realize_bytes_threshold
                 or (is_cpu(self.data) and should_realize_on_cpu(self.data))
             )
