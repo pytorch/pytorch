@@ -4338,6 +4338,7 @@ if HAS_CUDA:
             cxt = TritonCodeGenTests.NoOpCompilerBackend()
             torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
             graph = GraphLowering(cxt.model)
+            graph.num_static_inputs = 0
             args = cxt.example_args
             kernels = []
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
