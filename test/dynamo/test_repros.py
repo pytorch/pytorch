@@ -1740,8 +1740,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer('x', torch.ones(3))
-                self.register_buffer('y', torch.ones(3))
+                self.register_buffer("x", torch.ones(3))
+                self.register_buffer("y", torch.ones(3))
 
             def forward(self, inp):
                 res = 0
