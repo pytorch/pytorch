@@ -67,8 +67,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
 
 // https://docs.nvidia.com/cuda/cusparselt/getting_started.html
 // A, B, C, D in the above link corresponds to weight, activation, offset, and output
-
-// does all the initial preparation stuff
+// this function does all the cuSPARSELt initial preparation stuff
 void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
                             const at::Tensor& bias) {
   int major_cc, minor_cc;
@@ -82,13 +81,13 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
                     std::to_string(major_cc) + "." + std::to_string(minor_cc));
 
   // m & k are for weight I think, k & n are for activation
-  // check if weight is transposed?
-  // this is assuming num_batches > 1
+  // TODO: check if weight is transposed?
+  // TODO: this is assuming num_batches > 1
   auto m = weight.size(1);
   auto k = weight.size(2);
   auto n = activation.size(1); // this is assuming num_batches > 1
   auto num_batches = activation.size(0);
-  int64_t batch_strideA = 0; // this allows broadcasting of A (weight) tensor
+  int64_t batch_strideA = 0; // setting this to 0 allows broadcasting of A (weight) tensor for multi-batch gemm
   int64_t batch_strideB = k * n;
   int64_t batch_strideC = m * n;
   // TODO: make these user inputs
@@ -107,7 +106,7 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   auto     num_B_cols     = (isB_transposed) ? k : n;
   auto     num_C_rows     = m;
   auto     num_C_cols     = n;
-  // is this dtype dependent?
+  // TODO: is alignment dtype dependent? 16 was the default setting on spmma2 example for fp16
   unsigned alignment      = 16;
   auto     lda            = (is_rowmajor) ? num_A_cols : num_A_rows;
   auto     ldb            = (is_rowmajor) ? num_B_cols : num_B_rows;
@@ -118,25 +117,16 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   dA = weight.data_ptr<c10::Half>();
   dB = activation.data_ptr<c10::Half>();
   // TODO: we may consider removing C or improving the usability;
-  // right now, we assume it's not used
+  // right now, we assume it's not used (beta is initialized to 0)
   auto     hC = new __half[C_size]();
-  // T *hA, *hB, *hC;
-  // CHECK_CUDA(cudaMallocHost((void**)&hA, A_size));
-  // CHECK_CUDA(cudaMallocHost((void**)&hB, B_size));
-  // CHECK_CUDA(cudaMallocHost((void**)&hC, C_size));
 
   //--------------------------------------------------------------------------
   // Device memory management
-  // CHECK_CUDA(cudaMalloc((void**)&dA, A_size_bytes))
-  // CHECK_CUDA(cudaMalloc((void**)&dB, B_size_bytes))
   CHECK_CUDA(cudaMalloc((void**)&dC, C_size_bytes))
   CHECK_CUDA(cudaMalloc((void**) &d_valid, sizeof(*d_valid)))
 
   dD = res.data_ptr<c10::Half>();
 
-  // CHECK_CUDA(cudaMemcpy(dA, hA, A_size_bytes, cudaMemcpyHostToDevice))
-
-  // CHECK_CUDA(cudaMemcpy(dB, hB, B_size_bytes, cudaMemcpyHostToDevice))
   CHECK_CUDA(cudaMemcpy(dC, hC, C_size_bytes, cudaMemcpyHostToDevice))
   //--------------------------------------------------------------------------
   cusparseLtMatDescriptor_t activation_descriptor, matC;
@@ -197,8 +187,10 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   CHECK_CUSPARSE( cusparseLtMatmulAlgSelectionInit(
                                           &handle, &alg_sel, &matmul,
                                           CUSPARSELT_MATMUL_ALG_DEFAULT) )
-  // initializing for now because I sometimes see the error:
+  // workspace_size is left uninitialized in spmma2, but
+  // I initialize it here because I sometimes see the error:
   //  ** On entry to cusparseLtMatmulPlanInit() parameter number 5 (workspaceSize) had an illegal value: -9127659781585108992
+  // at run time. seems like a bug in cuSPARSELt internals
   size_t workspace_size = 0;
   CHECK_CUSPARSE(cusparseLtMatmulPlanInit(
       &handle, &plan, &matmul, &alg_sel, workspace_size))
@@ -241,10 +233,15 @@ void CusparseLtLinear::compress() {
 }
 
 void CusparseLtLinear::search_matmul_algo() {
+  // this is a function of the input matrix, which may be problematic because we don't want to be calling this
+  // relatively expensive function for every input matrix.
+  // see https://pytorch.slack.com/archives/C011LNUDW2Y/p1666211442160049?thread_ts=1665425044.320979&cid=C011LNUDW2Y for discussion
+  // with Xiao Wang in Oct. 2022
   CHECK_CUSPARSE( cusparseLtMatmulSearch(&handle, &plan, &alpha,
                                           dA_compressed, dB, &beta,
                                           dC, dD, d_workspace,
                                           streams, num_streams) )
+  // TODO: cache alg_id?
   int alg_id;
   CHECK_CUSPARSE( cusparseLtMatmulAlgGetAttribute(
                                           &handle, &alg_sel,
@@ -255,8 +252,6 @@ void CusparseLtLinear::search_matmul_algo() {
 
 // this function assumes the weight tensor already has the mask applied
 void CusparseLtLinear::masked_mm() {
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // TODO: should we cache any of this?
   CHECK_CUSPARSE(cusparseLtMatmul(
       &handle,
       &plan,
@@ -270,14 +265,6 @@ void CusparseLtLinear::masked_mm() {
       streams,
       num_streams))
 }
-
-// at::Tensor cusparselt_linear(const c10::intrusive_ptr<CusparseLtLinear>& params, const at::Tensor activation, const at::Tensor C) {
-    // _cusparselt_init(params, gpu_index);
-    // _cusparselt_prune(params, pruning_algo);
-    // _cusparselt_compress(params);
-    // _cusparselt_masked_mm(params, D);
-    // return D;
-// }
 
 TORCH_LIBRARY(cusparselt, m) {
   m.class_<CusparseLtLinear>("CusparseLtLinear")
