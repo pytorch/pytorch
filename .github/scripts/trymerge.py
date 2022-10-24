@@ -36,7 +36,6 @@ from gitutils import (
 )
 from trymerge_explainer import (
     TryMergeExplainer,
-    get_land_check_troubleshooting_message,
     get_revert_message,
 )
 
@@ -180,6 +179,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       comments(last: 5) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -337,6 +337,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
       comments(last: 100, before: $cursor) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -584,6 +585,7 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
 @dataclass
 class GitHubComment:
     body_text: str
+    created_at: str
     author_login: str
     author_association: str
     editor_login: Optional[str]
@@ -808,6 +810,7 @@ class GitHubPR:
     def _comment_from_node(node: Any) -> GitHubComment:
         editor = node["editor"]
         return GitHubComment(body_text=node["bodyText"],
+                             created_at=node["createdAt"] if "createdAt" in node else "",
                              author_login=node["author"]["login"],
                              author_association=node["authorAssociation"],
                              editor_login=editor["login"] if editor else None,
@@ -1377,7 +1380,9 @@ def merge(pr_num: int, repo: GitRepo,
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         if land_checks and not dry_run:
             pr.delete_land_time_check_branch(repo)
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+        raise RuntimeError(f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
+                           "Please rebase and try again. You can rebase by leaving the following comment on this PR:\n"
+                           "`@pytorchbot rebase`")
 
     start_time = time.time()
     last_exception = ''
@@ -1447,10 +1452,6 @@ def main() -> None:
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
 
-        troubleshooting = ""
-        if args.land_checks:
-            troubleshooting += get_land_check_troubleshooting_message()
-
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
@@ -1464,8 +1465,6 @@ def main() -> None:
         msg = "\n".join((
             f"## {title}",
             f"{exception}",
-            "",
-            f"{troubleshooting}",
             "",
             f"{internal_debugging}"
         ))

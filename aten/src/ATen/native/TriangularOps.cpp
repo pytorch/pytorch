@@ -168,12 +168,16 @@ TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   compute_triu_tril<UpperTriangle>(self, k, result);
 }
 
-Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
+Tensor trace_backward(const Tensor& grad, at::IntArrayRef sizes) {
+    return at::native::trace_backward_symint(grad, c10::fromIntArrayRefSlow(sizes));
+}
+
+Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
   if (sizes.size() != 2) {
     throw std::runtime_error("expected matrix input");
   }
 
-  auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
+  auto grad_input = at::zeros_symint(sizes[0] * sizes[1], grad.options());
   auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
   // for composite compliance, use out-of-place variant of
   // `index_fill` if grad tensor is a Tensor Subclass.
@@ -182,7 +186,7 @@ Tensor trace_backward(const Tensor& grad, IntArrayRef sizes) {
   } else {
     grad_input.index_fill_(0, indices, grad);
   }
-  return grad_input.view(sizes);
+  return grad_input.view_symint(sizes);
 }
 
 }  // namespace native

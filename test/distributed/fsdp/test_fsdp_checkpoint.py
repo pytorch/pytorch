@@ -5,6 +5,7 @@ from copy import deepcopy
 from functools import partial
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
@@ -12,6 +13,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
+    offload_wrapper,
 )
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
@@ -65,9 +67,10 @@ class TestFSDPCheckpoint(FSDPTest):
             l3 = nn.Linear(3, 3).cuda()
 
             if checkpoint_layer:
-                ckpt_wrapper = partial(
-                    checkpoint_wrapper, offload_to_cpu=offload_activations
-                )
+                if offload_activations:
+                    ckpt_wrapper = offload_wrapper
+                else:
+                    ckpt_wrapper = checkpoint_wrapper
 
                 l1 = ckpt_wrapper(l1)
                 l2 = ckpt_wrapper(l2)
@@ -110,11 +113,15 @@ class TestFSDPCheckpoint(FSDPTest):
     @parametrize("offload_activations", [True, False])
     def test_checkpoint_fsdp_wrapping(self, cpu_offload, offload_activations):
         # Test checkpoint(FSDP(layer1), FSDP(layer2), ....)
-        ckpt_sequential_wrapped_fsdp = checkpoint_wrapper(
+        if offload_activations:
+            wrapper_to_use = offload_wrapper
+        else:
+            wrapper_to_use = checkpoint_wrapper
+
+        ckpt_sequential_wrapped_fsdp = wrapper_to_use(
             TestFSDPCheckpoint.SequentialModule(
                 wrap_fsdp=True, cpu_offload=cpu_offload
             ),
-            offload_to_cpu=offload_activations,
         )
         # Test FSDP(checkpoint(layer1)), FSDP(checkpoint(layer2)), ....
         inner_ckpt = TestFSDPCheckpoint.SequentialModule(
@@ -153,6 +160,8 @@ class TestFSDPCheckpoint(FSDPTest):
 
                 self._verify_parity(losses, outputs, models)
 
+        dist.barrier()
+
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
@@ -166,13 +175,17 @@ class TestFSDPCheckpoint(FSDPTest):
             # Runs FSDP with no checkpointing
             fsdp_only_seq = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
             # Runs checkpoint-wrapped FSDP
-            checkpointed_fsdp = checkpoint_wrapper(
+            if offload_activations:
+                wrapper_to_use = offload_wrapper
+            else:
+                wrapper_to_use = checkpoint_wrapper
+
+            checkpointed_fsdp = wrapper_to_use(
                 FSDP(deepcopy(seq), cpu_offload=cpu_offload),
-                offload_to_cpu=offload_activations,
             )
             # Runs FSDP-wrapped checkpointed module
             fsdp_wrapped_checkpoint = FSDP(
-                checkpoint_wrapper(deepcopy(seq), offload_to_cpu=offload_activations),
+                wrapper_to_use(deepcopy(seq)),
                 cpu_offload=cpu_offload,
             )
             # Runs FSDP with manual calls to checkpoint.
@@ -219,6 +232,8 @@ class TestFSDPCheckpoint(FSDPTest):
                     _save_on_cpu_called = False
 
                 self._verify_parity(losses, outputs, models)
+
+        dist.barrier()
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
 
