@@ -90,14 +90,14 @@ jobs:
 
       - name: Setup miniconda (x86, py3.8)
         if: ${{ runner.arch == 'X64' }}
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@fix-conda-install-env-file
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
-        uses: huydhn/test-infra/.github/actions/setup-miniconda@fix-conda-install-env-file
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
