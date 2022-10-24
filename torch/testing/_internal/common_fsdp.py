@@ -479,7 +479,7 @@ class ModuleWithDelay(FSDPTestModel):
         return loss
 
     def run_backward(self, loss):
-        orig_reduce_scatter = torch.distributed._reduce_scatter_base
+        orig_reduce_scatter = torch.distributed.reduce_scatter_tensor
 
         def _delayed_reduce_scatter(*args, **kwargs):
             if self.delay_before_reduction_ms > 0:
@@ -489,7 +489,7 @@ class ModuleWithDelay(FSDPTestModel):
             return orig_reduce_scatter(*args, **kwargs)
 
         with mock.patch(
-            "torch.distributed._reduce_scatter_base", _delayed_reduce_scatter
+            "torch.distributed.reduce_scatter_tensor", _delayed_reduce_scatter
         ):
             self.module.run_backward(loss)
 
