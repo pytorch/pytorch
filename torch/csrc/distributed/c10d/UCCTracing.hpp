@@ -2,7 +2,7 @@
 
 #ifdef USE_C10D_UCC
 
-#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
+#include <c10d/UCCUtils.hpp>
 
 namespace c10d {
 

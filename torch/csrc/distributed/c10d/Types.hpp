@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <c10d/Store.hpp>
 
 #include <chrono>
 #include <cstdint>

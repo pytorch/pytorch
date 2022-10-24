@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/exception.h>
+#include <c10d/exception.h>
 
 namespace c10d {
 

@@ -1,42 +1,42 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/distributed/c10d/FileStore.hpp>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <c10d/FileStore.hpp>
+#include <c10d/TCPStore.hpp>
+#include <c10d/Utils.hpp>
 #ifndef _WIN32
-#include <torch/csrc/distributed/c10d/HashStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
+#include <c10d/HashStore.hpp>
+#include <c10d/ProcessGroupRoundRobin.hpp>
 #endif
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/PyProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
+#include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/ProcessGroupWrapper.hpp>
 #endif
 
 #ifdef USE_C10D_NCCL
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <c10d/NCCLUtils.hpp>
+#include <c10d/ProcessGroupNCCL.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
-#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
+#include <c10d/ProcessGroupMPI.hpp>
 #endif
 
 #ifdef USE_C10D_UCC
-#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
+#include <c10d/ProcessGroupUCC.hpp>
 #endif
 
+#include <c10d/PrefixStore.hpp>
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
-#include <torch/csrc/distributed/c10d/comm.hpp>
-#include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/logger.hpp>
-#include <torch/csrc/distributed/c10d/reducer.hpp>
+#include <c10d/comm.hpp>
+#include <c10d/debug.h>
+#include <c10d/logger.hpp>
+#include <c10d/reducer.hpp>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/Ops.hpp>
