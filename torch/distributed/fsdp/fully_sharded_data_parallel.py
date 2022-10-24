@@ -1879,7 +1879,7 @@ class FullyShardedDataParallel(nn.Module):
             sharding_backend = dist.get_backend(self.process_group)
             # TODO - we are using the overall world size here, but user may wish
             # to tune this.
-            world_size = dist.get_world_size()
+            world_size = dist.get_world_size(self.process_group)
             # Assuming fully homogeneous setup
             num_devices = torch.cuda.device_count()
             num_distinct_nodes = world_size // num_devices
