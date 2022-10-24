@@ -129,4 +129,6 @@ jobs:
             pip install -q awscli
             ls -lah "${PKG_DIR}"
             s3_dir="${UPLOAD_BUCKET}/whl/nightly/"
-            aws s3 cp --no-progress --acl public-read "${PKG_DIR}/*.whl" "${s3_dir}"
+            for pkg in ${PKG_DIR}/*.whl; do
+              aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
+             done
