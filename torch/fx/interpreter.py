@@ -134,7 +134,7 @@ class Interpreter:
                 msg += f"\nOriginal traceback:\n{node.stack_trace}"
                 e.args = (msg,) + e.args[1:]
                 if isinstance(e, KeyError):
-                    raise RuntimeError(*e.args)
+                    raise RuntimeError(*e.args) from e
                 raise
 
             if self.garbage_collect_values:
