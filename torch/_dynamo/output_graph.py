@@ -108,6 +108,8 @@ class OutputGraph(fx.Tracer):
         self.initial_random_state = ()
         self.unspec_variable_map = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
+        self.tensor_id_to_sym_shape_ref = {}
+
 
     @property
     def output(self):

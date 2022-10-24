@@ -10,7 +10,6 @@ import traceback
 import collections
 import textwrap
 from torch._subclasses.meta_utils import MetaConverter
-import copy
 
 try:
     import sympy  # type: ignore[import]
@@ -112,47 +111,10 @@ class PySymInt(object):
     our program. They're what sit under FakeTensor, and contains our primary
     implementation of symbolic shapes.
     """
-
-    class TensorReference(object):
-        """
-        TensorReference objects are entirely optional. They are created to give us hints
-        into where the symbolic shape came from.
-
-        ref_id: The id of the tensor
-        kind: A string tracking where in the tensor this value came from ("size","stride", etc)
-        idx: An index in the structure
-
-        NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
-        TensorReference(ref_id=12345, kind="size", idx=2)
-        """
-        def __init__(self, ref_id: Optional[int] = None, kind: Optional[str] = None, idx: Optional[int] = None):
-            assert ref_id is not None
-            assert kind is not None
-            self.ref_id = ref_id
-            self.kind = kind
-            self.idx = idx
-            self.expr = None  # Populated after association
-
-        def __hash__(self):
-            return hash((self.ref_id, self.kind, self.idx))
-
-
-    def __init__(self, expr, shape_env, constant=None, tensor_ref: Optional[TensorReference] = None):
+    def __init__(self, expr, shape_env, constant=None):
         self._expr = expr
         self.shape_env = shape_env
         self.constant = constant
-        self.tensor_ref = tensor_ref
-        # This mapping allows us to track the originating tensor components
-        # Of where this came shape come from.
-        # NOTE - not all sym shapes do, or should, have a tensor reference
-        # NOTE - this is meant primarily for guards, and is a relatively
-        # unstable internal contract of the whole shape_env.
-        if self.tensor_ref and str(self.expr) not in ('False', 'True'):
-            self.tensor_ref.expr = expr
-            if self.tensor_ref.ref_id not in self.shape_env.id_to_expr:
-                self.shape_env.id_to_expr[self.tensor_ref.ref_id] = set()
-            self.shape_env.id_to_expr[self.tensor_ref.ref_id].add(tensor_ref)
-
 
     @property
     def expr(self):
@@ -163,7 +125,7 @@ class PySymInt(object):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
-        return PySymInt(self.expr, self.shape_env, constant=self.constant, tensor_ref=self.tensor_ref)
+        return PySymInt(self.expr, self.shape_env, constant=self.constant)
 
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
@@ -401,10 +363,6 @@ class ShapeEnv(object):
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
 
-        # A mapping between tensor reference ids and symbolic expressions
-        # See docs on TensorReference in this file for more info.
-        self.id_to_expr = {}
-
     def _get_key(self):
         """
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
@@ -418,6 +376,7 @@ class ShapeEnv(object):
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
+
         size = [self.create_symbol(i) for i in ex.size()]
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
@@ -448,12 +407,10 @@ class ShapeEnv(object):
                 )[0]
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
-        return ([self.create_symintnode(x, id(ex), "size", idx) for idx, x in enumerate(size)],
-                [self.create_symintnode(x, id(ex), "stride", idx) for idx, x in enumerate(stride)])  # type: ignore[arg-type]
+        return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int], ref_id: Optional[int] = None, kind: Optional[str] = None,
-                          idx: Optional[int] = None):
-        py_sym_int = PySymInt(expr, self, tensor_ref=PySymInt.TensorReference(ref_id=ref_id, kind=kind, idx=idx))
+    def create_symintnode(self, expr: Union["sympy.Expr", int]):
+        py_sym_int = PySymInt(expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         return cpp_sym_int
 

@@ -479,6 +479,28 @@ class GuardedCode:
 
 from sympy.printing.str import StrPrinter
 
+@dataclasses.dataclass
+class TensorReference(object):
+    """
+    TensorReference objects are entirely optional. They are created to give us hints
+    into where the symbolic shape came from.
+
+    ref_id: The id of the tensor
+    kind: A string tracking where in the tensor this value came from ("size","stride", etc)
+    idx: An index in the structure
+
+    NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
+    TensorReference(ref_id=12345, kind="size", idx=2)
+    """
+    ref_id: Optional[int] = None
+    kind: Optional[str] = None
+    idx: Optional[int] = None
+    # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
+    # But it is a Optional[Union["sympy.Expr", int]]
+    expr: Optional[object] = None   # Populated after association
+
+    def __hash__(self):
+        return hash((self.ref_id, self.kind, self.idx))
 
 class DynamoGuardPrinter(StrPrinter):
     @staticmethod
@@ -521,7 +543,7 @@ class DynamoGuardPrinter(StrPrinter):
 class CheckFunctionManager:
     def __init__(
         self,
-        shape_env=None,
+        output_graph = None,
         guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict] = None,
         f_globals: Optional[Dict] = None,
@@ -529,7 +551,7 @@ class CheckFunctionManager:
         self.valid = True
         self._weakrefs = []
         self._seen_ids = set()
-        self.shape_env = shape_env
+        self.output_graph = output_graph
 
         # Note: right overrides left
         def combine_scopes(left, right):
@@ -590,26 +612,32 @@ class CheckFunctionManager:
             tensor_id = tensor_check_ids[name]
             id_to_name_map[tensor_id] = name
 
-            if tensor_id in self.shape_env.id_to_expr:
+            if tensor_id in self.output_graph.tensor_id_to_sym_shape_ref:
                 # If we made it here, this tensor_id is relevant to dynamo guard installation
                 # AND was found in the shape_env
-                tensor_ref_set = self.shape_env.id_to_expr[tensor_id]
+                tensor_ref_set = self.output_graph.tensor_id_to_sym_shape_ref[tensor_id]
                 for tensor_ref in tensor_ref_set:
-                    if tensor_ref.expr not in expr_to_tensor_ref:
-                        expr_to_tensor_ref[tensor_ref.expr] = set()
-                    expr_to_tensor_ref[tensor_ref.expr].add(tensor_ref)
+                    if isinstance(tensor_ref.expr, int):
+                        continue
+                    obj_expr = tensor_ref.expr.get_pyobj().expr
+                    if obj_expr in self.output_graph.shape_env.val_to_var:
+                        # Normalize in case the expr is an integer, replace with shape (ex: 10->s0)
+                        obj_expr = self.output_graph.shape_env.val_to_var[obj_expr] 
+                    if obj_expr not in expr_to_tensor_ref:
+                        expr_to_tensor_ref[obj_expr] = set()
+                    expr_to_tensor_ref[obj_expr].add(tensor_ref)
             finished_expressions.append(f"isinstance({name}, torch.Tensor)")
         # Extract all the guard elements out of guards
         # The guard format, atm, uses tuple position 0 for the expression
         # and tuple position 1 for a negation. Eventually, these will be collapsed together.
         expression_and_evaluation = [
-            (guard[0], guard[1]) for guard in self.shape_env.guards
+            (guard[0], guard[1]) for guard in self.output_graph.shape_env.guards
         ]
         for expression, evaluation in expression_and_evaluation:
             expr_as_str = guard_printer.doprint(expression)
             # We may get into a state where symbolic shape keys (all should be found in replacements)
             # Have not been removed from the expression. This is a serious enough error state that we need to assert.
-            for key in self.shape_env.var_to_val.keys():
+            for key in self.output_graph.shape_env.var_to_val.keys():
                 assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
 
             # Certain expressions are negated in their guards.

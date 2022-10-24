@@ -1,5 +1,4 @@
 import weakref
-from typing import Optional
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -145,12 +144,9 @@ class MetaConverter:
 
         make_symbolic = shape_env is not None
 
-        def sym(x, ref_id: Optional[int], kind: Optional[str]):
+        def sym(x):
             if make_symbolic:
-                # Please see the docs on PySymInt.TensorReference for how these values are used.
-                return shape_env.create_symintnode(
-                    shape_env.create_symbol(x), ref_id=ref_id, kind=kind, idx=None
-                )
+                return shape_env.create_symbol(x)
             else:
                 return x
 
@@ -215,11 +211,7 @@ class MetaConverter:
 
                     with torch.enable_grad():
                         sizes, strides = sym_sizes_strides(t)
-                        r = base.as_strided(
-                            sizes,
-                            strides,
-                            sym(t.storage_offset(), id(t), kind="storage_offset"),
-                        )
+                        r = base.as_strided(sizes, strides, sym(t.storage_offset()))
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
@@ -245,12 +237,7 @@ class MetaConverter:
                     with no_dispatch():
                         sizes, strides = sym_sizes_strides(t)
                         with torch.no_grad():
-                            r.set_(
-                                s,
-                                sym(t.storage_offset(), id(t), kind="storage_offset"),
-                                sizes,
-                                strides,
-                            )
+                            r.set_(s, sym(t.storage_offset()), sizes, strides)
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
