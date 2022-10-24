@@ -1367,7 +1367,7 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("transposed"),
       py::arg("output_padding"),
       py::arg("groups"),
-      py::arg("bias_sizes_opt"));
+      py::arg("bias_sizes"));
 
   py_module.def(
       "_conv_determine_backend_memory_format",
