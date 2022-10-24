@@ -15,7 +15,6 @@
 #else
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/addmv.h>
-#include <ATen/ops/addmv_meta.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/dot.h>

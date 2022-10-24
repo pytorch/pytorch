@@ -723,19 +723,19 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  const auto dim_size = self.size(dim);
-  int64_t split_size = (dim_size + chunks - 1) / chunks;
+  const auto dim_size = self.sym_size(dim);
+  auto split_size = (dim_size + chunks - 1) / chunks;
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
   // eventually we will do this for all cases.
   if (split_size == 0 && dim_size == 0) {
-    std::vector<int64_t> split_sizes(chunks, split_size);
+    std::vector<c10::SymInt> split_sizes(chunks, split_size);
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
-    return self.split_with_sizes(split_sizes, dim);
+    return self.split_with_sizes_symint(split_sizes, dim);
   } else {
-    return self.split(split_size, dim);
+    return self.split_symint(split_size, dim);
   }
 }
 
@@ -2273,8 +2273,8 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
-std::vector<Tensor> split(const Tensor& self, IntArrayRef sizes, int64_t dim) {
-  return at::split_with_sizes(self, sizes, dim);
+std::vector<Tensor> split_symint(const Tensor& self, c10::SymIntArrayRef sizes, int64_t dim) {
+  return at::split_with_sizes_symint(self, sizes, dim);
 }
 
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -3390,72 +3390,29 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   return self.as_strided(sizes, strides);
 }
 
-template <typename scalar_t>
-void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
-  TORCH_CHECK(self.dim() == 1 || self.dim() == 2, "matrix or a vector expected");
-
-  auto self_data = self.data_ptr<scalar_t>();
-  if (self.dim() == 1) {
-    auto self_size = self.size(0);
-    auto self_stride = self.stride(0);
-    int64_t sz = self_size + std::abs(dimension);
-
-    at::native::resize_output(result, {sz, sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    auto r_stride_1 = result.stride(1);
-    r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
-
-    for (const auto i : c10::irange(self_size)) {
-      r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
-    }
+Tensor diag(const Tensor& self, int64_t offset) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "diag(): Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    return at::diag_embed(self, offset);
   } else {
-    auto self_stride_0 = self.stride(0);
-    auto self_stride_1 = self.stride(1);
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t sz;
-    if (dimension >= 0) {
-      sz = std::min(self.size(0), self.size(1) - dimension);
-    } else {
-      sz = std::min(self.size(0) + dimension, self.size(1));
-    }
-
-    at::native::resize_output(result, {sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    self_data += (dimension >= 0 ? dimension * self_stride_1 : -dimension * self_stride_0);
-    for (const auto i : c10::irange(sz)) {
-      r_data[i * r_stride_0] = self_data[i * (self_stride_0 + self_stride_1)];
-    }
+    // We return a copy of the diagonal
+    return at::diagonal_copy(self, offset);
   }
 }
 
-Tensor diag(const Tensor& self, int64_t dimension) {
-  Tensor result = at::empty({0}, self.options());
-  at::diag_out(result, self, dimension);
-  return result;
-}
-
-Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kBool, self.scalar_type(), "diag", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
-  return result;
-}
-
-Tensor diag_backward_symint(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
-  auto ndimension = input_sizes.size();
-  AT_ASSERT(ndimension == 1 || ndimension == 2);
-
-  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
-    return grad.diag(diagonal);
+Tensor& diag_out(const Tensor& self, int64_t offset, Tensor& out) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    TORCH_CHECK(
+        canCast(self.scalar_type(), out.scalar_type()),
+        "diag: result type ", self.scalar_type(), " can't be cast to the desired out= type ",
+        out.scalar_type());
+    return at::diag_embed_out(out, self, offset);
+  } else {
+    return at::diagonal_copy_out(out, self, offset);
   }
-
-  // Input was a matrix but was not square
-  return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -3709,8 +3666,16 @@ at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayR
 
 
 at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
-  auto tmp = self.diagonal(offset, dim1, dim2);
-  out.copy_(tmp);
+  TORCH_CHECK(
+    out.device() == self.device(),
+    "diagonal_copy: Expected out and self tensors to be on the same device, but got ",
+    "out on ", out.device(), " and self on ", self.device());
+  auto result = self.diagonal(offset, dim1, dim2);
+  at::native::resize_output(out, result.sizes());
+  TORCH_CHECK(
+      canCast(result.scalar_type(), out.scalar_type()),
+      "diagonal_copy: result type ", result.scalar_type(), " can't be cast to the desired out= type ", out.scalar_type());
+  out.copy_(result);
   return out;
 }
 
