@@ -26,10 +26,10 @@ class ReplicateState(DistributedState):
         ...
 
     def init_helper(self):
-        """broadcast parameters, create Reducer"""
         self.has_initialized = True
         for module in self.modules:
             self._recursive_add_params(module)
+        # broadcast parameters, create Reducer
         ...
 
     def forward_pre_hook(
