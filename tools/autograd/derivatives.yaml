@@ -526,10 +526,6 @@
   self: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
-- name: diag(Tensor self, int diagonal=0) -> Tensor
-  self: diag_backward_symint(grad, self.sym_sizes(), diagonal)
-  result: auto_linear
-
 - name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   self: diagonal_backward_symint(grad, self.sym_sizes(), offset, dim1, dim2)
   result: auto_linear

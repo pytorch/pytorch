@@ -305,7 +305,7 @@ def bernoulli(self, *, generator=None):
 
 
 @register_decomposition([aten.bernoulli.p])
-def bernoulli(self, p=0.5, *, generator=None):
+def bernoulli_p(self, p=0.5, *, generator=None):
     assert generator is None
     return torch.rand_like(self, dtype=torch.float32) < p
 
