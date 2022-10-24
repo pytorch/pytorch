@@ -545,6 +545,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         c_flags = str(os.getenv('CFLAGS', ''))
+        c_flags += " -DPYBIND11_DETAILED_ERROR_MESSAGES"
         if IS_LINUX and '-fstack-clash-protection' in c_flags and 'clang' in os.environ.get('CC', ''):
             os.environ['CC'] = str(os.environ['CC'])
 
