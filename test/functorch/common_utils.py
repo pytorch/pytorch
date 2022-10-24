@@ -307,8 +307,8 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm
         for quantities in _compute_quantities_for_vmap_test(
                 op, batched_args, kwarg_values, in_dims, out_dim, batch_size,
                 compute_loop_out=False):
-            assert quantities[0] is None
-            yield (expected_batched, quantities[1])
+            assert quantities[1] is None
+            yield (quantities[0], expected_batched)
             yield (quantities[2], quantities[3])
 
 
