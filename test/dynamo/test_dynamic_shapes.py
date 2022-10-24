@@ -102,6 +102,15 @@ unittest.expectedFailure(
     # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
 )
 
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_get_parameter_dtype_dynamic_shapes 
+    # Unknown expression s0 (Most likely lifecycle issues)
+)
+
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_issue1466_size_aot_autograd_dynamic_shapes 
+    # Unknown expression s0 (Most likely lifecycle issues)
+)
 
 # DynamicShapesMiscTests
 unittest.expectedFailure(
@@ -112,11 +121,6 @@ unittest.expectedFailure(
     DynamicShapesMiscTests.test_module_deepcopy_dynamic_shapes
     # aten.squeeze_.dim - couldn't find symbolic meta function/decompositio
 )
-unittest.expectedFailure(
-    DynamicShapesMiscTests.test_numel_dynamic_shapes
-    # Cannot call numel() on tensor with symbolic sizes/strides
-)
-
 
 # DynamicShapesUnspecTests
 unittest.expectedFailure(

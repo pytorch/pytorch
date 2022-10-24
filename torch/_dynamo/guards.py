@@ -680,6 +680,9 @@ class CheckFunctionManager:
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
 
+        def direct_equality(a, b):
+            return a == b
+
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
@@ -687,7 +690,7 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
-                ("Eq", sympy.Eq),
+                ("Eq", direct_equality),
                 ("Mod", sympy.Mod),
                 ("FloorDiv", FloorDiv),
             ]
