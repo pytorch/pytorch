@@ -485,7 +485,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -498,7 +498,7 @@ class TestPrims(TestCase):
             dd = torch.sqrt(d)
             return torch.mul(aa, dd.digamma())
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a, b, c)
 
         expected = execute(gm, a, b, c, executor="aten")
@@ -514,7 +514,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -522,7 +522,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.digamma(a)  # not supported by nvfuser
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
         with catch_warnings(record=True) as w:
