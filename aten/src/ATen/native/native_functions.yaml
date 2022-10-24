@@ -1821,7 +1821,7 @@
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   variants: function, method
   dispatch:
-    CompositeExplicitAutograd: diag_embed
+    CompositeExplicitAutogradNonFunctional: diag_embed
   autogen: diag_embed.out
 
 - func: diagflat(Tensor self, int offset=0) -> Tensor
@@ -6293,7 +6293,7 @@
 
 - func: _sparse_coo_tensor_with_dims_and_tensors(SymInt sparse_dim, SymInt dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_and_tensor_sparse_symint
+    SparseCPU, SparseCUDA, SparseMeta, Meta: new_with_dims_and_tensor_sparse
   autogen: _sparse_coo_tensor_with_dims_and_tensors.out
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
@@ -7704,21 +7704,10 @@
 
 - func: diag.out(Tensor self, int diagonal=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: diag_cpu_out
-    CUDA: diag_cuda_out
-    MPS: diag_mps_out
+    CPU, CUDA: diag_out
 
 - func: diag(Tensor self, int diagonal=0) -> Tensor
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: diag
-
-- func: diag_backward(Tensor grad, SymInt[] input_sizes, int diagonal) -> Tensor
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CompositeImplicitAutograd: diag_backward_symint
 
 - func: cross.out(Tensor self, Tensor other, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 

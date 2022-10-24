@@ -771,7 +771,7 @@ std::vector<Tensor> _tensor_split_indices(const Tensor& self, ArrayRef<T> indice
     splits[split_idx] = at::symint::slice<T>(self, dim_, start_idx, end_idx);
     start_idx = end_idx;
   }
-  splits[num_indices] = at::symint::slice<T>(self, dim_, start_idx, self.size(dim_));
+  splits[num_indices] = at::symint::slice<T>(self, dim_, start_idx, at::symint::size<T>(self, dim_));
   return splits;
 }
 
@@ -3402,72 +3402,29 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   return self.as_strided(sizes, strides);
 }
 
-template <typename scalar_t>
-void apply_diag(Tensor& result, const Tensor& self, int64_t dimension) {
-  TORCH_CHECK(self.dim() == 1 || self.dim() == 2, "matrix or a vector expected");
-
-  auto self_data = self.data_ptr<scalar_t>();
-  if (self.dim() == 1) {
-    auto self_size = self.size(0);
-    auto self_stride = self.stride(0);
-    int64_t sz = self_size + std::abs(dimension);
-
-    at::native::resize_output(result, {sz, sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    auto r_stride_1 = result.stride(1);
-    r_data += (dimension >= 0 ? dimension*r_stride_1 : -dimension*r_stride_0);
-
-    for (const auto i : c10::irange(self_size)) {
-      r_data[i * (r_stride_0 + r_stride_1)] = self_data[i * self_stride];
-    }
+Tensor diag(const Tensor& self, int64_t offset) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "diag(): Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    return at::diag_embed(self, offset);
   } else {
-    auto self_stride_0 = self.stride(0);
-    auto self_stride_1 = self.stride(1);
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t sz;
-    if (dimension >= 0) {
-      sz = std::min(self.size(0), self.size(1) - dimension);
-    } else {
-      sz = std::min(self.size(0) + dimension, self.size(1));
-    }
-
-    at::native::resize_output(result, {sz});
-    result.zero_();
-    auto r_data = result.data_ptr<scalar_t>();
-    auto r_stride_0 = result.stride(0);
-    self_data += (dimension >= 0 ? dimension * self_stride_1 : -dimension * self_stride_0);
-    for (const auto i : c10::irange(sz)) {
-      r_data[i * r_stride_0] = self_data[i * (self_stride_0 + self_stride_1)];
-    }
+    // We return a copy of the diagonal
+    return at::diagonal_copy(self, offset);
   }
 }
 
-Tensor diag(const Tensor& self, int64_t dimension) {
-  Tensor result = at::empty({0}, self.options());
-  at::diag_out(result, self, dimension);
-  return result;
-}
-
-Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kBool, self.scalar_type(), "diag", [&] {
-    apply_diag<scalar_t>(result, self, dimension);
-  });
-  return result;
-}
-
-Tensor diag_backward_symint(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
-  auto ndimension = input_sizes.size();
-  AT_ASSERT(ndimension == 1 || ndimension == 2);
-
-  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
-    return grad.diag(diagonal);
+Tensor& diag_out(const Tensor& self, int64_t offset, Tensor& out) {
+  auto ndim = self.dim();
+  TORCH_CHECK(ndim == 1 || ndim == 2, "Supports 1D or 2D tensors. Got ", self.dim(), "D");
+  if (ndim == 1) {
+    TORCH_CHECK(
+        canCast(self.scalar_type(), out.scalar_type()),
+        "diag: result type ", self.scalar_type(), " can't be cast to the desired out= type ",
+        out.scalar_type());
+    return at::diag_embed_out(out, self, offset);
+  } else {
+    return at::diagonal_copy_out(out, self, offset);
   }
-
-  // Input was a matrix but was not square
-  return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -3721,8 +3678,16 @@ at::Tensor& _sparse_broadcast_to_copy_out(const at::Tensor & self, at::IntArrayR
 
 
 at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t dim1, int64_t dim2, at::Tensor & out) {
-  auto tmp = self.diagonal(offset, dim1, dim2);
-  out.copy_(tmp);
+  TORCH_CHECK(
+    out.device() == self.device(),
+    "diagonal_copy: Expected out and self tensors to be on the same device, but got ",
+    "out on ", out.device(), " and self on ", self.device());
+  auto result = self.diagonal(offset, dim1, dim2);
+  at::native::resize_output(out, result.sizes());
+  TORCH_CHECK(
+      canCast(result.scalar_type(), out.scalar_type()),
+      "diagonal_copy: result type ", result.scalar_type(), " can't be cast to the desired out= type ", out.scalar_type());
+  out.copy_(result);
   return out;
 }
 
