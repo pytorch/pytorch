@@ -101,6 +101,7 @@ test/test_type_promotion.py @mruberry @ngimel
 # related to functorch
 aten/src/ATen/functorch/ @zou3519
 torch/csrc/functorch/ @zou3519
+test/functorch/ @zou3519
 functorch/ @zou3519
 
 # torch MPS
