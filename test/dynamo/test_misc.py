@@ -399,9 +399,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         return torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
 
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # Cannot call numel() on tensor with symbolic sizes/strides
     def test_numel(self):
         def fn(a):
             return a + a.numel() + torch.numel(a)
@@ -723,9 +720,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -1587,9 +1581,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 1)
 
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # aten.quantize_per_tensor.default - couldn't find symbolic meta function/decomposition
     def test_unsupported_fake_tensor(self):
         def f(x):
             return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)

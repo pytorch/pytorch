@@ -282,9 +282,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x
 
     @make_test
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
     def test_len_tensor(x):
         z = len(x)
         return torch.add(x, z)
@@ -424,9 +421,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.cat([*it1, *it2], dim=-1)
 
     @make_test
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
     def test_tensor_len(a, b):
         return a + b + len(a) + b.__len__()
 

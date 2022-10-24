@@ -646,9 +646,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
 
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
         i = torch.randn(10)
@@ -658,9 +655,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 5)
 
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     def test_unsupportedmodule(self):
         m = UnsupportedModuleCall()
         i = torch.randn(10)
@@ -670,9 +664,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
         m2 = SelfMutatingModule(m1)
@@ -892,9 +883,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
-    @patch.object(
-        torch._dynamo.config, "dynamic_shapes", False
-    )  # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):
