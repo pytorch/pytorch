@@ -1003,6 +1003,7 @@ symbolic_aot_autograd_failures = {
     xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diagonal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('diagonal_copy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diagonal_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
@@ -1087,7 +1088,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_fill', ''),  # could not find kernel
     xfail('masked.log_softmax', ''),  # argument 'size' (position 2) must be tuple of ints, not ...
     xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
     xfail('masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides

@@ -2206,10 +2206,10 @@ def error_inputs_ormqr(op_info, device, **kwargs):
 def error_inputs_diag(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
     yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
-                     error_regex="matrix or a vector expected")
+                     error_regex="1D or 2D")
     zero_d = torch.randn(1, 1, 1, device=device)
     yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
-                     error_regex="matrix or a vector expected")
+                     error_regex="1D or 2D")
 
 def error_inputs_embedding(op_info, device, **kwargs):
     indices = torch.rand(2, 2, device=device).long()
@@ -5181,7 +5181,7 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
     samples3d = product(shapes3d, kwargs3d)
 
     for shape, kwargs in chain(samples1d, samples2d, samples3d):
-        if op_info.name in ('diagonal', '_refs.diagonal'):
+        if 'diagonal' in op_info.name:
             # these are error inputs for diagonal
             if shape in ((0,), (1,)):
                 continue
@@ -5217,7 +5217,7 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
         dim1 = kwargs.get('dim1')
         dim2 = kwargs.get('dim2')
 
-        if op_info.name in ('diagonal', '_refs.diagonal'):
+        if 'diagonal' in op_info.name:
             num_dim = arg.dim()
         elif op_info.name in ('diag_embed', '_refs.diag_embed'):
             # these are valid inputs for diag_embed
@@ -9213,10 +9213,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
     OpInfo('diag',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+           ref=np.diag,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_diag,
            error_inputs_func=error_inputs_diag),
     OpInfo('diag_embed',
@@ -9236,6 +9238,13 @@ op_db: List[OpInfo] = [
            aten_backward_name='diagonal_backward',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_diagonal_diag_embed,
+           reference_inputs_func=reference_inputs_diagonal_diag_embed,
+           error_inputs_func=error_inputs_diagonal_diag_embed),
+    OpInfo('diagonal_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed,
@@ -16319,7 +16328,7 @@ op_db: List[OpInfo] = [
         "diagflat",
         ref=lambda input, offset=0: np.diagflat(input, k=offset),
         sample_inputs_func=sample_inputs_diagflat,
-        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
@@ -17743,8 +17752,18 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.diag",
+        torch_opinfo_name="diag",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.diagonal",
         torch_opinfo_name="diagonal",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.diagonal_copy",
+        torch_opinfo_name="diagonal_copy",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -18059,12 +18078,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.trace",
         torch_opinfo_name="trace",
-        decorators=(
-            # TODO: torch.diag is currently not supported by either refs, meta funcs, or NVFuser
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
-            DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.norm",

@@ -219,7 +219,9 @@ __all__ = [
     "constant_pad_nd",
     "contiguous",
     "diag_embed",
+    "diag",
     "diagonal",
+    "diagonal_copy",
     "dsplit",
     "dstack",
     "expand",
@@ -2006,6 +2008,25 @@ def _reduction(
     return result
 
 
+def _make_copy_from_view(fn):
+    """
+    Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
+    """
+    name = fn.__name__
+    fn = out_wrapper()(fn)
+
+    def _fn(*args, out=None, **kwargs):
+        result = fn(*args, out=out, **kwargs)
+        if out is None:
+            return result.clone(memory_format=torch.contiguous_format)
+        return result
+
+    copy_name = f"{name}_copy"
+    _fn.__name__ = copy_name
+    _fn = register_decomposition(getattr(torch.ops.aten, copy_name))(_fn)
+    return _fn
+
+
 # Saves Python all
 py_all = all
 
@@ -3484,6 +3505,22 @@ def vsplit(
     return tensor_split(a, split_sizes, 0)
 
 
+@register_decomposition(torch.ops.aten.diag.out)
+@out_wrapper()
+def diag(
+    self: TensorLikeType,
+    offset: int = 0,
+) -> TensorLikeType:
+    ndim = self.dim()
+    utils.check(
+        ndim in (1, 2), lambda: f"diag(): Supports 1D or 2D tensors. Got {ndim}D"
+    )
+    if ndim == 1:
+        return torch.diag_embed(self, offset)
+    else:
+        return torch.diagonal_copy(self, offset)
+
+
 @register_decomposition(torch.ops.aten.diagonal, disable_meta=True)
 def diagonal(
     self: TensorLikeType,
@@ -3524,6 +3561,9 @@ def diagonal(
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
 
     return result
+
+
+diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)

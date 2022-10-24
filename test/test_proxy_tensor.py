@@ -1219,7 +1219,6 @@ symbolic_tensor_failures = {
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_fill', ''),  # expected predicate to be bool, got torch.float32
     xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
@@ -1409,6 +1408,7 @@ inplace_symbolic_tensor_failures = {
     xfail('logical_xor', ''),  # aten.logical_xor_.default - couldn't find symbolic meta function/decomposition
     xfail('logit', ''),  # aten.logit_.default - couldn't find symbolic meta function/decomposition
     xfail('lt', ''),  # aten.lt_.Tensor - couldn't find symbolic meta function/decomposition
+    xfail('masked_fill', ''),  # aten.masked_fill_.Tensor - couldn't find symbolic meta function/decomposition
     xfail('mvlgamma', 'mvlgamma_p_1'),  # aten.mvlgamma_.default - couldn't find symbolic meta function/decomposition
     xfail('mvlgamma', 'mvlgamma_p_3'),  # aten.mvlgamma_.default - couldn't find symbolic meta function/decomposition
     xfail('mvlgamma', 'mvlgamma_p_5'),  # aten.mvlgamma_.default - couldn't find symbolic meta function/decomposition
