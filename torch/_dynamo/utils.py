@@ -666,26 +666,40 @@ try:
     )
 
     def make_fake_tensor(e, fake_mode, tx=None):
-        fake_tensor = fake_mode.from_tensor(e, static_shapes=config.dynamic_shapes is False)
+        fake_tensor = fake_mode.from_tensor(
+            e, static_shapes=config.dynamic_shapes is False
+        )
         if tx is not None:
             from torch._dynamo.guards import TensorReference
+
             def _record(tensor_ref):
                 if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
                     tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
                 tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
 
             for index, symbol in enumerate(fake_tensor.size()):
-                tensor_ref = TensorReference(id(e), "size", index, symbol)
-                # if self.tensor_ref and str(self.expr) not in ('False', 'True'):
+                if isinstance(symbol, int):
+                    continue
+                tensor_ref = TensorReference(
+                    id(e), "size", index, symbol.get_pyobj().expr
+                )
                 _record(tensor_ref)
 
             for index, symbol in enumerate(fake_tensor.stride()):
-                tensor_ref = TensorReference(id(e), "stride", index, symbol)
+                if isinstance(symbol, int):
+                    continue
+                tensor_ref = TensorReference(
+                    id(e), "stride", index, symbol.get_pyobj().expr
+                )
                 _record(tensor_ref)
 
-            tensor_ref_storage_offset = TensorReference(id(e), "storage_offset", None, fake_tensor.storage_offset())
-            # if self.tensor_ref and str(self.expr) not in ('False', 'True'):
-            _record(tensor_ref_storage_offset)
+            offset = fake_tensor.storage_offset()
+            if not isinstance(offset, int):
+                tensor_ref_storage_offset = TensorReference(
+                    id(e), "storage_offset", None, offset.get_pyobj().expr
+                )
+                _record(tensor_ref_storage_offset)
+
         return fake_tensor
 
     def wrap_fake_exception(fn):
