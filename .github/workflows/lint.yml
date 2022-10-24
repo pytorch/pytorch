@@ -25,6 +25,7 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
@@ -87,6 +88,7 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -151,6 +153,7 @@ jobs:
         with:
           python-version: 3.x
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -242,7 +245,8 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
-          cache: 'pip'
+          check-latest: false
+          cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
 
@@ -275,6 +279,7 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -320,6 +325,7 @@ jobs:
         with:
           python-version: 3.5
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
@@ -329,6 +335,7 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
