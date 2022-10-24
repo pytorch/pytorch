@@ -99,7 +99,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
   upload-wheel:
-    runs-on: ubuntu-22.04
+    runs-on: linux.20_04.4x
     needs: build-wheel
     container:
       image: continuumio/miniconda3:4.12.0
