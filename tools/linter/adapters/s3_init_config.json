@@ -32,7 +32,7 @@
         },
         "Linux": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Linux_arm64/actionlint",
-            "hash": "7b10f1e9225709e39387730f3939caa0de83cbeaeed11e5333eaf403424a1ab3"
+            "hash": "025ac157db121b33971ef24af72d73d71cda3cb1e3a94795bb2708ef4032ca76"
         }
     }
 }
