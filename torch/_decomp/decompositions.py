@@ -1433,7 +1433,6 @@ def _to_copy(
     return x
 
 
-@register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
     return aten.where(
