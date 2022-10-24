@@ -97,12 +97,9 @@ test/test_reductions.py @mruberry @ngimel
 test/test_type_promotion.py @mruberry @ngimel
 
 # functorch-related things
-# This list is for people who want to be notified everytime there's a change
-# related to functorch
-aten/src/ATen/functorch/ @zou3519
-torch/csrc/functorch/ @zou3519
+# This list is for people wanting to be notified every time there's a change
+# Useful for e.g. auditing xfails that other folks add to tests
 test/functorch/ @zou3519
-functorch/ @zou3519
 
 # torch MPS
 test/test_mps.py @kulinseth
