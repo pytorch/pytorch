@@ -735,7 +735,7 @@ void cpu_gather_contig_kernel(const Tensor& result, const Tensor& index, const T
 }
 
 void scatter_add_config(const Tensor& self, const Tensor& index, const Tensor& src) {
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
     "scatter_add_contig", [&] {
       cpu_scatter_add_contig_kernel<scalar_t>(self, index, src);
@@ -743,7 +743,7 @@ void scatter_add_config(const Tensor& self, const Tensor& index, const Tensor& s
 }
 
 void gather_config(const Tensor& result, const Tensor& index, const Tensor& self) {
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
     "scatter_add_contig", [&] {
       cpu_gather_contig_kernel<scalar_t>(result, index, self);
