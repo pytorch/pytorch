@@ -964,7 +964,9 @@ void initJITBindings(PyObject* module) {
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
-      .def("_jit_set_onednn_layout_propagation", &jit::fuser::onednn::setPropagateLayoutMode)
+      .def(
+          "_jit_set_onednn_layout_propagation",
+          &jit::fuser::onednn::setPropagateLayoutMode)
 #else
       .def("_jit_set_llga_enabled", [](bool flag) { return false; })
       .def("_jit_llga_enabled", []() { return false; })
