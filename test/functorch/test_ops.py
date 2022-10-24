@@ -1195,6 +1195,7 @@ class TestOperators(TestCase):
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
+        xfail('attn', ''),  # NYI: forward-AD for attn
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
         xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
