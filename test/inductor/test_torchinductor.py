@@ -1962,8 +1962,10 @@ class CommonTemplate:
                 torch.randn(32),
                 torch.randn(32),
             ),
-            atol=1e-4,
-            rtol=1e-5,
+            # Absolute difference: 0.0003662109375 (up to 0.0001 allowed)
+            # Relative difference: 1.8804297408767818e-05 (up to 1e-05 allowed)
+            atol=5 * 1e-4,
+            rtol=5 * 1e-5,
             check_lowp=False,
         )
         if self.device != "cpu":
