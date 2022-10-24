@@ -2298,16 +2298,6 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_contiguous(cls, x):
-        if is_contiguous_storage_and_layout(x):
-            as_contiguous_storage_and_layout(x, freeze=True)
-            return x
-        x = cls.copy_input(x)
-        assert is_contiguous_storage_and_layout(x)
-        as_contiguous_storage_and_layout(x, freeze=True)
-        return x
-
-    @classmethod
     def require_stride_order(cls, x, order):
         # require x to have the layout as strided_ordered as order
         if isinstance(
@@ -2825,7 +2815,7 @@ class FallbackKernel(ExternKernelAlloc):
         return list(map(repr, self.unflatten_args(tensor_args, constant_args))) + kwargs
 
     @classmethod
-    def run_kernel(cls, kernel, *args, **kwargs):
+    def process_kernel(cls, kernel, *args, **kwargs):
         args_flat, args_spec = pytree.tree_flatten(args)
 
         is_arg_tensor = []
@@ -2849,10 +2839,6 @@ class FallbackKernel(ExternKernelAlloc):
                     new_args.append(next(it_non_tensors))
             return pytree.tree_unflatten(new_args, args_spec)
 
-        tensor_args = [
-            cls.require_contiguous(cls.realize_input(x)) for x in tensor_args
-        ]
-
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
         # TODO(jansel): replace this with dynamic shape formulas
@@ -2869,11 +2855,16 @@ class FallbackKernel(ExternKernelAlloc):
             ).zero_()
             example_args.append(arg)
 
-        return kernel(*unflatten_args(example_args, non_tensor_args), **kwargs)
+        example_output = kernel(
+            *unflatten_args(example_args, non_tensor_args), **kwargs
+        )
+
+        return example_output, tensor_args, non_tensor_args, unflatten_args
+
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        example_output = cls.run_kernel(kernel, *args, **kwargs)
+        example_output, tensor_args, non_tensor_args, unflatten_args = cls.process_kernel(kernel, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
@@ -2985,7 +2976,7 @@ class Convolution(ExternKernelAlloc):
         # TODO - enable FakeTensorMode for propagation more globally. incorrect stride metas for fallback
         # kernels will lead to runtime failures
         with FakeTensorMode():
-            output = cls.run_kernel(
+            output, *_ = cls.process_kernel(
                 cls,
                 aten.convolution,
                 x,
