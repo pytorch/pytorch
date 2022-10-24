@@ -651,14 +651,13 @@ endif()
 if(USE_CUDA)
   list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
+  include(${Torch_SOURCE_DIR}/cmake/LinkCudaLibraries.cmake)
+  link_cuda_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
   if(MSVC)
     # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
-    set(DELAY_LOAD_FLAGS "-DELAYLOAD:nvcuda.dll;delayimp.lib")
-  else()
-    set(DELAY_LOAD_FLAGS "")
+    target_link_libraries(caffe2_nvrtc "-DELAYLOAD:nvcuda.dll;delayimp.lib")
   endif()
 
-  target_link_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -1607,6 +1606,7 @@ endif()
 
 # ---[ CUDA library.
 if(USE_CUDA)
+  include(${Torch_SOURCE_DIR}/cmake/LinkCudaLibraries.cmake)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
@@ -1620,13 +1620,13 @@ if(USE_CUDA)
       torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
-  target_link_libraries(
+  link_cuda_libraries(
       torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
 
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  link_cuda_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
 
 # ---[ XPU library.
