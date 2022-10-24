@@ -873,9 +873,13 @@ def _make_elementwise_binary_reference(
 
         # TODO: enable this for operations that support it, like add
         if isinstance(a, Number) and isinstance(b, Number):
-            raise ValueError(
-                "Receive two Number inputs to an elementwise binary operation!"
-            )
+            torch_ops_that_allow_only_numbers = [
+                '_trunc_divide',
+            ]
+            if prim.__name__ not in torch_ops_that_allow_only_numbers:
+                raise ValueError(
+                    "Receive two Number inputs to an elementwise binary operation!"
+                )
 
         a, b = _maybe_broadcast(a, b)
         return prim(a, b)

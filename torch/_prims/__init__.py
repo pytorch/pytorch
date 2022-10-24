@@ -391,8 +391,15 @@ def _elementwise_meta(
     # Number case
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
-    assert not isinstance(number, torch.SymIntNode), "NYI"
-    assert not isinstance(number, torch.SymFloatNode), "NYI"
+    # For now for symint/float, just implementing the common / simple cases of (int,float,symint,symfloat)
+    seen_float = False
+    if isinstance(number, (torch.SymIntNode, torch.SymFloatNode)):
+        for a in args:
+            assert isinstance(a, (int, float, torch.SymIntNode, torch.SymFloatNode)), "NYI"
+            seen_float = seen_float or isinstance(a, (float, torch.SymFloatNode))
+        if seen_float:
+            number = sym_float(number)
+
     return TensorMeta(number)
 
 
