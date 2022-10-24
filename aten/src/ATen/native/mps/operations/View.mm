@@ -33,8 +33,13 @@ static std::string getStridedKey(const ScalarType& self_dtype, const ScalarType&
 }
 
 // initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
-static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output,
-                            bool needsScatter, bool requires_sync = false)
+static Tensor& runViewGraph(
+  ViewCachedGraph* cachedGraph,
+  const at::Tensor& src,
+  Tensor& output,
+  bool needsScatter,
+  bool requires_sync = false,
+  id<MTLBuffer> updatesBuffer = nil)
 {
   const id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
@@ -60,7 +65,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
         updatesType = MPSDataTypeInt8;
       }
 
-      feeds[cachedGraph->updatesTensor] = [[[MPSGraphTensorData alloc] initWithMTLBuffer: sourceBuffer
+      feeds[cachedGraph->updatesTensor] = [[[MPSGraphTensorData alloc] initWithMTLBuffer: (updatesBuffer != nil) ? updatesBuffer : sourceBuffer
                                                                                    shape: getMPSShape(src.numel())
                                                                                 dataType: updatesType] autorelease];
     }
@@ -632,11 +637,11 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
   return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false, requires_sync);
 }
 
-Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)
+Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output, id<MTLBuffer> updatesBuffer)
 {
   ViewCachedGraph* cachedGraph = createViewGraph(output, src, output.sizes(), output.strides(),
                                                  output.storage_offset(), /*needsScatter*/ true);
-  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true);
+  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ true, /*requires_sync*/  true, updatesBuffer);
 }
 
 } // namespace mps
