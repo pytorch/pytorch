@@ -7717,6 +7717,7 @@ class TestConsistency(TestCase):
             if op.name not in self.ALLOWLIST_OP_GRAD or dtype_abbrs[dtype] not in self.ALLOWLIST_OP_GRAD[op.name]:
                 run_grad_test = False
 
+        # Generate CPU inputs. These will function as ground-truth to compare the MPS results against.
         def get_samples():
             return op.sample_inputs("cpu", dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
@@ -7861,8 +7862,8 @@ class TestCommon(TestCase):
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
-instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True)
-instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
+instantiate_device_type_tests(TestConsistency, globals(), only_for="mps", allow_mps=True)
+instantiate_device_type_tests(TestCommon, globals(), only_for="mps", allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()
