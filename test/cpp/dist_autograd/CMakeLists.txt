@@ -10,7 +10,8 @@ if(USE_DISTRIBUTED AND NOT WIN32)
   target_link_libraries(test_dist_autograd PRIVATE torch gtest)
 
   if(USE_CUDA)
-    target_link_libraries(test_dist_autograd PRIVATE
+    include(${Torch_SOURCE_DIR}/cmake/LinkCudaLibraries.cmake)
+    link_cuda_libraries(test_dist_autograd PRIVATE
       ${CUDA_LIBRARIES}
       ${CUDA_NVRTC_LIB}
       ${CUDA_CUDA_LIB}

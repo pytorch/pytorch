@@ -156,7 +156,8 @@ if(LINUX)
 endif()
 
 if(USE_CUDA)
-  target_link_libraries(test_jit PRIVATE
+  include(${Torch_SOURCE_DIR}/cmake/LinkCudaLibraries.cmake)
+  link_cuda_libraries(test_jit PRIVATE
     ${CUDA_LIBRARIES}
     ${CUDA_NVRTC_LIB}
     ${CUDA_CUDA_LIB}
