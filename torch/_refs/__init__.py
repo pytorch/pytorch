@@ -724,13 +724,14 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    if a.dtype is torch.bool:
-        msg = (
+    check(
+        a.dtype is not torch.bool,
+        lambda: (
             "Negation, the `-` operator, on a bool tensor is not supported. "
             "If you are trying to invert a mask, use the `~` or `logical_not()` "
             "operator instead."
-        )
-        raise RuntimeError(msg)
+        ),
+    )
 
 
 @_make_elementwise_unary_reference(
@@ -2280,7 +2281,7 @@ def mean(
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE,
     )
     check(
-        not utils.is_integer_dtype(dtype),
+        utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
         lambda: (
             f"mean(): could not infer output dtype. {which_dtype} dtype must be either "
             f"a floating point or complex dtype. Got: {dtype}"
@@ -4486,10 +4487,6 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: "Expected `value` to be on same device as `a`",
         )
         value_type = utils.dtype_to_type(value.dtype)
-        # XXX: fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
-        # https://github.com/pytorch/pytorch/pull/81036
-        # if utils.is_cpu_scalar_tensor(value):
-        #     value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.

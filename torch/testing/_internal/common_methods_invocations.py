@@ -1824,13 +1824,13 @@ def error_inputs_cat(op_info, device, is_ref=False, **kwargs):
 
     # TODO: primTorch has no checks for overlapping memory.
     if not is_ref:
+        # error inputs for more than one element of the written-to tensor refer
+        # to a single memory location
         error_regex = (
             r'unsupported operation: more than one element of the written-to '
             r'tensor refers to a single memory location\. Please clone\(\) the '
             r'tensor before performing the operation\.'
         )
-        # error inputs for more than one element of the written-to tensor refer
-        # to a single memory location
         yield ErrorInput(SampleInput([make_arg((S, S)), make_arg((S, S))],
                                      kwargs={'out': make_arg((1, S)).expand((2 * S, S))}),
                          error_regex=error_regex)
