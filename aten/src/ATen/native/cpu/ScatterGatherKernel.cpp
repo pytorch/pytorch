@@ -617,9 +617,9 @@ void cpu_scatter_add_contig_kernel(const Tensor& self, const Tensor& index, cons
     for (const auto i : c10::irange(begin, end)) {
       int64_t index = index_data[i];
       TORCH_CHECK(index >= 0 && index < index_upper_bound,
-                "index ", index,
-                " is out of bounds for dimension ", 0,
-                " with size ", index_upper_bound);
+                  "index ", index,
+                  " is out of bounds for dimension ", 0,
+                  " with size ", index_upper_bound);
       keys[i] = index;
       values[i] = i;
     }
@@ -696,6 +696,44 @@ void cpu_scatter_add_contig_kernel(const Tensor& self, const Tensor& index, cons
   });
 }
 
+template <typename scalar_t>
+void cpu_gather_contig_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
+  int64_t* index_data = index.data_ptr<int64_t>();
+  scalar_t* result_data = result.data_ptr<scalar_t>();
+  scalar_t* self_data = self.data_ptr<scalar_t>();
+
+  const int64_t M = ensure_nonempty_size(result, 0);
+  const int64_t N = ensure_nonempty_size(self, 0);
+  const int64_t K = index.numel() / M;
+
+  const int64_t index_upper_bound = N;
+
+  using Vec = vec::Vectorized<scalar_t>;
+  int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / K);
+  at::parallel_for(0, M, grain_size, [&](int64_t begin, int64_t end) {
+    for (const auto m : c10::irange(begin, end)) {
+      scalar_t* result_ptr = result_data + m * K;
+      int64_t index = index_data[m];
+      TORCH_CHECK(index >= 0 && index < index_upper_bound,
+                  "index ", index,
+                  " is out of bounds for dimension ", 0,
+                  " with size ", index_upper_bound);
+      scalar_t* self_ptr = self_data + index * K;
+      int64_t d = 0;
+      for (; d < K - (K % Vec::size()); d += Vec::size()) {
+        Vec out_vec = Vec::loadu(self_ptr + d);
+        out_vec.store(result_ptr + d);
+      }
+      #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+      # pragma unroll
+      #endif
+      for (; d < K; d++) {
+        result_ptr[d] = self_ptr[d];
+      }
+    }
+  });
+}
+
 void scatter_add_config(const Tensor& self, const Tensor& index, const Tensor& src) {
   AT_DISPATCH_ALL_TYPES_AND3(
     ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
@@ -704,10 +742,44 @@ void scatter_add_config(const Tensor& self, const Tensor& index, const Tensor& s
   });
 }
 
+void gather_config(const Tensor& result, const Tensor& index, const Tensor& self) {
+  AT_DISPATCH_ALL_TYPES_AND3(
+    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
+    "scatter_add_contig", [&] {
+      cpu_gather_contig_kernel<scalar_t>(result, index, self);
+  });
+}
+
+template <bool is_scatter_like = true>
+inline bool is_index_broadcasted(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  if (!is_radix_sort_available()) { return false; }
+
+  // skip when having empty tensor
+  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) { return false; }
+
+  // skip when having scalar tensor
+  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) { return false; }
+
+  if (is_scatter_like) {
+    // using `spmm` for scatter would require sorting on index,
+    // this is only perf beneficial when the inner dimension, aka, `channels`
+    // is big enough.
+    constexpr int64_t threshold = 16;
+    if (index.numel() / index.size(0) < threshold) { return false; }
+  }
+
+  // index is expanded/broadcasted
+  return dim == 0 && index.stride(0) == 1 && src.is_contiguous() && self.is_contiguous();
+}
+
 void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
-  cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
-    result, dim, index, self,
-    "gather_out_cpu", tensor_assign);
+  if (is_index_broadcasted</*is_scatter_like=*/false>(result, dim, index, self)) {
+    gather_config(result, index, self);
+  } else {
+    cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
+      result, dim, index, self,
+      "gather_out_cpu", tensor_assign);
+  }
 }
 
 void scatter_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
@@ -720,27 +792,8 @@ void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& inde
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
 
-inline bool with_spmm_for_scatter(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  if (!is_radix_sort_available()) { return false; }
-
-  // skip when having empty tensor
-  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) { return false; }
-
-  // skip when having scalar tensor
-  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) { return false; }
-
-  // using `spmm` for scatter would require sorting on index,
-  // this is only perf beneficial when the inner dimension, aka, `channels`
-  // is big enough.
-  constexpr int64_t threshold = 16;
-  if (index.numel() / index.size(0) < threshold) { return false; }
-
-  // index is expanded
-  return dim == 0 && index.stride(0) == 1 && src.is_contiguous() && self.is_contiguous();
-}
-
 void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  if (with_spmm_for_scatter(self, dim, index, src)) {
+  if (is_index_broadcasted<>(self, dim, index, src)) {
     scatter_add_config(self, index, src);
   } else {
     cpu_scatter_gather_base_kernel<>()(
