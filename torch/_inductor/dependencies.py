@@ -149,6 +149,9 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
 
+    # Truncate the expr str by a threshold to prevent it's too long
+    # and cause process hanging. The result is not used.
+    # https://github.com/pytorch/torchdynamo/issues/1352
     @staticmethod
     def truncate_expr(expr):
         if len(expr) > config.realize_bytes_threshold:
