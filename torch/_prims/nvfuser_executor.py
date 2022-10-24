@@ -40,7 +40,7 @@ DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
 # https://github.com/pytorch/pytorch/issues/80551
 @dataclass(frozen=True)
 class nvFuserTensorTemplate:
-    ndim: int
+    symbolic_shape: tuple
     contiguity: tuple
     dtype: DataType
     is_cpu: bool
@@ -51,11 +51,15 @@ class nvFuserScalarTemplate:
     dtype: DataType
 
 
+def compute_nvfuser_symbolic_shape(shape):
+    return tuple(1 if s == 1 else -1 for s in shape)
+
+
 def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.ndim,
+                compute_nvfuser_symbolic_shape(arg.size()),
                 compute_contiguity(arg.size(), arg.stride()),
                 getnvFuserDtype(arg.dtype),
                 arg.is_cpu,  # type: ignore[attr-defined]
@@ -163,9 +167,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
-                symbolic_shape = [-1] * arg.ndim
                 x = fd.define_tensor(
-                    symbolic_shape, arg.contiguity, arg.dtype, arg.is_cpu
+                    arg.symbolic_shape, arg.contiguity, arg.dtype, arg.is_cpu
                 )
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
