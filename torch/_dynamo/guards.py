@@ -479,6 +479,7 @@ class GuardedCode:
 
 from sympy.printing.str import StrPrinter
 
+
 @dataclasses.dataclass
 class TensorReference(object):
     """
@@ -492,15 +493,17 @@ class TensorReference(object):
     NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
     TensorReference(ref_id=12345, kind="size", idx=2)
     """
+
     ref_id: Optional[int] = None
     kind: Optional[str] = None
     idx: Optional[int] = None
     # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
     # But it is a Optional[Union["sympy.Expr", int]]
-    expr: Optional[object] = None   # Populated after association
+    expr: Optional[object] = None  # Populated after association
 
     def __hash__(self):
         return hash((self.ref_id, self.kind, self.idx))
+
 
 class DynamoGuardPrinter(StrPrinter):
     @staticmethod
@@ -543,7 +546,7 @@ class DynamoGuardPrinter(StrPrinter):
 class CheckFunctionManager:
     def __init__(
         self,
-        output_graph = None,
+        output_graph=None,
         guards: Optional[Set[Guard]] = None,
         f_locals: Optional[Dict] = None,
         f_globals: Optional[Dict] = None,
@@ -617,12 +620,10 @@ class CheckFunctionManager:
                 # AND was found in the shape_env
                 tensor_ref_set = self.output_graph.tensor_id_to_sym_shape_ref[tensor_id]
                 for tensor_ref in tensor_ref_set:
-                    if isinstance(tensor_ref.expr, int):
-                        continue
-                    obj_expr = tensor_ref.expr.get_pyobj().expr
+                    obj_expr = tensor_ref.expr
                     if obj_expr in self.output_graph.shape_env.val_to_var:
                         # Normalize in case the expr is an integer, replace with shape (ex: 10->s0)
-                        obj_expr = self.output_graph.shape_env.val_to_var[obj_expr] 
+                        obj_expr = self.output_graph.shape_env.val_to_var[obj_expr]
                     if obj_expr not in expr_to_tensor_ref:
                         expr_to_tensor_ref[obj_expr] = set()
                     expr_to_tensor_ref[obj_expr].add(tensor_ref)
@@ -658,6 +659,7 @@ class CheckFunctionManager:
                 equality_expr = " == ".join(equality_candidates)
                 finished_expressions.append(equality_expr)
 
+        breakpoint()
         return finished_expressions
 
     def compile_check_fn(self, local_builder, global_builder):
