@@ -15,16 +15,6 @@
 
 namespace at {
 
-// TODO: move this to the rest of the symint namespace
-namespace symint {
-
-template <typename T, typename = enable_if_symint<T>>
-c10::SymInt numel(const TensorBase& t) { return t.sym_numel(); }
-template <typename T, typename = enable_if_int<T>>
-int64_t numel(const TensorBase& t) { return t.numel(); }
-
-}
-
 namespace native {
 
 template <typename T>
