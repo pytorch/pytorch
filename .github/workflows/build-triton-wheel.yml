@@ -25,7 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         # py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
-        py_vers: [ "3.7" ]
+        py_vers: [ "3.7", "3.8" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
@@ -104,18 +104,18 @@ jobs:
     needs: build-wheel
     container:
       image: continuumio/miniconda3:4.12.0
-    strategy:
-      fail-fast: false
-      matrix:
-        # py_vers: [ "3.7", "3.8", "3.9", "3.10", "3.11" ]
-        py_vers: [ "3.7" ]
     env:
       GITHUB_TOKEN: ${{ secrets.github-token }}
     steps:
-      - name: Download Build Artifacts
+      - name: Download Build Artifacts (3.7)
         uses: actions/download-artifact@v3
         with:
-          name: "pytorch-triton-${{ matrix.py_vers }}"
+          name: "pytorch-triton-3.7"
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Download Build Artifacts (3.8)
+        uses: actions/download-artifact@v3
+        with:
+          name: "pytorch-triton-3.8"
           path: "${{ runner.temp }}/artifacts/"
       - name: Upload binaries
         env:
