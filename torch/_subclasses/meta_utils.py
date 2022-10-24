@@ -1,4 +1,5 @@
 import weakref
+from typing import Optional
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -144,8 +145,9 @@ class MetaConverter:
 
         make_symbolic = shape_env is not None
 
-        def sym(x, ref_id, kind):
+        def sym(x, ref_id: Optional[int], kind: Optional[str]):
             if make_symbolic:
+                # Please see the docs on PySimInt.TensorReference for how these values are used.
                 return shape_env.create_symintnode(
                     shape_env.create_symbol(x), ref_id=ref_id, kind=kind, idx=None
                 )

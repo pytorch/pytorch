@@ -529,6 +529,13 @@ class CheckFunctionManager:
     CURRENT dynamo frame, and tensor names (dynamo's frame agnostic tensor reference mechanism, see TensorCheck and
     guards.cpp for more info) - and produce executable python expressions for addition to our guarded code components
     that make their way into check_fn.
+
+    We DO NOT create guards based on ids. The IDs act as a lookup for the following mapping:
+
+    dynamo: tensor_name <> tensor_id
+    shape_env: tensor_id <> shape_expr
+
+    This allows us to then create a tensor_name <> shape_expr association for the current frames guards.
     """
 
     def _parse_symbolic_shape_expressions(self, tensor_check_names, tensor_check_ids):
@@ -605,9 +612,7 @@ class CheckFunctionManager:
             # We may get into a state where symbolic shape keys (all should be found in replacements)
             # Have not been removed from the expression. This is a serious enough error state that we need to assert.
             for key in self.shape_env.replacements.keys():
-                assert (
-                    str(key) not in expr_as_str
-                ), f"Unknown shape symbol {key}. "
+                assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
 
             # Certain expressions are negated in their guards.
             if not evaluation:
