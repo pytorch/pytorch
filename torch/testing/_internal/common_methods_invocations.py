@@ -13284,7 +13284,7 @@ op_db: List[OpInfo] = [
            decorators=[DecorateInfo(toleranceOverride({
                                     torch.float32: tol(atol=1e-04, rtol=3e-05),
                                     torch.complex64: tol(atol=1e-02, rtol=5e-05)}),
-                                    'TestCommon', 'test_noncontiguous_samples'),],
+                                    'TestCommon', 'test_noncontiguous_samples')],
            ),
     OpInfo('svd',
            op=torch.svd,

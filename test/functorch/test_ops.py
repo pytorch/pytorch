@@ -1303,6 +1303,7 @@ class TestOperators(TestCase):
         # Potential bugs/errors
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
+        xfail('attn'),  # Forward AD not implemented
         xfail('bernoulli'),  # calls random op
         xfail('bfloat16'),  # required rank 4 tensor to use channels_last format
         xfail('cdist'),  # Forward AD not implemented and no decomposition
