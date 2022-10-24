@@ -124,5 +124,6 @@ jobs:
           UPLOAD_BUCKET: "s3://pytorch"
         run: |
             set -ex
+            pip install -q awscli
             s3_dir="${UPLOAD_BUCKET}/whl/nightly/"
             aws s3 cp --no-progress --acl public-read "${PKG_DIR}/*.whl" "${s3_dir}"
