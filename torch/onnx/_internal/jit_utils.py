@@ -322,9 +322,12 @@ def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
     tensor_type = typing.cast(_C.TensorType, value.type())
     return tensor_type.device()
 
+
 @_beartype.beartype
 def _parse_node_kind(kind: str) -> Tuple[str, str]:
     if "::" not in kind:
-        raise torch.onnx.errors.OnnxExporterError("Node kind is invalid. '::' is not in node kind.")
+        raise torch.onnx.errors.OnnxExporterError(
+            "Node kind is invalid. '::' is not in node kind."
+        )
     domain, opname = kind.split("::")
     return domain, opname
