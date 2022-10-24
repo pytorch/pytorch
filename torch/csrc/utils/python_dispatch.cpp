@@ -96,7 +96,9 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "def_",
           [](py::object self, const char* schema, const char* alias) {
-            if (!isMainPyInterpreter()) return self;
+            if (!isMainPyInterpreter()) {
+              return self;
+            }
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)));
             return self;
@@ -110,7 +112,9 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "def_legacy",
           [](py::object self, const char* schema) {
-            if (!isMainPyInterpreter()) return self;
+            if (!isMainPyInterpreter()) {
+              return self;
+            }
             self.cast<torch::Library&>().def(torch::jit::parseSchema(schema));
             return self;
           },
@@ -130,7 +134,9 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
-            if (!isMainPyInterpreter()) return self;
+            if (!isMainPyInterpreter()) {
+              return self;
+            }
             self.cast<torch::Library&>().def(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -148,7 +154,9 @@ void initDispatchBindings(PyObject* module) {
              const char* dispatch,
              const char* alias,
              const char* debug) {
-            if (!isMainPyInterpreter()) return self;
+            if (!isMainPyInterpreter()) {
+              return self;
+            }
             self.cast<torch::Library&>().def(
                 torch::schema(schema, parseAliasAnalysisKind(alias)),
                 dispatch_str(dispatch, [](const at::Tensor& a) {
@@ -169,7 +177,9 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
-            if (!isMainPyInterpreter()) return self;
+            if (!isMainPyInterpreter()) {
+              return self;
+            }
             self.cast<torch::Library&>().impl(
                 name, dispatch_str(dispatch, [](const at::Tensor& a) {
                         return a;
@@ -186,7 +196,9 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              const char* dispatch,
              const char* debug) {
-            if (!isMainPyInterpreter()) return self;
+            if (!isMainPyInterpreter()) {
+              return self;
+            }
             self.cast<torch::Library&>().impl(
                 name,
                 dispatch_str(
@@ -206,7 +218,9 @@ void initDispatchBindings(PyObject* module) {
              const char* dispatch,
              py::object func) {
             HANDLE_TH_ERRORS
-            if (!isMainPyInterpreter()) return;
+            if (!isMainPyInterpreter()) {
+              return;
+            }
             self.cast<torch::Library&>().impl(
                 name,
                 dispatch_str(
@@ -223,11 +237,15 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "define",
           [](py::object self, const char* schema, const char* alias_analysis) {
-            auto parsed_schema = torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
-            if (!isMainPyInterpreter()) return parsed_schema.name();
+            auto parsed_schema =
+                torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
+            if (!isMainPyInterpreter()) {
+              return parsed_schema.name();
+            }
             self.cast<torch::Library&>().def(std::move(parsed_schema));
             // TODO: this is dumb, had to make a second copy
-            return torch::schema(schema, parseAliasAnalysisKind(alias_analysis)).name();
+            return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
+                .name();
           },
           "",
           py::arg("schema"),
@@ -235,7 +253,9 @@ void initDispatchBindings(PyObject* module) {
       .def(
           "fallback_fallthrough",
           [](py::object self, const char* dispatch) {
-            if (!isMainPyInterpreter()) return self;
+            if (!isMainPyInterpreter()) {
+              return self;
+            }
             self.cast<torch::Library&>().fallback(
                 dispatch_str(dispatch, CppFunction::makeFallthrough()));
             return self;
@@ -500,8 +520,7 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch_key") = static_cast<const char*>(""));
 
   m.def(
-      "_dispatch_is_main_interpreter",
-      []() { return isMainPyInterpreter(); });
+      "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
 
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;

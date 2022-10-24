@@ -297,6 +297,10 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
   // THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
+  if (is_tensor) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !c10::impl::HermeticPyObjectTLS::get_state());
+  }
   if (is_tensor && Py_REFCNT(pyobj) > 1) {
     // It's still alive!  This can happen if a weak ref resurrected
     // the PyObject without flipping ownership.  At this point it is
@@ -318,7 +322,8 @@ class PyInterpreterHolder {
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
             ConcretePyInterpreterVTable::instance())) {
-    is_main_interpreter_ = at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
+    is_main_interpreter_ =
+        at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
   }
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
@@ -429,6 +434,14 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
     Py_RETURN_NONE;
   }
 
+  if (c10::impl::HermeticPyObjectTLS::get_state()) {
+    TORCH_INTERNAL_ASSERT(var.device().type() != c10::kXLA, "hermetic XLA NYI");
+    return THPVariable_NewWithVar(
+        (PyTypeObject*)THPVariableClass,
+        std::move(var),
+        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+  }
+
   c10::optional<PyObject*> mb_obj =
       var.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get());
   c10::impl::PyInterpreterStatus status;
@@ -502,6 +515,14 @@ bool isResurrectable(THPVariable* self) {
     return false;
   }
   auto const& tensor = THPVariable_Unpack(self);
+  // Check if this is hermetic. If it is, no resurrection.
+  if (!tensor.unsafeGetTensorImpl()
+           ->check_pyobj(self_interpreter.get())
+           .has_value()) {
+    // TODO: debug only
+    TORCH_INTERNAL_ASSERT(c10::impl::HermeticPyObjectTLS::get_state());
+    return false;
+  }
   if (!tensor.defined() || tensor.use_count() <= 1) {
     return false;
   }
@@ -544,6 +565,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   // Flip THPVariable to be non-owning
   // (near use-after-free miss here: fresh MaybeOwned is created breaking
   // reference on Tensor in struct BEFORE we overwrite the old one)
+  TORCH_INTERNAL_ASSERT(!c10::impl::HermeticPyObjectTLS::get_state());
   self->cdata = MaybeOwned<Variable>::borrowed(tensor);
 
   // NB: At this point, tensor *could* be dead (e.g., some other C++ thread
@@ -595,7 +617,12 @@ static int THPVariable_clear(THPVariable* self) {
     //        unsafeIsBorrowed() is TRUE.  We're deallocating the PyObject
     //        because Tensor asked us to (it's already destructing).
 
-    if (!self->cdata.unsafeIsBorrowed()) {
+    if (!self->cdata.unsafeIsBorrowed() &&
+        !tensor.unsafeGetTensorImpl()
+             ->check_pyobj(self_interpreter.get())
+             .has_value()) {
+      // TODO: debug only
+      TORCH_INTERNAL_ASSERT(c10::impl::HermeticPyObjectTLS::get_state());
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -1899,8 +1926,8 @@ static PyObject* THPVariable_NewWithVar(
     // TODO: named constructor to avoid default initialization
     new (&v->cdata) MaybeOwned<Variable>();
     if (c10::impl::HermeticPyObjectTLS::get_state()) {
-      // Do NOT initialize pyobj field on the tensor, do not make it owned
-      v->cdata = MaybeOwned<Variable>::borrowed(std::move(_var));
+      // Do NOT initialize pyobj field on the tensor, you own the C++
+      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
       TORCH_INTERNAL_ASSERT(
           !check_has_torch_dispatch(obj),
           "While HermeticPyObject was enabled, we attempted to create a tensor "
