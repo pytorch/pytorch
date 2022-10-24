@@ -124,12 +124,17 @@ numba==0.55.2 ; python_version == "3.10"
 #Pinned versions: 1.9.0
 #test that import:
 
+opt-einsum==3.3
+#Description: Python library to optimize tensor contraction order, used in einsum
+#Pinned versions: 3.3
+#test that import: test_linalg.py
+
 #pillow
 #Description:  Python Imaging Library fork
 #Pinned versions:
 #test that import:
 
-protobuf==3.20.1
+protobuf==3.20.2
 #Description:  Google’s data interchange format
 #Pinned versions: 3.20.1
 #test that import: test_tensorboard.py
@@ -146,6 +151,11 @@ pytest
 
 pytest-xdist
 #Description: plugin for running pytest in parallel
+#Pinned versions:
+#test that import:
+
+pytest-shard
+#Description: plugin spliting up tests in pytest
 #Pinned versions:
 #test that import:
 

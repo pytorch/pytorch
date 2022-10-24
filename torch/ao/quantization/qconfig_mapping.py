@@ -17,6 +17,7 @@ from .observer import (
 )
 from .qconfig import (
     default_reuse_input_qconfig,
+    default_symmetric_qnnpack_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
     QConfig,
@@ -69,7 +70,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     # so we have to modify the weight observer to default_weight_observer or another
     # per tensor supported observer.
     # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
+    if backend in ("fbgemm", "x86"):
         qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight)
     else:
         qconfig_transpose = qconfig
@@ -126,7 +127,7 @@ def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86", "fbgemm" (default), "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     # TODO: add assert for backend choices
@@ -138,11 +139,22 @@ def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMappi
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86", "fbgemm" (default), "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)
 
+def _get_symmetric_qnnpack_qconfig_mapping():
+    """
+    Return a QConfigMapping that uses `torch.ao.quantization.default_symmetric_qnnpack_qconfig`
+    as the default QConfig.
+    """
+    qconfig_mapping = get_default_qconfig_mapping("qnnpack") \
+        .set_global(default_symmetric_qnnpack_qconfig)
+    for pattern in qconfig_mapping.object_type_qconfigs.keys():
+        if pattern not in _FIXED_QPARAMS_OP_TO_OBSERVER:
+            qconfig_mapping.set_object_type(pattern, default_symmetric_qnnpack_qconfig)
+    return qconfig_mapping
 
 class QConfigMapping:
     """
@@ -151,9 +163,13 @@ class QConfigMapping:
     The user can specify QConfigs using the following methods (in increasing match priority):
 
         ``set_global`` : sets the global (default) QConfig
+
         ``set_object_type`` : sets the QConfig for a given module type, function, or method name
+
         ``set_module_name_regex`` : sets the QConfig for modules matching the given regex string
+
         ``set_module_name`` : sets the QConfig for modules matching the given module name
+
         ``set_module_name_object_type_order`` : sets the QConfig for modules matching a combination
         of the given module name, object type, and the index at which the module appears
 

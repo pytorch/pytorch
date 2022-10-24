@@ -126,6 +126,10 @@ inline Tensor new_qtensor(
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+    TORCH_CHECK(!device.is_cuda(), "It looks like you are trying to quantize a CUDA tensor ",
+                "while QNNPACK backend is enabled. Although not expected to happen in ",
+                "practice, you might have done it for testing purposes. ",
+                "Please, either change the quantization engine or move the tensor to a CPU.");
     allocator = c10::GetDefaultMobileCPUAllocator();
   }
 #endif

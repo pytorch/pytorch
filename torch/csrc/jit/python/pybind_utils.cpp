@@ -40,6 +40,20 @@ void clear_registered_instances(void* ptr) {
   registered_instances.erase(ptr);
 }
 
+// WARNING: Precondition for this function is that, e.g., you have tested if a
+// SymIntList is in fact only ints, and if so, you called this with T=int64_t.
+// This precondition is NOT checked at runtime.
+template <typename T>
+IValue listToIValue(py::handle obj) {
+  c10::List<T> rs;
+  for (auto it = obj.begin(); it != obj.end(); it++) {
+    auto elm = *it;
+    rs.push_back(py::cast<T>(elm));
+  }
+  // Promises that we have decayed the list appropriately
+  return c10::impl::toList<T>(rs);
+}
+
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
@@ -151,6 +165,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
+    case TypeKind::SymFloatType:
+      if (torch::is_symfloat_node(obj.ptr())) {
+        return py::cast<c10::SymFloat>(obj);
+      }
+      return py::cast<double>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
         throw py::cast_error(
@@ -231,13 +250,35 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             return repeated;
           }
         case TypeKind::SymIntType: {
-          c10::List<c10::SymInt> symints;
+          bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            auto si = py::cast<c10::SymInt>(elm);
-            symints.push_back(si);
+            if (torch::is_symint_node(elm)) {
+              is_symbolic = true;
+              break;
+            }
           }
-          return symints;
+          if (is_symbolic) {
+            return listToIValue<c10::SymInt>(obj);
+          } else {
+            return listToIValue<int64_t>(obj);
+          }
+        }
+        case TypeKind::SymFloatType: {
+          bool is_symbolic = false;
+          for (auto it = obj.begin(); it != obj.end(); it++) {
+            auto elm = *it;
+            // TODO: what about SymInt conversion to SymFloat?
+            if (torch::is_symfloat_node(elm)) {
+              is_symbolic = true;
+              break;
+            }
+          }
+          if (is_symbolic) {
+            return listToIValue<c10::SymFloat>(obj);
+          } else {
+            return listToIValue<double>(obj);
+          }
         }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
@@ -392,13 +433,19 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
         return static_cast<int8_t>(layout->layout);
       }
-      if (py::isinstance<py::int_>(obj)) {
+      if (py::isinstance<py::bool_>(obj)) {
+        return py::cast<bool>(obj);
+      } else if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       } else if (PyComplex_CheckExact(obj.ptr())) {
         auto c_obj = py::cast<std::complex<double>>(obj.ptr());
         return static_cast<c10::complex<double>>(c_obj);
+      } else if (torch::is_symint_node(obj)) {
+        return py::cast<c10::SymInt>(obj);
+      } else if (torch::is_symfloat_node(obj)) {
+        return py::cast<c10::SymFloat>(obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
@@ -609,8 +656,9 @@ py::object toPyObject(IValue ivalue) {
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isSymInt()) {
-    auto si = ivalue.toSymInt();
-    return py::cast(si);
+    return py::cast(ivalue.toSymInt());
+  } else if (ivalue.isSymFloat()) {
+    return py::cast(ivalue.toSymFloat());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

@@ -35,7 +35,7 @@ namespace mps {
 
     auto mps_event = static_cast<mpsEvent_t>(*event);
     MPSStream mps_stream{stream};
-    mps_event->recordEvent(&mps_stream);
+    mps_event->recordEvent(true);
   }
 
   void MPSGuardImpl::block(
@@ -45,7 +45,7 @@ namespace mps {
     auto mps_event = static_cast<mpsEvent_t>(event);
     MPSStream mps_stream{stream};
 
-    mps_event->waitForEvent(&mps_stream);
+    mps_event->waitForEvent(true);
   }
 
   bool MPSGuardImpl::queryEvent(void* event) const {

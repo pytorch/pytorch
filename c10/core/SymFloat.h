@@ -22,6 +22,10 @@ class C10_API SymFloat {
     return ptr_.get();
   }
 
+  SymFloatNodeImpl* release() && {
+    return std::move(ptr_).release();
+  }
+
   SymFloatNode toSymFloatNodeImpl() const;
   static c10::SymFloat toSymFloat(SymFloatNode sin);
 
@@ -30,6 +34,11 @@ class C10_API SymFloat {
     return data_;
   }
 
+  SymFloat operator+(SymFloat) const;
+  SymFloat operator-(SymFloat) const;
+  SymFloat operator*(SymFloat) const;
+  SymFloat operator/(SymFloat) const;
+
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
   // where `is_symbolic` is always false
@@ -37,7 +46,7 @@ class C10_API SymFloat {
     return ptr_;
   }
 
-  int64_t as_float_unchecked() const {
+  double as_float_unchecked() const {
     return data_;
   }
 

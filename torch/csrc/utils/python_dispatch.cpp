@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FuncTorchTLS.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
@@ -469,6 +470,13 @@ void initDispatchBindings(PyObject* module) {
         return names;
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
+
+  m.def("_are_functorch_transforms_active", []() {
+    auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
+    return (
+        include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
+        include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
+  });
 }
 
 } // namespace dispatch

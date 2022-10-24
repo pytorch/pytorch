@@ -1311,6 +1311,58 @@ int nnc_lowerings_lazy_registration() {
             });
       });
 
+  RegisterNNCLoweringsFunction aten_mish(
+      {"aten::mish(Tensor self) -> (Tensor)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeOneOperand(
+            "aten_mish",
+            inputs,
+            outputShape,
+            outputStrides,
+            outputType,
+            [](const ExprHandle& a) {
+              auto default_type_a = promoteIntegerToDefaultType(a);
+              return default_type_a * tanh(log1p(exp(default_type_a)));
+            });
+      });
+
+  RegisterNNCLoweringsFunction aten_elu(
+      {"aten::elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> (Tensor)"},
+      [](const std::vector<ArgValue>& inputs,
+         const std::vector<ExprHandle>& outputShape,
+         const std::vector<ExprHandle>& outputStrides,
+         const c10::optional<ScalarType>& outputType,
+         at::Device device) {
+        return computeFourOperand(
+            "aten_elu",
+            inputs,
+            outputShape,
+            outputStrides,
+            outputType,
+            [](const ExprHandle& a,
+               const ExprHandle& alpha,
+               const ExprHandle& scale,
+               const ExprHandle& input_scale) {
+              auto zero = Cast::make(a.dtype(), 0);
+              auto one = Cast::make(a.dtype(), 1);
+
+              auto poscoef = Cast::make(a.dtype(), scale);
+              auto negiptcoef = Cast::make(a.dtype(), input_scale);
+              auto negcoef = Cast::make(a.dtype(), alpha) * poscoef;
+
+              return CompareSelect::make(
+                  a,
+                  zero,
+                  a * poscoef,
+                  (exp(a * negiptcoef) - one) * negcoef,
+                  kGT);
+            });
+      });
+
   RegisterNNCLoweringsFunction aten_hardsigmoid(
       {"aten::hardsigmoid(Tensor self) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,

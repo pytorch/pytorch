@@ -1431,5 +1431,27 @@ void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
 #endif
 }
 
+void PrepackWeights(std::shared_ptr<Graph>& graph) {
+  const auto pattern = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %result: Tensor = fb::quantized_linear_unpacked_weight_v2(%input, %weight, %bias, %scale, %zero_point)
+        return (%result)
+  )IR";
+
+  const auto split_pattern = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %packed_params = quantized::linear_prepack(%weight, %bias)
+        %scale_float: float = aten::item(%scale)
+        %zero_point_int: int = aten::item(%zero_point)
+        %result: Tensor = quantized::linear(%input, %packed_params, %scale_float, %zero_point_int)
+        return (%result)
+  )IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, split_pattern);
+  fuse.runOnGraph(graph);
+  // Constant propagation should be called after this pass + others.
+}
+
 } // namespace jit
 } // namespace torch

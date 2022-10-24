@@ -423,14 +423,14 @@ IntArrayRef stride,
 IntArrayRef padding,
 IntArrayRef dilation,
 bool ceil_mode,
-const Tensor& indices,
+const Tensor& indices_,
 const Tensor& gradInput) {
   NoNamesGuard guard;
 
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
   TensorArg input_arg{ input_, "input_", 3 };
-  TensorArg indices_arg{ indices, "indices", 4 };
+  TensorArg indices_arg{ indices_, "indices", 4 };
 
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
@@ -473,6 +473,8 @@ const Tensor& gradInput) {
   const int64_t out_stride_c = gradOutput.stride(-3);
   const int64_t out_stride_h = gradOutput.stride(-2);
   const int64_t out_stride_w = gradOutput.stride(-1);
+
+  const Tensor indices = indices_.contiguous(memory_format);
 
   gradInput.zero_();
 

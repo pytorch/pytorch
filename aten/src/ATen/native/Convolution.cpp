@@ -1,16 +1,17 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/ConvolutionMM3d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
-#include <ATen/Config.h>
 #include <c10/macros/Macros.h>
 
 #include <limits>
@@ -21,6 +22,60 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/Utils.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_conv_depthwise2d.h>
+#include <ATen/ops/_convolution.h>
+#include <ATen/ops/_convolution_double_backward_native.h>
+#include <ATen/ops/_convolution_mode.h>
+#include <ATen/ops/_convolution_mode_native.h>
+#include <ATen/ops/_convolution_native.h>
+#include <ATen/ops/_mps_convolution.h>
+#include <ATen/ops/_mps_convolution_transpose.h>
+#include <ATen/ops/_nnpack_available.h>
+#include <ATen/ops/_nnpack_spatial_convolution.h>
+#include <ATen/ops/_slow_conv2d_backward.h>
+#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/conv1d_native.h>
+#include <ATen/ops/conv2d_native.h>
+#include <ATen/ops/conv3d_native.h>
+#include <ATen/ops/conv_depthwise3d.h>
+#include <ATen/ops/conv_transpose1d_native.h>
+#include <ATen/ops/conv_transpose2d_native.h>
+#include <ATen/ops/conv_transpose3d_native.h>
+#include <ATen/ops/convolution.h>
+#include <ATen/ops/convolution_backward_native.h>
+#include <ATen/ops/convolution_backward_overrideable.h>
+#include <ATen/ops/convolution_backward_overrideable_native.h>
+#include <ATen/ops/convolution_native.h>
+#include <ATen/ops/convolution_overrideable.h>
+#include <ATen/ops/convolution_overrideable_native.h>
+#include <ATen/ops/cudnn_convolution.h>
+#include <ATen/ops/cudnn_convolution_transpose.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/miopen_convolution.h>
+#include <ATen/ops/miopen_convolution_transpose.h>
+#include <ATen/ops/miopen_depthwise_convolution.h>
+#include <ATen/ops/mkldnn_convolution.h>
+#include <ATen/ops/mps_convolution_backward.h>
+#include <ATen/ops/mps_convolution_transpose_backward.h>
+#include <ATen/ops/slow_conv3d.h>
+#include <ATen/ops/slow_conv_dilated2d.h>
+#include <ATen/ops/slow_conv_dilated3d.h>
+#include <ATen/ops/slow_conv_transpose2d.h>
+#include <ATen/ops/slow_conv_transpose3d.h>
+#include <ATen/ops/thnn_conv2d.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 constexpr int MIOPEN_DIM_MAX = 5;
@@ -131,7 +186,8 @@ auto ConvParams::view1d_as_2d() -> void {
 
 auto ConvParams::use_cpu_depthwise3x3_winograd(
     const at::Tensor& input,
-    const at::Tensor& weight) const -> bool {
+    const at::Tensor& weight,
+    const c10::optional<at::Tensor>& bias) const -> bool {
 #if defined(__ARM_NEON__)
   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
   return (input.ndimension() == 4) &&
@@ -147,6 +203,7 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          (weight.device().is_cpu()) &&
          (weight.scalar_type() == at::kFloat) &&
          weight.is_contiguous() &&
+         (!bias.has_value() || bias->is_contiguous()) &&
          !is_strided() &&
          !is_dilated() &&
          !transposed;
@@ -1095,12 +1152,22 @@ ConvBackend select_conv_backend(
   auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  return select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
+  return _select_conv_backend(input, weight, bias, bias_sizes_opt, need_backward, params);
 }
 
 ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
+    const at::OptionalIntArrayRef bias_sizes_opt,
+    const bool need_backward,
+    const ConvParams& params) {
+  return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params);
+}
+
+ConvBackend _select_conv_backend(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
     const at::OptionalIntArrayRef bias_sizes_opt,
     const bool need_backward,
     const ConvParams& params) {
@@ -1145,7 +1212,7 @@ ConvBackend select_conv_backend(
     // option for NHWC.
     return ConvBackend::Xnnpack2d;
   // 3x3 depthwith convolutions implementation is inference only
-  } else if (!need_backward && params.use_cpu_depthwise3x3_winograd(input, weight)) {
+  } else if (!need_backward && params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
     return ConvBackend::Winograd3x3Depthwise;
   } else if (
       !params.transposed && (input.ndimension() == 5) &&
@@ -1309,6 +1376,7 @@ at::Tensor _convolution(
   int64_t dim = k - 2;
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
+  TORCH_CHECK(groups_ > 0, "non-positive groups is not supported");
 
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
@@ -1338,7 +1406,7 @@ at::Tensor _convolution(
   auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
+  ConvBackend backend = _select_conv_backend(input, weight, bias, bias_sizes_opt, need_backward, params);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.

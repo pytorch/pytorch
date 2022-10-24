@@ -12,50 +12,15 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
-namespace {
-// Provides additional detail into NCCL error codes based on when these are
-// thrown in the NCCL codebase.
-std::string getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string> processGroupFailureReason = c10::nullopt) {
-  // Prioritize failure reason provided by PG NCCL first, as it can abort
-  // communicators when it encounters collective timeouts, etc.
-  if (processGroupFailureReason != c10::nullopt) {
-    return (*processGroupFailureReason).c_str();
-  }
-  std::string interpret;
-  std::string err;
-#ifdef ENABLE_NCCL_GET_LAST_ERROR
-  err = "\nLast error:\n" + std::string(ncclGetLastError(NULL));
-#endif
-  switch (error) {
-    case ncclUnhandledCudaError:
-      interpret = "ncclUnhandledCudaError: Call to CUDA function failed.";
-      break;
-    case ncclSystemError:
-      interpret = "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
-        "It can be also caused by unexpected exit of a remote peer.";
-      break;
-    case ncclInternalError:
-      interpret = "ncclInternalError: Internal check failed.";
-      break;
-    case ncclInvalidArgument:
-      interpret = "ncclInvalidArgument: Invalid value for an argument.";
-      break;
-    case ncclInvalidUsage:
-      interpret = "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
-      break;
-    default:
-      interpret = "Unknown NCCL error!";
-  }
-  return interpret + err;
-}
-} // namespace
-
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
+// ncclRemoteError only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 13)
 #define ENABLE_NCCL_GET_LAST_ERROR
+#define NCCL_REMOTE_ERROR
 #elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
 #define ENABLE_NCCL_GET_LAST_ERROR
+#define NCCL_REMOTE_ERROR
 #endif
 
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
@@ -114,6 +79,12 @@ namespace c10d {
 
 std::string getNcclVersion();
 std::string ncclGetErrorWithVersion(ncclResult_t error);
+
+// Provides additional detail into NCCL error codes based on when these are
+// thrown in the NCCL codebase.
+std::string getNcclErrorDetailStr(
+  ncclResult_t error,
+  c10::optional<std::string> processGroupFailureReason = c10::nullopt);
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {

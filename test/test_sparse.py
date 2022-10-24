@@ -25,7 +25,6 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
-from torch.utils._python_dispatch import TorchDispatchMode
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -41,44 +40,28 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
 ) or (not IS_WINDOWS and CUDA11OrLater)
 
-class CrossRefSparseFakeMode(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
+class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
+    def __init__(self):
+        super(CrossRefSparseFakeMode, self).__init__(
+            self.ignore_op, check_strides=False,
+            check_aliasing=False,
+        )  # TODO: enable stride/alias checking
 
-        def on_tensor(f):
-            def go(t):
-                if isinstance(t, torch.Tensor):
-                    return f(t)
-                else:
-                    return t
-            return go
-
-        # empty_like excluded for now due to sparse complex
-        # aten._to_dense.default this one is getting called with csc
-        if (
-            func not in [
-                torch.ops.aten.lift_fresh.default,
-                torch.ops.aten.empty_like.default,
-                torch.ops.aten.set_.source_Storage_storage_offset,
-                torch.ops.aten.sspaddmm.out,
-                torch.ops.aten._spdiags.default,
-                torch.ops.aten._to_dense.default
-            ]
-            and torch.Tag.dynamic_output_shape not in func.tags
-            and torch.Tag.inplace_view not in func.tags
-            and torch.Tag.data_dependent_output not in func.tags
-        ):
-            from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
-            from torch.utils._pytree import tree_map
-            try:
-                with FakeTensorMode(allow_meta=True) as fake_mode:
-                    fake_args, fake_kwargs = tree_map(on_tensor(fake_mode.from_tensor), (args, kwargs))
-                    fake_r = func(*fake_args, **fake_kwargs)
-            except UnsupportedFakeTensorException:
-                pass
-
-        r = func(*args, **kwargs)
-        return r
+    # empty_like excluded for now due to sparse complex
+    # aten._to_dense.default this one is getting called with csc
+    @staticmethod
+    def ignore_op(func):
+        return func in (
+            torch.ops.aten.empty_like.default,
+            torch.ops.aten.set_.source_Storage_storage_offset,
+            torch.ops.aten.sspaddmm.out,
+            torch.ops.aten._spdiags.default,
+            torch.ops.aten._to_dense.default,
+            torch.ops.aten.indices.default,
+            torch.ops.aten._indices.default,
+            torch.ops.aten.values.default,
+            torch.ops.aten._values.default,
+        )
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -1733,9 +1716,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(torch.sparse.sum(x, dim=0), torch.sparse.sum(x, dim=-2))
         self.assertEqual(torch.sum(x.to_dense(), dim=0), torch.sparse.sum(x, dim=0).to_dense())
 
-        # not support SparseTensor.sum()
         S = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
-        self.assertRaises(RuntimeError, lambda: S.sum())
 
         # dim out of range
         self.assertRaises(IndexError, lambda: torch.sparse.sum(S, 5))
@@ -3621,6 +3602,14 @@ class TestSparse(TestSparseBase):
                 x = self._gen_sparse(sparse_dim, nnz_val, empty_sparse_shape, dtype, device, coalesce)[0]
                 check(self, x, x)
 
+        # TODO: uncomment once backward is implemented for sparse tensors that broadcast in dense dims.
+        # def check_autograd(x, y):
+        #     if dtype in {torch.double, torch.cdouble}:
+        #         xa = x.detach().clone().requires_grad_(True)
+        #         ya = y.detach().clone().requires_grad_(True)
+        #         gradcheck(lambda a, b: (a * b).to_dense(), (xa, ya), check_sparse_nnz=True)
+        #         gradcheck(lambda a, b: (a * b).to_dense(), (ya, xa), check_sparse_nnz=True)
+
         for dim in range(len(shape) + 1):
             sub_shape = shape[dim:]
             sparse_dim = len(sub_shape) // 2
@@ -3630,12 +3619,16 @@ class TestSparse(TestSparseBase):
             x = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
             y = self._gen_sparse(sparse_dim, nnz, sub_shape, dtype, device, coalesced)[0]
             check(self, x, y)
+            # TODO: uncomment once supported
+            # check_autograd(x, y)
 
             # check broadcasting in dense dims
             for d in range(sparse_dim, len(sub_shape)):
                 new_shape = sub_shape[:d] + (1,) + sub_shape[d + 1:]
                 y = self._gen_sparse(sparse_dim, nnz, new_shape, dtype, device, coalesced)[0]
                 check(self, x, y)
+                # TODO: uncomment once supported
+                # check_autograd(x, y)
 
     @coalescedonoff
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
@@ -3822,6 +3815,20 @@ class TestSparse(TestSparseBase):
         # even if there are no duplicates
         self.assertFalse(torch.sparse_coo_tensor([[0, 1], [0, 1]], [1, 2], (2, 2)).is_coalesced())
 
+    @coalescedonoff
+    @dtypes(*all_types_and_complex_and(torch.bool))
+    def test_sum(self, device, dtype, coalesced):
+        def run_test(shape, nnz):
+            a = self._gen_sparse(2, nnz, shape, dtype, device, coalesced)[0]
+            self.assertEqual(a.sum(), a._values().sum())
+            if dtype.is_floating_point or dtype.is_complex:
+                a.requires_grad_(True)
+                a.sum().backward()
+                self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device))
+        for shape in [(10, 5), (10, 10)]:
+            run_test(shape, 0)
+            run_test(shape, max(shape))
+            run_test(shape, shape[0] * shape[1])
 
 
 class TestSparseOneOff(TestCase):
@@ -3990,12 +3997,12 @@ class TestSparseMaskedReductions(TestCase):
         torch.testing._internal.common_methods_invocations._generate_reduction_kwargs
         is made to generate samples with `dim=()` for non-scalar
         inputs. With this and after gh-29137 is resolved, this test
-        can be deleted. See also `torch._masked._canonical_dim`
+        can be deleted. See also `torch.masked._canonical_dim`
         implementation about changing the `dim=()` behavior.
         """
 
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
-        op_name = op.name.replace('_masked.', '')
+        op_name = op.name.replace('masked.', '')
         for sample_input in samples:
             if sample_input.kwargs.get('dim') != 0:
                 continue
@@ -4007,7 +4014,7 @@ class TestSparseMaskedReductions(TestCase):
             if mask is None and op_name in {'prod', 'amax', 'amin'}:
                 # FIXME: for now reductions with non-zero reduction identity and
                 # unspecified mask are not supported for sparse COO
-                # tensors, see torch._masked.prod implementation
+                # tensors, see torch.masked.prod implementation
                 # for details.
                 continue
             sparse_op_kwargs = dict(sample_input_kwargs)

@@ -1,7 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/alpha_dropout_native.h>
+#include <ATen/ops/dropout_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/feature_alpha_dropout_native.h>
+#include <ATen/ops/feature_dropout_native.h>
+#include <ATen/ops/native_dropout.h>
+#include <ATen/ops/native_dropout_backward_native.h>
+#include <ATen/ops/native_dropout_native.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
@@ -12,9 +29,9 @@ template<bool inplace>
 using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
 
 Tensor make_feature_noise(const Tensor& input) {
-  auto input_sizes = input.sizes();
+  auto input_sizes = input.sym_sizes();
   TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
-  std::vector<int64_t> sizes;
+  c10::SymDimVector sizes;
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
@@ -22,11 +39,11 @@ Tensor make_feature_noise(const Tensor& input) {
     (void)i; //Suppress unused variable warning
     sizes.push_back(1);
   }
-  return input.new_empty(sizes);
+  return input.new_empty_symint(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.sym_numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -46,7 +63,7 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
 Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
-  if (p == 0 || !train || input.numel() == 0) {
+  if (p == 0 || !train || input.sym_numel() == 0) {
     return input;
   }
 

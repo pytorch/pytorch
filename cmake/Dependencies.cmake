@@ -92,6 +92,10 @@ endif()
 if(MSVC)
   # skip unwanted includes from windows.h
   add_definitions(-DWIN32_LEAN_AND_MEAN)
+
+  # Windows SDK broke compatibility since version 25131, but introduced this define for backward compatibility.
+  add_definitions(-D_UCRT_LEGACY_INFINITY)
+
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
@@ -1336,7 +1340,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ ROCm
-if(USE_ROCM)
+if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)

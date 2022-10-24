@@ -237,6 +237,9 @@ void apply_ldl_solve_cusolver(
   auto pivots_ = pivots.to(kLong);
   auto pivots_data = pivots_.data_ptr<int64_t>();
 
+  // needed to run ldl_solve tests in parallel
+  // see https://github.com/pytorch/pytorch/issues/82894 for examples of failures
+  c10::cuda::device_synchronize();
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   auto datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
   size_t worksize_device = 0;

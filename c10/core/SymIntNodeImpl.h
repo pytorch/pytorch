@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/SymFloatNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -11,7 +12,6 @@ namespace c10 {
 
 class SymInt;
 class SymIntNodeImpl;
-using SymIntNode = c10::intrusive_ptr<SymIntNodeImpl>;
 
 class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
  public:
@@ -33,8 +33,8 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymIntNode mul(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode truediv(const SymIntNode& other) {
-    TORCH_CHECK(false, "FP division isn't support for SymInts");
+  virtual SymFloatNode truediv(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode floordiv(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
@@ -60,15 +60,36 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymIntNode ge(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymIntNode ceil() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode neg() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode min(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode max(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode clone() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode sym_float() {
+    TORCH_CHECK(false, "NYI");
+  }
   virtual SymIntNode wrap(int64_t num) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual int64_t guard_int(const char* file, int64_t line) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
   };
   virtual bool bool_() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual int64_t int_() {
-    TORCH_CHECK(false, "NYI");
-  }
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };

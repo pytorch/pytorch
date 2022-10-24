@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
 import weakref
-
 import torch
 
 # nvFuser imports are conditional on being compiled with CUDA
@@ -126,8 +125,18 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     if check_strides:
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
-            msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                a.stride(), b.stride(), idx
+            msg = (
+                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                    a.stride(), b.stride(), idx
+                )
+            )
+            raise RuntimeError(msg)
+
+        if a.storage_offset() != b.storage_offset():
+            msg = (
+                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
+                    a.storage_offset(), b.storage_offset()
+                )
             )
             raise RuntimeError(msg)
 
@@ -632,6 +641,17 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     return shape if shape is not None else scalar_shape
 
 
+# Extracts dimensions that might be passed either as a list/tuple or as varargs.
+# A typical case is Tensor.permute .
+def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
+    if dims and isinstance(dims[0], Sequence):
+        assert len(dims) == 1
+        dims = cast(Tuple[DimsSequenceType], dims)
+        return dims[0]
+    else:
+        return cast(DimsSequenceType, dims)
+
+
 def extract_shape_from_varargs(
     shape: Union[ShapeType, Tuple[ShapeType]],
     validate=True,
@@ -678,12 +698,16 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
             newsize *= d
         else:
             check(False, lambda: f"invalid shape dimension {d}")
-    check(numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
-          lambda: f"shape '{list(shape)}' is invalid for input of size {numel}")
+    check(
+        numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
+        lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+    )
     if dim is not None:
-        check(newsize != 0,
-              lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
-                      f"unspecified dimension size -1 can be any value and is ambiguous")
+        check(
+            newsize != 0,
+            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+            f"unspecified dimension size -1 can be any value and is ambiguous",
+        )
         shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
@@ -773,15 +797,14 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float
+    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
-        # TODO: type error here is real, replace with sym_int
-        return lambda x: int(x)  # type: ignore[arg-type]
+        return sym_int
     if dtype in _float_dtypes:
         return sym_float
     if dtype in _complex_dtypes:
@@ -930,6 +953,14 @@ def get_higher_dtype(
             return a
 
     raise RuntimeError("Unexpected termination!")
+
+
+def check_pin_memory(pin_memory: bool):
+    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
+
+
+def check_layout(layout: torch.layout):
+    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
 
 
 # TODO: maybe unify with can_cast_to?
@@ -1081,6 +1112,7 @@ def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> T
         return float
     else:
         return type(x)
+
 
 # TODO: document type promotion kinds
 def elementwise_dtypes(
@@ -1502,6 +1534,20 @@ def prod(xs: Sequence[NumberType]) -> NumberType:
     return reduce(operator.mul, xs, 1)
 
 
+def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
+    """Checks if a shape can be expanded to another shape.
+    This is equivalent to checking if the two shapes are broadcastable.
+    """
+    # This is a Python implementation of
+    # aten/src/ATen/ExpandUtils.h:is_expandable_to
+    if len(shape) > len(desired):
+        return False
+    for i in range(len(shape)):
+        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
+            return False
+    return True
+
+
 def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
     """
     Similar to torch.where(mask, t, 0) but if t is boolean,
@@ -1513,3 +1559,15 @@ def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
         return mask.logical_and(t)
     else:
         return torch.where(mask, t, 0)
+
+
+def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
+    return dtype if dtype is not None else torch.get_default_dtype()
+
+
+def device_or_default(device: Optional[torch.device]) -> torch.device:
+    return device if device is not None else torch.device("cpu")
+
+
+def layout_or_default(layout: Optional[torch.layout]) -> torch.layout:
+    return layout if layout is not None else torch.strided

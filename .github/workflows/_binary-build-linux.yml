@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         description: Desired python version
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS:
+        required: false
+        type: string
+        description: Extra install requirements
+        default: ""
     secrets:
       github-token:
         required: true
@@ -79,6 +84,7 @@ jobs:
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ inputs.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}
       # Needed for conda builds
       ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
       ANACONDA_USER: pytorch
@@ -97,7 +103,6 @@ jobs:
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
             echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
             echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
-
             echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
             echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
             echo "GPU_ARCH_TYPE=${{ env.GPU_ARCH_TYPE }}"
@@ -107,12 +112,13 @@ jobs:
             echo "LIBTORCH_VARIANT=${{ env.LIBTORCH_VARIANT }}"
             echo "DESIRED_DEVTOOLSET=${{ env.DESIRED_DEVTOOLSET }}"
             echo "DESIRED_PYTHON=${{ env.DESIRED_PYTHON }}"
-
+            echo "PYTORCH_EXTRA_INSTALL_REQUIREMENTS=${{ env.PYTORCH_EXTRA_INSTALL_REQUIREMENTS }}"
             echo "ALPINE_IMAGE=${{ env.ALPINE_IMAGE }}"
             echo "ANACONDA_USER=${{ env.ANACONDA_USER }}"
             echo "AWS_DEFAULT_REGION=${{ env.AWS_DEFAULT_REGION }}"
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
+            echo "BUILD_NAME=${{ env.BUILD_NAME }}"
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
@@ -127,7 +133,7 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.github-token }}
       - name: Clean workspace
@@ -167,7 +173,7 @@ jobs:
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
       - name: Build PyTorch binary
@@ -190,6 +196,7 @@ jobs:
             -e PYTORCH_FINAL_PACKAGE_DIR \
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
+            -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -216,7 +223,7 @@ jobs:
 
       - name: Teardown Linux
         if: always()
-        uses: ./pytorch/.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
         if: always()
