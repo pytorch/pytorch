@@ -851,6 +851,20 @@ Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
   return cvtfp32_bf16(o1, o2);
 }
 
+template <>
+Vectorized<BFloat16> inline fmsub(const Vectorized<BFloat16>& a,
+    const Vectorized<BFloat16>& b, const Vectorized<BFloat16>& c) {
+  __m512 a_lo, a_hi;
+  __m512 b_lo, b_hi;
+  __m512 c_lo, c_hi;
+  cvtbf16_fp32(__m512i(a), a_lo, a_hi);
+  cvtbf16_fp32(__m512i(b), b_lo, b_hi);
+  cvtbf16_fp32(__m512i(c), c_lo, c_hi);
+  auto o1 = _mm512_fmsub_ps(a_lo, b_lo, c_lo);
+  auto o2 = _mm512_fmsub_ps(a_hi, b_hi, c_hi);
+  return cvtfp32_bf16(o1, o2);
+}
+
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
   __m512 o1, o2;
   cvtbf16_fp32(__m512i(a), o1, o2);
