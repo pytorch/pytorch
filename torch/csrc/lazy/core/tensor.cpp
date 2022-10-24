@@ -83,7 +83,7 @@ LazyTensor::LazyTensor(
     const BackendDevice& device)
     : LazyTensor(std::make_shared<Data>(std::move(view), device)) {}
 
-LazyTensor::LazyTensor(std::shared_ptr<Data> data): data_(std::move(data)) {}
+LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
 
 LazyTensor::Data* LazyTensor::data() const {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
