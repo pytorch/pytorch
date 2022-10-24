@@ -1598,7 +1598,13 @@ def _export(
                     node_attr_to_name,
                 )
             # proto is None when model > 2GB
-            proto = _add_onnxscript_fn(proto, graph, custom_opsets, val_use_external_data_format, model_file_location)
+            proto = _add_onnxscript_fn(
+                proto,
+                graph,
+                custom_opsets,
+                val_use_external_data_format,
+                model_file_location,
+            )
             if verbose:
                 torch.onnx.log("Exported graph: ", graph)
             if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
@@ -1664,7 +1670,11 @@ def _export(
 
 @_beartype.beartype
 def _add_onnxscript_fn(
-    model_bytes: bytes, graph: _C.Graph, custom_opsets: Mapping[str, int], val_use_external_data_format: bool, model_file_location: str
+    model_bytes: bytes,
+    graph: _C.Graph,
+    custom_opsets: Mapping[str, int],
+    val_use_external_data_format: bool,
+    model_file_location: str,
 ) -> Optional[bytes]:
     """Insert model-included custom onnx-script function into ModelProto"""
 
