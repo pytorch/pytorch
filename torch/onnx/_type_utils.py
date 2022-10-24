@@ -88,9 +88,10 @@ class JitScalarType(enum.IntEnum):
     ) -> JitScalarType:
         """Convert a JIT scalar type or torch type name to ScalarType.
 
-        NB: DO NOT USE this API if dtype is comes from a torch._C.Value.type().scalarType() call because
-            "RuntimeError: INTERNAL ASSERT FAILED at "../aten/src/ATen/core/jit_type_base.h" can
-            be raised in some scenarios. Instead use from_value API which handles all cases
+        Note: DO NOT USE this API when `name` comes from a `torch._C.Value.type()` calls.
+            A "RuntimeError: INTERNAL ASSERT FAILED at "../aten/src/ATen/core/jit_type_base.h" can
+            be raised in several scenarios where shape info is not present.
+            Instead use `from_value` API which is safer.
 
         Args:
             name: JIT scalar type name (Byte) or torch type name (uint8_t).
@@ -115,9 +116,10 @@ class JitScalarType(enum.IntEnum):
     def from_dtype(cls, dtype: torch.dtype) -> JitScalarType:
         """Convert a torch dtype to JitScalarType.
 
-        NB: DO NOT USE this API if dtype is comes from a torch._C.Value.type().dtype() call because
-            "RuntimeError: INTERNAL ASSERT FAILED at "../aten/src/ATen/core/jit_type_base.h" can
-            be raised in some scenarios. Instead use from_value API which handles all cases
+        Note: DO NOT USE this API when `dtype` comes from a `torch._C.Value.type()` calls.
+            A "RuntimeError: INTERNAL ASSERT FAILED at "../aten/src/ATen/core/jit_type_base.h" can
+            be raised in several scenarios where shape info is not present.
+            Instead use `from_value` API which is safer.
 
         Args:
             dtype: A torch.dtype to create a JitScalarType from
@@ -141,7 +143,7 @@ class JitScalarType(enum.IntEnum):
         """Create a JitScalarType from a torch._C.Value underlying scalar type.
 
         Args:
-            value: A `torch._C.Value` object to fetch scalar type from.
+            value: A `Union[torch._C.Value, torch.Tensor]` object to fetch scalar type from.
 
         Returns:
             JitScalarType.
@@ -157,16 +159,16 @@ class JitScalarType(enum.IntEnum):
                 "Cannot determine scalar type for `None` instance."
             )
         elif isinstance(value, torch.Tensor):
-            return JitScalarType.from_dtype(value.dtype)
+            return cls.from_dtype(value.dtype)
         elif isinstance(value.type(), torch.ListType):
-            return JitScalarType.from_dtype(value.type().getElementType().dtype())
+            return cls.from_dtype(value.type().getElementType().dtype())
         scalar_type = value.type().scalarType()
         if scalar_type is None:
             raise errors.SymbolicValueError(
                 f"Cannot determine scalar type for this '{type(value.type())}' instance.",
                 value,
             )
-        return JitScalarType.from_name(scalar_type)
+        return cls.from_name(scalar_type)
 
     @_beartype.beartype
     def scalar_name(self) -> ScalarName:

@@ -114,13 +114,6 @@ def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val:
 @_onnx_symbolic("aten::clamp")
 @_beartype.beartype
 def clamp(g: jit_utils.GraphContext, self, min, max):
-    try:
-        scalar_type = _type_utils.JitScalarType.from_value(self)
-        min = _cast_if_not_none(min, scalar_type)
-        max = _cast_if_not_none(max, scalar_type)
-    except errors.OnnxExporterError:
-        pass
-
     @_beartype.beartype
     def _cast_if_not_none(tensor, dtype):
         if tensor is not None and not symbolic_helper._is_none(tensor):
@@ -131,6 +124,13 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
             )
         else:
             return tensor
+
+    try:
+        scalar_type = _type_utils.JitScalarType.from_value(self)
+        min = _cast_if_not_none(min, scalar_type)
+        max = _cast_if_not_none(max, scalar_type)
+    except errors.OnnxExporterError:
+        pass
 
     if symbolic_helper._is_none(min):
         return clamp_max(g, self, max)

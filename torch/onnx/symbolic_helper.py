@@ -672,9 +672,9 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
     except errors.OnnxExporterError:
         index_scalar_type = None
 
-    if index_scalar_type is None or index_scalar_type.scalar_name() not in {
-        "Long",
-        "Int",
+    if index_scalar_type is None or index_scalar_type not in {
+        _type_utils.JitScalarType.INT64,
+        _type_utils.JitScalarType.INT,
     }:
         index = g.op("Cast", index, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("Gather", self, index, axis_i=dim)
@@ -1577,13 +1577,13 @@ def quantize_helper(
         )
 
     assert scale is not None
-    if _type_utils.JitScalarType.from_value(scale).scalar_name() != "Float":
+    if _type_utils.JitScalarType.from_value(scale) != _type_utils.JitScalarType.FLOAT:
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if _type_utils.JitScalarType.from_value(zero_point).scalar_name() not in {
-        "Byte",
-        "Char",
+    if _type_utils.JitScalarType.from_value(zero_point) not in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
     }:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
     output = g.op(
