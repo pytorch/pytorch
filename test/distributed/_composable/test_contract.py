@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.distributed._composable import contract
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 class ToyModel(nn.Module):

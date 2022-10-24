@@ -7,9 +7,11 @@ from typing import Optional
 
 def contract(func):
     r"""
-    docstring TBA
+    Decorate a function as a composable distributed API, where the first
+    argument of the function must be an :class:`nn.Module` instance. The
+    decorator verifies that the wrapped function does not modify parameter,
+    buffer, and sub-module fully-qualified names (FQN).
     """
-
     def wrapper(module: nn.Module, *args, **kwargs) -> Optional[nn.Module]:
         orig_named_params = OrderedDict(module.named_parameters())
         orig_named_buffers = OrderedDict(
@@ -36,17 +38,13 @@ def contract(func):
             "Output of composable distributed APIs must be either None or "
             f"nn.Module, but got {type(updated)}"
         )
-        assert list(orig_named_params.keys()) == list(
-            new_named_params.keys()
-        ), (
+        assert list(orig_named_params.keys()) == list(new_named_params.keys()), (
             "Composable distributed API implementations cannot modify "
             "parameter FQNs. \n"
             f"Original FQNs: {list(orig_named_params.keys())}, \n"
             f"Updated FQNs: {list(OrderedDict(module.named_parameters()).keys())}"
         )
-        assert list(orig_named_buffers.keys()) == list(
-            new_named_buffers.keys()
-        ), (
+        assert list(orig_named_buffers.keys()) == list(new_named_buffers.keys()), (
             "Composable distributed API implementations cannot modify "
             "buffer FQNs. \n"
             f"Original FQNs: {list(orig_named_buffers.keys())}, \n"
@@ -61,6 +59,9 @@ def contract(func):
 
         # TODO: a stricter verification should also reject changing module
         # types and monkey-patching forward() method implementations.
+
+        # TODO: verify that installed distributed paradigms are compatible with
+        # each other.
 
         return updated
 
