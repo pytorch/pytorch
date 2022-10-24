@@ -1068,6 +1068,28 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         ]
         self.assertEqual(len(all_aten_nodes), 0)
 
+    def test_cat_with_empty_tensor(self):
+        class NoopConcat(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat((torch.Tensor([]), x))
+
+        x = torch.randn(4, 5, 6)
+        # TODO: Parametrize this test for opset_version
+        for opset_version in {9, 11}:
+            f = io.BytesIO()
+            torch.onnx.export(NoopConcat(), (x,), f, opset_version=opset_version)
+            loaded_model = onnx.load_from_string(f.getvalue())
+            self.assertEqual(
+                len(loaded_model.graph.output[0].type.tensor_type.shape.dim), 3
+            )
+            for idx, dim in enumerate(x.shape):
+                self.assertEqual(
+                    loaded_model.graph.output[0]
+                    .type.tensor_type.shape.dim[idx]
+                    .dim_value,
+                    dim,
+                )
+
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):
     def _test_lower_graph_impl(self, model, data):
