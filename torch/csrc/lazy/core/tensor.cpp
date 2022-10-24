@@ -84,11 +84,7 @@ LazyTensor::LazyTensor(
     : LazyTensor(std::make_shared<Data>(std::move(view), device)) {}
 
 LazyTensor::LazyTensor(std::shared_ptr<Data> data)
-    : data_(std::move(data)),
-      storage_(c10::Storage(
-          {},
-          0,
-          c10::DataPtr(nullptr, backendDeviceToAtenDevice(data_->device)))) {}
+    : data_(std::move(data)) {}
 
 LazyTensor::Data* LazyTensor::data() const {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
@@ -353,9 +349,7 @@ std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
 }
 
 LazyTensorPtr LazyTensor::CreateViewTensor(ViewInfo view_info) const {
-  auto new_tensor = Create(CreateView(std::move(view_info)), GetDevice());
-  new_tensor->storage_ = Storage();
-  return new_tensor;
+  return Create(CreateView(std::move(view_info)), GetDevice());
 }
 
 at::Tensor LazyTensor::ToTensor(bool detached) {
