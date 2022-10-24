@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 from copy import deepcopy
 from enum import Enum, auto
-from math import inf
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest import mock
 
@@ -479,7 +478,7 @@ class ModuleWithDelay(FSDPTestModel):
         return loss
 
     def run_backward(self, loss):
-        orig_reduce_scatter = torch.distributed._reduce_scatter_base
+        orig_reduce_scatter = torch.distributed.reduce_scatter_tensor
 
         def _delayed_reduce_scatter(*args, **kwargs):
             if self.delay_before_reduction_ms > 0:
@@ -489,7 +488,7 @@ class ModuleWithDelay(FSDPTestModel):
             return orig_reduce_scatter(*args, **kwargs)
 
         with mock.patch(
-            "torch.distributed._reduce_scatter_base", _delayed_reduce_scatter
+            "torch.distributed.reduce_scatter_tensor", _delayed_reduce_scatter
         ):
             self.module.run_backward(loss)
 
@@ -1058,25 +1057,3 @@ class SkipModel(nn.Module):
         x = self.linear_skip(x)
         x = self.nested_linear(x)
         return x
-
-
-def _collect_total_grad_norm_fsdp(model, norm_type, rank):
-    total_norm = _collect_total_grad_norm_local(model, norm_type)
-    op = torch.distributed.ReduceOp.SUM
-    if norm_type == inf:
-        op = torch.distributed.ReduceOp.MAX
-        norm_type = 1.0
-    return_norm = torch.tensor(total_norm ** norm_type, device=rank)
-    dist.all_reduce(return_norm, op=op)
-    return return_norm ** (1.0 / norm_type)
-
-
-def _collect_total_grad_norm_local(model, norm_type):
-    if norm_type == inf:
-        return max(p.grad.abs().max() for p in model.parameters())
-    else:
-        total_norm = 0.0
-        for p in model.parameters():
-            local_norm = torch.linalg.vector_norm(p.grad, norm_type, dtype=torch.float32)
-            total_norm += local_norm ** norm_type
-        return total_norm ** (1.0 / norm_type)
