@@ -9,7 +9,6 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
-from torch._decomp import meta_table as meta_table
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -761,6 +760,7 @@ class FakeTensorMode(TorchDispatchMode):
             has_symbolic_sizes
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
+            from torch._decomp import meta_table as meta_table
             with no_dispatch():
                 if func == aten.size.default:
                     sys.stderr.write(
