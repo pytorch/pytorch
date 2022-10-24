@@ -90,7 +90,7 @@ def get_fixed_qparams_op_to_overwrite_output_observer(backend_config: BackendCon
     fixed_qparam_op_to_overwrite_output_observer: Dict[Union[Callable, str], _PartialWrapper] = {}
     for pattern, config in backend_config.configs.items():
         if config._overwrite_output_observer is not None:
-            fixed_qparam_op_to_overwrite_output_observer[pattern] = config._overwrite_output_observer
+            fixed_qparam_op_to_overwrite_output_observer[pattern] = config._overwrite_output_observer  # type: ignore[index]
     return fixed_qparam_op_to_overwrite_output_observer
 
 def get_fusion_pattern_to_extra_inputs_getter(backend_config: BackendConfig) -> Dict[Pattern, Callable]:
