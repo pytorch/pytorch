@@ -2,10 +2,10 @@
 
 #ifdef USE_C10D_GLOO
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 namespace c10d {
 

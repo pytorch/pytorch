@@ -143,18 +143,6 @@ class _LRScheduler(object):
                               "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
 
-        class _enable_get_lr_call:
-
-            def __init__(self, o):
-                self.o = o
-
-            def __enter__(self):
-                self.o._get_lr_called_within_step = True
-                return self
-
-            def __exit__(self, type, value, traceback):
-                self.o._get_lr_called_within_step = False
-
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
@@ -173,6 +161,19 @@ class _LRScheduler(object):
             self.print_lr(self.verbose, i, lr, epoch)
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
+
+class _enable_get_lr_call:
+
+    def __init__(self, o):
+        self.o = o
+
+    def __enter__(self):
+        self.o._get_lr_called_within_step = True
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.o._get_lr_called_within_step = False
 
 
 class LambdaLR(_LRScheduler):
@@ -534,8 +535,8 @@ class LinearLR(_LRScheduler):
 
     def __init__(self, optimizer, start_factor=1.0 / 3, end_factor=1.0, total_iters=5, last_epoch=-1,
                  verbose=False):
-        if start_factor > 1.0 or start_factor < 0:
-            raise ValueError('Starting multiplicative factor expected to be between 0 and 1.')
+        if start_factor > 1.0 or start_factor <= 0:
+            raise ValueError('Starting multiplicative factor expected to be greater than 0 and less or equal to 1.')
 
         if end_factor > 1.0 or end_factor < 0:
             raise ValueError('Ending multiplicative factor expected to be between 0 and 1.')
@@ -553,7 +554,7 @@ class LinearLR(_LRScheduler):
         if self.last_epoch == 0:
             return [group['lr'] * self.start_factor for group in self.optimizer.param_groups]
 
-        if (self.last_epoch > self.total_iters):
+        if self.last_epoch > self.total_iters:
             return [group['lr'] for group in self.optimizer.param_groups]
 
         return [group['lr'] * (1. + (self.end_factor - self.start_factor) /
@@ -1214,17 +1215,19 @@ class CyclicLR(_LRScheduler):
         self.gamma = gamma
 
         if scale_fn is None:
+            self._scale_fn_custom = None
             if self.mode == 'triangular':
-                self.scale_fn = self._triangular_scale_fn
+                self._scale_fn_ref = weakref.WeakMethod(self._triangular_scale_fn)
                 self.scale_mode = 'cycle'
             elif self.mode == 'triangular2':
-                self.scale_fn = self._triangular2_scale_fn
+                self._scale_fn_ref = weakref.WeakMethod(self._triangular2_scale_fn)
                 self.scale_mode = 'cycle'
             elif self.mode == 'exp_range':
-                self.scale_fn = self._exp_range_scale_fn
+                self._scale_fn_ref = weakref.WeakMethod(self._exp_range_scale_fn)
                 self.scale_mode = 'iterations'
         else:
-            self.scale_fn = scale_fn
+            self._scale_fn_custom = scale_fn
+            self._scale_fn_ref = None
             self.scale_mode = scale_mode
 
         self.cycle_momentum = cycle_momentum
@@ -1251,6 +1254,13 @@ class CyclicLR(_LRScheduler):
             return param
         else:
             return [param] * len(optimizer.param_groups)
+
+    def scale_fn(self, x):
+        if self._scale_fn_custom is not None:
+            return self._scale_fn_custom(x)
+
+        else:
+            return self._scale_fn_ref()(x)
 
     def _triangular_scale_fn(self, x):
         return 1.

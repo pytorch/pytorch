@@ -166,6 +166,8 @@
             # shellcheck disable=SC1091
             source "${WORKSPACE_DIR}"/miniconda3/bin/activate
 
+            brew link --force libomp
+
             echo "export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${BASH_ENV}"
             .jenkins/pytorch/macos-build.sh
 
@@ -218,7 +220,7 @@
       - run_brew_for_macos_build
       - run:
           name: Test
-          no_output_timeout: "1h"
+          no_output_timeout: "2h"
           command: |
             set -x
 
@@ -546,7 +548,7 @@
             retry checkout
       - run_brew_for_ios_build
       - run:
-          name: Run Fastlane
+          name: Setup Fastlane
           no_output_timeout: "1h"
           command: |
             set -e
@@ -554,20 +556,6 @@
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
             sudo gem install bundler && bundle install
-            # install certificates
-            echo ${IOS_CERT_KEY_2022} >> cert.txt
-            base64 --decode cert.txt -o Certificates.p12
-            rm cert.txt
-            bundle exec fastlane install_root_cert
-            bundle exec fastlane install_dev_cert
-            # install the provisioning profile
-            PROFILE=PyTorch_CI_2022.mobileprovision
-            PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
-            mkdir -pv "${PROVISIONING_PROFILES}"
-            cd "${PROVISIONING_PROFILES}"
-            echo ${IOS_SIGN_KEY_2022} >> cert.txt
-            base64 --decode cert.txt -o ${PROFILE}
-            rm cert.txt
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -625,18 +613,12 @@
           command: |
             set -e
             PROJ_ROOT=/Users/distiller/project
-            PROFILE=PyTorch_CI_2022
             # run the ruby build script
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
               exit 1
             fi
-            echo ${IOS_DEV_TEAM_ID}
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
-              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
-            else
-              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
-            fi
+            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1

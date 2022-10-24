@@ -130,7 +130,7 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.github-token }}
       - name: Clean workspace
@@ -171,7 +171,7 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
         with:
           timeout_minutes: 10
@@ -184,7 +184,7 @@ jobs:
             popd
 
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
@@ -193,7 +193,7 @@ jobs:
 
       - name: Teardown Linux
         if: always()
-        uses: ./pytorch/.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
         if: always()

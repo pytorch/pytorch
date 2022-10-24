@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-from functorch._C import (
+from torch._C._functorch import (
     _vmap_add_layers,
     _vmap_remove_layers,
 )

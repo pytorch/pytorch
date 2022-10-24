@@ -132,8 +132,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
-      return torch::utils::getTHPMemoryFormat(
-          static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
+      return py::cast(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
     } else {
       return torch::jit::toPyObject(arguments[idx]);
     }
@@ -189,42 +188,22 @@ void pushPyOutToStack(
 
 namespace {
 
-template <const char* func_name, typename... Ts>
-void concrete_trace_cuda(Ts... args) {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  if (Py_IsInitialized()) {
-    try {
-      py::module mod = py::module::import("torch.utils._cuda_trace");
-      py::object hook = mod.attr(func_name).attr("fire_callbacks");
-      hook(args...);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what();
-    }
+// NB: This is a macro and not a template function (like it was before)
+// because passing in constexpr char* as template argument breaks some
+// versions of MSVC that are being used internally at Meta.
+// MSVC 14.16.27023 (vs2017_15.9)
+#define CONCRETE_TRACE_CUDA(func_name, ...)                           \
+  at::impl::MaybeSetTLSOnEntryGuard guard;                            \
+  if (Py_IsInitialized()) {                                           \
+    pybind11::gil_scoped_acquire gil;                                 \
+    try {                                                             \
+      py::module mod = py::module::import("torch.utils._cuda_trace"); \
+      py::object hook = mod.attr(func_name).attr("fire_callbacks");   \
+      hook(__VA_ARGS__);                                              \
+    } catch (const std::exception& e) {                               \
+      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what(); \
+    }                                                                 \
   }
-}
-
-static constexpr char trace_cuda_event_creation_fn_name[] =
-    "CUDAEventCreationCallbacks";
-static constexpr char trace_cuda_event_deletion_fn_name[] =
-    "CUDAEventDeletionCallbacks";
-static constexpr char trace_cuda_event_record_fn_name[] =
-    "CUDAEventRecordCallbacks";
-static constexpr char trace_cuda_event_wait_fn_name[] =
-    "CUDAEventWaitCallbacks";
-static constexpr char trace_cuda_memory_allocation_fn_name[] =
-    "CUDAMemoryAllocationCallbacks";
-static constexpr char trace_cuda_memory_deallocation_fn_name[] =
-    "CUDAMemoryDeallocationCallbacks";
-static constexpr char trace_cuda_stream_creation_fn_name[] =
-    "CUDAStreamCreationCallbacks";
-static constexpr char trace_cuda_device_synchronization_fn_name[] =
-    "CUDADeviceSynchronizationCallbacks";
-static constexpr char trace_cuda_stream_synchronization_fn_name[] =
-    "CUDAStreamSynchronizationCallbacks";
-static constexpr char trace_cuda_event_synchronization_fn_name[] =
-    "CUDAEventSynchronizationCallbacks";
 
 struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
@@ -241,7 +220,9 @@ struct ConcretePyInterpreterVTable final
       c10::DispatchKeySet,
       torch::jit::Stack* stack) const override;
 
-  bool is_contiguous(const TensorImpl* self) const override;
+  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override;
+  bool is_strides_like(const TensorImpl* self, at::MemoryFormat) const override;
+  bool is_non_overlapping_and_dense(const TensorImpl* self) const override;
   c10::Device device(const TensorImpl* self) const override;
   int64_t dim(const TensorImpl* self) const override;
   c10::IntArrayRef strides(const TensorImpl* self) const override;
@@ -253,35 +234,35 @@ struct ConcretePyInterpreterVTable final
   c10::SymInt sym_storage_offset(const TensorImpl* self) const override;
 
   void trace_gpu_event_creation(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_creation_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventCreationCallbacks", event);
   }
   void trace_gpu_event_deletion(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_deletion_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventDeletionCallbacks", event);
   }
   void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
       const override {
-    concrete_trace_cuda<trace_cuda_event_record_fn_name>(event, stream);
+    CONCRETE_TRACE_CUDA("CUDAEventRecordCallbacks", event, stream);
   }
   void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_event_wait_fn_name>(event, stream);
+    CONCRETE_TRACE_CUDA("CUDAEventWaitCallbacks", event, stream);
   }
   void trace_gpu_memory_allocation(uintptr_t ptr) const override {
-    concrete_trace_cuda<trace_cuda_memory_allocation_fn_name>(ptr);
+    CONCRETE_TRACE_CUDA("CUDAMemoryAllocationCallbacks", ptr);
   }
   void trace_gpu_memory_deallocation(uintptr_t ptr) const override {
-    concrete_trace_cuda<trace_cuda_memory_deallocation_fn_name>(ptr);
+    CONCRETE_TRACE_CUDA("CUDAMemoryDeallocationCallbacks", ptr);
   }
   void trace_gpu_stream_creation(uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_stream_creation_fn_name>(stream);
+    CONCRETE_TRACE_CUDA("CUDAStreamCreationCallbacks", stream);
   }
   void trace_gpu_device_synchronization() const override {
-    concrete_trace_cuda<trace_cuda_device_synchronization_fn_name>();
+    CONCRETE_TRACE_CUDA("CUDADeviceSynchronizationCallbacks");
   }
   void trace_gpu_stream_synchronization(uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_stream_synchronization_fn_name>(stream);
+    CONCRETE_TRACE_CUDA("CUDAStreamSynchronizationCallbacks", stream);
   }
   void trace_gpu_event_synchronization(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
   static ConcretePyInterpreterVTable* instance() {
@@ -755,7 +736,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
-      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
   });
@@ -1053,7 +1034,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
   }
   THPUtils_assertRet(
       -1,
-      grad.sizes().equals(var.sizes()),
+      grad.sym_sizes().equals(var.sym_sizes()),
       "assigned grad has data of a different size");
 
   var.mutable_grad() = grad;
@@ -1281,34 +1262,6 @@ PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef USE_DEPLOY
-// This code is only used for asserts, so it is OK to skip it entirely from
-// deploy interpreters (in which case we will just skip the safety check).  For
-// a more precise check, it would be necessary to test that we are not holding
-// the GIL for *all* active torch deploy interpreters.  There is not really any
-// reason to do this.
-struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
-  bool check_python_gil() const override {
-    return Py_IsInitialized() && PyGILState_Check();
-  };
-};
-// During process destruction, python_gil_hooks will get destructed, making
-// further virtual calls on the object invalid.  By the ordering of declarations
-// in this file, the registerer will get destructed first, removing the
-// externally visible reference to the object.  Assuming at this point in time,
-// there aren't other threads racing to read out the hooks, subsequent calls
-// into GIL hooks will hit a nullptr and gracefully no-op the asserts (as
-// desired, since at process shutdown time the Python interpreter is definitely
-// dead).
-//
-// An alternative way to reduce the risk of python_gil_hooks going prematurely
-// dead would be to leak it at destruction time.  I didn't do that because
-// it's annoying to write the Registerer class for this case.
-ConcretePythonGILHooks python_gil_hooks;
-static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(
-    &python_gil_hooks);
-#endif
-
 PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1458,6 +1411,16 @@ PyObject* THPVariable_is_nested(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_has_symbolic_sizes_strides(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(
+      self_.unsafeGetTensorImpl()->has_symbolic_sizes_strides());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1596,6 +1559,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr},
     {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
     {"is_nested", (getter)THPVariable_is_nested, nullptr, nullptr, nullptr},
+    {"_has_symbolic_sizes_strides",
+     (getter)THPVariable_has_symbolic_sizes_strides,
+     nullptr,
+     nullptr,
+     nullptr},
     {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
     {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
     {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
@@ -2164,7 +2132,12 @@ py::object torchDispatchFromTensorImpl(
     const c10::TensorImpl* self,
     const char* func_name,
     PyObject* torch_api_function,
-    const char* module_name) {
+    const char* module_name,
+    // WARNING: MUST NOT BE TENSOR ARGS
+    c10::SmallVector<py::object, 1> extra_args = {}) {
+  if (torch_api_function == nullptr) {
+    throw python_error();
+  }
   TORCH_CHECK(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
@@ -2179,8 +2152,16 @@ py::object torchDispatchFromTensorImpl(
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
+  auto args =
+      py::reinterpret_steal<py::object>(PyTuple_New(1 + extra_args.size()));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
+  int64_t i = 1;
+  for (auto& a : extra_args) {
+    if (a.ptr() == nullptr)
+      throw python_error();
+    PyTuple_SET_ITEM(args.ptr(), i, std::move(a).release().ptr());
+    i++;
+  }
 
   py::dict kwargs;
 
@@ -2195,23 +2176,36 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
+py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
+  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
+    // Parse the name into namespace and name (no overload_name)
+    // TODO: put this into the library
+    const auto& schema = op.schema();
+    const auto& qualified_name = op.operator_name().name;
+    const auto& overload_name = schema.overload_name();
+    auto pos = qualified_name.find("::");
+    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
+    // Make me some null terminated strings
+    std::string ns_str = qualified_name.substr(0, pos);
+    const char* ns = ns_str.c_str();
+    const char* func_name = qualified_name.c_str() + pos + strlen("::");
+
+    py::handle torch_api_function =
+        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    if (overload_name == "") {
+      return torch_api_function.attr("default").ptr();
+    } else {
+      return torch_api_function.attr(overload_name.c_str()).ptr();
+    }
+  });
+}
+
 void ConcretePyInterpreterVTable::dispatch(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  // Parse the name into namespace and name (no overload_name)
-  // TODO: put this into the library
-  const auto& qualified_name = op.operator_name().name;
-  const auto& overload_name = schema.overload_name();
-  auto pos = qualified_name.find("::");
-  TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-  // Make me some null terminated strings
-  std::string ns_str = qualified_name.substr(0, pos);
-  const char* ns = ns_str.c_str();
-  const char* func_name = qualified_name.c_str() + pos + strlen("::");
 
   // The plan: convert all the arguments back into PyObjects,
   // extracting out the tensor handles, then call
@@ -2222,16 +2216,7 @@ void ConcretePyInterpreterVTable::dispatch(
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  py::handle torch_api_function =
-      py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-  py::handle torch_api_function_overload;
-  if (overload_name == "") {
-    torch_api_function_overload = torch_api_function.attr("default");
-  } else {
-    torch_api_function_overload =
-        torch_api_function.attr(overload_name.c_str());
-  }
-  std::string module_name_str = "torch.ops." + ns_str;
+  py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
   for (const auto idx : c10::irange(arguments.size())) {
@@ -2263,9 +2248,9 @@ void ConcretePyInterpreterVTable::dispatch(
       overloaded_args,
       args.ptr(),
       kwargs.ptr(),
-      func_name,
+      nullptr,
       torch_api_function_overload.ptr(),
-      module_name_str.c_str(),
+      nullptr,
       TorchFunctionName::TorchDispatch);
   pushPyOutToStack(
       op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
@@ -2275,59 +2260,35 @@ void ConcretePyInterpreterVTable::python_dispatcher(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet ks,
     torch::jit::Stack* stack) const {
+  py::gil_scoped_acquire g;
+  py::handle torch_api_function_overload = getTorchApiFunction(op);
+
+  c10::DispatchKey k = ks.highestPriorityTypeId();
+  auto handler = torch_api_function_overload.attr(toString(k));
+  if (handler.ptr() == nullptr) {
+    throw python_error();
+  }
+  if (py::isinstance<c10::DispatchKey>(handler)) {
+    // NB: not redispatch, as that will permanently remove the python
+    // dispatcher for subsequent redispatches
+    op.callBoxedForDispatchKey(py::cast<c10::DispatchKey>(handler), *stack);
+    return;
+  }
+
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  // Parse the name into namespace and name (no overload_name)
-  // TODO: put this into the library
-  const auto& qualified_name = op.operator_name().name;
-  const auto& overload_name = schema.overload_name();
-  auto pos = qualified_name.find("::");
-  TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-  // Make me some null terminated strings
-  std::string ns_str = qualified_name.substr(0, pos);
-  const char* ns = ns_str.c_str();
-  const char* func_name = qualified_name.c_str() + pos + strlen("::");
-
-  // The plan: convert all the arguments back into PyObjects,
-  // extracting out the tensor handles, then call
-  // handle_torch_function_no_python_arg_parser
-  // NB: at the point arguments are pushed to the stack, ALL defaults
-  // are already present
-
-  py::gil_scoped_acquire g;
-
-  std::vector<py::handle> overloaded_args;
-  py::handle torch_api_function =
-      py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-  py::handle torch_api_function_overload;
-  if (overload_name == "") {
-    torch_api_function_overload = torch_api_function.attr("default");
-  } else {
-    torch_api_function_overload =
-        torch_api_function.attr(overload_name.c_str());
-  }
-  std::string module_name_str = "torch.ops." + ns_str;
 
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
   auto args = std::move(args_kwargs.first);
   auto kwargs = std::move(args_kwargs.second);
 
-  auto python_dispatcher =
-      c10::impl::PythonDispatcherTLS::get_state().ptr(getPyInterpreter());
-  TORCH_INTERNAL_ASSERT(python_dispatcher);
+  py::object obj = py::reinterpret_steal<py::object>(
+      PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
 
-  py::object obj = py::reinterpret_steal<py::object>(PyObject_CallFunction(
-      python_dispatcher,
-      "OOOO",
-      torch_api_function_overload,
-      py::cast(ks).ptr(),
-      args.ptr(),
-      kwargs.ptr()));
-
-  if (obj == nullptr)
+  if (obj.ptr() == nullptr) {
     throw python_error();
+  }
 
   pushPyOutToStack(op, stack, std::move(obj), "Python dispatcher");
 }
@@ -2358,24 +2319,107 @@ c10::intrusive_ptr<TensorImpl> ConcretePyInterpreterVTable::detach(
 }
 
 bool ConcretePyInterpreterVTable::is_contiguous(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  py::object out;
+  if (memory_format == at::MemoryFormat::Contiguous) {
+    // For backwards compatibility
+    out = torchDispatchFromTensorImpl(
+        self,
+        "is_contiguous",
+        py::module::import("torch")
+            .attr("ops")
+            .attr("aten")
+            .attr("is_contiguous")
+            .attr("default")
+            .ptr(),
+        "torch.ops.aten");
+  } else {
+    out = torchDispatchFromTensorImpl(
+        self,
+        "is_contiguous",
+        py::module::import("torch")
+            .attr("ops")
+            .attr("aten")
+            .attr("is_contiguous")
+            .attr("memory_format")
+            .ptr(),
+        "torch.ops.aten",
+        {py::cast(memory_format)});
+  }
+
+  if (out.is(py::none())) {
+    return self->is_contiguous_default(memory_format);
+  }
+
+  TORCH_CHECK(
+      PyBool_Check(out.ptr()),
+      "is_contiguous returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected bool");
+
+  return PyObject_IsTrue(out.ptr());
+}
+
+bool ConcretePyInterpreterVTable::is_strides_like(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "is_strides_like",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          // NB: intentionally suffixed with _format to avoid
+          // triggering matches against "_like" suffix
+          .attr("is_strides_like_format")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten",
+      {py::cast(memory_format)});
+
+  if (out.is(py::none())) {
+    return self->is_strides_like_default(memory_format);
+  }
+
+  TORCH_CHECK(
+      PyBool_Check(out.ptr()),
+      "is_strides_like_format returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected bool");
+
+  return PyObject_IsTrue(out.ptr());
+}
+
+bool ConcretePyInterpreterVTable::is_non_overlapping_and_dense(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
   auto out = torchDispatchFromTensorImpl(
       self,
-      "is_contiguous",
+      "is_non_overlapping_and_dense",
       py::module::import("torch")
           .attr("ops")
           .attr("aten")
-          .attr("is_contiguous")
+          .attr("is_non_overlapping_and_dense")
           .attr("default")
           .ptr(),
       "torch.ops.aten");
 
+  if (out.is(py::none())) {
+    return self->is_non_overlapping_and_dense_default();
+  }
+
   TORCH_CHECK(
       PyBool_Check(out.ptr()),
-      "is_contiguous returned invalid type ",
+      "is_non_overlapping_and_dense returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected bool");
 
@@ -2441,7 +2485,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call strides on a tensor with symbolic shapes/strides");
@@ -2500,7 +2544,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call sizes on a tensor with symbolic shapes/strides");
@@ -2531,7 +2575,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_sizes_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`
@@ -2594,7 +2638,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call numel on a tensor with symbolic shapes/strides");
@@ -2620,7 +2664,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_storage_offset_default();
   }
   return torch::is_symint_node(out)
@@ -2644,7 +2688,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_strides_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`

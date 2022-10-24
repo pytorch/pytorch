@@ -416,6 +416,7 @@ DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -1095,8 +1096,6 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "index_select(): self and result must have the same scalar type");
-  TORCH_CHECK(dim == 0 || dim < self.dim(),
-              "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, index);
@@ -1258,13 +1257,17 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
-Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+Tensor index_select_backward(const Tensor& grad, at::IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+    return at::native::index_select_backward_symint(grad, c10::fromIntArrayRefSlow(self_sizes), dim, index);
+}
+
+Tensor index_select_backward_symint(const Tensor& grad, c10::SymIntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   // for composite compliance, use out-of-place variant of
   // `index_add` if index tensor is a Tensor Subclass.
   if (isTensorSubclassLike(index)) {
-    return grad.new_zeros(self_sizes, grad.options()).index_add(dim, index, grad);
+    return grad.new_zeros_symint(self_sizes, grad.options()).index_add(dim, index, grad);
   }
-  return grad.new_zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+  return grad.new_zeros_symint(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Scalar& source) {
@@ -1366,7 +1369,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  auto result = grad.new_zeros(self.sizes());
+  auto result = grad.new_zeros_symint(self.sym_sizes());
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if index tensor is a Tensor Subclass.
   if (isTensorSubclassLike(index)) {

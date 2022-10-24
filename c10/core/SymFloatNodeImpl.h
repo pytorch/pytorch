@@ -9,6 +9,9 @@
 
 namespace c10 {
 
+class SymIntNodeImpl;
+using SymIntNode = c10::intrusive_ptr<SymIntNodeImpl>;
+
 class SymFloat;
 class SymFloatNodeImpl;
 using SymFloatNode = c10::intrusive_ptr<SymFloatNodeImpl>;
@@ -26,6 +29,41 @@ class C10_API SymFloatNodeImpl : public c10::intrusive_ptr_target {
   virtual SymFloatNode wrap(double num) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymFloatNode add(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode sub(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode mul(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode truediv(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode pow(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode eq(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode ne(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode gt(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode lt(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode le(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode ge(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode ceil();
+  virtual SymIntNode floor();
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };

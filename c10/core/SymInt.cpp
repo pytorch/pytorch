@@ -1,10 +1,10 @@
+#include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
 
 namespace c10 {
 
-#ifndef C10_MOBILE
 static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   SymIntNode a, b;
   if (a_.is_symbolic())
@@ -36,21 +36,21 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
   auto rep = (ptr & ~MASK) | IS_SYM;
   return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
 }
-#else
-// this code should never be executed on mobile due to inlining of `is_symbolic`
-// which always returns `false` on mobile.
-// However, if we decide to strip off `SymIntNode` completely from mobile builds
-// We would need to stub these methods anyways
-c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
-  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
+
+int64_t SymInt::guard_int(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymIntNode a = toSymIntNodeImpl();
+  return a->guard_int(file, line);
 }
-SymIntNode SymInt::toSymIntNodeImpl() const {
-  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
+
+SymInt::operator SymFloat() const {
+  if (!is_symbolic()) {
+    return SymFloat(double(data_));
+  }
+  return SymFloat::toSymFloat(toSymIntNodeImpl()->sym_float());
 }
-static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
-  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
-}
-#endif
 
 SymInt SymInt::operator+(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
@@ -136,8 +136,27 @@ bool SymInt::operator>=(SymInt sci) const {
   return res[0]->ge(res[1])->bool_();
 }
 
+SymInt SymInt::min(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return std::min(data_, sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->min(res[1]));
+}
+SymInt SymInt::max(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return std::max(data_, sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->max(res[1]));
+}
+
 void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
+}
+
+void SymInt::operator+=(SymInt sci) {
+  *this = *this + sci;
 }
 
 bool SymInt::operator<(int64_t sci) const {
@@ -166,6 +185,23 @@ bool SymInt::operator!=(int64_t sci) const {
 
 SymInt SymInt::operator*(int64_t sci) const {
   return *this * c10::SymInt(sci);
+}
+
+std::ostream& operator<<(std::ostream& os, SymInt s) {
+  if (s.is_symbolic()) {
+    os << s.toSymIntNodeImpl()->str();
+  } else {
+    os << s.as_int_unchecked();
+  }
+  return os;
+}
+
+SymInt operator-(SymInt s) {
+  if (s.is_symbolic()) {
+    return SymInt::toSymInt(s.toSymIntNodeImpl()->neg());
+  } else {
+    return SymInt(-s.as_int_unchecked());
+  }
 }
 
 } // namespace c10

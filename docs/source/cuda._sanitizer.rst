@@ -44,7 +44,7 @@ the following output is printed by CSAN:
     CSAN detected a possible data race on tensor with data pointer 139719969079296
     Access by stream 94646435460352 during kernel:
     aten::mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-    writing to argument: self, out, output
+    writing to argument(s) self, out, and to the output
     With stack trace:
       File "example_error.py", line 6, in <module>
         torch.mul(a, 5, out=a)
@@ -54,7 +54,7 @@ the following output is printed by CSAN:
 
     Previous access by stream 0 during kernel:
     aten::rand(int[] size, *, int? dtype=None, Device? device=None) -> Tensor
-    writing to argument: output
+    writing to the output
     With stack trace:
       File "example_error.py", line 3, in <module>
         a = torch.rand(10000, device="cuda")

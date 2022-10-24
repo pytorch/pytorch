@@ -156,7 +156,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
       TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
-      TORCH_INTERNAL_ASSERT(dst_tensor_nbytes >= (dst.storage_offset() * dst.element_size()));
 
       stream->copy_and_sync(tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking);
       [destBuffer release];
@@ -172,7 +171,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
 {
   MPSStream* stream = getCurrentMPSStream();
-  Tensor dst;
   Tensor src;
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
@@ -180,12 +178,15 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
   uint64_t src_total_size = 0;
 
-  if (src_.is_view()) {
+  // This is weird, but sometimes this function can be called
+  //  with contiguous destination and non-contiguous source
+  if (src_.is_view() || dst_.is_contiguous() != src_.is_contiguous()) {
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
     // Get the actual size of a View (takes into account the storage offset)
     // For View tensors, the storage offset can be bigger than what's being reported by nbytes
     src_total_size = at::detail::computeStorageNbytesContiguous(src.sizes(), src.element_size(), src.storage_offset());
   } else {
+    TORCH_INTERNAL_ASSERT(src_.strides() == dst_.strides());
     src = src_;
     if (src.dtype() != dst_.dtype()) {
       // In case of dtype change, perform conversion on source device
@@ -197,7 +198,6 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   const size_t size_to_copy = src.nbytes();
   const void* host_src = src.storage().data();
   TORCH_INTERNAL_ASSERT(src_total_size >= (src.storage_offset() * src.element_size()));
-  TORCH_INTERNAL_ASSERT(dst_.nbytes() >= dst_byte_offset);
 
   NSUInteger sourceOffset = 0;
   @autoreleasepool {
@@ -210,8 +210,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
                                          options:options
                                      deallocator:nil];
     sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
-    if (src_.is_view() || !src_.is_contiguous())
-      sourceOffset += src_.storage_offset() * src_.itemsize();
+    sourceOffset += src_.storage_offset() * src_.itemsize();
 
     stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     [sourceBuffer release];

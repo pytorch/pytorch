@@ -84,7 +84,7 @@ std::string Dtype::ToCppString() const {
     case ScalarType::Half:
       return "half";
     case ScalarType::BFloat16:
-      return "__nv_bfloat16";
+      return "bfloat16";
     case ScalarType::QInt8:
       return "qint8";
     case ScalarType::QUInt8:

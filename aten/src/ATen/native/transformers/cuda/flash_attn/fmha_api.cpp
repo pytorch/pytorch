@@ -26,6 +26,7 @@
  *
  ******************************************************************************/
 
+#ifdef USE_FLASH_ATTENTION
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
@@ -241,3 +242,4 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     return result;
 }
 } // namespace fmha
+#endif

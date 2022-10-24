@@ -102,7 +102,7 @@ struct Gemm_Q_K : public Gemm_Q_K_base<Kernel_traits> {
 
     static constexpr bool SHARE_SMEM_FOR_K_AND_V = Kernel_traits::SHARE_SMEM_FOR_K_AND_V;
     // If V is stored in shared memory, we can't load K using the same shared memory.
-    static_assert(Kernel_traits::V_IN_REGS);
+    static_assert(Kernel_traits::V_IN_REGS, "");
 
     static constexpr size_t SMEM_OFFSET_O = Kernel_traits::BYTES_PER_SMEM_Q;
     static constexpr size_t SMEM_OFFSET_SOFTMAX = SMEM_OFFSET_O + sizeof(typename Smem_O::SharedStorage);
@@ -161,7 +161,7 @@ struct Gemm_Q_K<Kernel_traits, false> : public Gemm_Q_K_base<Kernel_traits> {
 
     static constexpr bool SHARE_SMEM_FOR_K_AND_V = Kernel_traits::SHARE_SMEM_FOR_K_AND_V;
     static constexpr bool V_IN_REGS = Kernel_traits::V_IN_REGS;
-    static_assert(V_IN_REGS || !SHARE_SMEM_FOR_K_AND_V);
+    static_assert(V_IN_REGS || !SHARE_SMEM_FOR_K_AND_V, "");
 
     static constexpr size_t SMEM_OFFSET_V = Kernel_traits::BYTES_PER_SMEM_Q + (SHARE_SMEM_FOR_K_AND_V ? 0 : Kernel_traits::BYTES_PER_SMEM_K);
     static constexpr size_t SMEM_OFFSET_O = SMEM_OFFSET_V + Kernel_traits::BYTES_PER_SMEM_V;
@@ -298,7 +298,7 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
     Gmem_softmax_sum gmem_softmax_lse(params.softmax_lse_ptr, params, tidx);
 
     // Wind gmem tiles to the correct position.
-    static_assert(Cta_tile_p::N % Cta_tile_p::M == 0);
+    static_assert(Cta_tile_p::N % Cta_tile_p::M == 0, "");
     const int begin_og = begin;
     begin = Is_causal ? std::max(begin, loop_step_idx * Cta_tile_p::N / Cta_tile_p::M) : begin;
     const int steps_og = steps;
@@ -428,7 +428,7 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
     const int warp_idx = threadIdx.x / 32;
     iter_V.add_tile_offset({kIterationsPV * warp_idx, 0});
     typename WarpIteratorV::Fragment frag_v[kIterationsPV];
-    static_assert(WarpIteratorV::Fragment::kStorageElements == 4 * Mma_tile_o::MMAS_N || WarpIteratorV::Fragment::kStorageElements == 2 * Mma_tile_o::MMAS_N );
+    static_assert(WarpIteratorV::Fragment::kStorageElements == 4 * Mma_tile_o::MMAS_N || WarpIteratorV::Fragment::kStorageElements == 2 * Mma_tile_o::MMAS_N, "");
     #pragma unroll
     for( int ki = 0; ki < kIterationsPV; ++ki ) {
         iter_V.load(frag_v[ki]);
@@ -463,8 +463,8 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
         gemm_q_k(mma_qk, acc_p);
 
         typename Smem_O::OutputFragment out[Smem_O::kIterationsStore];
-        static_assert(GmemIteratorOAccum::kIterations == Smem_O::kIterationsStore);
-        static_assert(GmemIteratorO::kIterations == Smem_O::kIterationsStore);
+        static_assert(GmemIteratorOAccum::kIterations == Smem_O::kIterationsStore, "");
+        static_assert(GmemIteratorO::kIterations == Smem_O::kIterationsStore, "");
         if (!Is_first) {
             #pragma unroll
             for (int iter = 0; iter < GmemIteratorOAccum::kIterations; ++iter) {
@@ -536,8 +536,8 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
             softmax.template apply_dropout_16bits<encode_dropout_in_sign_bit>(ph0, ph1, params.p_dropout_in_uint16_t);
         }
 
-        static_assert(Mma_tile_o::MMAS_M == Mma_tile_p::MMAS_M);
-        static_assert(Mma_tile_o::MMAS_K == Mma_tile_p::MMAS_N);
+        static_assert(Mma_tile_o::MMAS_M == Mma_tile_p::MMAS_M, "");
+        static_assert(Mma_tile_o::MMAS_K == Mma_tile_p::MMAS_N, "");
         softmax.pack_noconvert(acc_p);
         cutlass::NumericArrayConverter<Element, ElementAccum, decltype(acc_p)::kElements, cutlass::FloatRoundStyle::round_to_nearest> convert_p;
         auto frag_p = convert_p(acc_p);
@@ -558,13 +558,13 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
         // Declare the accumulators for the 2nd gemm.
         WarpMmaPV mma_pv;
         typename WarpMmaPV::FragmentC acc_o;
-        static_assert(WarpMmaPV::FragmentC::kElements == Mma_tile_o::MMAS_M * Mma_tile_o::MMAS_N * 8);
+        static_assert(WarpMmaPV::FragmentC::kElements == Mma_tile_o::MMAS_M * Mma_tile_o::MMAS_N * 8, "");
         acc_o.clear();
 
         // For some reason, WarpMmaPV::FragmentA has length K * N * (8|4) instead of just N * (8|4).
         // We have to first cast frag_p to be array of k x (N * (8|4)), then cast each row to be
         // an array of WarpMmaPV::FragmentA (which is what mma_pv expects).
-        static_assert(decltype(frag_p)::kElements == kIterationsPV * Mma_tile_o::MMAS_M * WarpMmaPV::FragmentA::kElements);
+        static_assert(decltype(frag_p)::kElements == kIterationsPV * Mma_tile_o::MMAS_M * WarpMmaPV::FragmentA::kElements, "");
         const auto frag_p_reshaped = reinterpret_cast<const cutlass::Array<Element, WarpMmaPV::FragmentA::kElements> (&)[kIterationsPV]>(frag_p);
         #pragma unroll
         for( int ki = 0; ki < kIterationsPV; ++ki ) {
@@ -589,7 +589,7 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
         }
 
         softmax.reduce_max_after_sync_(p_max_o, rows);
-        static_assert(Mma_tile_o::MMAS_M == 1);
+        static_assert(Mma_tile_o::MMAS_M == 1, "");
         for (int jj = 0; jj < kOutputRowsPerThread; jj++) {
             p_max_o[jj][0] *= params.scale_bmm1;
         }
@@ -601,7 +601,7 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
         // Make sure the data is in shared memory.
         __syncthreads();
 
-        static_assert(Mma_tile_o::MMAS_M == 1);
+        static_assert(Mma_tile_o::MMAS_M == 1, "");
         float p_sum_o[kOutputRowsPerThread][Mma_tile_o::MMAS_M];
         softmax.reduce_sum_after_sync_(p_sum_o, rows);
         if (!Is_first) {
@@ -625,7 +625,7 @@ inline __device__ void device_1xN_(const Params &params, const int bidb, const i
 
         // Load from shared memory.
         using ArrayTypeO = cutlass::Array<ElementAccum, OutputTileThreadMap::kElementsPerAccess>;
-        static_assert(OutputTileThreadMap::kElementsPerAccess * kOutputRowsPerThread == Smem_O::kIterationsStore * Smem_O::OutputFragment::kElements);
+        static_assert(OutputTileThreadMap::kElementsPerAccess * kOutputRowsPerThread == Smem_O::kIterationsStore * Smem_O::OutputFragment::kElements, "");
         cutlass::multiplies<ArrayTypeO> multiply_fragments;
         if (!Is_first) {
             auto out_reshaped = reinterpret_cast<ArrayTypeO (&)[kOutputRowsPerThread]>(out);

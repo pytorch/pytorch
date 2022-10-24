@@ -78,6 +78,7 @@ class DispatchKey(Enum):
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
 
+    Python = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -670,9 +671,11 @@ class NativeFunction:
             )
             # if a function is a structured delegate, deleting the dispatch
             # table is NOT semantics preserving
-            assert structured_delegate or dispatch.keys() != {
-                DispatchKey.CompositeImplicitAutograd
-            }, (
+            assert (
+                structured_delegate
+                or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+                or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
+            ), (
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
                 "name, then delete the dispatch table"
@@ -962,6 +965,10 @@ class NativeFunction:
     def root_name(self) -> str:
         return self.func.name.name.base
 
+    @property
+    def part_of_structured_group(self) -> bool:
+        return self.structured or self.structured_delegate is not None
+
 
 SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
 
@@ -990,6 +997,12 @@ class NativeFunctionsGroup:
                 raise AssertionError(
                     "NativeFunctionsGroup constructed from two NativeFunctions "
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
+                )
+
+            if self.structured != f.part_of_structured_group:
+                raise AssertionError(
+                    "NativeFunctionsGroup constructed from structured and unstructured "
+                    f"functions: {self.out.func.name} and {f.func.name}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
         assert self.out.func.kind() == SchemaKind.out
@@ -1134,7 +1147,7 @@ class UfuncInnerLoop:
 # (the 'dispatch' entry in native_functions.yaml).
 # However, there can be other examples of different backends having different information.
 # External backends can choose to opt their kernels to be structured independently from in-tree backends,
-# which means that this information isn't inherentely tied to a NativeFunction- it's different per backend.
+# which means that this information isn't inherently tied to a NativeFunction- it's different per backend.
 @dataclass(frozen=True)
 class BackendIndex:
     dispatch_key: DispatchKey

@@ -1,10 +1,11 @@
 import torch
 from torch import Tensor
 import itertools
+
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
-from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD
 from typing import Callable
 import re
@@ -99,7 +100,7 @@ def is_inplace(func):
     return name[-1] == '_'
 
 
-def generate_cct(autograd_view_consistency=True):
+def generate_cct_and_mode(autograd_view_consistency=True):
     # This function returns a new class CompositeCompliantTensor
     # The two arguments control the behaviour described below.
 
@@ -116,7 +117,7 @@ def generate_cct(autograd_view_consistency=True):
         __torch_function__ = torch._C._disabled_torch_function_impl
 
         @staticmethod
-        def __new__(cls, elem, *args, **kwargs):
+        def __new__(cls, elem, mode, *args, **kwargs):
             assert type(elem) is not cls, \
                 "Wrapping a CompositeCompliantTensor in a CompositeCompliantTensor is not supported"
 
@@ -148,6 +149,8 @@ def generate_cct(autograd_view_consistency=True):
             # Ref: https://github.com/albanD/subclass_zoo/issues/21
             torch._C._set_conj(r, r.elem.is_conj())
             torch._C._set_neg(r, r.elem.is_neg())
+
+            r.mode = mode
             return r
 
         def __repr__(self):
@@ -155,11 +158,20 @@ def generate_cct(autograd_view_consistency=True):
 
         @classmethod
         def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+            all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
+            modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
+            if not all_same_mode(modes):
+                raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
+            with modes[0]:
+                return func(*args, **kwargs)
+
+    class CompositeCompliantTensorMode(TorchDispatchMode):
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
             def unwrap(e):
                 return e.elem if isinstance(e, CompositeCompliantTensor) else e
 
             def wrap(e):
-                return CompositeCompliantTensor(e) if isinstance(e, torch.Tensor) else e
+                return CompositeCompliantTensor(e, self) if isinstance(e, torch.Tensor) else e
 
             if func == torch.ops.aten._local_scalar_dense.default:
                 raise RuntimeError(
@@ -224,13 +236,13 @@ def generate_cct(autograd_view_consistency=True):
             # For each CompositeCompliantTensor t, we check that t and t.elem
             # have consistent metadata. If they don't have consistent metadata,
             # that means the operator did something fishy.
-            check = partial(check_metadata_consistency, CCT=cls)
+            check = partial(check_metadata_consistency, CCT=CompositeCompliantTensor)
             tree_map(check, args)
             tree_map(check, kwargs)
             tree_map(check, rs)
             return rs
 
-    return CompositeCompliantTensor
+    return CompositeCompliantTensor, CompositeCompliantTensorMode()
 
 def is_tensorlist(lst):
     if not isinstance(lst, list) and not isinstance(lst, tuple):
@@ -251,12 +263,12 @@ def maybe_map(fn, should_map, arg):
     return fn(arg) if should_map else arg
 
 
-def wrap(arg, CCT):
-    # CCT: CompositeCompliantTensor class which is generated using generate_cct
+def wrap(arg, CCT, cct_mode):
+    # CCT: CompositeCompliantTensor class which is generated using generate_cct_and_mode
     if isinstance(arg, torch.Tensor):
-        return CCT(arg)
+        return CCT(arg, cct_mode)
     if is_tensorlist(arg):
-        return [CCT(a) for a in arg]
+        return [CCT(a, cct_mode) for a in arg]
     raise RuntimeError("wrap assumes that the input can be wrapped")
 
 
@@ -270,14 +282,14 @@ def wrap(arg, CCT):
 # [A, 1, B]
 # NB: Yes, this is exponential. No, we don't care too much because PyTorch ops
 # don't accept that many input Tensors.
-def generate_subclass_choices(flat_args, CCT):
-    # CCT: CompositeCompliantTensor class which is generated using generate_cct
+def generate_subclass_choices(flat_args, CCT, cct_mode):
+    # CCT: CompositeCompliantTensor class which is generated using generate_cct_and_mode
     is_tensor_likes = [isinstance(arg, torch.Tensor) or is_tensorlist(arg) for arg in flat_args]
     subclass_options = [[False, True] if is_tensor_like else [False] for is_tensor_like in is_tensor_likes]
 
     for which_args_are_wrapped in itertools.product(*subclass_options):
 
-        result = [maybe_map(partial(wrap, CCT=CCT), should_wrap_arg, arg)
+        result = [maybe_map(partial(wrap, CCT=CCT, cct_mode=cct_mode), should_wrap_arg, arg)
                   for should_wrap_arg, arg in zip(which_args_are_wrapped, flat_args)]
         yield result, which_args_are_wrapped
 
@@ -285,11 +297,11 @@ def generate_subclass_choices(flat_args, CCT):
 # For an operation f(*args, **kwargs), each Tensor argument may either be
 # a regular Tensor or a Tensor Subclass. This iterator iterates through
 # all of those options.
-def generate_subclass_choices_args_kwargs(args, kwargs, CCT):
-    # CCT: CompositeCompliantTensor class which is generated using generate_cct
+def generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
+    # CCT: CompositeCompliantTensor class which is generated using generate_cct_and_mode
     flat_kwargs, spec = tree_flatten(kwargs)
     flat_args_kwargs = list(args) + list(flat_kwargs)
-    for choice, debug_metadata in generate_subclass_choices(flat_args_kwargs, CCT):
+    for choice, debug_metadata in generate_subclass_choices(flat_args_kwargs, CCT, cct_mode):
         new_args = choice[:len(args)]
         new_kwargs = tree_unflatten(choice[len(args):], spec)
         which_args_are_wrapped = debug_metadata[:len(args)]
@@ -320,9 +332,9 @@ def raise_composite_compliance_error(err, additional_info=''):
 # If some composite operation does any non-compliant behavior,
 # CompositeCompliantTensor will raise an error.
 def check_all_permutations(op, args, kwargs, assert_equal_fn):
-    CCT = generate_cct()
+    CCT, cct_mode = generate_cct_and_mode()
     expected = op(*args, **kwargs)
-    for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
+    for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
 
         try:
@@ -365,17 +377,17 @@ def check_all_permutations(op, args, kwargs, assert_equal_fn):
 # Composite does any non-compliant behavior,
 # CompositeCompliantTensor will raise an error.
 def check_with_mode(op, args, kwargs, assert_equal_fn):
-    CCT = generate_cct()
+    CCT, cct_mode = generate_cct_and_mode()
 
     def wrap(e):
-        return CCT(e) if isinstance(e, torch.Tensor) else e
+        return CCT(e, cct_mode) if isinstance(e, torch.Tensor) else e
 
     expected = op(*args, **kwargs)
 
     args = tree_map(wrap, args)
     kwargs = tree_map(wrap, kwargs)
     try:
-        with enable_torch_dispatch_mode(CCT):
+        with cct_mode:
             actual = op(*args, **kwargs)
     # see NOTE: [What errors are Composite Compliance trying to catch?]
     except RuntimeError as err:
@@ -399,6 +411,26 @@ def gather_leaf_tensors(args, kwargs):
     return leaf_tensors
 
 
+def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradcheck_wrapper=None):
+    if gradcheck_wrapper is None:
+        results = op(*args, **kwargs)
+    else:
+        results = gradcheck_wrapper(op, *args, **kwargs)
+
+    if output_process_fn_grad is not None:
+        results = output_process_fn_grad(results)
+
+    flat_results, _ = tree_flatten(results)
+    flat_diff_results = [r for r in flat_results if r.requires_grad]
+    assert len(flat_diff_results) > 0
+
+    grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results]
+    leaf_tensors = gather_leaf_tensors(args, kwargs)
+    assert len(leaf_tensors) > 0
+    return torch.autograd.grad(flat_diff_results, leaf_tensors,
+                               grads, allow_unused=True, retain_graph=True)
+
+
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
@@ -409,31 +441,11 @@ def gather_leaf_tensors(args, kwargs):
 def check_backward_formula(op: Callable, args, kwargs,
                            output_process_fn_grad=None,
                            gradcheck_wrapper=None, assert_equal_fn=None):
-    CCT = generate_cct()
+    CCT, cct_mode = generate_cct_and_mode()
 
-    def compute_expected_grads(args, kwargs):
-        if gradcheck_wrapper is None:
-            results = op(*args, **kwargs)
-        else:
-            results = gradcheck_wrapper(op, *args, **kwargs)
+    expected = compute_expected_grads(op, args, kwargs, output_process_fn_grad, gradcheck_wrapper)
 
-        if output_process_fn_grad is not None:
-            results = output_process_fn_grad(results)
-
-        flat_results, _ = tree_flatten(results)
-        flat_diff_results = [r for r in flat_results if r.requires_grad]
-        assert len(flat_diff_results) > 0
-
-        grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
-                 for r in flat_diff_results]
-        leaf_tensors = gather_leaf_tensors(args, kwargs)
-        assert len(leaf_tensors) > 0
-        return torch.autograd.grad(flat_diff_results, leaf_tensors,
-                                   grads, allow_unused=True, retain_graph=True)
-
-    expected = compute_expected_grads(args, kwargs)
-
-    for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
+    for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
         leaf_tensors = gather_leaf_tensors(new_args, new_kwargs)
         assert len(leaf_tensors) > 0
@@ -460,7 +472,7 @@ def check_backward_formula(op: Callable, args, kwargs,
         # NB: ones, not ones_like, so we get a regular Tensor here
         grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
                  for r in flat_diff_results]
-        for flat_new_grads, which_grad_is_batched in generate_subclass_choices(grads, CCT):
+        for flat_new_grads, which_grad_is_batched in generate_subclass_choices(grads, CCT, cct_mode):
             try:
                 actual = torch.autograd.grad(flat_diff_results, leaf_tensors, flat_new_grads,
                                              allow_unused=True, retain_graph=True)
@@ -486,7 +498,7 @@ def check_backward_formula(op: Callable, args, kwargs,
 # this means we can apply check_forward_ad_formula to things that aren't OpInfos
 # while debugging.
 def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None, assert_equal_fn=None):
-    CCT = generate_cct(autograd_view_consistency=False)
+    CCT, cct_mode = generate_cct_and_mode(autograd_view_consistency=False)
 
     def maybe_tangent(t):
         assert type(t) is not CCT
@@ -529,11 +541,11 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
         expected_tangents = tree_map(lambda x: x.tangent, expected)
 
         # Permutations of arg and kwargs in CCT.
-        for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
+        for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
             new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
 
             # Permutations tangent arg and tangent kwargs in CCT.
-            for tang_choice in generate_subclass_choices_args_kwargs(tangent_args, tangent_kwargs, CCT):
+            for tang_choice in generate_subclass_choices_args_kwargs(tangent_args, tangent_kwargs, CCT, cct_mode):
                 new_tang_args, new_tang_kwargs, \
                     which_tang_args_are_wrapped, which_tang_kwargs_are_wrapped = tang_choice
 

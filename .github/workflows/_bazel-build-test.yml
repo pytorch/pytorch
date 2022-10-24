@@ -36,7 +36,7 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -47,7 +47,7 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -197,5 +197,5 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

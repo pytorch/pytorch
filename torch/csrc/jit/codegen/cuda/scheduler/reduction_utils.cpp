@@ -266,7 +266,7 @@ void multiReductionInliner(
 
     // Grab all tensor views that should be vectorized
     auto vectorizable_inputs_outputs =
-        scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
+        scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true, true);
 
     auto vectorizable_expr = [](Expr* e) {
       return e->isA<UnaryOp>() &&
