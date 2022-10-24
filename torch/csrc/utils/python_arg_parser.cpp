@@ -1413,7 +1413,7 @@ bool FunctionSignature::parse(
                           PySequence_GetItem(obj, failed_idx))
                           .ptr())
                   ->tp_name,
-              failed_idx);
+              static_cast<long>(failed_idx));
         }
         throw TypeError(
             "%s(): argument '%s' (position %ld) must be %s, not %s",
