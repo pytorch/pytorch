@@ -52,8 +52,6 @@ from torch.distributed.utils import (
     _sync_params_and_buffers,
     _to_kwargs,
 )
-from torch.nn.parameter import Parameter
-
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -3912,13 +3910,6 @@ class FullyShardedDataParallel(nn.Module):
                     "`True` while in the `no_sync()` context manager"
                 )
                 m._sync_gradients = old_flag
-
-    @property
-    def params_with_grad(self) -> List[Parameter]:
-        """
-        Recursively returns a list of all module parameters that have a gradient.
-        """
-        return [p for p in self.parameters() if p.grad is not None]
 
     @torch.no_grad()
     def clip_grad_norm_(
