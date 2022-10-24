@@ -218,7 +218,7 @@ class MetaConverter:
                         r = base.as_strided(
                             sizes,
                             strides,
-                            sym(t.storage_offset(), id(t), kind="offset"),
+                            sym(t.storage_offset(), id(t), kind="storage_offset"),
                         )
                 else:
                     is_leaf = safe_is_leaf(t)
@@ -247,7 +247,7 @@ class MetaConverter:
                         with torch.no_grad():
                             r.set_(
                                 s,
-                                sym(t.storage_offset(), id(t), kind="offset"),
+                                sym(t.storage_offset(), id(t), kind="storage_offset"),
                                 sizes,
                                 strides,
                             )
