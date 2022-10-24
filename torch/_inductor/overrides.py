@@ -434,9 +434,9 @@ def fuse_binary(gm: torch.fx.GraphModule):
                             continue
                         computation_node = modules[node.args[index_node].target]
                         # only fuse for linear when the dtype is bf16
-                        if bf16_only_node(computation_node) and not is_bfloat16_module(
-                            computation_node
-                        ):
+                        if type(computation_node) in [
+                            nn.Linear
+                        ] and not is_bfloat16_module(computation_node):
                             continue
                         replace_and_fuse_for_binary(
                             computation_node,
