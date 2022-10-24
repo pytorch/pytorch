@@ -16,13 +16,13 @@ import torch.fx as fx
 
 from . import config
 from .optimizations.backends import register_backend
-from .utils import clone_inputs
+from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
 
 
 def minifier_dir():
-    path = config.repro_dir
+    path = os.path.join(get_debug_dir(), "minifier")
     if path is None:
         path = f"/tmp/minifier_{getpass.getuser()}"
     if not os.path.exists(path):
@@ -326,13 +326,17 @@ def nvfuser_fails(fx_g, args, check_str=None):
 
 
 def inductor_accuracy_fails(fx_g, args, check_str=None):
-    from torchinductor.compile_fx import compile_fx_inner
+    from torch._inductor.compile_fx import compile_fx_inner
 
     return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
 
+def get_minifier_repro_path():
+    return os.path.join(minifier_dir(), "minifier_launcher.py")
+
+
 def helper_for_dump_minify(contents):
-    minified_repro_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+    minified_repro_path = get_minifier_repro_path()
     log.warning(f"Writing minified repro to {minified_repro_path}")
     try:
         with open(minified_repro_path, "w") as fd:
@@ -340,15 +344,6 @@ def helper_for_dump_minify(contents):
     except OSError as e:
         log.exception(e)
         raise NotImplementedError("Could not write to {minified_repro_path}")
-
-    local_path = os.path.join(config.base_dir, "minifier_launcher.py")
-    try:
-        shutil.copyfile(minified_repro_path, local_path)
-        log.warning(
-            f"Copying minified repro from {minified_repro_path} to {local_path} for convenience"
-        )
-    except OSError:
-        log.warning(f"Don't have write permissions for {local_path}")
 
 
 def dump_to_minify(gm, args, compiler_name: str):
@@ -827,7 +822,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError("Issue deteced. Repro at minifier_launcher.py.")
+                    raise ValueError(
+                        f"Issue detected. Repro at {get_minifier_repro_path()}."
+                    )
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -878,10 +875,10 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from torchdynamo.optimizations.backends import BACKENDS
+    from torch._dynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
-        from torchinductor.compile_fx import compile_fx
+        from torch._inductor.compile_fx import compile_fx
 
         compiler_fn = compile_fx
     else:
