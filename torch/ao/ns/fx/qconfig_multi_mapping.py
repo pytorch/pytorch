@@ -7,6 +7,8 @@ import torch
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.qconfig import QConfigAny
 
+__all__ = ["QConfigMultiMapping"]
+
 _QCONFIG_STYLE_ORDER: List[str] = [
     "global_qconfig",
     "object_type_qconfigs",
@@ -23,6 +25,15 @@ _QCONFIG_STYLE_TO_METHOD: Dict[str, str] = {
     "module_name_object_type_order_qconfigs": "set_module_name_object_type_order",
 }
 
+def _remove_duplicates_and_none(qconfig_list: List[QConfigAny]) -> None:
+    to_remove = []
+    for index, cur_qconfig in enumerate(qconfig_list):
+        for checked_qconfig in qconfig_list[:index]:
+            if torch.ao.quantization.qconfig_equals(cur_qconfig, checked_qconfig) or cur_qconfig is None:
+                to_remove.append(index)
+                break
+    for index in to_remove[::-1]:
+        qconfig_list.pop(index)
 
 class QConfigMultiMapping:
     """
@@ -107,16 +118,6 @@ class QConfigMultiMapping:
             while len(qconfig_list) < len(self.qconfig_mappings_list):
                 qconfig_list.append(None)
 
-    def _remove_duplicates(self, qconfig_list) -> None:
-        to_remove = []
-        for index, cur_qconfig in enumerate(qconfig_list):
-            for checked_qconfig in qconfig_list[:index]:
-                if torch.ao.quantization.qconfig_equals(cur_qconfig, checked_qconfig):
-                    to_remove.append(index)
-                    break
-        for index in to_remove[::-1]:
-            qconfig_list.pop(index)
-
     # this function applies the insertion method across each QConfigMapping
     def _insert_qconfig_list(
         self,
@@ -124,7 +125,7 @@ class QConfigMultiMapping:
         args: List[Union[str, int, Callable]],
         qconfig_list: List[QConfigAny],
     ) -> None:
-        self._remove_duplicates(qconfig_list)
+        _remove_duplicates_and_none(qconfig_list)
         self._handle_list_size_mismatch(qconfig_list, style)
         method_name = _QCONFIG_STYLE_TO_METHOD[style]
         for qconfig_mapping, qconfig in zip(self.qconfig_mappings_list, qconfig_list):
