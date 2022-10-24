@@ -19,6 +19,7 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
     from torch._C._nvfuser import (  # type: ignore[import]
+        compute_contiguity,
         DataType,
         Fusion,
         FusionDefinition,
@@ -39,8 +40,8 @@ DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
 # https://github.com/pytorch/pytorch/issues/80551
 @dataclass(frozen=True)
 class nvFuserTensorTemplate:
-    size: tuple
-    stride: tuple
+    ndim: int
+    contiguity: tuple
     dtype: DataType
     is_cpu: bool
 
@@ -54,8 +55,8 @@ def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.size(),
-                arg.stride(),
+                arg.ndim,
+                compute_contiguity(arg.size(), arg.stride()),
                 getnvFuserDtype(arg.dtype),
                 arg.is_cpu,  # type: ignore[attr-defined]
             )
@@ -162,7 +163,10 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
-                x = fd.define_tensor(arg.size, arg.stride, arg.dtype, arg.is_cpu)
+                symbolic_shape = [-1] * arg.ndim
+                x = fd.define_tensor(
+                    symbolic_shape, arg.contiguity, arg.dtype, arg.is_cpu
+                )
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
