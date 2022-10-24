@@ -92,7 +92,7 @@ jobs:
           conda env remove --name pr-ci
           rm /tmp/pr-body.txt
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: TorchBench result
           path: ~/.torchbench/bisection/pr${{ github.event.number }}
