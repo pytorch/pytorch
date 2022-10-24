@@ -880,7 +880,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from torchdynamo.optimizations.backends import BACKENDS
+    from torch._dynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
         from torchinductor.compile_fx import compile_fx
