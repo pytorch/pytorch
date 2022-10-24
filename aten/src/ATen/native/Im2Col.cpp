@@ -85,7 +85,6 @@ static void im2col_out_cpu_template(
   int64_t output_length = output_height * output_width;
 
   output.resize_({batch_size, n_output_plane, output_length});
-  output.zero_();
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf,
       input.scalar_type(), "im2col_out_cpu", [&] {
