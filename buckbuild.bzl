@@ -1697,7 +1697,7 @@ def define_buck_targets(
             "torch/csrc/jit/serialization/mobile_bytecode.fbs",
         ],
         outs = {
-            "mobile_bytecode_generated_fbsource.h": ["mobile_bytecode_generated.h"],
+            "mobile_bytecode_generated.h": ["mobile_bytecode_generated.h"],
         },
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
@@ -1713,16 +1713,13 @@ def define_buck_targets(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
-            "torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h": ":mobile_bytecode_header[mobile_bytecode_generated_fbsource.h]",
+            "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
         },
         # Avoid leaking implementation details by only exposing this header to
         # the internals of the loader/serializer layer.
         visibility = [
             "{}:flatbuffer_loader".format(ROOT),
             "{}:flatbuffer_serializer_mobile".format(ROOT),
-        ],
-        exported_deps = [
-            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1744,6 +1741,7 @@ def define_buck_targets(
             ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
+            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_train",
@@ -1781,6 +1779,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":mobile_bytecode",
+            third_party("flatbuffers-api"),
         ],
         exported_deps = [
             ":torch_mobile_deserialize",
