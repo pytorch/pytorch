@@ -856,7 +856,6 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALAR:
       return "Number";
     case ParameterType::INT64:
-      return "int";
     // NB: SymInt is intentionally not mentioned here, as conventional user
     // use will only know about ints
     case ParameterType::SYM_INT:
