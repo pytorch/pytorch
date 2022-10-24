@@ -206,6 +206,14 @@ class FlatParameter(nn.Parameter):
             This is only defined when offloading parameters is enabled.
         _saved_grad_shard (Tensor): Sharded gradient with padding from previous
             iterations for gradient accumulation without :meth:`no_sync`.
+
+        _tensors (Optional[List[Optional[Tensor]]]): This saves the ``Tensor``
+            views created in the forward and tracked by autograd when
+            ``use_orig_params=True`` and is ``None`` otherwise. This is to
+            preserve those ``Tensor`` variables for the backward to ensure that
+            the ``FlatParameter`` 's ``AccumulateGrad`` object does not change
+            in which case the post-backward hook does not run. This is relevant
+            for cases like reentrant activation checkpointing.
     """
 
     def _init_metadata(
@@ -256,9 +264,11 @@ class FlatParameter(nn.Parameter):
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
                 _set_fsdp_flattened(param)
+            self._tensors: Optional[List[Optional[Tensor]]] = [None for _ in range(len(self._params))]
         else:
             self._params = None
             self._shared_params = None
+            self._tensors = None
         self._unpadded_unsharded_size = self.size()
         _set_fsdp_flattened(self)
 
@@ -799,7 +809,7 @@ class FlatParamHandle:
             padded_unsharded_flat_param.numel() == expected_numel,
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
-        dist._all_gather_base(
+        dist.all_gather_into_tensor(
             padded_unsharded_flat_param,
             sharded_flat_param,
             self.process_group,
@@ -863,7 +873,7 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-        dist._all_gather_base(padded_unsharded_grad, sharded_grad, self.process_group)
+        dist.all_gather_into_tensor(padded_unsharded_grad, sharded_grad, self.process_group)
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[:unsharded_size.numel()].view(unsharded_size)
         self._use_unsharded_grad_views()
@@ -1148,8 +1158,27 @@ class FlatParamHandle:
                 param.data = view
             elif as_params:
                 module.register_parameter(param_name, nn.Parameter(view))
-            else:
-                setattr(module, param_name, view)
+            else:  # `as_params=False`
+                param_var: Tensor = view
+                if self._use_orig_params:
+                    if self._training_state == HandleTrainingState.FORWARD:
+                        assert self.flat_param._tensors is not None
+                        # Save the `Tensor` for the pre-backward
+                        self.flat_param._tensors[i] = view  # save for pre-backward
+                    elif self._training_state == HandleTrainingState.BACKWARD_PRE:
+                        # Use the saved `Tensor` variable from the forward to
+                        # preserve the autograd graph so that the post-backward
+                        # hook fires (e.g. for reentrant AC)
+                        assert self.flat_param._tensors is not None  # mypy
+                        tensor = self.flat_param._tensors[i]
+                        p_assert(
+                            tensor is not None,
+                            "Expects `Tensor` to have been saved in forward"
+                        )
+                        tensor.data = view  # type: ignore[union-attr]
+                        assert tensor is not None
+                        param_var = tensor
+                setattr(module, param_name, param_var)
         for i, (
             param_name,
             module,
@@ -1284,6 +1313,11 @@ class FlatParamHandle:
             setattr(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
             param.data = prim_param  # could be both empty and non-empty
+        if self._training_state == HandleTrainingState.BACKWARD_POST:
+            assert self.flat_param._tensors is not None  # mypy
+            # Clear the saved `Tensor`s since they are unneeded now
+            for i in range(len(self.flat_param._tensors)):
+                self.flat_param._tensors[i] = None  # type: ignore[index]
 
     @torch.no_grad()
     def _use_sharded_grad_views(self) -> None:

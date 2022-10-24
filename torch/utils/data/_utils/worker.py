@@ -10,8 +10,10 @@ import os
 import queue
 from dataclasses import dataclass
 from torch._utils import ExceptionWrapper
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS, HAS_NUMPY
+if TYPE_CHECKING:
+    from torch.utils.data import Dataset
 
 if IS_WINDOWS:
     import ctypes
@@ -60,6 +62,10 @@ _worker_info = None
 
 
 class WorkerInfo(object):
+    id: int
+    num_workers: int
+    seed: int
+    dataset: 'Dataset'
     __initialized = False
 
     def __init__(self, **kwargs):
@@ -80,7 +86,7 @@ class WorkerInfo(object):
         return '{}({})'.format(self.__class__.__name__, ', '.join(items))
 
 
-def get_worker_info():
+def get_worker_info() -> Optional[WorkerInfo]:
     r"""Returns the information about the current
     :class:`~torch.utils.data.DataLoader` iterator worker process.
 
