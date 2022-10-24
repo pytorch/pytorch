@@ -3137,24 +3137,23 @@ class Convolution(ExternKernelAlloc):
             ):
                 valid_cudnn = True
 
-            valid_device = x.get_device().type == "cpu" or (
-                x.get_device().type == "cuda" and valid_cudnn
-            )
+            # TODO - We cannot use strides to identify if a tensor is
+            # channels-last for 1x1 kernels. Incorrectly identifying the
+            # channels last configuration leads to a dramatic increase in
+            # compilation time. Unfortuantely, this breaks the channels last
+            # support.
+            # valid_device = x.get_device().type == "cpu" or (
+            #     x.get_device().type == "cuda" and valid_cudnn
+            # )
 
-            # Check if a kernel is 1x1. This helps in checking channels_last layout later.
-            is_1x1 = False
-            if len(kernel_size) == 2:
-                is_1x1 = kernel_size[0] == 1 and kernel_size[1] == 1
+            valid_device = x.get_device().type == "cpu"
 
             if (
                 valid_device
                 and len(x.get_size()) == 4
                 and (
                     x.get_layout().is_channels_last_stride_ordered()
-                    or (
-                        not is_1x1
-                        and weight.get_layout().is_channels_last_stride_ordered()
-                    )
+                    or weight.get_layout().is_channels_last_stride_ordered()
                 )
             ):
                 output_layout_str = "torch.channels_last"

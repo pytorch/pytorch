@@ -1459,24 +1459,6 @@ class CommonTemplate:
             rtol=0.001,
         )
 
-    def test_convolution1x1(self):
-        m = torch.nn.Sequential(
-            torch.nn.Conv2d(5, 6, [1, 1]),
-            torch.nn.ReLU(),
-            ToTuple(),
-        )
-
-        self.common(
-            m,
-            (torch.randn([2, 5, 16, 16]),),
-            # Mismatched elements: 10 / 2352 (0.4%)
-            # Greatest absolute difference: 5.7220458984375e-05 at index (0, 3, 12, 12) (up to 1e-05 allowed)
-            # Greatest relative difference: 0.06512477175897748 at index (0, 4, 11, 9) (up to 0.001 allowed)
-            atol=6e-5,
-            rtol=0.001,
-            check_lowp=False,
-        )
-
     def test_convolution2(self):
         def fn(x, w, b):
             # transposed conv
@@ -1492,6 +1474,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
