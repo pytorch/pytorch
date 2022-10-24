@@ -183,7 +183,7 @@ class ConvBinary2d(nn.Conv2d):
         return self._conv_forward(input, other, self.weight, self.bias)
 
 
-def fuse_conv_unary_eval(conv: nn.Module, unary: nn.Module):
+def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
@@ -191,7 +191,7 @@ def fuse_conv_unary_eval(conv: nn.Module, unary: nn.Module):
     )
 
 
-def fuse_conv_binary_eval(conv: nn.Module, binary_op_name: str):
+def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinary2d(
         conv,
@@ -214,16 +214,14 @@ def check_node_kind(current_node, modules, node_kind):
 
 
 def check_node_is_binary(node):
-    if (
+    return (
         (node.op == "call_function" and node.target in [torch.add, torch.sub])
         or (node.op == "call_function" and node.target in [operator.add, operator.sub])
         or (
             node.op == "call_method"
             and node.target in [torch.Tensor.add, torch.Tensor.sub]
         )
-    ):
-        return True
-    return False
+    )
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
@@ -458,7 +456,7 @@ def rand_like(x, **kwargs):
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
 
 
-computation_op_unary_op_fusion_map = {nn.Conv2d: fuse_conv_unary_eval}
+computation_op_unary_op_fusion_map = {nn.Conv2d: fused_conv_unary_eval}
 
 
 unary_modules_map = {
@@ -483,7 +481,7 @@ binary_attr = {
 
 
 computation_op_binary_op_fusion_map = {
-    nn.Conv2d: fuse_conv_binary_eval,
+    nn.Conv2d: fused_conv_binary_eval,
 }
 
 
