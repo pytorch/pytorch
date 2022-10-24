@@ -279,6 +279,12 @@ def meta_bernoulli(self, p=0.5, generator=None):
     return torch.empty_like(self)
 
 
+@register_meta(aten.bernoulli.out)
+def meta_bernoulli_out(self, *, generator=None, out):
+    torch._resize_output_(out, self.size(), self.device)
+    return out
+
+
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
 def meta__fused_moving_avg_obs_fq_helper(
     self,
@@ -331,12 +337,6 @@ def _compute_reduction_shape(self, dims, keepdim):
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
 
     return utils.compute_reduction_output_shape(self.shape, dims)
-
-
-@register_meta(aten.bernoulli.out)
-def meta_bernoulli(self, *, generator=None, out):
-    torch._resize_output_(out, self.size(), self.device)
-    return out
 
 
 @register_meta(aten.convolution.default)
@@ -1166,11 +1166,18 @@ def meta_zero_(self):
 
 
 @register_meta(
-    [aten.add_.Scalar, aten.sub_.Scalar, aten.mul_.Scalar, aten.div_.Scalar,
-     aten.add_.Tensor, aten.sub_.Tensor, aten.mul_.Tensor, aten.div_.Tensor,
-     aten.logical_and_.default,
-     aten.logical_or_.default,
-     aten.logical_xor_.default,
+    [
+        aten.add_.Scalar,
+        aten.sub_.Scalar,
+        aten.mul_.Scalar,
+        aten.div_.Scalar,
+        aten.add_.Tensor,
+        aten.sub_.Tensor,
+        aten.mul_.Tensor,
+        aten.div_.Tensor,
+        aten.logical_and_.default,
+        aten.logical_or_.default,
+        aten.logical_xor_.default,
     ],
     register_dispatcher=False,
 )
@@ -1755,26 +1762,53 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
         memory_format=mem_format
     )
 
+
 @register_meta(aten.upsample_nearest2d_backward.vec)
-def upsample_nearest2d_backward_vec_meta(grad_output, output_size, input_size, scale_factors):
+def upsample_nearest2d_backward_vec_meta(
+    grad_output, output_size, input_size, scale_factors
+):
     mem_format = utils.suggest_memory_format(grad_output)
     return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
-def rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden):
+
+def rnn_cell_checkSizes(
+    input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
+):
     check(input_gates.ndim == 2, lambda: f"{input_gates.ndim} != 2")
-    check(input_gates.shape == hidden_gates.shape, lambda: f"{input_gates.shape} != {hidden_gates.shape}")
+    check(
+        input_gates.shape == hidden_gates.shape,
+        lambda: f"{input_gates.shape} != {hidden_gates.shape}",
+    )
     gates_size = input_gates.size(1)
     if input_bias is not None:
         check(input_bias.ndim == 1, lambda: f"{input_bias.ndim} != 1")
-        check(input_bias.numel() == gates_size, lambda: f"{input_bias.numel()} != {gates_size}")
-        check(input_bias.shape == hidden_bias.shape, lambda: f"{input_bias.shape} != {hidden_bias.shape}")
+        check(
+            input_bias.numel() == gates_size,
+            lambda: f"{input_bias.numel()} != {gates_size}",
+        )
+        check(
+            input_bias.shape == hidden_bias.shape,
+            lambda: f"{input_bias.shape} != {hidden_bias.shape}",
+        )
     check(prev_hidden.ndim == 2, lambda: f"{prev_hidden.ndim} != 2")
     expected_prev_hidden_numel = input_gates.size(0) * gates_size // factor
-    check(prev_hidden.numel() == expected_prev_hidden_numel, lambda: f"{prev_hidden.numel()} != {input_gates.size(0)} * {gates_size} // {factor} (aka {expected_prev_hidden_numel})")
-    check(all(x.device == input_gates.device for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]), lambda: "expected all inputs to be same device")
+    check(
+        prev_hidden.numel() == expected_prev_hidden_numel,
+        lambda: f"{prev_hidden.numel()} != {input_gates.size(0)} * {gates_size} // {factor} (aka {expected_prev_hidden_numel})",
+    )
+    check(
+        all(
+            x.device == input_gates.device
+            for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
+        ),
+        lambda: "expected all inputs to be same device",
+    )
+
 
 @register_meta(aten._thnn_fused_lstm_cell.default)
-def _thnn_fused_lstm_cell_meta(input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None):
+def _thnn_fused_lstm_cell_meta(
+    input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None
+):
     rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 4, cx)
     workspace = torch.empty_like(input_gates, memory_format=torch.contiguous_format)
     hy = torch.empty_like(cx, memory_format=torch.contiguous_format)
@@ -1787,12 +1821,15 @@ def zero_numel_check_dims(self, dim, fn_name):
         check(
             dim == 0 or dim == -1,
             lambda: f"{fn_name}: Expected reduction dim -1 or 0 for scalar but got {dim}",
-            IndexError)
+            IndexError,
+        )
     else:
         check(
             self.size(dim) != 0,
             lambda: f"{fn_name}: Expected reduction dim {dim} to have non-zero size.",
-            IndexError)
+            IndexError,
+        )
+
 
 def check_argmax_argmin(name, self, dim):
     if dim is not None:
@@ -1801,8 +1838,9 @@ def check_argmax_argmin(name, self, dim):
     else:
         check(
             self.numel() != 0,
-            lambda: f"{name}: Expected reduction dim to be specified for input.numel() == 0."
+            lambda: f"{name}: Expected reduction dim to be specified for input.numel() == 0.",
         )
+
 
 @register_meta(aten.argmax.default, register_dispatcher=False)
 def argmax_meta(self, dim=None, keepdim=False):
@@ -1811,12 +1849,6 @@ def argmax_meta(self, dim=None, keepdim=False):
     shape = _compute_reduction_shape(self, dims, keepdim)
     return self.new_empty(shape, dtype=torch.int64)
 
-@register_meta(aten.argmin.default, register_dispatcher=False)
-def argmax_meta(self, dim=None, keepdim=False):
-    check_argmax_argmin("argmin", self, dim)
-    dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
-    shape = _compute_reduction_shape(self, dims, keepdim)
-    return self.new_empty(shape, dtype=torch.int64)
 
 # Pulled directly from aten/src/ATen/ExpandUtils.cpp
 def infer_dense_strides(tensor_sizes, tensor_strides):
@@ -1867,6 +1899,7 @@ def infer_dense_strides(tensor_sizes, tensor_strides):
             curr_stride *= tensor_sizes[idx]
     return out_strides
 
+
 @register_meta(aten.sort.default, register_dispatcher=False)
 def sort_meta(self, dim=-1, descending=False):
     if utils.is_non_overlapping_and_dense(self):
@@ -1879,7 +1912,15 @@ def sort_meta(self, dim=-1, descending=False):
 
 
 @register_meta(aten.grid_sampler_2d_backward.default, register_dispatcher=False)
-def grid_sample_2d_backward_meta(grad_output, input, grid, interpolation_mode, padding_mode, align_corners, output_mask):
+def grid_sample_2d_backward_meta(
+    grad_output,
+    input,
+    grid,
+    interpolation_mode,
+    padding_mode,
+    align_corners,
+    output_mask,
+):
     input_requires_grad = output_mask[0]
     if input_requires_grad:
         grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
@@ -1888,15 +1929,22 @@ def grid_sample_2d_backward_meta(grad_output, input, grid, interpolation_mode, p
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)
     return (grad_input, grad_grid)
 
+
 @register_meta(aten.upsample_bilinear2d_backward.vec, register_dispatcher=False)
-def upsample_bilinear2d_backward_vec_meta(grad_output, output_size, input_size, align_corners, scale_factors):
+def upsample_bilinear2d_backward_vec_meta(
+    grad_output, output_size, input_size, align_corners, scale_factors
+):
     mem_format = utils.suggest_memory_format(grad_output)
     return grad_output.new_empty(input_size).to(memory_format=mem_format)
+
 
 @register_meta(aten.topk.default, register_dispatcher=False)
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
-    check(k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1), lambda: "selected index k out of range")
+    check(
+        k >= 0 and k <= (self.size(dim) if self.dim() > 0 else 1),
+        lambda: "selected index k out of range",
+    )
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
     check(k >= 0 and k <= sliceSize, lambda: "k not in range for dimension")
 
@@ -1905,9 +1953,13 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
+
 @register_meta(aten.scalar_tensor.default, register_dispatcher=False)
 def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
-    return torch.empty((), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    return torch.empty(
+        (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions

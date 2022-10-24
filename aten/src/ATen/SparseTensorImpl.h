@@ -100,14 +100,22 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
 
   // From https://stackoverflow.com/a/3057522/23845
   // TODO: does C++14 have a stdlib template for this?
-  template<typename T>
-  struct identity { typedef T type; };
+  template <typename T>
+  struct identity {
+    typedef T type;
+  };
 
   template <typename T>
-  ArrayRef<T> impl_sizes() { return _impl_sizes(identity<T>()); }
+  ArrayRef<T> impl_sizes() {
+    return _impl_sizes(identity<T>());
+  }
 
-  ArrayRef<int64_t> _impl_sizes(identity<int64_t>) { return sizes(); }
-  ArrayRef<c10::SymInt> _impl_sizes(identity<c10::SymInt>) { return sym_sizes(); }
+  ArrayRef<int64_t> _impl_sizes(identity<int64_t>) {
+    return sizes();
+  }
+  ArrayRef<c10::SymInt> _impl_sizes(identity<c10::SymInt>) {
+    return sym_sizes();
+  }
 
   // NOTE: This function preserves invariants of sparse_dim/dense_dim with
   // respect to indices and values.
@@ -244,7 +252,10 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
     return _resize_(sparse_dim, dense_dim, size);
   }
 
-  void resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<c10::SymInt> size) {
+  void resize_(
+      int64_t sparse_dim,
+      int64_t dense_dim,
+      ArrayRef<c10::SymInt> size) {
     return _resize_(sparse_dim, dense_dim, size);
   }
 

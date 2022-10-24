@@ -3443,8 +3443,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::nll_loss, aten_nll_loss, [](Node* n) -> SROperat
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::nll_loss_outf(
-          self, target, weight, reduction, ignore_index, out);
+      at::nll_loss_outf(self, target, weight, reduction, ignore_index, out);
     };
   }
   LogAndDumpSchema(n);
@@ -3503,14 +3502,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::nll_loss2d, aten_nll_loss2d, [](Node* n) -> SROp
       const auto reduction = p_node->Input(3).toInt();
       const auto ignore_index = p_node->Input(4).toInt();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::nll_loss2d(
-            self, target, weight, reduction, ignore_index);
+        p_node->Output(0) =
+            at::nll_loss2d(self, target, weight, reduction, ignore_index);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::nll_loss2d_outf(
-          self, target, weight, reduction, ignore_index, out);
+      at::nll_loss2d_outf(self, target, weight, reduction, ignore_index, out);
     };
   }
   LogAndDumpSchema(n);

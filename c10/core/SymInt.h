@@ -182,7 +182,6 @@ class C10_API SymInt {
   bool operator>(int64_t sci) const;
   bool operator>=(int64_t sci) const;
 
-
   operator SymFloat() const;
 
   int64_t as_int_unchecked() const {

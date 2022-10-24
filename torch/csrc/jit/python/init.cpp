@@ -396,7 +396,9 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   }
 
   // (float, float) -> int
-  SymIntNode dispatch_common_int_(const char* fname, const SymFloatNode& other) {
+  SymIntNode dispatch_common_int_(
+      const char* fname,
+      const SymFloatNode& other) {
     auto pother = dynamic_cast<PythonSymFloatNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
@@ -1615,7 +1617,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__radd__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1628,7 +1631,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__sub__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1641,7 +1645,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__rsub__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1654,7 +1659,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__mul__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1667,7 +1673,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__rmul__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1680,7 +1687,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__truediv__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1693,7 +1701,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__rtruediv__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1706,7 +1715,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__floordiv__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1719,7 +1729,8 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__rfloordiv__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1732,21 +1743,24 @@ void initJITBindings(PyObject* module) {
                 } else {
                   throw py::reference_cast_error();
                 }
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__mod__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 // don't need mod for floats
                 auto snb = toSymIntNode(a, b);
                 return a->mod(snb);
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__rmod__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 // don't need mod for floats
                 auto snb = toSymIntNode(a, b);
                 return snb->mod(a);
-              }, py::is_operator())
+              },
+              py::is_operator())
           .def(
               "__pow__",
               [](c10::SymIntNode a, py::object b) -> py::object {
@@ -1893,7 +1907,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__radd__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -1906,7 +1921,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__sub__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -1919,7 +1935,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__rsub__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -1932,7 +1949,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__mul__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -1945,7 +1963,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__rmul__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -1958,7 +1977,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__truediv__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -1971,7 +1991,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__rtruediv__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -1984,7 +2005,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__eq__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -2062,7 +2084,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__rpow__",
           [](c10::SymFloatNode a, py::object b) -> py::object {
@@ -2075,7 +2098,8 @@ void initJITBindings(PyObject* module) {
             } else {
               throw py::reference_cast_error();
             }
-          }, py::is_operator())
+          },
+          py::is_operator())
       .def(
           "__ceil__",
           [](c10::SymFloatNode a) -> c10::SymIntNode { return a->ceil(); })
@@ -2091,9 +2115,9 @@ void initJITBindings(PyObject* module) {
             return py::none();
           })
       .def("__str__", [](c10::SymFloatNode a) { return a->str(); })
-      .def(
-          "guard_float",
-          [](c10::SymFloatNode a) { return a->guard_float(nullptr, 0); });
+      .def("guard_float", [](c10::SymFloatNode a) {
+        return a->guard_float(nullptr, 0);
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

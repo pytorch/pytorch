@@ -97,7 +97,8 @@ inline c10::MaybeOwned<Tensor> expand_inplace(
   if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
     return c10::MaybeOwned<Tensor>::borrowed(to_expand);
   }
-  return c10::MaybeOwned<Tensor>::owned(to_expand.expand_symint(tensor.sym_sizes()));
+  return c10::MaybeOwned<Tensor>::owned(
+      to_expand.expand_symint(tensor.sym_sizes()));
 }
 
 inline c10::MaybeOwned<Tensor> expand_inplace(

@@ -664,7 +664,10 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int_list(PyObject* obj, int broadcast_size, int64_t* failed_idx = nullptr) {
+static bool is_int_list(
+    PyObject* obj,
+    int broadcast_size,
+    int64_t* failed_idx = nullptr) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     auto len = PySequence_Size(obj);
     if (len == 0) {
@@ -697,9 +700,9 @@ static bool is_int_list(PyObject* obj, int broadcast_size, int64_t* failed_idx =
 
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
-    bool r = (
-        jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+    bool r =
+        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
+         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -718,7 +721,10 @@ static bool is_int_or_symint(PyObject* obj) {
   return torch::is_symint_node(py::handle(obj)) || THPUtils_checkIndex(obj);
 }
 
-static bool is_int_or_symint_list(PyObject* obj, int broadcast_size, int64_t* failed_idx = nullptr) {
+static bool is_int_or_symint_list(
+    PyObject* obj,
+    int broadcast_size,
+    int64_t* failed_idx = nullptr) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     if (PySequence_Size(obj) == 0) {
       return true;
@@ -730,9 +736,9 @@ static bool is_int_or_symint_list(PyObject* obj, int broadcast_size, int64_t* fa
     }
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
-    bool r = (
-        jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+    bool r =
+        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
+         THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
     if (!r && failed_idx != nullptr) {
       *failed_idx = 0;
     }
@@ -850,7 +856,6 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALAR:
       return "Number";
     case ParameterType::INT64:
-      return "int";
     // NB: SymInt is intentionally not mentioned here, as conventional user
     // use will only know about ints
     case ParameterType::SYM_INT:
@@ -1373,8 +1378,9 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         varargs_eligible &&
-        ((int_list_overload ? is_int_list(args, param.size, &failed_idx)
-                            : is_int_or_symint_list(args, param.size, &failed_idx)))) {
+        ((int_list_overload
+              ? is_int_list(args, param.size, &failed_idx)
+              : is_int_or_symint_list(args, param.size, &failed_idx)))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

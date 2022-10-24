@@ -13,8 +13,12 @@ from torch import Tensor
 from torch._decomp import register_decomposition
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
+from torch.fx.experimental.symbolic_shapes import (
+    guard_int_hack_please_dont_use,
+    sym_float,
+    sym_int,
+)
 from torch.utils._pytree import tree_flatten, tree_map
-from torch.fx.experimental.symbolic_shapes import guard_int_hack_please_dont_use, sym_float, sym_int
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
@@ -919,7 +923,8 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     # but it seems to fail tests!
     # utils.check(mask.dtype == torch.bool, lambda: f"Mask should be Bool Scalar Type {mask.dtype}")
     r = (grad_output * (mask.type_as(grad_output) * scale)).clone(
-        memory_format=utils.suggest_memory_format(grad_output))
+        memory_format=utils.suggest_memory_format(grad_output)
+    )
     return r
 
 

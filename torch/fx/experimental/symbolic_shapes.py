@@ -293,7 +293,8 @@ def _make_magic(method, func, py_type):
             other_expr = other.expr
         else:
             if not isinstance(other, sympy.Expr):
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             assert isinstance(other, sympy.Expr)
             other_expr = other
         # TODO: consider constant prop here

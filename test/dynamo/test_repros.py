@@ -11,6 +11,8 @@ from copy import deepcopy
 from typing import List
 from unittest.mock import patch
 
+import functorch._src.config
+
 import numpy as np
 import torch
 
@@ -21,7 +23,6 @@ from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch.nn import functional as F
-import functorch._src.config
 
 try:
     import torch._refs
@@ -1639,13 +1640,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
-
     @patch.object(functorch._src.config, "use_dynamic_shapes", True)
     def test_bigbird_unsqueeze_inplace(self):
         def fn(reshape_2):
             view_2 = reshape_2.clone()
             view_2.unsqueeze_(2)
-            cat_11 = torch.cat([view_2], dim = 2)
+            cat_11 = torch.cat([view_2], dim=2)
             view_13 = cat_11.view((2, 12, 64, -1))
             return (view_13,)
 
@@ -1654,7 +1654,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
-
 
     # This doesn't work without fake tensors but I don't care
     @patch.object(torch._dynamo.config, "fake_tensor_propagation", True)

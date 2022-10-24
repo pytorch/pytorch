@@ -717,6 +717,7 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     loose similarity metric to guide the minifier path.
     """
     from difflib import SequenceMatcher
+
     try:
         gm(*example_inputs)
     except Exception as e:

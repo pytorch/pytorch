@@ -2312,7 +2312,9 @@ def _arange_meta(
         lambda: "step must be nonzero",
     )
     # SymInts can't represent inf
-    if not isinstance(start, torch.SymIntNode) and not isinstance(end, torch.SymIntNode):
+    if not isinstance(start, torch.SymIntNode) and not isinstance(
+        end, torch.SymIntNode
+    ):
         utils.check(
             math.isfinite(start) and math.isfinite(end),
             lambda: f"unsupported range: {start} -> {end}",
@@ -2872,7 +2874,7 @@ def _gather_aten(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tens
     # print(f"prim_gather {dims} {indices[0].shape}")
     from builtins import slice
 
-    args = []
+    args: List[Optional[Tensor]] = []
     for i in range(tensor.ndim):
         if i in dims:
             idx = indices[dims.index(i)]
