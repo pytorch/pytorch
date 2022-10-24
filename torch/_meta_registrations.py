@@ -305,8 +305,8 @@ def meta__fused_moving_avg_obs_fq_helper(
         ch_axis < self.dim(),
         lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
     )
-    mask = self.empty_like(dtype=torch.bool)
-    return (self.empty_like(), mask)
+    mask = torch.empty_like(self, dtype=torch.bool)
+    return (torch.empty_like(self), mask)
 
 
 def dot_check(self, other):
