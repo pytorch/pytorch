@@ -2485,7 +2485,7 @@ class FullyShardedDataParallel(nn.Module):
             >>> local_dict.keys()
             >>> odict_keys(['flat_param', 'inner.flat_param'])
 
-        .. warning:: This needs to be called on all ranks since it calls
+        .. warning:: This needs to be called on all ranks since it uses
             collective communications.
         """
         # TODO (rohan-varma): separate these out once a state_dict pre-hook
@@ -2782,7 +2782,7 @@ class FullyShardedDataParallel(nn.Module):
             >>> local_dict.keys()
             >>> odict_keys(['flat_param', 'inner.flat_param'])
 
-        .. warning:: This needs to be called on all ranks since it calls
+        .. warning:: This needs to be called on all ranks since it uses
             collective communications.
         """
         return super().load_state_dict(state_dict, *args)
@@ -3875,7 +3875,7 @@ class FullyShardedDataParallel(nn.Module):
             calling it for FSDP models would lead to different scaling being
             applied per subset of model parameters.
 
-        .. warning:: This needs to be called on all ranks since it calls
+        .. warning:: This needs to be called on all ranks since it uses
             collective communications.
         """
         self._lazy_init()
@@ -3961,7 +3961,7 @@ class FullyShardedDataParallel(nn.Module):
         and ``"param_groups"``. The flattened parameters in ``FSDP`` modules
         contained in ``model`` are mapped back to their unflattened parameters.
 
-        .. warning:: This needs to be called on all ranks since it calls
+        .. warning:: This needs to be called on all ranks since it uses
             collective communications. However, if ``rank0_only=True``, then
             the state dict is only populated on rank 0, and all other ranks
             return an empty :class:`dict`.
