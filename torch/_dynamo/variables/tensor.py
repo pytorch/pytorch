@@ -17,7 +17,7 @@ if fake_tensors_available:
         DataDependentOutputException,
         DynamicOutputShapeException,
     )
-    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor
+    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
 import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
@@ -98,7 +98,7 @@ def _get_fake_value(node, tx):
     Run the computation represented by `node` using fake tensors and return the result.
     """
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=tx.fake_mode)
+    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
     from ..utils import wrap_fake_exception
 
     def visit(n: torch.fx.Node):
@@ -206,7 +206,7 @@ class TensorVariable(VariableTracker):
                 proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
                 if use_fake_tensors:
                     fake_wrapper = functools.partial(
-                        wrap_to_fake_tensor, fake_mode=tx.fake_mode
+                        wrap_to_fake_tensor_and_record, tx=tx
                     )
                     example_value = fake_wrapper(example_value)
 

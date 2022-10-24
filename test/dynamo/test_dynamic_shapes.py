@@ -102,16 +102,6 @@ unittest.expectedFailure(
     # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
 )
 
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_get_parameter_dtype_dynamic_shapes 
-    # Unknown expression s0 (Most likely lifecycle issues)
-)
-
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_issue1466_size_aot_autograd_dynamic_shapes 
-    # Unknown expression s0 (Most likely lifecycle issues)
-)
-
 # DynamicShapesMiscTests
 unittest.expectedFailure(
     DynamicShapesMiscTests.test_unsupported_fake_tensor_dynamic_shapes
