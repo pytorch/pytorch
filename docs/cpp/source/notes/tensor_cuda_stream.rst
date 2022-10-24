@@ -206,7 +206,7 @@ CUDA Stream Usage Examples
 
   // sum() on tensor0 uses default CUDA stream as current CUDA stream on device 0
   tensor0.sum();
-  // sum() on tensor1 uses defualt CUDA stream as current CUDA stream on device 1
+  // sum() on tensor1 uses default CUDA stream as current CUDA stream on device 1
   tensor1.sum();
 
 .. attention::
