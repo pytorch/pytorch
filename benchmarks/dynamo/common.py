@@ -149,6 +149,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "convit_base",  # fp64_OOM
     "gernet_l",  # accuracy
     "gluon_xception65",
+    "hrnet_w18",  # accuracy
     "lcnet_0500",  # accuracy
     "levit_128",  # levit_128
     "rexnet_100",  # accuracy
@@ -346,84 +347,6 @@ def randomize_input(inputs):
         raise RuntimeError(
             f"randomize_input can not handle input of type {type(inputs)}"
         )
-
-
-def cold_start_experiment(args, model_iter_fn, model, example_inputs, optimize_ctx):
-    compile_iters = 2
-    total_iters = compile_iters + 2
-    timings = np.zeros((total_iters, 2), np.float64)
-    # if we randomize the input, we should also check the result is correct
-    should_check_result = should_randomize_input = args.randomize_input
-    is_correct = True
-
-    optimized_model_iter_fn = optimize_ctx(model_iter_fn)
-    for rep in range(total_iters):
-        inputs = (
-            randomize_input(copy.deepcopy(example_inputs))
-            if should_randomize_input
-            else example_inputs
-        )
-
-        # interleave the runs to handle frequency scaling and load changes
-        timings[rep, 0], expected_output = timed(
-            model, model_iter_fn, inputs, return_result=True
-        )
-        timings[rep, 1], actual_output = timed(
-            model, optimized_model_iter_fn, inputs, return_result=True
-        )
-        if should_check_result:
-            is_correct = is_correct and same(expected_output, actual_output)
-    pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
-    worst = np.max(timings, axis=0)
-
-    def breakeven(dynamo_times, eager_times):
-        """
-        Solve for the number of iterations it takes dynamo to 'catch up' with eager,
-        taking into account the time it spent compiling.  Assumes all compilation
-        happens up front and the model is static thereafter, which is definitely not
-        true in general but might be across torchbench.
-
-            dc1, dc2 = dynamo compilation iterations (with Prof Exec)
-            d, e = dynamo, eager warmed up iteration
-            B = num iters to break even
-            dc1 + dc2 + (B-2)d = B*e
-            B = (dc1 + dc2 - 2d) / (e - d)
-        """
-        dc1, dc2, d = dynamo_times[0], dynamo_times[1], np.median(dynamo_times[2:])
-        e = np.median(eager_times)
-        if d < e:
-            return (dc1 + dc2 + 2 * d) / (e - d)
-        else:
-            # if optimized dynamo is not faster than eager we'll compute
-            # a nonsense negative number
-            return 0
-
-    speedup = worst[0] / worst[1]
-    eager_times, dynamo_times = timings[:, 0], timings[:, 1]
-    output_csv(
-        output_filename,
-        ("dev", "name", "batch_size", "cold-start speedup", "breakeven iters"),
-        [
-            current_device,
-            current_name,
-            current_batch_size,
-            float(speedup),
-            breakeven(dynamo_times, eager_times),
-        ],
-    )
-
-    def format_speedup(
-        speedup, pvalue, breakeven_iters, is_correct=True, pvalue_threshold=0.1
-    ):
-        if not is_correct:
-            return "ERROR"
-        if pvalue > pvalue_threshold:
-            return f"{speedup:.3f}x breakeven={breakeven_iters:.2f} iters SAME"
-        return f"{speedup:.3f}x breakeven={breakeven_iters:.2f} iters p={pvalue:.2f}"
-
-    return format_speedup(
-        speedup, pvalue, breakeven(dynamo_times, eager_times), is_correct=is_correct
-    )
 
 
 def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
@@ -663,66 +586,6 @@ def try_script(model, example_inputs):
         return torch.jit.script(model)
     except Exception:
         return None
-
-
-def speedup_experiment_ts(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of TorchScript and optimize_for_inference.
-
-    Writes to ./baseline_ts.csv
-    """
-    if args.training:
-        return baselines(
-            [
-                ("eager", model),
-                ("ts", try_script(model, example_inputs)),
-            ],
-            model_iter_fn,
-            example_inputs,
-            args,
-        )
-
-    return baselines(
-        [
-            ("eager", model),
-            ("ts", try_script(model, example_inputs)),
-            (
-                "ofi",
-                backends.ofi(try_script(model, example_inputs), example_inputs),
-            ),
-            # ("nnc", backends.nnc(try_script(model, example_inputs), example_inputs)),
-            # ("nvfuser", backends.nvfuser(try_script(model, example_inputs), example_inputs)),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
-
-
-def speedup_experiment_sr(args, model_iter_fn, model, example_inputs):
-    """
-    Measure baseline performance (without using TorchDynamo) of static runtime.
-
-    Writes to ./baseline_sr.csv
-    """
-
-    if current_name not in ("opacus_cifar10", "timm_nfnet", "hf_T5"):
-        sr = backends.static_runtime(try_script(model, example_inputs), example_inputs)
-    else:
-        # segfaults on these models
-        sr = None
-    return baselines(
-        [
-            ("eager", model),
-            (
-                "sr",
-                sr,
-            ),
-        ],
-        model_iter_fn,
-        example_inputs,
-        args,
-    )
 
 
 def speedup_experiment_onnx(args, model_iter_fn, model, example_inputs):
@@ -1466,20 +1329,9 @@ def parse_args():
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
-        "--raise-on-assertion-error",
+        "--suppress-errors",
         action="store_true",
-        help="Fail a benchmark if torch._dynamo triggers an internal assertion",
-    )
-    parser.add_argument(
-        "--raise-on-backend-error",
-        action="store_true",
-        help="Fail a benchmark if backend throws an exception",
-    )
-    parser.add_argument(
-        "--raise-on-any",
-        "--raise",
-        action="store_true",
-        help="Raise on assertion or backend errors",
+        help="Suppress errors instead of raising them",
     )
     parser.add_argument(
         "--output",
@@ -1529,26 +1381,7 @@ def parse_args():
         "--coverage", action="store_true", help="(default) " + help(coverage_experiment)
     )
     group.add_argument(
-        "--speedup-ltc",
-        action="store_true",
-        help="speedup using the ltc backend",
-    )
-    group.add_argument(
-        "--speedup-ltc-trivial",
-        action="store_true",
-        help="speedup using the ltc backend without reusing compiled graph",
-    )
-    group.add_argument(
-        "--cold-start", action="store_true", help=help(cold_start_experiment)
-    )
-    group.add_argument(
         "--overhead", action="store_true", help=help(overhead_experiment)
-    )
-    group.add_argument(
-        "--speedup-ts", action="store_true", help=help(speedup_experiment_ts)
-    )
-    group.add_argument(
-        "--speedup-sr", action="store_true", help=help(speedup_experiment_sr)
     )
     group.add_argument(
         "--speedup-onnx", action="store_true", help=help(speedup_experiment_onnx)
@@ -1672,7 +1505,7 @@ def main(runner, original_dir=None):
             os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
         # Stricter check to disable fallbacks
-        args.raise_on_any = True
+        args.suppress_errors = False
 
     elif args.performance:
         # Ensure that we test on real scenarios
@@ -1736,12 +1569,7 @@ def main(runner, original_dir=None):
     if args.quiet:
         torch._dynamo.config.log_level = logging.ERROR
 
-    torch._dynamo.config.raise_on_assertion_error = (
-        args.raise_on_assertion_error or args.raise_on_any
-    )
-    torch._dynamo.config.raise_on_backend_error = (
-        args.raise_on_backend_error or args.raise_on_any
-    )
+    torch._dynamo.config.suppress_errors = args.suppress_errors
 
     if args.training:
         runner.model_iter_fn = runner.forward_and_backward_pass
@@ -1785,14 +1613,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "overheads.csv"
-    elif args.cold_start:
-        optimize_ctx = torch._dynamo.optimize("aot_nvfuser", nopython=args.nopython)
-        experiment = cold_start_experiment
-        assert args.nvfuser, "TODO - Add another aot string for mem fusion with NNC"
-        backend_str = "nvfuser" if args.nvfuser else "nnc"
-        output_filename = f"cold_start_{backend_str}.csv"
-        # TODO(whc) should we move this to a more general part of the script?
-        torch.backends.cuda.matmul.allow_tf32 = True
     elif args.inductor or args.inductor_dynamic:
         from torch._inductor import config as inductor_config
 
@@ -1812,24 +1632,6 @@ def main(runner, original_dir=None):
         optimize_ctx = torch._dynamo.optimize("inductor", nopython=args.nopython)
         experiment = speedup_experiment
         output_filename = "inductor.csv"
-    elif args.speedup_ltc:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.ltc_reuse_graph, nopython=args.nopython
-        )
-        experiment = speedup_experiment
-        output_filename = "speedups_ltc.csv"
-    elif args.speedup_ltc_trivial:
-        optimize_ctx = torch._dynamo.optimize(
-            backends.ltc_trivial, nopython=args.nopython
-        )
-        experiment = speedup_experiment
-        output_filename = "speedups_ltc_trivial.csv"
-    elif args.speedup_ts:
-        experiment = speedup_experiment_ts
-        output_filename = "baseline_ts.csv"
-    elif args.speedup_sr:
-        experiment = speedup_experiment_sr
-        output_filename = "baseline_sr.csv"
     elif args.speedup_onnx:
         experiment = speedup_experiment_onnx
         output_filename = "baseline_onnx.csv"
