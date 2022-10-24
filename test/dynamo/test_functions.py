@@ -16,7 +16,6 @@ from torch import sub
 from torch._dynamo.testing import requires_static_shapes
 from torch.nn import functional as F
 
-
 tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
