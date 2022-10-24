@@ -301,7 +301,6 @@ class ValueCache {
   c10::optional<TensorMetadata> recordIfTensor(py::handle p);
   std::vector<std::pair<std::string, TensorMetadata>> unpackTensorMap(
       py::dict tensor_map);
-  TensorMetadata toTensorMetadata(PyObject* self);
   void trimPrefixes();
 
  private:
@@ -313,11 +312,14 @@ class ValueCache {
   using State = typename Config<C>::cache_t;
 
   CallTypeHelper<State>::tuple_type state_;
-
-  // We never use this, but the weak pointers in `RawTensorMetadata` are
-  // important for reserving `TensorImpl*`s.
-  // AppendOnlyList<RawTensorMetadata, 64> raw_tensors_;
 };
+
+TensorMetadata toTensorMetadata(PyObject* self) {
+  TORCH_INTERNAL_ASSERT(THPVariable_CheckExact(self));
+  const auto& t = THPVariable_Unpack(self);
+  RawTensorMetadata m{t};
+  return TensorMetadata{m};
+}
 
 template <CallType C>
 typename Config<C>::cls_t set_class(
@@ -476,14 +478,6 @@ std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
     }
   }
   return out;
-}
-
-TensorMetadata ValueCache::toTensorMetadata(PyObject* self) {
-  TORCH_INTERNAL_ASSERT(THPVariable_CheckExact(self));
-  const auto& t = THPVariable_Unpack(self);
-  RawTensorMetadata m{t};
-  // raw_tensors_.emplace_back(m);
-  return TensorMetadata{m};
 }
 
 // TODO: Use re2.
