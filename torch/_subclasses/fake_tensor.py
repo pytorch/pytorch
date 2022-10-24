@@ -9,6 +9,7 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
+from torch._decomp import meta_table as meta_table
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -756,15 +757,17 @@ class FakeTensorMode(TorchDispatchMode):
 
         from torch._decomp import _disabled_meta_decomps, decomposition_table
 
+        with self:
+            # Decomposes CompositeImplicitAutograd ops
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
-            # TODO: Find better approach for this
-            # Avoid circular import
-            from torch._meta_registrations import meta_table
-
             with no_dispatch():
                 if func == aten.size.default:
                     sys.stderr.write(
@@ -780,11 +783,6 @@ class FakeTensorMode(TorchDispatchMode):
                     return r
                 if func in decomposition_table:
                     return decomposition_table[func](*args, **kwargs)
-
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return r
 
         if (
             func in decomposition_table

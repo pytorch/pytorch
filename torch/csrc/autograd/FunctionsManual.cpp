@@ -2906,8 +2906,8 @@ Tensor as_strided_scatter_backward(
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  auto result = grad_.new_empty_strided_symint(
-      input_geometry.sym_sizes(), input_geometry.sym_strides());
+  auto result = grad_.new_zeros_symint(input_geometry.sym_sizes())
+    .as_strided_symint(input_geometry.sym_sizes(), input_geometry.sym_strides());
   auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;
@@ -4859,15 +4859,15 @@ Tensor sparse_constructor_values_backward(
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
 // in pads])
-Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
+Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   auto negated_pad = pad.vec();
   // NOLINTNEXTLINE(modernize-use-transparent-functors)
   std::transform(
       negated_pad.cbegin(),
       negated_pad.cend(),
       negated_pad.begin(),
-      std::negate<int64_t>());
-  return at::constant_pad_nd(grad, negated_pad, 0);
+      std::negate<c10::SymInt>());
+  return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 
 Tensor embedding_dense_double_backward(
