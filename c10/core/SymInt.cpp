@@ -155,6 +155,10 @@ void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
 }
 
+void SymInt::operator/=(SymInt sci) {
+  *this = *this / sci;
+}
+
 void SymInt::operator+=(SymInt sci) {
   *this = *this + sci;
 }
