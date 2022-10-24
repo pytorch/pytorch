@@ -299,6 +299,9 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
             result = super().run_node(n)
+
+            # Realize if (1) any user need inputs realized, or (2) there is
+            # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
@@ -307,6 +310,13 @@ class GraphLowering(torch.fx.Interpreter):
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
+
+            # Realize if the IRNode already has accumulated lots of reads
+            if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
+                # Prevent excessive accumulation in a computed buffer, when
+                # there are multiple branches meach with small number of memory
+                # reads, but they converge to a user.
+                result.realize_hint()
         return result
 
     def codegen(self):
