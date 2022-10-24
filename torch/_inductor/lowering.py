@@ -22,6 +22,8 @@ from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    IndexingConstant,
+    IndexingDiv,
     PermuteView,
     Pointwise,
     Reduction,
@@ -260,7 +262,7 @@ def broadcast_symbolic_shapes(a, b):
 
 
 def promote_constants(inputs, override_return_dtype=None):
-    if not any(isinstance(x, (int, float)) for x in inputs):
+    if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
     if all(isinstance(x, (int, float)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
@@ -268,16 +270,20 @@ def promote_constants(inputs, override_return_dtype=None):
         )
         return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, TensorBox))
-    return [
-        (
-            ExpandView.create(
-                ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+    out = []
+    for x in inputs:
+        if isinstance(x, (int, float)):
+            out.append(
+                ExpandView.create(
+                    ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+                )
             )
-            if isinstance(x, (int, float))
-            else x
-        )
-        for x in inputs
-    ]
+        elif isinstance(x, sympy.Expr):
+            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+        else:
+            out.append(x)
+
+    return out
 
 
 def make_pointwise(
@@ -315,8 +321,19 @@ def make_pointwise(
             else:
                 return fn(*[load(index) for load in loaders])
 
+        if not override_device:
+            device = None
+            for i in inputs:
+                if i.get_device().type == "cuda":
+                    device = i.get_device()
+                    break
+            if not device:
+                device = inputs[0].get_device()
+
+        device = override_device or device
+
         return Pointwise.create(
-            device=override_device or inputs[0].get_device(),
+            device=device,
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -625,8 +642,8 @@ def repeat(x, repeats):
     new_size = list(x.get_size())
 
     for i in range(len(repeats)):
-        assert repeats[i] >= 1
-        if repeats[i] > 1:
+        assert repeats[i] != 0
+        if repeats[i] != 1:
             new_size[i] = new_size[i] * repeats[i]
 
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
@@ -636,7 +653,7 @@ def repeat(x, repeats):
         assert len(index) == len(repeats)
         index = list(index)
         for i in range(len(repeats)):
-            if repeats[i] > 1:
+            if repeats[i] != 1:
                 if old_size[i] == 1:
                     index[i] = sympy.Integer(0)
                 else:
@@ -1067,8 +1084,6 @@ make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell)
 make_fallback(aten.topk)
-make_fallback(aten.unfold)
-make_fallback(aten.unfold_backward)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
 
@@ -1085,11 +1100,16 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
+    is_cpu = all(
+        input.get_device().type == "cpu"
+        for input in (x, weight, bias)
+        if input is not None
+    )
     result = TensorBox.create(
         ir.Convolution.create(
             x,
             weight,
-            None,  # bias handled below
+            bias if is_cpu else None,  # For cpu path, bias can always be fused
             stride,
             padding,
             dilation,
@@ -1098,7 +1118,7 @@ def convolution(
             groups,
         )
     )
-    if bias is not None:
+    if not is_cpu and bias is not None:
         kernel_dims = len(weight.get_size()) - 2
         out_chan = result.get_size()[-1 - kernel_dims]
         bias = view(bias, [out_chan] + kernel_dims * [1])
@@ -3336,9 +3356,24 @@ def sym_size(a, dim):
     return a.get_size()[dim]
 
 
+@register_lowering(aten.sym_numel)
+def sym_numel(a):
+    return a.get_numel()
+
+
 @register_lowering(operator.mul)
 def op_mul(a, b):
     return a * b
+
+
+@register_lowering(operator.add)
+def op_add(a, b):
+    return a + b
+
+
+@register_lowering(operator.floordiv)
+def op_floordiv(a, b):
+    return IndexingDiv(a, b)
 
 
 @register_lowering(aten._foobar)
