@@ -14951,6 +14951,7 @@ class TestNNDeviceType(NNTestCase):
                     if (self.device_type == "cuda"):
                         input = input.cuda()
                         mask = mask.cuda()
+                        mask_orig = mask_orig.cuda()
                     native_res = torch._masked_softmax(input, mask_orig, dim, mask_type)
                     mask = ~mask
 
