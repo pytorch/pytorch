@@ -926,6 +926,12 @@ class TestViewOps(TestCase):
         self.assertEqual(a_view_copy, a_view)
         self.assertEqual(a.grad, a_ref.grad)
 
+    # Testing that the output of a view_copy kernel (by default) is contiguous.
+    def test_view_copy_output_contiguous(self, device):
+        a = torch.randn(4, 4, 4, 4, device=device).to(memory_format=torch.channels_last)
+        b = torch.ops.aten.slice_copy(a, 0, 0, 2)
+        self.assertTrue(b.is_contiguous())
+
     def test_view_copy_out(self, device):
         a = torch.randn(2, 2, device=device)
         out = torch.empty(2, device=device)

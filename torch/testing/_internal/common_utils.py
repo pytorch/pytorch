@@ -612,15 +612,6 @@ def sanitize_test_filename(filename):
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
-# hack until https://github.com/pytorch/pytorch/issues/82109 is resolved
-def sanitize_if_functorch_test_filename(filename):
-    # absolute filenames must be converted to relative paths, otherwise,
-    # we cannot prepend test-reports/ to it
-    # (e.g. test-reports\\C:\\... on windows is nonsense)
-    if filename.startswith(CI_FUNCTORCH_ROOT):
-        filename = filename[len(CI_PT_ROOT) + 1:]
-    return filename
-
 def lint_test_case_extension(suite):
     succeed = True
     for test_case_or_suite in suite:
@@ -640,10 +631,8 @@ def lint_test_case_extension(suite):
     return succeed
 
 
-def get_report_path(pytest=False):
-    test_filename = inspect.getfile(sys._getframe(2))
-    test_filename = sanitize_if_functorch_test_filename(test_filename)
-    test_filename = sanitize_test_filename(test_filename)
+def get_report_path(argv=UNITTEST_ARGS, pytest=False):
+    test_filename = sanitize_test_filename(argv[0])
     test_report_path = TEST_SAVE_XML + LOG_SUFFIX
     test_report_path = os.path.join(test_report_path, test_filename)
     if pytest:
@@ -940,6 +929,9 @@ if TEST_WITH_TORCHDYNAMO:
     torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.cache_size_limit = 8
+    # TODO: Remove this; this is grandfathered in because we suppressed errors
+    # on test suite previously
+    torch._dynamo.config.suppress_errors = True
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
