@@ -13,8 +13,10 @@ class TORCH_API PrefixStore : public Store {
 
   virtual ~PrefixStore(){};
 
+  using Store::set;
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
+  using Store::compareSet;
   std::vector<uint8_t> compareSet(
       const std::string& key,
       const std::vector<uint8_t>& expectedValue,

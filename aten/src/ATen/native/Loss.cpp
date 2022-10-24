@@ -157,15 +157,17 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
   auto n_dim = negative.dim();
   TORCH_CHECK(
       a_dim == p_dim && p_dim == n_dim,
-      "All inputs should have same dimension but got ",
-      a_dim,
-      "D, ",
-      p_dim,
-      "D and ",
-      n_dim,
-      "D inputs.")
+      "The anchor, positive, and negative tensors are expected to have "
+      "the same number of dimensions, but got: anchor ", a_dim, "D, "
+      "positive ", p_dim, "D, and negative ", n_dim, "D inputs")
+
   auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
   auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
+  // The distance swap is described in the paper "Learning shallow
+  // convolutional feature descriptors with triplet losses" by V. Balntas, E.
+  // Riba et al.  If True, and if the positive example is closer to the
+  // negative example than the anchor is, swaps the positive example and the
+  // anchor in the loss computation.
   if (swap) {
     auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
     dist_neg = at::min(dist_neg, dist_swap);
