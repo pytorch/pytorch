@@ -477,6 +477,37 @@ class GuardedCode:
     check_fn: Callable
 
 
+from sympy.printing.str import StrPrinter
+
+
+class DynamoGuardPrinter(StrPrinter):
+    @staticmethod
+    def tensor_ref_as_str(tensor_ref, id_to_name_map):
+        if tensor_ref.kind in ("size", "stride"):
+            return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()[{tensor_ref.idx}]"
+        return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
+
+    def __init__(self, expr_to_tensor_ref, id_to_name_map):
+        super().__init__()
+        self.expr_to_tensor_ref = expr_to_tensor_ref
+        self.id_to_name_map = id_to_name_map
+
+    def _print_Symbol(self, expr) -> str:
+        assert isinstance(expr, sympy.core.symbol.Symbol)
+        if expr == 0:
+            return "0"
+        if expr == 1:
+            return "1"
+        assert expr in self.expr_to_tensor_ref, f"Unknown expression {expr}"
+        refs = self.expr_to_tensor_ref[expr]
+        if len(refs) == 0:
+            return super()._print_Symbol(expr)
+        tensor_ref = next(
+            iter(refs)
+        )  # Any is fine here, because we install equality guards later
+        return DynamoGuardPrinter.tensor_ref_as_str(tensor_ref, self.id_to_name_map)
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that consistutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -545,16 +576,13 @@ class CheckFunctionManager:
         # A mapping of tensor_ids to tensor names
         id_to_name_map = {}
 
-        # TensorReferences to size. See PySimInt.TensorReference for more info.
-        size_parts = []
-
-        # TensorReferences to size. See PySimInt.TensorReference for more info.
-        stride_parts = []
-
         # We should not have a shape env, or guards if we are not in config.dynamic shapes
         # But check it anyway.
         if not config.dynamic_shapes:
             return finished_expressions
+
+        expr_to_tensor_ref = {}
+        guard_printer = DynamoGuardPrinter(expr_to_tensor_ref, id_to_name_map)
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
         # All other guards installations are driven off of it, so these ones will too.
@@ -565,16 +593,12 @@ class CheckFunctionManager:
             if tensor_id in self.shape_env.id_to_expr:
                 # If we made it here, this tensor_id is relevant to dynamo guard installation
                 # AND was found in the shape_env
-                tensor_ref_list = self.shape_env.id_to_expr[tensor_id]
-                for tensor_ref in tensor_ref_list:
-                    val = str(tensor_ref.expr)
-                    if val in ("0", "1"):
-                        continue
-                    if tensor_ref.kind == "size":
-                        size_parts.append(tensor_ref)
-                    if tensor_ref.kind == "stride":
-                        stride_parts.append(tensor_ref)
-
+                tensor_ref_set = self.shape_env.id_to_expr[tensor_id]
+                for tensor_ref in tensor_ref_set:
+                    if tensor_ref.expr not in expr_to_tensor_ref:
+                        expr_to_tensor_ref[tensor_ref.expr] = set()
+                    expr_to_tensor_ref[tensor_ref.expr].add(tensor_ref)
+            finished_expressions.append(f"isinstance({name}, torch.Tensor)")
         # Extract all the guard elements out of guards
         # The guard format, atm, uses tuple position 0 for the expression
         # and tuple position 1 for a negation. Eventually, these will be collapsed together.
@@ -582,36 +606,10 @@ class CheckFunctionManager:
             (guard[0], guard[1]) for guard in self.shape_env.guards
         ]
         for expression, evaluation in expression_and_evaluation:
-            # Expression to string so we can do string replacement on it.
-            # Before you cry, this whole file generates python code,
-            # So turning an expression into a string is not a code smell, it will
-            # get passed to eval and executed later on down, along with the rest of our guards.
-            # See: py_code in this file.
-            #
-            # Ex: `Eq(s0, s1**2)`
-            expr_as_str = str(expression)
-
-            for tensor_ref in size_parts:
-                # Here, we find any symbols associated with size, and replace them
-                #
-                # Ex: `Eq(s0, s1**2)` becomes `Eq(x.size()[0], s1**2)`
-                expr_as_str = expr_as_str.replace(
-                    str(tensor_ref.expr),
-                    f"{id_to_name_map[tensor_ref.ref_id]}.size()[{tensor_ref.idx}]",
-                )
-
-            for tensor_ref in stride_parts:
-                # Here, we find any symbols associated with stride, and replace them
-                #
-                # Ex: `Eq(x.size()[0], s1**2)` becomes `Eq(x.size()[0], y.stride()[1]**2)`
-                expr_as_str = expr_as_str.replace(
-                    str(tensor_ref.expr),
-                    f"{id_to_name_map[tensor_ref.ref_id]}.stride()[{tensor_ref.idx}]",
-                )
-
+            expr_as_str = guard_printer.doprint(expression)
             # We may get into a state where symbolic shape keys (all should be found in replacements)
             # Have not been removed from the expression. This is a serious enough error state that we need to assert.
-            for key in self.shape_env.replacements.keys():
+            for key in self.shape_env.var_to_val.keys():
                 assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
 
             # Certain expressions are negated in their guards.
@@ -619,6 +617,19 @@ class CheckFunctionManager:
                 expr_as_str = f"not {expr_as_str}"
 
             finished_expressions.append(expr_as_str)
+
+        for expr in expr_to_tensor_ref.keys():
+            tensor_refs = expr_to_tensor_ref[expr]
+            equality_candidates = set(
+                [
+                    DynamoGuardPrinter.tensor_ref_as_str(x, id_to_name_map)
+                    for x in tensor_refs
+                ]
+            )
+            if len(equality_candidates) > 1:
+                equality_expr = " == ".join(equality_candidates)
+                finished_expressions.append(equality_expr)
+
         return finished_expressions
 
     def compile_check_fn(self, local_builder, global_builder):
