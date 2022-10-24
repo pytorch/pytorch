@@ -82,7 +82,9 @@ struct SequenceType : public Type {
       return false;
     auto num_elements = PySequence_Length(object);
     for (const auto i : c10::irange(num_elements)) {
-      if (!type->is_matching(py::reinterpret_steal<py::object>(PySequence_GetItem(object, i)).ptr()))
+      if (!type->is_matching(
+              py::reinterpret_steal<py::object>(PySequence_GetItem(object, i))
+                  .ptr()))
         return false;
     }
     return true;
@@ -285,7 +287,9 @@ std::string _formattedArgDesc(
         if (i != 0) {
           result += ", ";
         }
-        result += py_typename(py::reinterpret_steal<py::object>(PySequence_GetItem(arg, i)).ptr());
+        result += py_typename(
+            py::reinterpret_steal<py::object>(PySequence_GetItem(arg, i))
+                .ptr());
       }
       if (is_tuple) {
         if (num_elements == 1) {
