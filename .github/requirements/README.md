@@ -10,7 +10,7 @@ gives a clear picture of all the dependencies required by different CI
 jobs, but it also allows them to be cached properly to improve CI
 reliability.
 
-The list of support jobs are as follows:
+The list of support files are as follows:
 
 * Conda:
   * conda-env-macOS-ARM64. This is used by MacOS (m1, arm64) build and
