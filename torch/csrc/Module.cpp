@@ -1318,7 +1318,16 @@ Call this whenever a new thread is created in order to propagate values from
             output_padding_,
             groups_,
             c10::nullopt);
-      });
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("stride"),
+      py::arg("padding"),
+      py::arg("dilation"),
+      py::arg("transposed"),
+      py::arg("output_padding"),
+      py::arg("groups"));
 
   // overload for bias_sizes_opt/backward TODO: figure out default value
   py_module.def(
