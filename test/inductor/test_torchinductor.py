@@ -4319,10 +4319,9 @@ if HAS_CUDA:
                 def interpret(*args, **kwargs):
                     return Interpreter(model_).run(*args[0:], **kwargs)
 
-                fake_flat_tensor_args = []
-                for x in example_inputs_:
-                    fake_flat_tensor_args.append(fake_mode.from_tensor(x))
-
+                fake_flat_tensor_args = [
+                    fake_mode.from_tensor(x) for x in example_inputs_
+                ]
                 fw_module = make_fx(interpret, select_decomp_table())(
                     *fake_flat_tensor_args
                 )
@@ -4339,10 +4338,9 @@ if HAS_CUDA:
             torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
             graph = GraphLowering(cxt.model)
             graph.num_static_inputs = 0
-            args = cxt.example_args
             kernels = []
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
-                graph.run(*args)
+                graph.run(*(cxt.example_args))
                 mod = graph.compile_to_module()
                 i = 0
                 while True:
