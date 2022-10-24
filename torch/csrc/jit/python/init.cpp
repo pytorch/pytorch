@@ -1435,14 +1435,14 @@ void initJITBindings(PyObject* module) {
           .def(
               "__truediv__",
               [](c10::SymIntNode a, py::object b) -> c10::SymFloatNode {
-                auto float_a = a->sym_float();
-                return float_a->truediv(float_a->wrap(py::cast<double>(b)));
+                auto snb = toSymIntNode(a, b);
+                return a->truediv(snb);
               })
           .def(
               "__rtruediv__",
               [](c10::SymIntNode a, py::object b) -> c10::SymFloatNode {
-                auto float_a = a->sym_float();
-                return float_a->wrap(py::cast<double>(b))->truediv(float_a);
+                auto snb = toSymIntNode(a, b);
+                return snb->truediv(a);
               })
           .def(
               "__floordiv__",
