@@ -960,6 +960,11 @@ c10::SymIntArrayRef strides(const TensorBase& t) { return t.sym_strides(); }
 template <typename T, typename = enable_if_int<T>>
 IntArrayRef strides(const TensorBase& t) { return t.strides(); }
 
+template <typename T, typename = enable_if_symint<T>>
+c10::SymInt numel(const TensorBase& t) { return t.sym_numel(); }
+template <typename T, typename = enable_if_int<T>>
+int64_t numel(const TensorBase& t) { return t.numel(); }
+
 } // namespace symint
 
 } // namespace at
