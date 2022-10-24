@@ -1409,7 +1409,7 @@ bool FunctionSignature::parse(
               param.name.c_str(),
               static_cast<long>(arg_pos + 1),
               param.type_name().c_str(),
-              Py_TYPE(py::reinterpret_steal<py::object>(PySequence_GetItem(obj, failed_idx)))->tp_name,
+              Py_TYPE(py::reinterpret_steal<py::object>(PySequence_GetItem(obj, failed_idx)).ptr())->tp_name,
               failed_idx);
         }
         throw TypeError(
