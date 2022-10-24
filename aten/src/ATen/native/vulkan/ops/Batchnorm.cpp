@@ -31,7 +31,7 @@ Tensor batch_norm(
       "running_var must be defined in evaluation mode.");
   TORCH_CHECK(input_arg.dim() == 4, "Vulkan batchnorm expects 4-dim input!");
   TORCH_CHECK(
-      channels_size(input_arg) % 4 == 0,
+      get_dim<Dim4D::Channel>(input_arg) % 4 == 0,
       "Vulkan batchnorm expects channel dim to be multiple of 4!");
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
@@ -106,16 +106,6 @@ Tensor batch_norm(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       VK_KERNEL(batchnorm),
       // pipeline barrier

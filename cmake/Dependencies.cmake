@@ -78,7 +78,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ Custom Protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
@@ -92,6 +92,10 @@ endif()
 if(MSVC)
   # skip unwanted includes from windows.h
   add_definitions(-DWIN32_LEAN_AND_MEAN)
+
+  # Windows SDK broke compatibility since version 25131, but introduced this define for backward compatibility.
+  add_definitions(-D_UCRT_LEGACY_INFINITY)
+
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
@@ -823,12 +827,8 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
       # See https://github.com/pytorch/pytorch/issues/74352
-      target_compile_options(asmjit PRIVATE -Wno-deprecated-copy)
-      if(("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.1.6)
-        OR("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0.0))
-        # -Wno-unused-but-set-variable doesn't exist in Apple clang version 13.0.0 (clang-1300.0.29.30)
-        target_compile_options(asmjit PRIVATE -Wno-unused-but-set-variable)
-      endif()
+      target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
+      target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     endif()
   endif()
 
@@ -1340,7 +1340,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ ROCm
-if(USE_ROCM)
+if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)
@@ -1442,6 +1442,11 @@ if(USE_GLOO)
       if(USE_DISTRIBUED AND USE_TENSORPIPE)
         get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
         set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
+      endif()
+      if(USE_NCCL AND NOT USE_SYSTEM_NCCL)
+        # Tell Gloo build system to use bundled NCCL, see
+        # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
+        set(NCCL_EXTERNAL ON)
       endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
@@ -1771,7 +1776,6 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
-  set(CAFFE2_USE_MKLDNN OFF)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1787,11 +1791,11 @@ if(NOT INTERN_BUILD_MOBILE)
       set(AT_MKLDNN_ENABLED 1)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       if(BUILD_CAFFE2_OPS)
-        set(CAFFE2_USE_MKLDNN ON)
         list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkldnn)
       endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")
+      caffe2_update_option(USE_MKLDNN OFF)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")

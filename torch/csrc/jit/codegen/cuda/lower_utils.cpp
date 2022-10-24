@@ -91,9 +91,12 @@ bool isTvOp(const Expr* expr) {
       (expr->getExprType().value() == ExprType::UnaryOp ||
        expr->getExprType().value() == ExprType::BinaryOp ||
        expr->getExprType().value() == ExprType::TernaryOp ||
+       expr->getExprType().value() == ExprType::RNGOp ||
+       expr->getExprType().value() == ExprType::ARangeOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::GroupedReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::GroupedWelfordOp ||
        expr->getExprType().value() == ExprType::LoadStoreOp ||
        expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
@@ -104,8 +107,10 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::ViewAsScalar ||
        expr->getExprType().value() == ExprType::ViewOp ||
        expr->getExprType().value() == ExprType::GridReduction ||
+       expr->getExprType().value() == ExprType::GroupedGridReduction ||
        expr->getExprType().value() == ExprType::GridBroadcast ||
-       expr->getExprType().value() == ExprType::GridWelford)) {
+       expr->getExprType().value() == ExprType::GridWelford ||
+       expr->getExprType().value() == ExprType::GroupedGridWelford)) {
     return true;
   }
   return false;
@@ -183,14 +188,13 @@ TensorView* getTvOutput(const Expr* expr) {
   return nullptr;
 }
 
-bool isReductionOp(const Expr* expr) {
-  // Note that GridReduction inherits ReductionOp
-  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
-}
-
-bool isReductionTvOp(const Expr* expr) {
-  return isTvOp(expr) && isReductionOp(expr);
+TensorView* getTvInput(const Expr* expr) {
+  for (auto inp : expr->inputs()) {
+    if (auto tv = getTv(inp)) {
+      return tv;
+    }
+  }
+  return nullptr;
 }
 
 bool isScalarOp(const Expr* expr) {
@@ -201,6 +205,10 @@ bool isScalarOp(const Expr* expr) {
 }
 
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
+  if (expr->isA<kir::BlockSync>()) {
+    return true;
+  }
+
   if (!isTvOp(expr)) {
     return false;
   }
@@ -414,6 +422,26 @@ IterDomain* caMapExactConcreteId(IterDomain* id) {
       id, IdMappingMode::EXACT);
 }
 
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to) {
+  auto all_expr = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()}, {to.begin(), to.end()});
+
+  std::vector<Expr*> all_swizzles;
+
+  std::copy_if(
+      all_expr.begin(),
+      all_expr.end(),
+      std::back_inserter(all_swizzles),
+      [](Expr* expr) {
+        return expr->getExprType().has_value() &&
+            (expr->etype() == ExprType::Swizzle2D);
+      });
+
+  return all_swizzles;
+}
+
 } // namespace ir_utils
 
 namespace loop_utils {
@@ -463,7 +491,7 @@ BasicAllocInfo getAllocInformation(
 
     // Allocation of a double buffered tensor is placed outside its
     // double buffer axis.
-    if (tv->isDoubleBuffered() &&
+    if ((tv->isDoubleBuffered() || tv->isCircularBuffered()) &&
         tv->axis(info.alloc_pos) ==
             gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
       outer_alloc_found = true;
@@ -545,9 +573,7 @@ class ReplaceExprInput : private kir::ExprMutator {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
       auto replacement = IrBuilder::create<UnaryOp>(
-          node->getUnaryOpType(),
-          node->out(),
-          replaced_inputs.value().at(node->in()));
+          node->getUnaryOpType(), node->out(), replaced_inputs->at(node->in()));
       registerReplaceWithPredicate(node, replacement);
     }
   }
@@ -558,8 +584,8 @@ class ReplaceExprInput : private kir::ExprMutator {
       auto replacement = IrBuilder::create<BinaryOp>(
           node->getBinaryOpType(),
           node->out(),
-          replaced_inputs.value().at(node->lhs()),
-          replaced_inputs.value().at(node->rhs()));
+          replaced_inputs->at(node->lhs()),
+          replaced_inputs->at(node->rhs()));
       registerReplaceWithPredicate(node, replacement);
     }
   }
@@ -570,11 +596,16 @@ class ReplaceExprInput : private kir::ExprMutator {
       auto replacement = IrBuilder::create<TernaryOp>(
           node->getTernaryOpType(),
           node->out(),
-          replaced_inputs.value().at(node->in1()),
-          replaced_inputs.value().at(node->in2()),
-          replaced_inputs.value().at(node->in3()));
+          replaced_inputs->at(node->in1()),
+          replaced_inputs->at(node->in2()),
+          replaced_inputs->at(node->in3()));
       registerReplaceWithPredicate(node, replacement);
     }
+  }
+
+  void handle(RNGOp* node) final {
+    // RNGOp has no input
+    return;
   }
 
   void handle(ReductionOp* node) final {
@@ -584,7 +615,7 @@ class ReplaceExprInput : private kir::ExprMutator {
           node->getReductionOpType(),
           node->init(),
           node->out(),
-          replaced_inputs.value().at(node->in()),
+          replaced_inputs->at(node->in()),
           node->isAllreduce());
       registerReplaceWithPredicate(node, replacement);
     }
@@ -615,7 +646,7 @@ class ReplaceExprInput : private kir::ExprMutator {
     if (replaced_inputs.has_value()) {
       auto replacement = IrBuilder::create<BroadcastOp>(
           node->out(),
-          replaced_inputs.value().at(node->in()),
+          replaced_inputs->at(node->in()),
           node->getBroadcastDimFlags());
       registerReplaceWithPredicate(node, replacement);
     }
@@ -631,9 +662,9 @@ class ReplaceExprInput : private kir::ExprMutator {
           node->initAvg(),
           node->initVar(),
           node->initN(),
-          replaced_inputs.value().at(node->inAvg()),
-          replaced_inputs.value().at(node->inVar()),
-          replaced_inputs.value().at(node->inN()));
+          replaced_inputs->at(node->inAvg()),
+          replaced_inputs->at(node->inVar()),
+          replaced_inputs->at(node->inN()));
       registerReplaceWithPredicate(node, replacement);
     }
   }
@@ -643,8 +674,8 @@ class ReplaceExprInput : private kir::ExprMutator {
     if (replaced_inputs.has_value()) {
       auto replacement = IrBuilder::create<MmaOp>(
           node->out(),
-          replaced_inputs.value().at(node->inA()),
-          replaced_inputs.value().at(node->inB()),
+          replaced_inputs->at(node->inA()),
+          replaced_inputs->at(node->inB()),
           node->init(),
           node->options());
       registerReplaceWithPredicate(node, replacement);

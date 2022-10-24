@@ -11,6 +11,7 @@ def unifiable(cls):
     ...     def __init__(self, a, b):
     ...         self.a = a
     ...         self.b = b
+    >>> # xdoctest: +SKIP
     >>> unifiable(A)
     <class 'unification.more.A'>
     >>> x = var('x')
@@ -38,6 +39,7 @@ def reify_object(o, s):
     ...         self.b = b
     ...     def __str__(self):
     ...         return "Foo(%s, %s)"%(str(self.a), str(self.b))
+    >>> # xdoctest: +SKIP
     >>> x = var('x')
     >>> f = Foo(1, x)
     >>> print(f)
@@ -92,6 +94,7 @@ def unify_object(u, v, s):
     ...         self.b = b
     ...     def __str__(self):
     ...         return "Foo(%s, %s)"%(str(self.a), str(self.b))
+    >>> # xdoctest: +SKIP
     >>> x = var('x')
     >>> f = Foo(1, x)
     >>> g = Foo(1, 2)

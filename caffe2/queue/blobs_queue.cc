@@ -53,7 +53,7 @@ BlobsQueue::BlobsQueue(
     }
     queue_.push_back(blobs);
   }
-  DCHECK_EQ(queue_.size(), capacity);
+  TORCH_DCHECK_EQ(queue_.size(), capacity);
 }
 
 bool BlobsQueue::blockingRead(

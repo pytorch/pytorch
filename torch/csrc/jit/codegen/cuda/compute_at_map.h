@@ -93,6 +93,14 @@ class TORCH_CUDA_CU_API IterDomainGraph {
 
   void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
 
+  // Returns if first and second are expressions with inputs match through exact
+  // map (if forward), or outputs match (if not forward).
+  bool exprsMap(Expr* first, Expr* second, bool forward);
+
+  // Checks if exprsMap then if forward will map outputs else inputs in exact
+  // and permissive map.
+  void mapThroughExpr(Expr* first, Expr* second, bool forward);
+
   DisjointSets<IterDomain*> permissive_nodes_;
   DisjointSets<IterDomain*> exact_nodes_;
   DisjointSets<IterDomain*> loop_nodes_;
@@ -175,6 +183,10 @@ class TORCH_CUDA_CU_API ComputeAtMap {
 
   //! Get the ID sets for a provided IdMappingMode
   const DisjointSets<IterDomain*>& getIdSets(IdMappingMode mode) const;
+
+  // Returns if the ID actually has a disjoint set meaning it has been processed
+  // in the creation of the compute at map.
+  bool idExistsInMap(IterDomain* id) const;
 
   //! Returns the pre-allocated index variable integer used in
   //!  the kir::ForLoop corresponding to the given IterDomain.

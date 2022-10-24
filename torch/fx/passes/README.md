@@ -1,5 +1,5 @@
 ## FX Pass Infrastructure
-This folder contains the pass infarstructure and passes for transforming fx.Graph.
+This folder contains the pass infrastructure and passes for transforming fx.Graph.
 
 
 ## Code Structure
@@ -11,6 +11,7 @@ This folder contains the pass infarstructure and passes for transforming fx.Grap
     * [fuser_utis.py](utils/fuser_utils.py) - utility functions for fusing list of nodes into a single node
 * [dialect](dialect) - dialect specific passes
     * [common](dialect/common) - common passes that can be shared by all dialects
+        * [cse_pass.py](dialect/common/cse_pass.py) - a CSE pass
     * [aten](dialect/aten) - aten dialect specific passes
     * [prims](dialect/prims) - prim dialect specific passes
 * [backends](backends) - Backend specific passes

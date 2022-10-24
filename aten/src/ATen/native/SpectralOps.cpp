@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -796,20 +797,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool return_complex = return_complexOpt.value_or(
       self.is_complex() || (window.defined() && window.is_complex()));
   if (!return_complex) {
-    if (!return_complexOpt.has_value()) {
-      TORCH_WARN_ONCE(
-        "stft will soon require the return_complex parameter be given for real inputs, "
-        "and will further require that return_complex=True in a future PyTorch release."
-      );
-    }
+    TORCH_CHECK(return_complexOpt.has_value(),
+        "stft requires the return_complex parameter be given for real inputs, "
+        "and will further require that return_complex=True in a future PyTorch release.");
 
 
-    // TORCH_WARN_ONCE(
-    //     "stft with return_complex=False is deprecated. In a future pytorch "
-    //     "release, stft will return complex tensors for all inputs, and "
-    //     "return_complex=False will raise an error.\n"
-    //     "Note: you can still call torch.view_as_real on the complex output to "
-    //     "recover the old return format.");
+    TORCH_WARN_ONCE(
+        "stft with return_complex=False is deprecated. In a future pytorch "
+        "release, stft will return complex tensors for all inputs, and "
+        "return_complex=False will raise an error.\n"
+        "Note: you can still call torch.view_as_real on the complex output to "
+        "recover the old return format.");
   }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
@@ -973,12 +971,10 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   const auto win_length = win_lengthOpt.value_or(n_fft);
 
-  if (!self.is_complex()) {
-    TORCH_WARN_ONCE(
-      "istft will require a complex-valued input tensor in a future PyTorch release. "
-      "Matching the output from stft with return_complex=True. ");
-  }
-  Tensor input = self.is_complex() ? self.is_conj() ? at::view_as_real(self.resolve_conj()) : at::view_as_real(self) : self;
+  TORCH_CHECK(self.is_complex(),
+              "istft requires a complex-valued input tensor matching the "
+              "output from stft with return_complex=True.");
+  Tensor input = at::view_as_real(self.resolve_conj());
   const auto input_dim = input.dim();
   const auto n_frames = input.size(-2);
   const auto fft_size = input.size(-3);
@@ -1100,8 +1096,8 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
-  const auto window_envelop_lowest = window_envelop.abs().min().item().toDouble();
-  if (window_envelop_lowest < 1e-11) {
+  const auto window_envelop_lowest = window_envelop.abs().min().lt(1e-11);
+  if (at::is_scalar_tensor_true(window_envelop_lowest)) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;
     AT_ERROR(ss.str());
@@ -1121,7 +1117,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   }
   return y;
 
-  #undef REPR
+#undef REPR
 }
 
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,

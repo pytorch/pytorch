@@ -58,6 +58,11 @@ template<typename T>
 static inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
     TORCH_CHECK(stride != 0, "stride should not be zero");
+    TORCH_CHECK(pad >= 0,
+                "pad must be non-negative, but got pad: ", pad);
+    TORCH_CHECK(pad <= kernelSize / 2,
+                "pad should be at most half of kernel size, but got pad=",
+                pad, " and kernel_size=", kernelSize)
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
@@ -211,10 +216,20 @@ pool3d_shape_check(
   TORCH_CHECK(ndim == 4 || ndim == 5,
               fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
 
-  for (const auto i : c10::irange(1, ndim)) {
-    TORCH_CHECK(input.size(i) > 0,
-                fn_name, "Expected input to have non-zero size for non-batch dimensions, but got",
-                input.sizes(), " with dimension ", i, " being empty.");
+  for (const auto i : c10::irange(ndim)) {
+    if (ndim == 5 && i == 0) {
+      // size of batch-dim can be 0.
+      continue;
+    }
+    TORCH_CHECK(
+        input.size(i) > 0,
+        fn_name,
+        ": Expected input's non-batch dimensions to have positive length,"
+        " but input has a shape of ",
+        input.sizes(),
+        " and non-batch dimension ",
+        input.size(i),
+        " has length zero!")
   }
 
   if (check_input_size) { // AveragePool3d

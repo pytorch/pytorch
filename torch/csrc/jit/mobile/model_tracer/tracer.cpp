@@ -1,11 +1,12 @@
 #include <iostream>
+#include <sstream>
 #include <string>
 
 /**
- * The tracer.cpp generates a binary that accepts a TorchScript model or a
- * Torch Mobile Model (with bytecode.pkl) which has at least 1 bundled
- * input. This binary then feeds the bundled input(s) into the model
- * and executes using the lite interpreter.
+ * The tracer.cpp generates a binary that accepts multiple Torch Mobile Model(s)
+ * (with bytecode.pkl), each of which has at least 1 bundled
+ * input. This binary then feeds the bundled input(s) into each corresponding
+ * model and executes it using the lite interpreter.
  *
  * Both root operators as well as called operators are recorded and saved
  * into a YAML file (whose path is provided on the command line).
@@ -33,7 +34,7 @@ typedef std::map<std::string, std::set<std::string>> kt_type;
 C10_DEFINE_string(
     model_input_path,
     "",
-    "The path of the input model file (.ptl).");
+    "A comma separated list of path(s) to the input model file(s) (.ptl).");
 
 C10_DEFINE_string(
     build_yaml_path,
@@ -82,10 +83,40 @@ void printOpsYAML(
   }
 }
 
+void printDTypeYAML(
+    std::ostream& out,
+    int indent,
+    const std::string& kernel_tag_name,
+    const std::set<std::string> dtypes) {
+  std::string indent_str = std::string(indent, ' ');
+  out << indent_str << kernel_tag_name << ":" << std::endl;
+  for (auto& dtype : dtypes) {
+    out << indent_str << "- " << dtype << std::endl;
+  }
+}
+
+void printDTypesYAML(
+    std::ostream& out,
+    const torch::jit::mobile::KernelDTypeTracer::kernel_tags_type&
+        kernel_tags) {
+  for (auto& it : kernel_tags) {
+    printDTypeYAML(out, 2, it.first, it.second);
+  }
+}
+
+void printCustomClassesYAML(
+    std::ostream& out,
+    const torch::jit::mobile::CustomClassTracer::custom_classes_type&
+        loaded_classes) {
+  for (auto& class_name : loaded_classes) {
+    out << "- " << class_name << std::endl;
+  }
+}
+
 /**
- * Converts a pytorch model (full/lite) to lite interpreter model for
- * mobile, and additionally writes out a list of root and called
- * operators.
+ * Runs multiple PyTorch lite interpreter models, and additionally writes
+ * out a list of root and called operators, kernel dtypes, and loaded/used
+ * TorchBind custom classes.
  */
 int main(int argc, char* argv[]) {
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
@@ -96,21 +127,27 @@ int main(int argc, char* argv[]) {
   REQUIRE_STRING_ARG(model_input_path);
   REQUIRE_STRING_ARG(build_yaml_path);
 
-  const std::string input_module_path = FLAGS_model_input_path;
-
+  std::istringstream sin(FLAGS_model_input_path);
   std::ofstream yaml_out(FLAGS_build_yaml_path);
 
-  std::cout << "Processing: " << input_module_path << std::endl;
   std::cout << "Output: " << FLAGS_build_yaml_path << std::endl;
   torch::jit::mobile::TracerResult tracer_result;
+  std::vector<std::string> model_input_paths;
+
+  for (std::string model_input_path;
+       std::getline(sin, model_input_path, ',');) {
+    std::cout << "Processing: " << model_input_path << std::endl;
+    model_input_paths.push_back(model_input_path);
+  }
+
   try {
-    tracer_result = torch::jit::mobile::trace_run(FLAGS_model_input_path);
+    tracer_result = torch::jit::mobile::trace_run(model_input_paths);
   } catch (std::exception& ex) {
     std::cerr
         << "ModelTracer has not been able to load the module for the following reasons:\n"
         << ex.what()
-        << "\nPlease consider posting to the PyTorch with the error message."
-        << std::endl;
+        << "\nPlease consider opening an issue at https://github.com/pytorch/pytorch/issues "
+        << "with the detailed error message." << std::endl;
 
     throw ex;
   }
@@ -135,7 +172,8 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  yaml_out << "include_all_non_op_selectives: true" << std::endl;
+  yaml_out << "include_all_non_op_selectives: false" << std::endl;
+  yaml_out << "build_features: []" << std::endl;
   yaml_out << "operators:" << std::endl;
   printOpsYAML(
       yaml_out,
@@ -149,5 +187,20 @@ int main(int argc, char* argv[]) {
       false /* is_used_for_training */,
       false /* is_root_operator */,
       false /* include_all_overloads */);
+
+  yaml_out << "kernel_metadata:";
+  if (tracer_result.called_kernel_tags.empty()) {
+    yaml_out << " []";
+  }
+  yaml_out << std::endl;
+  printDTypesYAML(yaml_out, tracer_result.called_kernel_tags);
+
+  yaml_out << "custom_classes:";
+  if (tracer_result.loaded_classes.empty()) {
+    yaml_out << " []";
+  }
+  yaml_out << std::endl;
+  printCustomClassesYAML(yaml_out, tracer_result.loaded_classes);
+
   return 0;
 }

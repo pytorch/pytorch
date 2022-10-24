@@ -3,9 +3,11 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
+
 #include <c10/util/string_view.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 namespace native {
@@ -21,7 +23,11 @@ inline void check_nested_tensor_matrix_constraints(
       !dense_matrix.is_nested(),
       caller,
       " does not support nested weight when input is a nested tensor.")
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
+  // TODO: support noncontiguous case
+  // error out for now
+  TORCH_CHECK(
+      nested_tensor_impl_is_contiguous(nt_input),
+      "for now linear only supports contiguous nested tensor");
   TORCH_CHECK(
       nested_tensor.dim() == 3 && dense_matrix.dim() == 2,
       caller,
@@ -67,40 +73,6 @@ Tensor nested_linear(
   return wrap_buffer(result_buffer, new_sizes);
 }
 
-std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
-    const Tensor& input,
-    const Tensor& grad_output,
-    const Tensor& weight,
-    std::array<bool, 3> output_mask) {
-  if (!grad_output.defined()) {
-    return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
-  }
-  Tensor grad_input, grad_weight, grad_bias;
-  auto* nt_grad_output = get_nested_tensor_impl(grad_output);
-  auto* nt_input = get_nested_tensor_impl(input);
-  TORCH_INTERNAL_ASSERT(nt_grad_output != nullptr);
-  TORCH_INTERNAL_ASSERT(nt_input != nullptr);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_grad_output));
-  auto grad_ouput_buffer = nt_grad_output->get_buffer();
-  auto input_buffer = nt_input->get_buffer();
-
-  auto reshaped_grad = grad_ouput_buffer.reshape({-1, weight.size(0)});
-
-  if (output_mask[0]) {
-    auto grad_input_buffer = at::mm(reshaped_grad, weight).view({-1});
-    auto grad_input_nt_size = nt_input->get_nested_size_tensor().clone();
-    grad_input = wrap_buffer(grad_input_buffer, grad_input_nt_size);
-  }
-  if (output_mask[1]) {
-    grad_weight =
-        at::mm(reshaped_grad.t(), input_buffer.reshape({-1, weight.size(1)}));
-  }
-  if (output_mask[2]) {
-    grad_bias = reshaped_grad.sum(0);
-  }
-  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
-}
-
 Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
   check_nested_tensor_matrix_constraints(self, other, c10::string_view{"Matmul"});
   auto* nt_self = get_nested_tensor_impl_or_null(self);
@@ -114,7 +86,6 @@ Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
   new_sizes.index_put_({at::indexing::Slice(), -1}, other_size_1);
   return wrap_buffer(result_buffer, new_sizes);
 }
-
 
 Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(
     const Tensor& self,
@@ -169,44 +140,56 @@ Tensor NestedTensor_add_NestedTensor_in_place(
   return self;
 }
 
-void NestedTensor_softmax_dropout(const Tensor& query, Tensor& attn_scores) {
+Tensor NestedTensor_softmax_dropout(const Tensor& self, const Tensor& query) {
   const auto* query_nt = get_nested_tensor_impl_or_null(query);
   TORCH_INTERNAL_ASSERT(query_nt != nullptr);
   TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(query_nt));
 
   const Tensor& sizes = query_nt->get_nested_size_tensor();
   const auto num_tensors = sizes.sizes()[0];
-  const auto max_seq_len = attn_scores.sizes()[2];
+
+  auto output = at::empty_like(self,{}, at::MemoryFormat::Contiguous);
+  TORCH_INTERNAL_ASSERT(output.is_contiguous());
+
+  const auto max_seq_len = self.sizes()[2];
 
   for (int64_t i = 0; i < num_tensors; i++) {
     auto seq_len = sizes.index({i, 0}).item<int64_t>();
-    auto subseq = attn_scores.index(
+    auto subseq = self.index(
         {i,
          indexing::Slice(),
          indexing::Slice(0, seq_len),
          indexing::Slice(0, seq_len)});
     auto subscores = at::softmax(subseq, subseq.dim() - 1);
-    attn_scores.index_put_(
+    output.index_put_(
         {i,
          indexing::Slice(),
          indexing::Slice(0, seq_len),
          indexing::Slice(0, seq_len)},
         subscores);
-    attn_scores.index_put_(
+    output.index_put_(
         {i,
          indexing::Slice(),
          indexing::Slice(0, seq_len),
          indexing::Slice(seq_len, max_seq_len)},
         0);
-    attn_scores.index_put_(
+    output.index_put_(
         {i,
          indexing::Slice(),
          indexing::Slice(seq_len, max_seq_len),
          indexing::Slice(0, max_seq_len)},
         0);
   }
+  return output;
 }
 
+Tensor NestedTensor_softmax_dropout_cuda(const Tensor& self, const Tensor& query) {
+  c10::optional<Tensor> attn_mask;
+
+  attn_mask = NestedTensor_to_mask(query, 2, self.size(2));
+  attn_mask = attn_mask->to(query.device(), /*non-blocking=*/true);
+  return _masked_softmax(self, *attn_mask, self.dim() - 1, /*mask type */ 1 );  // NestedTensor_to_mask produces a BxT mask
+}
 
 Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
@@ -227,8 +210,10 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
   return offsets;
 }
 
+
 Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length) {
   auto* nt_impl = get_nested_tensor_impl(nt);
+  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_impl), "to_mask only works on contiguous NestedTensors.");
   TORCH_CHECK(
       !mask_dim || *mask_dim < nt.dim(),
       "Requested mask dimension ",
@@ -260,5 +245,6 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c
   }
   return result;
 }
+
 } // namespace native
 } // namespace at

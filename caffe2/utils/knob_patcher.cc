@@ -82,7 +82,7 @@ class Patcher {
       if (iter == patches_.end()) {
         LOG(FATAL) << "patch node not found when unpatching knob value";
       }
-      CHECK_EQ(iter->second, node);
+      TORCH_CHECK_EQ(iter->second, node);
       if (node->prev) {
         iter->second = node->prev;
       } else {

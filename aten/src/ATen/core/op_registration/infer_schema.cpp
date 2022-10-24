@@ -23,7 +23,7 @@ std::vector<Argument> createArgumentVector(c10::ArrayRef<ArgumentDef> args) {
   result.reserve(args.size());
   for (const auto i : c10::irange(args.size())) {
     // Arguments are named "_<index>"
-    result.emplace_back(fastToString(i), (*args[i].getTypeFn)());
+    result.emplace_back(fastToString(i), (*args[i].getFakeTypeFn)(), (*args[i].getTypeFn)());
   }
   return result;
 }

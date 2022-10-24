@@ -1,13 +1,12 @@
 import torch
 from torch.fx.graph import Node, Graph
-from ..utils import _parent_name
-from torch.ao.quantization.quantization_types import NodePattern, Pattern
+from ..utils import _parent_name, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
 from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
-
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 __all__ = [
     "DefaultFuseHandler",
@@ -39,7 +38,7 @@ class FuseHandler(ABC):
              is_qat: bool) -> Node:
         pass
 
-# TODO: move this to backend_config.fuse_handler
+# TODO: move this to backend_config_utils
 class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
@@ -91,7 +90,7 @@ class DefaultFuseHandler(FuseHandler):
             if isinstance(m, tuple):
                 return tuple(map(get_matched_types, m))
             if isinstance(m, torch.nn.Module):
-                return type(m)
+                return type_before_parametrizations(m)
             return m
 
         matched_module_types = get_matched_types(matched_modules)

@@ -13,6 +13,16 @@ namespace api {
 // ShaderSource
 //
 
+ShaderSource::ShaderSource()
+    : type(ShaderSource::Type::SPIRV),
+      src_code{
+          .spirv =
+              {
+                  nullptr,
+                  0u,
+              },
+      } {}
+
 ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
     : type(ShaderSource::Type::GLSL),
       src_code{
@@ -27,7 +37,8 @@ ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
 ShaderSource::ShaderSource(
     std::string name,
     const uint32_t* const spirv_bin,
-    const uint32_t size)
+    const uint32_t size,
+    const std::vector<VkDescriptorType>& layout)
     : type(Type::SPIRV),
       src_code{
           .spirv =
@@ -36,7 +47,8 @@ ShaderSource::ShaderSource(
                   size,
               },
       },
-      kernel_name{std::move(name)} {}
+      kernel_name{std::move(name)},
+      kernel_layout{layout} {}
 
 bool operator==(const ShaderSource& _1, const ShaderSource& _2) {
   if (_1.type != _2.type) {

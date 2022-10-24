@@ -51,7 +51,7 @@ def get_cmake_cache_variables_from_file(
       dict: A ``dict`` containing the value of cached CMake variables.
     """
 
-    results = dict()
+    results = {}
     for i, line in enumerate(cmake_cache_file, 1):
         line = line.strip()
         if not line or line.startswith(("#", "//")):

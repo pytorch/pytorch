@@ -157,7 +157,7 @@ default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32, compute_dtype=torch.float16),
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float16, compute_dtype=torch.float16),
                                   weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
@@ -228,23 +228,35 @@ def get_default_qconfig(backend='fbgemm', version=0):
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
-        `qnnpack` and `onednn`.
+      * `backend` (str): a string representing the target backend. Currently supports
+        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
 
     Return:
         qconfig
     """
+    supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
+    if backend not in supported_backends:
+        raise AssertionError(
+            "backend: " + str(backend) +
+            " not supported. backend must be one of {}".format(supported_backends)
+        )
+
     if version == 0:
         if backend == 'fbgemm':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                               weight=default_per_channel_weight_observer)
         elif backend == 'qnnpack':
+            # TODO: make this compatible with xnnpack constraints
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
         elif backend == 'onednn':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
+        elif backend == 'x86':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
+                              weight=default_per_channel_weight_observer)
         else:
+            # won't reach
             qconfig = default_qconfig
     else:
         raise AssertionError("Version number: " + str(version) +
@@ -299,13 +311,20 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
     Returns the default QAT qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
-        `qnnpack` and `onednn`.
+      * `backend` (str): a string representing the target backend. Currently supports
+        `x86`, `fbgemm` (default), `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
         qconfig
     """
+    supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
+    if backend not in supported_backends:
+        raise AssertionError(
+            "backend: " + str(backend) +
+            " not supported. backend must be one of {}".format(supported_backends)
+        )
+
     # Histogram observer is too slow for quantization aware training
     if version == 0:
         if backend == 'fbgemm':
@@ -325,6 +344,12 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                 quant_min=0,
                                                                 quant_max=255),
                               weight=default_per_channel_weight_fake_quant)
+        if backend == 'x86':
+            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                quant_min=0,
+                                                                quant_max=255,
+                                                                reduce_range=True),
+                              weight=default_per_channel_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
     # Use the fused observe + fake_quant modules for doing QAT.
@@ -336,6 +361,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                                  reduce_range=True),
                               weight=default_fused_per_channel_wt_fake_quant)
         elif backend == 'qnnpack':
+            # TODO: make this compatible with xnnpack constraints
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
                                                                                  quant_max=255,
@@ -345,6 +371,12 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
                                                                                  quant_max=255),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'x86':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
                               weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2
@@ -412,6 +444,7 @@ def assert_valid_qconfig(qconfig: Optional[QConfig],
 
 # TODO: remove QConfigAny and replace it with Optional[QConfig]
 QConfigAny = Optional[QConfig]
+QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
 def add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,

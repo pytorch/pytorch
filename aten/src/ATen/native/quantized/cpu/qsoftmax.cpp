@@ -94,7 +94,7 @@ Tensor qsoftmax_qnnpack(const Tensor& qx, const int64_t dim) {
   TORCH_CHECK(
       status == pytorch_qnnp_status_success,
       "failed to create QNNPACK Softmax operator");
-  CHECK_NOTNULL(softargmax);
+  TORCH_CHECK_NOTNULL(softargmax);
 
   status = pytorch_qnnp_setup_softargmax_nc_q8(
       softargmax, batch_size, input, input_stride, output, output_stride);

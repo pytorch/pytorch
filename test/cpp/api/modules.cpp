@@ -1225,7 +1225,7 @@ TEST_F(ModulesTest, Unfold) {
         model(torch::randn({1, 2, 2, 2})),
         "Given input with spatial size (2, 2), kernel_size=(2, 3), "
         "dilation=(1, 1), padding=(0, 0), calculated shape of the array of "
-        "sliding blocks as (1, 0), which is too small (non-positive).");
+        "sliding blocks as (1, 0), but its components must be at least one.");
   }
 }
 
@@ -3526,7 +3526,7 @@ void _multihead_attn_test_helper(
     const torch::Tensor V = K;
     const torch::Tensor Q =
         decoder_state.clone().resize_({batch_sz, 1, d_model});
-    auto attn_mask = torch::randint(0, 2, {1, seq_len});
+    auto attn_mask = torch::randint(0, 2, {1, seq_len}, torch::kFloat);
     const torch::Tensor attn_mask_tensor = attn_mask.clone();
     attn_mask_tensor.masked_fill_(
         attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());

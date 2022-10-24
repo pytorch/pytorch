@@ -53,6 +53,20 @@ void set_magma_init_fn(void (*fn)()) {
   magma_init_fn = fn;
 }
 
+// Sets the CUDA_MODULE_LOADING environment variable
+// if it's not set by the user.
+void maybe_set_cuda_module_loading(const std::string &def_value) {
+  auto value = std::getenv("CUDA_MODULE_LOADING");
+  if (!value) {
+#ifdef _WIN32
+    auto env_var = "CUDA_MODULE_LOADING=" + def_value;
+    _putenv(env_var.c_str());
+#else
+    setenv("CUDA_MODULE_LOADING", def_value.c_str(), 1);
+#endif
+  }
+}
+
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
@@ -62,6 +76,7 @@ void CUDAHooks::initCUDA() const {
   // have a chance to enable vitals.
   at::vitals::VitalsAPI.setVital("CUDA", "used", "true", /* force = */ true);
 
+  maybe_set_cuda_module_loading("LAZY");
   const auto num_devices = c10::cuda::device_count_ensure_non_zero();
   c10::cuda::CUDACachingAllocator::init(num_devices);
   at::cuda::detail::init_p2p_access_cache(num_devices);
@@ -257,6 +272,20 @@ bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 7) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
+#if AT_CUDNN_ENABLED()
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
     return true;
   } else {
     return false;

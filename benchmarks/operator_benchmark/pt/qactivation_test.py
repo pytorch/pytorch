@@ -1,5 +1,5 @@
 import torch
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized.functional as qF
 
 import operator_benchmark as op_bench
 
@@ -44,9 +44,9 @@ qactivation_ops = op_bench.op_list(
     attrs=(
         ('relu', torch.nn.ReLU()),
         ('relu6', torch.ops.quantized.relu6),
-        ('functional.hardtanh', nnq.functional.hardtanh),
-        ('functional.hardsigmoid', nnq.functional.hardsigmoid),
-        ('functional.leaky_relu', nnq.functional.leaky_relu),
+        ('functional.hardtanh', qF.hardtanh),
+        ('functional.hardsigmoid', qF.hardsigmoid),
+        ('functional.leaky_relu', qF.leaky_relu),
         ('functional.sigmoid', torch.nn.functional.sigmoid),
         ('functional.tanh', torch.nn.functional.tanh),
     ),
@@ -92,9 +92,9 @@ op_bench.generate_pt_tests_from_op_list(qactivation_ops,
 
 qactivation_scale_zero_point_ops = op_bench.op_list(
     attrs=(
-        ('functional.hardswish', nnq.functional.hardswish),
-        ('functional.elu', nnq.functional.elu),
-        ('functional.celu', nnq.functional.celu),
+        ('functional.hardswish', qF.hardswish),
+        ('functional.elu', qF.elu),
+        ('functional.celu', qF.celu),
     ),
     attr_names=('op_name', 'op_func'),
 )

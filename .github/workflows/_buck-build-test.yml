@@ -28,7 +28,7 @@ jobs:
           activate-environment: build
 
       - name: Install dependencies
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         with:
           timeout_minutes: 10
           max_attempts: 5
@@ -46,16 +46,17 @@ jobs:
               typing_extensions
 
       - name: Install Buck
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         with:
           timeout_minutes: 10
           max_attempts: 5
           command: |
-            wget https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
+            sudo apt update -q
+            wget -q https://github.com/facebook/buck/releases/download/v2021.01.12.01/buck.2021.01.12.01_all.deb
             sudo apt install ./buck.2021.01.12.01_all.deb
 
       - name: Download third party libraries and generate wrappers
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         with:
           timeout_minutes: 10
           max_attempts: 5

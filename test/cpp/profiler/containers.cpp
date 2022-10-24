@@ -77,3 +77,18 @@ TEST(ProfilerTest, clock_converter) {
   EXPECT_LT(std::abs(deltas[n / 2]), 200);
   EXPECT_LT(deltas[n * 3 / 4] - deltas[n / 4], 50);
 }
+
+TEST(ProfilerTest, soft_assert) {
+  EXPECT_TRUE(SOFT_ASSERT(true));
+  torch::profiler::impl::setSoftAssertRaises(true);
+  EXPECT_ANY_THROW(SOFT_ASSERT(false));
+  torch::profiler::impl::setSoftAssertRaises(false);
+  EXPECT_NO_THROW(SOFT_ASSERT(false));
+  // Reset soft assert behavior to default
+  torch::profiler::impl::setSoftAssertRaises(c10::nullopt);
+#ifdef NDEBUG
+  EXPECT_NO_THROW(SOFT_ASSERT(false));
+#else
+  EXPECT_ANY_THROW(SOFT_ASSERT(false));
+#endif
+}

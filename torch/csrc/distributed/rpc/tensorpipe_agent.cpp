@@ -495,8 +495,7 @@ void TensorPipeAgent::startImpl() {
 
   // Store our own url.
   const auto address = listener_->url(lowestPriorityTransport);
-  const std::vector<uint8_t> selfAddrData(address.begin(), address.end());
-  nameToAddressStore_.set(workerInfo_.name_, selfAddrData);
+  nameToAddressStore_.set(workerInfo_.name_, address);
 
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is using address "
           << address;

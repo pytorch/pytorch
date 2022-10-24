@@ -25,9 +25,9 @@ class RoIAlignOp final : public Operator<Context> {
         OP_SINGLE_ARG(int, "pooled_w", pooled_w_, 1),
         OP_SINGLE_ARG(int, "sampling_ratio", sampling_ratio_, -1),
         OP_SINGLE_ARG(bool, "aligned", aligned_, false) {
-    DCHECK_GT(spatial_scale_, 0.0f);
-    DCHECK_GT(pooled_h_, 0);
-    DCHECK_GT(pooled_w_, 0);
+    TORCH_DCHECK_GT(spatial_scale_, 0.0f);
+    TORCH_DCHECK_GT(pooled_h_, 0);
+    TORCH_DCHECK_GT(pooled_w_, 0);
     DCHECK(order_ == StorageOrder::NCHW || order_ == StorageOrder::NHWC);
   }
 

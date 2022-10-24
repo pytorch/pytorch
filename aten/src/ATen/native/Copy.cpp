@@ -1,21 +1,29 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
 #include <ATen/metal/Context.h>
-#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_copy_from.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/expand_copy.h>
+#endif
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -261,13 +269,18 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // That might be fine for functorch (which already doesn't preserve strides in vmap),
   // but it's worth looking into whether or not this implementation will be problematic for LazyTensor/XLA.
   auto intermediate = src.to(self, non_blocking);
-  // Unfortunately, copy()'s decomposition involves view ops.
-  // To preserve the functionalization pass semantics of "maybe reapply views",
-  // we need to manually do that here.
-  if (at::functionalization::impl::getFunctionalizationReapplyViewsTLS()) {
-    return intermediate.expand(self.sizes());
+  // We can't use expand() here. Why?
+  // The contract for copy_() is that the output tensor has the same amount of storage as the original tensor.
+  // e.g. This should work:
+  //   a = torch.ones(4, 4)
+  //   b = torch.ones(1, 4)
+  //   c = torch.ones(4, 4)
+  //   torch.ops.aten.copy(a, b).add_(c)
+  // We don't want to emit an extra copy every time though, so we only do it if the shapes are different.
+  if (self.sym_sizes() != intermediate.sym_sizes()) {
+    return at::expand_copy_symint(intermediate, self.sym_sizes());
   } else {
-    return at::expand_copy(intermediate, self.sizes());
+    return intermediate;
   }
 }
 

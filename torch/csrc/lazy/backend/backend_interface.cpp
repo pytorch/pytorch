@@ -1,4 +1,5 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {

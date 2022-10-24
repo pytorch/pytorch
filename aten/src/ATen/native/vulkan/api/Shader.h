@@ -4,34 +4,15 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
+
+#include <mutex>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
-
-struct ShaderSource final {
-  enum class Type { GLSL, SPIRV } type;
-
-  union {
-    struct {
-      const char* src; // Null-terminated
-      uint32_t unused; // padding
-    } glsl;
-    struct {
-      const uint32_t* bin;
-      uint32_t size;
-    } spirv;
-  } src_code;
-
-  std::string kernel_name;
-  explicit ShaderSource(std::string name, const char* glsl);
-  explicit ShaderSource(
-      std::string name,
-      const uint32_t* spirv,
-      uint32_t bytes);
-};
 
 class ShaderLayout final {
  public:
@@ -61,6 +42,37 @@ class ShaderLayout final {
   // be used in the hash map.
   friend void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept;
 };
+
+struct ShaderSource final {
+  enum class Type { GLSL, SPIRV } type;
+
+  union {
+    struct {
+      const char* src; // Null-terminated
+      uint32_t unused; // padding
+    } glsl;
+    struct {
+      const uint32_t* bin;
+      uint32_t size;
+    } spirv;
+  } src_code;
+
+  std::string kernel_name{""};
+  ShaderLayout::Signature kernel_layout{};
+
+  // Shader Metadata
+  utils::uvec3 out_tile_size{1u, 1u, 1u};
+
+  explicit ShaderSource();
+  explicit ShaderSource(std::string, const char*);
+  explicit ShaderSource(
+      std::string,
+      const uint32_t*,
+      const uint32_t,
+      const std::vector<VkDescriptorType>&);
+};
+
+bool operator==(const ShaderSource& _1, const ShaderSource& _2);
 
 class ShaderModule final {
  public:

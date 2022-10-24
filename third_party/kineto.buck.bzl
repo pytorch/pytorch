@@ -168,3 +168,14 @@ def define_kineto():
             ":fmt",
         ],
     )
+
+    cxx_library(
+        name = "libkineto_headers",
+        exported_headers = native.glob([
+            "kineto/libkineto/include/*.h",
+        ]),
+        public_include_directories = [
+            "kineto/libkineto/include",
+        ],
+        visibility = ["PUBLIC"],
+    )

@@ -7,7 +7,7 @@
 #ifndef USE_NUMPY
 namespace torch {
 namespace utils {
-PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+PyObject* tensor_to_numpy(const at::Tensor&, bool) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_numpy(
@@ -27,6 +27,10 @@ bool is_numpy_scalar(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
+
+void warn_numpy_not_writeable() {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
 } // namespace utils
@@ -232,7 +236,6 @@ at::Tensor tensor_from_numpy(
     stride /= element_size_in_bytes;
   }
 
-  size_t storage_size = 1;
   for (const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
       throw ValueError(
@@ -241,8 +244,6 @@ at::Tensor tensor_from_numpy(
           "(You can probably work around this by making a copy of your array "
           " with array.copy().) ");
     }
-    // XXX: this won't work for negative strides
-    storage_size += (sizes[i] - 1) * strides[i];
   }
 
   void* data_ptr = PyArray_DATA(array);
@@ -252,7 +253,7 @@ at::Tensor tensor_from_numpy(
         "Conversion between byte orders is currently not supported.");
   }
   Py_INCREF(obj);
-  return at::from_blob(
+  return at::lift_fresh(at::from_blob(
       data_ptr,
       sizes,
       strides,
@@ -260,7 +261,7 @@ at::Tensor tensor_from_numpy(
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },
-      at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array))));
+      at::device(kCPU).dtype(numpy_dtype_to_aten(PyArray_TYPE(array)))));
 }
 
 int aten_to_numpy_dtype(const ScalarType scalar_type) {
@@ -359,7 +360,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       THPObjectPtr(PyObject_GetAttrString(obj, "__cuda_array_interface__"));
   TORCH_INTERNAL_ASSERT(cuda_dict);
 
-  if (!PyDict_Check(cuda_dict)) {
+  if (!PyDict_Check(cuda_dict.get())) {
     throw TypeError("`__cuda_array_interface__` must be a dict");
   }
 

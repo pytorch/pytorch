@@ -19,6 +19,7 @@ def pt_operator_library(
         train = False,
         model = None,
         include_all_operators = False,
+        include_base_operators = True,
         **kwargs):
     (model_name, model_versions, model_assets, model_traced_backends) = validate_and_extract_model_information(
         name,
@@ -28,8 +29,9 @@ def pt_operator_library(
     ops = [op.strip() for op in ops]
 
     # If ops are specified, then we are in static selective build mode, so we append
-    # base ops to this list to avoid additional special case logic in subsequent code.
-    if len(ops) > 0:
+    # base ops to this list to avoid additional special case logic in subsequent code,
+    # unless include_base_operators is explicitly set to False (the default is True)
+    if len(ops) > 0 and include_base_operators:
         ops.extend(PT_BASE_OPS)
 
     labels = kwargs.pop("labels", [])
@@ -52,11 +54,11 @@ def pt_operator_library(
             "{optionally_model_traced_backends} " +
             "{optionally_include_all_operators}"
         ).format(
-            exe = "//tools:gen_operators_yaml" if IS_OSS else "//xplat/caffe2/tools:gen_operators_yaml",
+            exe = "//tools:gen_operators_yaml" if IS_OSS else "fbsource//xplat/caffe2/tools:gen_operators_yaml",
             rule_name = name,
             model_name = model_name,
-            dep_graph_yaml = "none" if IS_OSS else "$(location //xplat/caffe2:pytorch_op_deps)/fb/pytorch_op_deps.yaml ",
-            models_yaml = "none" if IS_OSS else "$(location //xplat/pytorch_models:all_mobile_model_configs)/build/all_mobile_model_configs.yaml ",
+            dep_graph_yaml = "none" if IS_OSS else "$(location fbsource//xplat/caffe2:pytorch_op_deps)/fb/pytorch_op_deps.yaml ",
+            models_yaml = "none" if IS_OSS else "$(location fbsource//xplat/pytorch_models:all_mobile_model_configs)/build/all_mobile_model_configs.yaml ",
             optionally_root_ops = "--root_ops " + (",".join(ops)) if len(ops) > 0 else "",
             optionally_training_root_ops = "--training_root_ops " + (",".join(ops)) if len(ops) > 0 and train else "",
             optionally_model_versions = "--model_versions " + (",".join(model_versions)) if model_versions != None else "",

@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -558,6 +559,37 @@ TEST(SchemaParserTest, Futures) {
 TEST(SchemaParserTest, AnnotatedAliasSets) {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
+}
+
+TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
+  const auto s = parseSchema(
+      "at::foo(Tensor(a!) self, Tensor(b!)[] out)"
+      " -> ()");
+  const AliasInfo* selfAliasInfo = s.arguments().at(0).alias_info();
+  const AliasInfo* outAliasInfo = s.arguments().at(1).alias_info();
+  ASSERT_TRUE(
+      selfAliasInfo->beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::a")});
+  ASSERT_TRUE(selfAliasInfo->isWrite());
+
+  ASSERT_TRUE(outAliasInfo->isWrite());
+  ASSERT_TRUE(outAliasInfo->beforeSets().empty());
+  ASSERT_EQ(outAliasInfo->containedTypes().size(), 1);
+
+  auto containedType = outAliasInfo->containedTypes()[0];
+
+  ASSERT_TRUE(containedType.isWrite());
+  ASSERT_TRUE(
+      containedType.beforeSets() ==
+      std::unordered_set<Symbol>{Symbol::fromQualString("alias::b")});
+}
+
+TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
+  EXPECT_THAT(
+      []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
+      ::testing::Throws<std::runtime_error>(::testing::Property(
+          &std::runtime_error::what,
+          ::testing::HasSubstr("expected ident but found '!' here"))));
 }
 
 TEST(SchemaParserTest, BeforeAfterSets) {
@@ -1413,6 +1445,83 @@ TEST(TestSymInt, AddSymbolicInt) {
   c10::SymInt b(3);
   ASSERT_TRUE((a + b).expect_int() == 8);
 }
+
+#ifndef C10_MOBILE
+TEST(TestSymInt, TestIntrusive) {
+  auto a = c10::make_intrusive<c10::SymIntNodeImpl>();
+  auto b = c10::make_intrusive<c10::SymIntNodeImpl>();
+  ASSERT_EQ(a.use_count(), 1);
+  ASSERT_EQ(b.use_count(), 1);
+  auto as = a->toSymInt();
+  auto bs = b->toSymInt();
+  ASSERT_EQ(a.use_count(), 2);
+  ASSERT_EQ(b.use_count(), 2);
+  as = bs;
+  ASSERT_EQ(a.use_count(), 1);
+  ASSERT_EQ(b.use_count(), 3);
+}
+
+class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
+ public:
+  TestSymIntNodeImpl(int64_t i) : i_(i) {}
+
+  bool bool_() override {
+    return static_cast<bool>(i_);
+  };
+
+#define OPDEF3(NAME, OP, RET)                                            \
+  RET NAME(const c10::SymIntNode& other) override {                      \
+    return make_intrusive<TestSymIntNodeImpl>(                           \
+        this->i_ OP dynamic_cast<TestSymIntNodeImpl*>(other.get())->i_); \
+  }
+
+#define OPDEF2(NAME, OP) OPDEF3(NAME, OP, c10::SymIntNode)
+  OPDEF2(add, +)
+  OPDEF2(sub, -)
+  OPDEF2(mul, *)
+  OPDEF2(floordiv, /)
+  OPDEF2(mod, %)
+
+  OPDEF2(eq, ==)
+  OPDEF2(ne, !=)
+  OPDEF2(lt, <)
+  OPDEF2(le, <=)
+  OPDEF2(gt, >)
+  OPDEF2(ge, >=)
+#undef OPDEF2
+#undef OPDEF3
+
+  int64_t i_;
+};
+
+TEST(TestSymInt, TestSymIntToSymIntNodeDispatch) {
+  auto get = [](c10::SymInt si) {
+    auto node = si.toSymIntNodeImpl();
+    return dynamic_cast<TestSymIntNodeImpl*>(node.get())->i_;
+  };
+
+  std::vector<int64_t> inputs{0, 1, -1, 4, -4, 777, -777};
+  for (auto i : inputs) {
+    for (auto j : inputs) {
+      auto a = c10::make_intrusive<TestSymIntNodeImpl>(i)->toSymInt();
+      auto b = c10::make_intrusive<TestSymIntNodeImpl>(j)->toSymInt();
+      ASSERT_EQ(get(a + b), i + j);
+      ASSERT_EQ(get(a - b), i - j);
+      ASSERT_EQ(get(a * b), i * j);
+      if (j != 0) {
+        ASSERT_EQ(get(a / b), i / j);
+        ASSERT_EQ(get(a % b), i % j);
+      }
+      ASSERT_EQ(a == b, i == j);
+      ASSERT_EQ(a != b, i != j);
+      ASSERT_EQ(a < b, i < j);
+      ASSERT_EQ(a <= b, i <= j);
+      ASSERT_EQ(a > b, i > j);
+      ASSERT_EQ(a >= b, i >= j);
+    }
+  }
+}
+#endif
 
 TEST(FallbackGraphsTest, Basic) {
   auto x = at::randn({1}, at::kCPU);
@@ -3068,6 +3177,29 @@ TEST_F(Composed, ComposedOp) {
   ASSERT_TRUE(at::allclose(inp_2, ref1));
   torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
 #endif
+}
+
+TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+  const auto src = R"IR(
+    graph():
+        %none: NoneType = prim::Constant()
+        %dim: int = prim::Constant[value=3]()
+        %shape: int[] = prim::ListConstruct(%dim, %dim)
+        %weight: Tensor = aten::ones(%shape, %none, %none, %none, %none)
+        %scale: float = prim::Constant[value=1.]()
+        %zero_point: int = prim::Constant[value=0]()
+        %dtype: int = prim::Constant[value=12]()
+        %weight_q: Tensor = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
+        %params: __torch__.torch.classes.quantized.LinearPackedParamsBase = quantized::linear_prepack(%weight_q, %none)
+        return (%params)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  ConstantPropagation(graph);
+
+  testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
 }
 
 } // namespace jit

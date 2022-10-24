@@ -2,6 +2,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FuncTorchTLS.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/library.h>
@@ -12,6 +13,7 @@
 
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <iostream>
 
@@ -291,12 +293,39 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def(
+      // Returns whether or not a direct kernel registration exists
+      // for this <op_name, dispatch_key> pair.
       "_dispatch_has_kernel_for_dispatch_key",
+      [](const char* name, c10::DispatchKey dispatch) -> bool {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        TORCH_CHECK(op, "operator ", name, " does not exist");
+        return op->hasKernelForDispatchKey(dispatch);
+      });
+
+  m.def(
+      "_dispatch_has_kernel_for_any_dispatch_key",
+      [](const char* name, c10::DispatchKeySet ks) -> bool {
+        auto op =
+            c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
+        TORCH_CHECK(op, "operator ", name, " does not exist");
+        return op->hasKernelForAnyDispatchKey(ks);
+      });
+
+  m.def(
+      // Returns whether or not there is an entry in the runtime computed
+      // dispatch table, for this <op_name, dispatch_key> pair. For example, if
+      // "op" has a `CompositeImplicitAutograd` kernel, Then
+      // _dispatch_has_computed_kernel_for_dispatch_key(op, backend) will return
+      // true for all backends that are part of the alias set for
+      // CompositeImplicitAutograd.
+      "_dispatch_has_computed_kernel_for_dispatch_key",
       [](const char* name, const char* dispatch) -> bool {
         auto op =
             c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
         TORCH_CHECK(op, "operator ", name, " does not exist");
-        return op->hasKernelForDispatchKey(c10::parseDispatchKey(dispatch));
+        return op->hasComputedKernelForDispatchKey(
+            c10::parseDispatchKey(dispatch));
       });
 
   m.def("_dispatch_find_dangling_impls", []() -> std::vector<std::string> {
@@ -311,20 +340,113 @@ void initDispatchBindings(PyObject* module) {
     return states;
   });
 
+  m.def("_dispatch_get_all_op_names", []() -> std::vector<std::string> {
+    auto op_names = c10::Dispatcher::singleton().getAllOpNames();
+
+    std::vector<std::string> names;
+    names.reserve(op_names.size());
+    for (auto& op : op_names) {
+      std::stringstream ss;
+      ss << op.name;
+      if (!op.overload_name.empty()) {
+        ss << "." << op.overload_name;
+      }
+      names.push_back(ss.str());
+    }
+
+    return names;
+  });
+
   m.def(
       "_dispatch_tls_set_dispatch_key_excluded",
-      [](const char* dispatch_key, bool desired_state) {
-        c10::impl::tls_set_dispatch_key_excluded(
-            c10::parseDispatchKey(dispatch_key), desired_state);
+      [](c10::DispatchKey dispatch_key, bool desired_state) {
+        c10::impl::tls_set_dispatch_key_excluded(dispatch_key, desired_state);
       });
-  m.def("_dispatch_tls_is_dispatch_key_excluded", [](const char* dispatch_key) {
-    return c10::impl::tls_is_dispatch_key_excluded(
-        c10::parseDispatchKey(dispatch_key));
-  });
+  m.def(
+      "_dispatch_tls_is_dispatch_key_excluded",
+      [](c10::DispatchKey dispatch_key) {
+        return c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
+      });
 
   m.def("_dispatch_isTensorSubclassLike", [](const at::Tensor& tensor) {
     return at::isTensorSubclassLike(tensor);
   });
+
+  m.def("_dispatch_key_name", [](c10::DispatchKey k) {
+    return c10::toString(k);
+  });
+  m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
+  m.def("_dispatch_num_backends", []() { return c10::num_backends; });
+
+#define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
+
+  py::enum_<c10::DispatchKey>(m, "DispatchKey") DEF_ONE(Undefined)
+      DEF_ONE(CompositeExplicitAutogradNonFunctional)
+          DEF_ONE(CompositeExplicitAutograd)
+              DEF_ONE(CompositeImplicitAutogradNestedTensor)
+                  DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
+                      DEF_ONE(Autograd) DEF_ONE(BackendSelect)
+                          DEF_ONE(ADInplaceOrView) DEF_ONE(PythonTLSSnapshot)
+                              DEF_ONE(Python)
+
+#define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
+#define DEF_MULTIPLE(fullname, prefix)              \
+  DEF_SINGLE(, fullname)                            \
+  DEF_SINGLE(, StartOf##fullname##Backends)         \
+  C10_FORALL_BACKEND_COMPONENTS(DEF_SINGLE, prefix) \
+  DEF_SINGLE(, EndOf##fullname##Backends)
+
+                                  C10_FORALL_FUNCTIONALITY_KEYS(DEF_MULTIPLE)
+
+#undef DEF_MULTIPLE
+#undef DEF_SINGLE
+                                      ;
+
+  py::class_<c10::DispatchKeySet>(m, "DispatchKeySet")
+      .def(py::init<c10::DispatchKey>())
+      .def("__or__", &c10::DispatchKeySet::operator|)
+      .def("__sub__", &c10::DispatchKeySet::operator-)
+      .def("__and__", &c10::DispatchKeySet::operator&)
+      .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
+      .def("has", &c10::DispatchKeySet::has)
+      .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
+
+  m.attr("_dispatch_autogradother_backends") =
+      py::cast(c10::autogradother_backends);
+
+  m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) {
+    return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t);
+  });
+
+  m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
+    return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
+  });
+
+  m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
+    return c10::toString(keyset);
+  });
+
+  m.def("_dispatch_get_backend_keyset_from_autograd", [](c10::DispatchKey k) {
+    return c10::getBackendKeySetFromAutograd(k);
+  });
+
+  m.def("_dispatch_keys", [](const at::Tensor& tensor) {
+    auto* impl = tensor.unsafeGetTensorImpl();
+    return impl->key_set();
+  });
+  m.def("_dispatch_tls_local_include_set", []() {
+    return c10::impl::tls_local_dispatch_key_set().included_;
+  });
+  m.def("_dispatch_tls_local_exclude_set", []() {
+    return c10::impl::tls_local_dispatch_key_set().excluded_;
+  });
+  m.def(
+      "_dispatch_is_included_in_alias",
+      [](c10::DispatchKey a, c10::DispatchKey b) {
+        return c10::isIncludedInAlias(a, b);
+      });
+  py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
+      .def(py::init<c10::DispatchKeySet>());
 
   py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
       .def(py::init<>());
@@ -365,6 +487,13 @@ void initDispatchBindings(PyObject* module) {
         return names;
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
+
+  m.def("_are_functorch_transforms_active", []() {
+    auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
+    return (
+        include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
+        include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
+  });
 }
 
 } // namespace dispatch

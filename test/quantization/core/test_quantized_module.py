@@ -4,10 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
-import torch.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.quantization
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 
 from torch.ao.quantization import (
     get_default_static_quant_module_mappings,
@@ -624,7 +624,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                                        dtype=torch.quint8)
         qX_expect = torch.nn.functional.max_pool2d(qX, **kwargs)
 
-        pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)
+        pool_under_test = torch.ao.nn.quantized.MaxPool2d(**kwargs)
         qX_hat = pool_under_test(qX)
         self.assertEqual(qX_expect, qX_hat)
 
@@ -1011,6 +1011,30 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.checkEmbeddingSerialization(qemb, num_embeddings, embedding_dim, indices,
                                              offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
 
+    def test_prelu(self):
+        x = torch.randn((4, 4, 4, 4), dtype=torch.float)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.quint8)
+
+        # num_parameters = 1
+        prelu_module = nnq.PReLU(output_scale=1.0, output_zero_point=0, num_parameters=1)
+        w = torch.randn(1, dtype=torch.float)
+        qw = torch.quantize_per_tensor(w, 1.0, 0, dtype=torch.quint8)
+        prelu_module.set_weight(qw)
+        qy = prelu_module(qx)
+        qy_ref = torch.prelu(qx, qw)
+
+        self.assertEqual(qy_ref, qy,
+                         msg="PReLU module API failed")
+
+        # num_parameters = num_channels
+        prelu_module = nnq.PReLU(output_scale=1.0, output_zero_point=0, num_parameters=4)
+        w = torch.randn(4, dtype=torch.float)
+        qw = torch.quantize_per_tensor(w, 1.0, 0, dtype=torch.quint8)
+        prelu_module.set_weight(qw)
+        qy = prelu_module(qx)
+        qy_ref = torch.prelu(qx, qw)
+        self.assertEqual(qy_ref, qy,
+                         msg="PReLU module API failed")
 
 class TestDynamicQuantizedModule(QuantizationTestCase):
     def _test_qconv_impl(self, q_mod, dq_mod, dim, dtype, bias):
@@ -1130,8 +1154,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
     @override_qengines
     def test_dynamic_conv1d(self):
-        q_mod = torch.nn.quantized.Conv1d
-        dq_mod = torch.nn.quantized.dynamic.Conv1d
+        q_mod = torch.ao.nn.quantized.Conv1d
+        dq_mod = torch.ao.nn.quantized.dynamic.Conv1d
         dim = 3
         dtype = torch.quint8
 
@@ -1140,8 +1164,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
     @override_qengines
     def test_dynamic_conv2d(self):
-        q_mod = torch.nn.quantized.Conv2d
-        dq_mod = torch.nn.quantized.dynamic.Conv2d
+        q_mod = torch.ao.nn.quantized.Conv2d
+        dq_mod = torch.ao.nn.quantized.dynamic.Conv2d
         dim = 4
         dtype = torch.quint8
 
@@ -1150,8 +1174,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
     @override_qengines
     def test_dynamic_conv3d(self):
-        q_mod = torch.nn.quantized.Conv3d
-        dq_mod = torch.nn.quantized.dynamic.Conv3d
+        q_mod = torch.ao.nn.quantized.Conv3d
+        dq_mod = torch.ao.nn.quantized.dynamic.Conv3d
         dim = 5
         dtype = torch.quint8
 
@@ -1162,8 +1186,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
     @override_qengines
     def test_dynamic_convtranspose1d(self):
-        q_mod = torch.nn.quantized.ConvTranspose1d
-        dq_mod = torch.nn.quantized.dynamic.ConvTranspose1d
+        q_mod = torch.ao.nn.quantized.ConvTranspose1d
+        dq_mod = torch.ao.nn.quantized.dynamic.ConvTranspose1d
         dim = 3
         dtype = torch.quint8
 
@@ -1172,8 +1196,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
     @override_qengines
     def test_dynamic_convtranspose2d(self):
-        q_mod = torch.nn.quantized.ConvTranspose2d
-        dq_mod = torch.nn.quantized.dynamic.ConvTranspose2d
+        q_mod = torch.ao.nn.quantized.ConvTranspose2d
+        dq_mod = torch.ao.nn.quantized.dynamic.ConvTranspose2d
         dim = 4
         dtype = torch.quint8
 
@@ -1182,8 +1206,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
     @override_qengines
     def test_dynamic_convtranspose3d(self):
-        q_mod = torch.nn.quantized.ConvTranspose3d
-        dq_mod = torch.nn.quantized.dynamic.ConvTranspose3d
+        q_mod = torch.ao.nn.quantized.ConvTranspose3d
+        dq_mod = torch.ao.nn.quantized.dynamic.ConvTranspose3d
         dim = 5
         dtype = torch.quint8
 
@@ -1320,22 +1344,22 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             x = torch.randn(seq_len, batch, input_size)
             h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
             c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
-            cell_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
-                                                      hidden_size=hidden_size,
-                                                      num_layers=num_layers,
-                                                      bias=bias,
-                                                      batch_first=False,
-                                                      dropout=0.0,
-                                                      bidirectional=bidirectional,
-                                                      dtype=dtype)
-            ref_dq = torch.nn.quantized.dynamic.LSTM(input_size=input_size,
-                                                     hidden_size=hidden_size,
-                                                     num_layers=num_layers,
-                                                     bias=bias,
-                                                     batch_first=False,
-                                                     dropout=0.0,
-                                                     bidirectional=bidirectional,
-                                                     dtype=dtype)
+            cell_dq = torch.ao.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                         hidden_size=hidden_size,
+                                                         num_layers=num_layers,
+                                                         bias=bias,
+                                                         batch_first=False,
+                                                         dropout=0.0,
+                                                         bidirectional=bidirectional,
+                                                         dtype=dtype)
+            ref_dq = torch.ao.nn.quantized.dynamic.LSTM(input_size=input_size,
+                                                        hidden_size=hidden_size,
+                                                        num_layers=num_layers,
+                                                        bias=bias,
+                                                        batch_first=False,
+                                                        dropout=0.0,
+                                                        bidirectional=bidirectional,
+                                                        dtype=dtype)
 
             _all_params = ([m.param for m in cell_dq._all_weight_values])
             result = torch.quantized_lstm(x, (h, c),
@@ -1382,14 +1406,14 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
 
 
-            cell_dq = torch.nn.quantized.dynamic.GRU(input_size=input_size,
-                                                     hidden_size=hidden_size,
-                                                     num_layers=num_layers,
-                                                     bias=bias,
-                                                     batch_first=False,
-                                                     dropout=0.0,
-                                                     bidirectional=bidirectional,
-                                                     dtype=dtype)
+            cell_dq = torch.ao.nn.quantized.dynamic.GRU(input_size=input_size,
+                                                        hidden_size=hidden_size,
+                                                        num_layers=num_layers,
+                                                        bias=bias,
+                                                        batch_first=False,
+                                                        dropout=0.0,
+                                                        bidirectional=bidirectional,
+                                                        dtype=dtype)
 
             _all_params = ([m.param for m in cell_dq._all_weight_values])
             result = torch.quantized_gru(x,
@@ -1423,10 +1447,10 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         x = torch.rand(batch, input_size)
         h = torch.rand(batch, hidden_size)
-        cell_dict = {'LSTMCell': torch.nn.quantized.dynamic.LSTMCell,
-                     'GRUCell': torch.nn.quantized.dynamic.GRUCell,
-                     'RNNTanh': torch.nn.quantized.dynamic.RNNCell,
-                     'RNNReLU': torch.nn.quantized.dynamic.RNNCell
+        cell_dict = {'LSTMCell': torch.ao.nn.quantized.dynamic.LSTMCell,
+                     'GRUCell': torch.ao.nn.quantized.dynamic.GRUCell,
+                     'RNNTanh': torch.ao.nn.quantized.dynamic.RNNCell,
+                     'RNNReLU': torch.ao.nn.quantized.dynamic.RNNCell
                      }
         state = {'LSTMCell': (h, h),
                  'GRUCell': h,

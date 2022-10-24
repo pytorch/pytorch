@@ -1,7 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+from copy import deepcopy
 import functools
 import sys
+from collections import namedtuple
 from contextlib import suppress
 
 import torch
@@ -9,7 +11,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FlatParameter
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import ShardingStrategy
+from torch.distributed.fsdp import ShardingStrategy, CPUOffload
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     transformer_auto_wrap_policy,
@@ -53,6 +55,121 @@ class TestFSDPMisc(FSDPTest):
         return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_namedtuple(self):
+        # Ensure namedtuple support, preventing issues such as
+        # https://github.com/pytorch/pytorch/issues/83053
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(100, 100)
+
+            def forward(self, x):
+                return x
+
+        m = MyModule().cuda()
+        m = FSDP(m)
+        t = torch.ones(1, device="cuda", requires_grad=True)
+
+        MyOutputType = namedtuple(
+            "MyOutputType",
+            ["a", "b", "c", "d"],
+            defaults=(t, t, t, t)
+        )
+
+        inp = MyOutputType()
+        out = m(inp)
+        # Ensure hooks are registered
+        for x in out:
+            self.assertNotEqual([], list(x._backward_hooks.values()))
+
+        # TODO: we should check backward() and param is resharded
+        # as well, but this is blocked by
+        # https://github.com/pytorch/pytorch/issues/83107 and
+        # https://github.com/pytorch/pytorch/issues/83129
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_not_all_outputs_used_in_loss(self):
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = nn.Linear(4, 4)
+                self.lin2 = nn.Linear(4, 4)
+
+            def forward(self, x):
+                a = self.lin1(x)
+                b = self.lin2(x)
+                return (a, b)
+
+        def _check_resharded(fsdp_module):
+            for handle in fsdp_module._handles:
+                param = handle.flat_param
+                if handle.uses_sharded_strategy:
+                    full_param = param._full_param_padded
+                    self.assertEqual(full_param.storage().size(), 0)
+
+                self.assertEqual(
+                    param.data_ptr(),
+                    param._local_shard.data_ptr()
+                )
+
+        def _check_equal(local, fsdp):
+            with FSDP.summon_full_params(fsdp):
+                for p1, p2 in zip(fsdp.parameters(), local.parameters()):
+                    torch.testing.assert_allclose(p1, p2)
+
+        for sharding_strategy in [
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP,
+            ShardingStrategy.NO_SHARD
+        ]:
+            with self.subTest(sharding_strategy=sharding_strategy):
+                fsdp_ctor = functools.partial(FSDP, sharding_strategy=sharding_strategy)
+                m = MyModule().cuda()
+                m_local = deepcopy(m)
+                local_m = m_local
+                prev_params = [p.clone() for p in m_local.parameters()]
+
+                m.lin1 = fsdp_ctor(m.lin1)
+                m = fsdp_ctor(m)
+                _check_equal(m_local, m)
+
+                opt = torch.optim.SGD(m.parameters(), lr=1e-3)
+                opt_local = torch.optim.SGD(local_m.parameters(), lr=1e-3)
+
+                for i in range(6):
+                    t = torch.ones(4, device="cuda")
+                    a, b = m(t)
+                    local_a, local_b = local_m(t)
+                    if i < 2:
+                        # use both params in loss computation. Later,
+                        # b will go unused and we check grads are the
+                        # same as local training.
+                        loss = (a @ b).sum()
+                        loss_local = (local_a @ local_b).sum()
+                    else:
+                        loss = a.sum()
+                        loss_local = local_a.sum()
+
+                    loss.backward()
+                    loss_local.backward()
+                    _check_resharded(m)
+                    opt.step()
+                    opt_local.step()
+                    _check_equal(m_local, m)
+                    # Ensure at least some change from previous params, otherwise
+                    # above check would be vacuously true.
+                    self.assertTrue(
+                        any(not torch.equal(p1, p2) for p1, p2 in zip(prev_params, m_local.parameters()))
+                    )
+                    prev_params = [p.clone() for p in local_m.parameters()]
+                    opt.zero_grad()
+                    opt_local.zero_grad()
+
+                dist.barrier()
+
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
     @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
     def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):
@@ -89,8 +206,8 @@ class TestFSDPMisc(FSDPTest):
             loss.backward()
 
             # self.a receives grad, self.b does not
-            a_grad = fsdp.module.a._fsdp_wrapped_module.flat_param.grad
-            b_grad = fsdp.module.b._fsdp_wrapped_module.flat_param.grad
+            a_grad = fsdp.module.a._handles[0].flat_param.grad
+            b_grad = fsdp.module.b._handles[0].flat_param.grad
             self.assertIsNotNone(a_grad)
             self.assertIsNone(b_grad)
 
@@ -114,9 +231,42 @@ class TestFSDPMisc(FSDPTest):
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
             self.assertEqual(
-                fsdp_module.device_id,
+                fsdp_module.compute_device,
                 torch.device("cuda", torch.cuda.current_device()),
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_device_id_cpu_offload(self):
+        """
+        Ensures that even if device_id is specified but we have
+        CPU offload, module is on CPU after init.
+        """
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        model = MyModel()
+
+        fsdp = FSDP(
+            model,
+            auto_wrap_policy=always_wrap_policy,
+            cpu_offload=CPUOffload(offload_params=True),
+            device_id=torch.cuda.current_device()
+        )
+
+        cpu_device = torch.device("cpu")
+
+        for fsdp_unit in FSDP.fsdp_modules(fsdp):
+            # This FSDP unit may not directly manage
+            # any parameters.
+            if len(fsdp_unit.params) > 0:
+                fsdp_param = fsdp_unit.params[0]
+                self.assertEqual(fsdp_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])
@@ -169,7 +319,7 @@ class TestFSDPMisc(FSDPTest):
         )
         _check_device_matches(nested_wrapped_module, dev_id)
         # Check that passing in `torch.device("cuda")` for a GPU module warns
-        regex = "does not have explicit index"
+        regex = "does not have an explicit index"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
         )
@@ -191,8 +341,8 @@ class TestFSDPMisc(FSDPTest):
         module that does not match the GPU device ID raises an error."""
         context = (
             self.assertRaisesRegex(
-                RuntimeError,
-                f"on rank {self.rank}.*cuda:0, but is on cuda:{self.rank}"
+                ValueError,
+                f"cuda:{self.rank} vs cuda:0"
             ) if self.rank != 0 else suppress()
         )
         with context:
@@ -243,7 +393,7 @@ class TestFSDPMisc(FSDPTest):
         no_params = nn.ReLU().cuda()
         context = (
             self.assertRaisesRegex(
-                AssertionError,
+                ValueError,
                 f"Inconsistent.*cuda:{self.rank} vs cuda:0"
             )
         ) if self.rank != 0 else suppress()

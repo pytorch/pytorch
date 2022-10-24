@@ -125,17 +125,17 @@ _CURRENT_FULL_PRECISION_PARAM_DTYPE = None
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter, full_precision_param_dtype):
     """
-    Patches dist._reduce_scatter_base with a new reduce_scatter_base and
-    restores upon exiting. Used for validation of mixed precision
+    Patches ``dist.reduce_scatter_tensor`` with ``new_reduce_scatter`` and
+    restores upon exiting. Used for validation of mixed precision.
     """
-    orig_reduce_scatter = dist._reduce_scatter_base
-    dist._reduce_scatter_base = new_reduce_scatter
+    orig_reduce_scatter = dist.reduce_scatter_tensor
+    dist.reduce_scatter_tensor = new_reduce_scatter
     global _CURRENT_FULL_PRECISION_PARAM_DTYPE
     _CURRENT_FULL_PRECISION_PARAM_DTYPE = full_precision_param_dtype
     try:
         yield
     finally:
-        dist._reduce_scatter_base = orig_reduce_scatter
+        dist.reduce_scatter_tensor = orig_reduce_scatter
         _CURRENT_FULL_PRECISION_PARAM_DTYPE = None
 
 class LinearMixedPrecision(nn.Module):
@@ -175,9 +175,13 @@ class LinearMixedPrecision(nn.Module):
                 # local shard. This supports both FULL_SHARD and SHARD_GRAD_OP
                 # cases. In FULL_SHARD, we have the additional property that
                 # param._full_param_padded has not been freed.
+                param_is_sharded = (
+                    fsdp_module.sharding_strategy != ShardingStrategy.NO_SHARD
+                    and fsdp_module.world_size > 1
+                )
                 is_fsdp_unit_active = (
-                    param._is_sharded and
-                    (param.data.data_ptr() != param._local_shard.data_ptr())
+                    param_is_sharded
+                    and param.data.data_ptr() != param._local_shard.data_ptr()
                 )
                 if is_fsdp_unit_active:
                     num_active_fsdp += 1
@@ -190,7 +194,7 @@ class LinearMixedPrecision(nn.Module):
                         cls.assertEqual(0, param._mp_shard.storage().size())
                     else:
                         cls.assertFalse(hasattr(param, '_mp_shard'))
-                elif param._is_sharded:
+                elif param_is_sharded:
                     # This FSDP unit is not active as full param has been
                     # freed or not yet allocated. Ensure param points to full
                     # precision param.
@@ -246,7 +250,7 @@ class TestFSDPMixedPrecision(FSDPTest):
             for param in fsdp.params:
                 self.assertEqual(0, param._mp_shard.storage().size())
 
-    def _reduce_scatter_base_validate_mp(
+    def _reduce_scatter_validate_mp(
         self,
         orig_reduce_scatter,
         mp_config,
@@ -254,9 +258,9 @@ class TestFSDPMixedPrecision(FSDPTest):
         **kwargs
     ):
         """
-        Performs dist._reduce_scatter_base but verifies mixed precision settings
-        before. This is to test mixed precision is working as expected during
-        backward pass. In particular it ensures that the gradients were cast to the right type
+        Runs reduce-scatter but verifies mixed precision settings before. This
+        is to test mixed precision is working as expected during backward pass.
+        In particular it ensures that the gradients were cast to the right type
         and comm. is going to happen in the right type.
         """
         tensors = []
@@ -286,6 +290,37 @@ class TestFSDPMixedPrecision(FSDPTest):
 
         return orig_reduce_scatter(*args, **kwargs)
 
+    def _test_grads_reduced_precision(self, offload_params: bool):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin1 = nn.Linear(10, 10)
+                self.lin2 = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.lin2(self.lin1(x))
+
+        m = MyModel().cuda()
+        mp = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+            keep_low_precision_grads=True,
+        )
+        fsdp_kwargs = {
+            "mixed_precision": mp,
+            "cpu_offload": CPUOffload(offload_params=offload_params),
+        }
+        m.lin1 = FSDP(m.lin1, **fsdp_kwargs)
+        m = FSDP(m, **fsdp_kwargs)
+        for _ in range(6):
+            inp = torch.ones(1, 10)
+            m(inp).sum().backward()
+            for param in m.parameters():
+                self.assertEqual(torch.float16, param.grad.dtype)
+
+        dist.barrier()
+
     def _run_test_mixed_precision_e2e(
         self,
         mp_config,
@@ -304,7 +339,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
                 backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch
+                forward_prefetch=forward_prefetch,
             ),
             self._get_simple_nested_model(
                 param_dtype=full_precision_param_dtype,
@@ -312,7 +347,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
                 backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch
+                forward_prefetch=forward_prefetch,
             ),
         ]
         for model in fsdp_models:
@@ -320,9 +355,9 @@ class TestFSDPMixedPrecision(FSDPTest):
                 model.cuda()
 
             # Patch reduce_scatter to add validation for mixed precision types.
-            orig_reduce_scatter = dist._reduce_scatter_base
+            orig_reduce_scatter = dist.reduce_scatter_tensor
             test_reduce_scatter = partial(
-                self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
+                self._reduce_scatter_validate_mp, orig_reduce_scatter, mp_config,
             )
             with patch_reduce_scatter(test_reduce_scatter, full_precision_param_dtype):
                 scaler = ShardedGradScaler(enabled=enable_sharded_grad_scaler)
@@ -342,15 +377,11 @@ class TestFSDPMixedPrecision(FSDPTest):
                         else:
                             self.assertEqual(buf.dtype, _BUFFER_ORIG_DTYPE)
                     # p._mp_shard should be freed.
-                    if model.params[0]._is_sharded:  # i.e. world_size > 1
-                        # TODO: free the mixed precision shard after forward
-                        # when world_size == 1 as well, currently when
-                        # world_size == 1 it is only freed after backward.
-                        if mp_config.param_dtype is not None:
-                            self._validate_mp_shard_freed(model)
-                        else:
-                            # We never should have allocated an _mp_shard.
-                            self._validate_no_mp_shard(model)
+                    if mp_config.param_dtype is not None:
+                        self._validate_mp_shard_freed(model)
+                    else:
+                        # We never should have allocated an _mp_shard.
+                        self._validate_no_mp_shard(model)
 
                     loss = act.sum()
                     loss = scaler.scale(loss)
@@ -485,9 +516,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # Basic test to ensure int inputs are not casted which would break
         # modules such as embedding tables.
         param_dtype = mp_config.param_dtype or torch.float32
-        orig_reduce_scatter = dist._reduce_scatter_base
+        orig_reduce_scatter = dist.reduce_scatter_tensor
         test_reduce_scatter = partial(
-            self._reduce_scatter_base_validate_mp, orig_reduce_scatter, mp_config,
+            self._reduce_scatter_validate_mp, orig_reduce_scatter, mp_config,
         )
         with patch_reduce_scatter(test_reduce_scatter, param_dtype):
             # TODO: `test_mp_embedding_reduce()` fails if we do not wrap the
@@ -582,6 +613,13 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         loss.backward()
 
     @skip_if_lt_x_gpu(2)
+    def test_grads_reduced_precision(self):
+        self.run_subtests(
+            {"offload_params": [False, True]},
+            self._test_grads_reduced_precision,
+        )
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("convert_sync_bn", [True, False])
     def test_mp_batchnorm(self, convert_sync_bn):
         class BatchNormNet(nn.Module):
@@ -614,7 +652,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
         with self.assertWarnsRegex(
             expected_warning=UserWarning,
-            expected_regex="BatchNorm units will be wrapped as a separate"
+            expected_regex="batch norm submodules will be wrapped as separate"
         ):
             model = FSDP(
                 net,
@@ -627,8 +665,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # policy should not have wrapped any other submodules
         self.assertFalse(isinstance(model.fc1, FSDP))
         self.assertFalse(isinstance(model.fc2, FSDP))
-        self.assertEqual(None, bn.mixed_precision)
-        self.assertNotEqual(None, model.mixed_precision)
+        no_mixed_precision = MixedPrecision()
+        self.assertEqual(no_mixed_precision, bn.mixed_precision)
+        self.assertNotEqual(no_mixed_precision, model.mixed_precision)
 
         inp = torch.randn((1, 2), device='cuda')
         # Without FSDP BN mixed precision fix, this would result in
@@ -644,6 +683,13 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     @property
     def world_size(self):
         return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_grads_reduced_precision(self):
+        self.run_subtests(
+            {"offload_params": [False, True]},
+            self._test_grads_reduced_precision,
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_no_reshard_after_forward(self):

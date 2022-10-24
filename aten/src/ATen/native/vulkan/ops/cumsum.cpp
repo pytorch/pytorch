@@ -18,7 +18,8 @@ Tensor cumsum(
       input_arg.dim() <= 4, "Vulkan cumsum expects input dimension <= 4!");
 
   TORCH_CHECK(
-      batch_size(input_arg) == 1, "Vulkan cumsum expects batch size <= 1!");
+      get_dim<Dim4D::Batch>(input_arg) == 1,
+      "Vulkan cumsum expects batch size <= 1!");
 
   TORCH_CHECK(dim < 4, "Vulkan cumsum expects dim < 4!");
 
@@ -48,12 +49,6 @@ Tensor cumsum(
   api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
-      // shader layout signature
-      {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-      },
       // shader descriptor
       VK_KERNEL(cumsum),
       // pipeline barrier

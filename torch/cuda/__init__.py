@@ -15,7 +15,8 @@ from torch.types import Device
 import traceback
 import warnings
 import threading
-from typing import List, Optional, Tuple, Union, Any
+from functools import lru_cache
+from typing import Any, List, Optional, Set, Tuple, Union
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
 from .graphs import CUDAGraph, graph_pool_handle, graph, \
@@ -74,20 +75,39 @@ has_magma: bool = False
 has_half: bool = False
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
+def _is_compiled() -> bool:
+    r"""Returns true if compile with CUDA support."""
+    return hasattr(torch._C, '_cuda_getDeviceCount')
+
+def _nvml_based_avail() -> bool:
+    return os.getenv('PYTORCH_NVML_BASED_CUDA_CHECK') == '1'
+
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
-    if not hasattr(torch._C, '_cuda_getDeviceCount'):
+    if not _is_compiled():
         return False
-    # This function never throws and returns 0 if driver is missing or can't
-    # be initialized
-    return torch._C._cuda_getDeviceCount() > 0
+    if _nvml_based_avail():
+        # The user has set an env variable to request this availability check that attempts to avoid fork poisoning by
+        # using NVML at the cost of a weaker CUDA availability assessment. Note that if NVML discovery/initialization
+        # fails, this assessment falls back to the default CUDA Runtime API assessment (`cudaGetDeviceCount`)
+        return device_count() > 0
+    else:
+        # The default availability inspection never throws and returns 0 if the driver is missing or can't
+        # be initialized. This uses the CUDA Runtime API `cudaGetDeviceCount` which in turn initializes the CUDA Driver
+        # API via `cuInit`
+        return torch._C._cuda_getDeviceCount() > 0
+
 
 def is_bf16_supported():
-    r"""Returns a bool indicating if the current CUDA device supports dtype bfloat16"""
+    r"""Returns a bool indicating if the current CUDA/ROCm device supports dtype bfloat16"""
+    # Check for ROCm, if true return true, no ROCM_VERSION check required,
+    # since it is supported on AMD GPU archs.
+    if torch.version.hip:
+        return True
+
     cu_vers = torch.version.cuda
     if cu_vers is not None:
         cuda_maj_decide = int(cu_vers.split('.')[0]) >= 11
-
     else:
         cuda_maj_decide = False
     return torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8 and cuda_maj_decide
@@ -174,6 +194,7 @@ _lazy_call(_check_cubins)
 class DeferredCudaCallError(Exception):
     pass
 
+OutOfMemoryError = torch._C._OutOfMemoryError
 
 def init():
     r"""Initialize PyTorch's CUDA state.  You may need to call
@@ -214,6 +235,8 @@ def _lazy_init():
                 "libcudart functions unavailable. It looks like you have a broken build?")
         # This function throws if there's a driver initialization error, no GPUs
         # are found or any other error occurs
+        if 'CUDA_MODULE_LOADING' not in os.environ:
+            os.environ['CUDA_MODULE_LOADING'] = 'LAZY'
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
@@ -451,12 +474,70 @@ def set_stream(stream: Stream):
         return
     torch._C._cuda_setStream(stream._cdata)
 
+def _parse_visible_devices() -> Set[int]:
+    """Parse CUDA_VISIBLE_DEVICES environment variable."""
+    var = os.getenv("CUDA_VISIBLE_DEVICES")
+    if var is None:
+        return set(x for x in range(64))
+
+    def _strtoul(s: str) -> int:
+        """Return -1 or positive integer sequence string starts with,"""
+        if not s:
+            return -1
+        for idx, c in enumerate(s):
+            if not c.isdigit():
+                break
+            if idx + 1 == len(s):
+                idx += 1
+        return int(s[:idx]) if idx > 0 else -1
+
+    # CUDA_VISIBLE_DEVICES uses something like strtoul
+    # which makes `1gpu2,2ampere` is equivalent to `1,2`
+    rc: Set[int] = set()
+    for elem in var.split(","):
+        rc.add(_strtoul(elem.strip()))
+    return rc
+
+def _raw_device_count_nvml() -> int:
+    """Return number of devices as reported by NVML
+    or negative value if NVML discovery/initialization failed."""
+    from ctypes import CDLL, c_int
+    nvml_h = CDLL("libnvidia-ml.so.1")
+    rc = nvml_h.nvmlInit()
+    if rc != 0:
+        warnings.warn("Can't initialize NVML")
+        return -1
+    dev_arr = (c_int * 1)(-1)
+    rc = nvml_h.nvmlDeviceGetCount_v2(dev_arr)
+    if rc != 0:
+        warnings.warn("Can't get nvml device count")
+        return -1
+    del nvml_h
+    return dev_arr[0]
+
+def _device_count_nvml() -> int:
+    """Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
+    Negative value is returned if NVML discovery or initialization has failed."""
+    visible_devices = _parse_visible_devices()
+    if not visible_devices:
+        return 0
+    try:
+        raw_cnt = _raw_device_count_nvml()
+    except OSError:
+        return -1
+    except AttributeError:
+        return -1
+    if raw_cnt <= 0:
+        return raw_cnt
+    return len(set(range(raw_cnt)).intersection(visible_devices))
+
+@lru_cache(maxsize=1)
 def device_count() -> int:
     r"""Returns the number of GPUs available."""
-    if is_available():
-        return torch._C._cuda_getDeviceCount()
-    else:
+    if not _is_compiled():
         return 0
+    nvml_count = _device_count_nvml()
+    return torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
 
 def get_arch_list() -> List[str]:
     r"""Returns list CUDA architectures this library was compiled for."""
@@ -752,3 +833,30 @@ from . import profiler
 from . import nvtx
 from . import amp
 from . import jiterator
+
+__all__ = [
+    # Typed storage and tensors
+    'BFloat16Storage', 'BFloat16Tensor',
+    'BoolStorage', 'BoolTensor',
+    'ByteStorage', 'ByteTensor',
+    'CharStorage', 'CharTensor',
+    'ComplexDoubleStorage', 'ComplexFloatStorage',
+    'DoubleStorage', 'DoubleTensor',
+    'FloatStorage', 'FloatTensor',
+    'HalfStorage', 'HalfTensor',
+    'IntStorage', 'IntTensor',
+    'LongStorage', 'LongTensor',
+    'ShortStorage', 'ShortTensor',
+    'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError',
+    'Stream', 'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
+    'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream', 'default_generators',
+    'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_allocator_backend', 'get_arch_list',
+    'get_device_capability', 'get_device_name', 'get_device_properties', 'get_gencode_flags', 'get_rng_state', 'get_rng_state_all',
+    'get_sync_debug_mode', 'graph', 'graph_pool_handle', 'graphs', 'has_half', 'has_magma', 'init', 'initial_seed', 'ipc_collect',
+    'is_available', 'is_bf16_supported', 'is_current_stream_capturing', 'is_initialized', 'jiterator', 'list_gpu_processes',
+    'make_graphed_callables', 'manual_seed', 'manual_seed_all', 'max_memory_allocated', 'max_memory_cached', 'max_memory_reserved',
+    'mem_get_info', 'memory', 'memory_allocated', 'memory_cached', 'memory_reserved', 'memory_snapshot', 'memory_stats',
+    'memory_stats_as_nested_dict', 'memory_summary', 'memory_usage', 'nccl', 'nvtx', 'profiler', 'random',
+    'reset_accumulated_memory_stats', 'reset_max_memory_allocated', 'reset_max_memory_cached', 'reset_peak_memory_stats',
+    'seed', 'seed_all', 'set_device', 'set_per_process_memory_fraction', 'set_rng_state', 'set_rng_state_all', 'set_stream',
+    'set_sync_debug_mode', 'sparse', 'stream', 'streams', 'synchronize', 'utilization']

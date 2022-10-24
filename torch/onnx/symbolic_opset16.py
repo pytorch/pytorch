@@ -20,23 +20,36 @@ Updated operators:
     Where
     GreaterOrEqual
     LessOrEqual
-    SequenceMap
 """
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+# see Note [Edit Symbolic Files] in README.md
+
+import functools
 
 from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
 )
-from torch.onnx import symbolic_helper
+from torch.onnx import _type_utils, symbolic_helper
+from torch.onnx._internal import _beartype, jit_utils, registration
+
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 
 
 # note (mkozuki): Why `grid_sampler` instead of `grid_sample`?
 # Because `torch.nn.functional.grid_sample` calls `torch.grid_sampler`.
+@_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
-def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
+@_beartype.beartype
+def grid_sampler(
+    g: jit_utils.GraphContext,
+    input,
+    grid,
+    mode_enum,
+    padding_mode_enum,
+    align_corners,
+):
     mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
     padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
     return g.op(
@@ -49,8 +62,10 @@ def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
     )
 
 
+@_onnx_symbolic("aten::scatter_add")
 @symbolic_helper.parse_args("v", "i", "v", "v")
-def scatter_add(g, self, dim, index, src):
+@_beartype.beartype
+def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
 
@@ -74,7 +89,9 @@ def scatter_add(g, self, dim, index, src):
             src = g.op(
                 "Cast",
                 src,
-                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+                to_i=_type_utils.JitScalarType.from_name(
+                    self.type().scalarType()
+                ).onnx_type(),
             )
 
         return g.op(

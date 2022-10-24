@@ -174,7 +174,7 @@ std::map<std::string, at::Tensor> load_parameters_from_zip(
   auto result = unpickler.deserialize(device).toGenericDict();
   std::map<std::string, at::Tensor> map;
   for (const auto& e : result) {
-    auto key = e.key().toString()->string();
+    auto key = e.key().toStringRef();
     auto value = e.value().toTensor().tensor_data();
     map[key] = value;
   }

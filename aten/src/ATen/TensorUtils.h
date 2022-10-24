@@ -85,11 +85,20 @@ TORCH_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
     IntArrayRef sizes);
+TORCH_API void checkSize_symint(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    c10::SymIntArrayRef sizes);
 TORCH_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t dim,
     int64_t size);
+TORCH_API void checkSize_symint(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim,
+    c10::SymInt size);
 TORCH_API void checkNumel(
     CheckedFrom c,
     const TensorGeometryArg& t,
@@ -156,6 +165,11 @@ TORCH_API c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape);
+
+TORCH_API c10::optional<SymDimVector> computeStride(
+    c10::SymIntArrayRef oldshape,
+    c10::SymIntArrayRef oldstride,
+    c10::SymIntArrayRef newshape);
 
 TORCH_API c10::optional<DimVector> computeStride(
     IntArrayRef oldshape,

@@ -33,7 +33,7 @@ fi
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
 export DATE="$(date -u +%Y%m%d)"
-export IOS_NIGHTLY_BUILD_VERSION="1.13.0.${DATE}"
+export IOS_NIGHTLY_BUILD_VERSION="1.14.0.${DATE}"
 if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
     # libtorch_lite_ios_nightly_1.11.0.20210810.zip
     ZIPFILE="libtorch_lite_ios_nightly_${IOS_NIGHTLY_BUILD_VERSION}.zip"

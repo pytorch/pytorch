@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -11,6 +12,15 @@
 #include <c10/util/Optional.h>
 #include <limits>
 #include <cmath>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/full.h>
+#include <ATen/ops/view_as_real.h>
+#endif
 
 namespace at {
 namespace native {
@@ -204,7 +214,6 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::opt
   at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
@@ -219,7 +228,6 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c
   at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std

@@ -1,0 +1,20 @@
+[flake8]
+select = B,C,E,F,P,T4,W,B9
+max-line-length = 120
+# C408 ignored because we like the dict keyword argument syntax
+# E501 is not flexible enough, we're using B950 instead
+ignore =
+    E203,E305,E402,E501,E721,E741,F405,F821,F841,F999,W503,W504,C408,E302,W291,E303,
+    # shebang has extra meaning in fbcode lints, so I think it's not worth trying
+    # to line this up with executable bit
+    EXE001,
+    # these ignores are from flake8-bugbear; please fix!
+    B007,B008,
+    # these ignores are from flake8-comprehensions; please fix!
+    C400,C401,C402,C403,C404,C405,C407,C411,C413,C414,C415
+exclude =
+    ./.git,
+    ./benchmarks,
+    ./docs,
+    ./examples,
+    ./notebooks

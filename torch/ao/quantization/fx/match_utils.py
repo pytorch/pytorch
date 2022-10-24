@@ -4,7 +4,7 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
-from torch.ao.quantization.quantization_types import Pattern
+from torch.ao.quantization.utils import Pattern
 from .quantization_patterns import (
     QuantizeHandler,
 )
@@ -17,7 +17,7 @@ from ..utils import (
 from .graph_module import (
     is_observed_standalone_module,
 )
-
+from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
 
 
@@ -27,7 +27,8 @@ __all__ = [
     "find_matches",
 ]
 
-
+# TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
+# would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
 
 _MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
@@ -58,7 +59,7 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != 'call_module':
             return False
-        if not type(modules[node.target]) == self_match:
+        if not type_before_parametrizations(modules[node.target]) == self_match:
             return False
     elif callable(self_match):
         if node.op != 'call_function' or node.target is not self_match:

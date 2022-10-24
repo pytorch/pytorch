@@ -157,15 +157,17 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
   auto n_dim = negative.dim();
   TORCH_CHECK(
       a_dim == p_dim && p_dim == n_dim,
-      "All inputs should have same dimension but got ",
-      a_dim,
-      "D, ",
-      p_dim,
-      "D and ",
-      n_dim,
-      "D inputs.")
+      "The anchor, positive, and negative tensors are expected to have "
+      "the same number of dimensions, but got: anchor ", a_dim, "D, "
+      "positive ", p_dim, "D, and negative ", n_dim, "D inputs")
+
   auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
   auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
+  // The distance swap is described in the paper "Learning shallow
+  // convolutional feature descriptors with triplet losses" by V. Balntas, E.
+  // Riba et al.  If True, and if the positive example is closer to the
+  // negative example than the anchor is, swaps the positive example and the
+  // anchor in the loss computation.
   if (swap) {
     auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
     dist_neg = at::min(dist_neg, dist_swap);
@@ -189,9 +191,22 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
   TORCH_CHECK(!input.is_complex() && !target.is_complex(),
-              "kl_div: Complex inputs not supported.")
-  auto output = log_target ? at::exp(target) * (target - input)
-                           : target * (at::log(target) - input);
+              "kl_div: Complex inputs not supported.");
+  TORCH_CHECK(!at::isIntegralType(input.scalar_type(), /*include_bool*/true) &&
+              !at::isIntegralType(target.scalar_type(), /*include_bool*/true),
+              "kl_div: Integral inputs not supported.");
+  Tensor output;
+  if (log_target) {
+    output = at::exp(target) * (target - input);
+  } else {
+    if (input.is_mps() || target.is_mps()) {
+      // MPS fallback, as MPS does not currently implement xlogy.
+      // MPS will give the wrong results at `target[i] = 0`
+      output = target * (at::log(target) - input);
+    } else {
+      output = at::xlogy(target, target) - target * input;
+    }
+  }
   return apply_loss_reduction(output, reduction);
 }
 

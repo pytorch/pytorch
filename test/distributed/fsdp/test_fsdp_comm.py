@@ -149,9 +149,9 @@ class TestCommunication(FSDPTest):
                 f"sharding_strategy={sharding_strategy}"
         if is_first_iter and pass_type == PassType.FWD:
             # With execution order validation, on the first iteration, we have
-            # an additional all-gather before every actual all-gather in the
-            # forward pass
-            num_all_gathers *= 2
+            # an additional two all-gathers before every actual all-gather in
+            # the forward pass
+            num_all_gathers *= 3
         return num_all_gathers
 
     def _print_ref_num_all_gathers_in_pass(
@@ -220,8 +220,8 @@ class TestCommunication(FSDPTest):
         # and if `use_no_sync=False`, we only run `num_iters` iterations
         # outside `no_sync()`
         num_iters = 3
-        with patch("torch.distributed._all_gather_base") as mock_all_gather, \
-                patch("torch.distributed._reduce_scatter_base") as mock_reduce_scatter:
+        with patch("torch.distributed.all_gather_into_tensor") as mock_all_gather, \
+                patch("torch.distributed.reduce_scatter_tensor") as mock_reduce_scatter:
             def reset_mocks():
                 mock_all_gather.reset_mock()
                 mock_reduce_scatter.reset_mock()

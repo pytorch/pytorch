@@ -1728,6 +1728,85 @@ def transpose(self: List[int],
     _3 = torch.append(out0, elem0)
   return (out, out0, [grad_output[1]])
 
+def conv_forwards(input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    transposed: bool,
+    output_padding: List[int],
+    groups: int) -> List[int]:
+  has_dilation = torch.gt(torch.len(dilation), 0)
+  dim = torch.len(input)
+  output_size = annotate(List[int], [])
+  if transposed:
+    weight_output_channels_dim = 1
+  else:
+    weight_output_channels_dim = 0
+  _0 = torch.append(output_size, input[0])
+  _1 = torch.append(output_size, weight[weight_output_channels_dim])
+  for _2 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_2, 2, 1)
+    if has_dilation:
+      dilation_ = dilation[torch.sub(d, 2)]
+    else:
+      dilation_ = 1
+    if transposed:
+      kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
+      _3 = torch.mul(torch.sub(input[d], 1), stride[torch.sub(d, 2)])
+      _4 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _5 = torch.add(torch.sub(_3, _4), kernel)
+      _6 = torch.append(output_size, torch.add(_5, 1))
+    else:
+      _7 = torch.mul(dilation_, torch.sub(weight[d], 1))
+      kernel0 = torch.add(_7, 1)
+      _8 = input[d]
+      _9 = torch.mul(padding[torch.sub(d, 2)], 2)
+      _10 = torch.sub(torch.add(_8, _9), kernel0)
+      _11 = torch.floordiv(_10, stride[torch.sub(d, 2)])
+      _12 = torch.append(output_size, torch.add(_11, 1))
+  return output_size
+
+)=====")
++ std::string(R"=====(def conv_transpose2d_input(input: List[int],
+    weight: List[int],
+    bias: Optional[List[int]]=None,
+    stride: Optional[List[int]]=None,
+    padding: Optional[List[int]]=None,
+    output_padding: Optional[List[int]]=None,
+    groups: int=1,
+    dilation: Optional[List[int]]=None) -> List[int]:
+  if torch.__is__(stride, None):
+    stride0 = [1, 1]
+  else:
+    stride0 = unchecked_cast(List[int], stride)
+  if torch.__is__(padding, None):
+    padding0 = [0, 0]
+  else:
+    padding0 = unchecked_cast(List[int], padding)
+  if torch.__is__(dilation, None):
+    dilation0 = [1, 1]
+  else:
+    dilation0 = unchecked_cast(List[int], dilation)
+  has_dilation = torch.gt(torch.len(dilation0), 0)
+  dim = torch.len(input)
+  output_size = annotate(List[int], [])
+  _0 = torch.append(output_size, input[0])
+  _1 = torch.append(output_size, weight[1])
+  for _2 in range(torch.__range_length(2, dim, 1)):
+    d = torch.__derive_index(_2, 2, 1)
+    if has_dilation:
+      dilation_ = dilation0[torch.sub(d, 2)]
+    else:
+      dilation_ = 1
+    kernel = torch.mul(dilation_, torch.sub(weight[d], 1))
+    _3 = torch.mul(torch.sub(input[d], 1), stride0[torch.sub(d, 2)])
+    _4 = torch.mul(padding0[torch.sub(d, 2)], 2)
+    _5 = torch.add(torch.sub(_3, _4), kernel)
+    _6 = torch.append(output_size, torch.add(_5, 1))
+  return output_size
+
 )=====")
 + std::string(R"=====(def flatten(input: List[int],
     start_dim: int,
@@ -2115,75 +2194,41 @@ def transpose(self: List[int],
   return _1
 
 )=====")
-+ std::string(R"=====(def mean_dim(self: List[int],
-    dims: List[int],
-    keep_dim: bool,
-    dt: Any) -> List[int]:
-  out = annotate(List[int], [])
-  for idx in range(torch.len(self)):
-    is_mean_dim = False
-    for _0 in range(torch.len(dims)):
-      reduce_dim = dims[_0]
-      _1 = torch.len(self)
-      if torch.le(_1, 0):
-        dim_post_expr = 1
-      else:
-        dim_post_expr = _1
-      min = torch.neg(dim_post_expr)
-      max = torch.sub(dim_post_expr, 1)
-      if torch.lt(reduce_dim, min):
-        _2 = True
-      else:
-        _2 = torch.gt(reduce_dim, max)
-      if torch.__not__(_2):
-        pass
-      else:
-        ops.prim.RaiseException("AssertionError: ")
-      if torch.lt(reduce_dim, 0):
-        dim0 = torch.add(reduce_dim, dim_post_expr)
-        dim = dim0
-      else:
-        dim = reduce_dim
-      if torch.eq(idx, dim):
-        is_mean_dim0 = True
-      else:
-        is_mean_dim0 = is_mean_dim
-      is_mean_dim = is_mean_dim0
-    if is_mean_dim:
-      if keep_dim:
-        _3 = torch.append(out, 1)
-      else:
-        pass
-    else:
-      _4 = torch.append(out, self[idx])
-  return out
-
-)=====")
-+ std::string(R"=====(def sum_dim(self: List[int],
++ std::string(R"=====(def sum_mean_dim(self: List[int],
     opt_dims: Optional[List[int]],
     keep_dim: bool,
     dt: Any) -> List[int]:
   out = annotate(List[int], [])
-  if opt_dims is None:
-    dims:List[int] = []
+  if torch.__is__(opt_dims, None):
+    _0, opt_dims0 = True, opt_dims
   else:
-    dims = opt_dims
+    opt_dims1 = unchecked_cast(List[int], opt_dims)
+    _0, opt_dims0 = torch.eq(torch.len(opt_dims1), 0), opt_dims1
+  if _0:
+    _1 = torch.len(self)
+    dims0 = annotate(List[int], [])
+    for _2 in range(_1):
+      _3 = torch.append(dims0, _2)
+    dims = dims0
+  else:
+    opt_dims2 = unchecked_cast(List[int], opt_dims0)
+    dims = opt_dims2
   for idx in range(torch.len(self)):
     is_mean_dim = False
-    for _0 in range(torch.len(dims)):
-      reduce_dim = dims[_0]
-      _1 = torch.len(self)
-      if torch.le(_1, 0):
+    for _4 in range(torch.len(dims)):
+      reduce_dim = dims[_4]
+      _5 = torch.len(self)
+      if torch.le(_5, 0):
         dim_post_expr = 1
       else:
-        dim_post_expr = _1
+        dim_post_expr = _5
       min = torch.neg(dim_post_expr)
       max = torch.sub(dim_post_expr, 1)
       if torch.lt(reduce_dim, min):
-        _2 = True
+        _6 = True
       else:
-        _2 = torch.gt(reduce_dim, max)
-      if torch.__not__(_2):
+        _6 = torch.gt(reduce_dim, max)
+      if torch.__not__(_6):
         pass
       else:
         ops.prim.RaiseException("AssertionError: ")
@@ -2199,11 +2244,11 @@ def transpose(self: List[int],
       is_mean_dim = is_mean_dim0
     if is_mean_dim:
       if keep_dim:
-        _3 = torch.append(out, 1)
+        _7 = torch.append(out, 1)
       else:
         pass
     else:
-      _4 = torch.append(out, self[idx])
+      _8 = torch.append(out, self[idx])
   return out
 
 )=====")
@@ -2214,7 +2259,7 @@ def transpose(self: List[int],
   out = annotate(List[int], [])
   for idx in range(torch.len(self)):
     is_mean_dim = False
-    for _1 in range(1):
+    for _1 in range(torch.len(_0)):
       reduce_dim = _0[_1]
       _2 = torch.len(self)
       if torch.le(_2, 0):
@@ -2726,17 +2771,9 @@ def native_batch_norm(input: List[int],
   return out
 
 def nonzero_lower_bound(input: List[int]) -> List[int]:
-  if torch.ge(torch.len(input), 1):
-    pass
-  else:
-    ops.prim.RaiseException("AssertionError: ")
   return [0, torch.len(input)]
 
 def nonzero_upper_bound(input: List[int]) -> List[int]:
-  if torch.ge(torch.len(input), 1):
-    pass
-  else:
-    ops.prim.RaiseException("AssertionError: ")
   numel = 1
   for _0 in range(torch.len(input)):
     elem = input[_0]
@@ -2790,14 +2827,16 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", "batch_norm"},
     {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
     {"aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", "conv_backwards"},
+    {"aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", "conv_forwards"},
+    {"aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", "conv_transpose2d_input"},
     {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", "flatten"},
     {"aten::cat(Tensor[] tensors, int dim=0) -> Tensor", "cat"},
     {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
     {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
     {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
     {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
-    {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
-    {"aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_dim"},
+    {"aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
+    {"aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "sum_mean_dim"},
     {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", "max_dim"},
     {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
     {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},

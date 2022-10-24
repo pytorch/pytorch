@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -36,6 +36,9 @@ TORCH_API std::string parse_env(const char* env_var_name);
 
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+
+// Use -2 to represent unset state of env vars
+#define C10D_ENV_NOT_SET -2
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -70,7 +73,7 @@ inline void assertSameType(
   }
 }
 
-inline bool parseEnvVarFlag(const char* envVarName) {
+inline int parseEnvVarInt(const char* envVarName) {
   char* stringValue = std::getenv(envVarName);
   if (stringValue != nullptr) {
     int val;
@@ -80,16 +83,28 @@ inline bool parseEnvVarFlag(const char* envVarName) {
       TORCH_CHECK(false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
+    return val;
+  }
+  return C10D_ENV_NOT_SET;
+}
+
+inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
+    int val = parseEnvVarInt(envVarName);
+    if (val == C10D_ENV_NOT_SET)
+      return defaultVal;
+    return val;
+}
+
+inline bool parseEnvVarFlag(const char* envVarName) {
+    int val = parseEnvVarInt(envVarName);
     if (val == 1) {
       return true;
-    } else if (val == 0) {
+    } else if (val == 0 || val == C10D_ENV_NOT_SET) {
       return false;
-    } else {
-      TORCH_CHECK(false,
-          "Invalid value for environment variable: " + std::string(envVarName));
     }
-  }
-  return false;
+    TORCH_CHECK(false,
+        "Invalid value for environment variable: " + std::string(envVarName));
+    return false;
 }
 
 inline void assertSameSizes(

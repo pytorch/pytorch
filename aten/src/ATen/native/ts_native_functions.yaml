@@ -141,7 +141,6 @@ full_codegen:
   - upsample_nearest2d
   - upsample_nearest2d_backward
   - zero
-  - narrow_copy.SymInt
   - alias_copy
   - as_strided_copy
   - diagonal_copy
@@ -168,12 +167,13 @@ full_codegen:
   - slice_scatter
   - diagonal_scatter
   - as_strided_scatter
+ir_gen:
+  - selu
 supported:
   - clone
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format
-  - empty.SymInt
   - empty_strided
   - fill_.Scalar
   - normal_
@@ -182,12 +182,14 @@ supported:
   - _to_copy
   - _unsafe_view
   - lift
+  - lift_fresh
   # Below are all operators that are "composite" in core,
   # but require us to explicitly re-enable functionalization in order to use them.
   # Why? These operators are all CompositeExplicitAutograd, which mean that they run
   # after functionalization,
   # but their implementations call view operators (which we need to functionalize away).
   - block_diag
+  - diag_embed
   - diagonal_backward
   - slice_backward
   - new_empty_strided
@@ -196,9 +198,23 @@ supported:
   - pixel_unshuffle
   - select_backward
   - _trilinear
-  - linalg_inv_ex
   - linalg_pinv.atol_rtol_tensor
   - logsumexp.out
+symint:
+  - empty.memory_format
+  - expand_copy
+  - narrow_copy
+  - view_copy
+  - as_strided_copy
+  - as_strided_scatter
+  - diagonal_backward
+  - slice_backward
+  - slice_copy.Tensor
+  - slice_scatter
+  - empty_strided
+  - new_empty_strided
+  - _reshape_alias_copy
+  - select_backward
 autograd:
   - max_pool3d
   - native_group_norm

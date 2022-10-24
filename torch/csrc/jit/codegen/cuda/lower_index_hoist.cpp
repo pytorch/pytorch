@@ -124,13 +124,15 @@ CommonIndexKey::CommonIndexKey(
     if (it != concrete_leaf_ids.end()) {
       // This leaf reference id is used for indexing the consumer id
       used_loops_.push_back(loop);
-      auto index_it =
-          loop_index_map.find(gpu_lower->caMap()->getConcreteMappedID(
-              loop_domains.at(i), IdMappingMode::EXACT));
+      auto loop_concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          loop_domains.at(i), IdMappingMode::EXACT);
+      auto index_it = loop_index_map.find(loop_concrete_id);
       TORCH_INTERNAL_ASSERT(
           index_it != loop_index_map.end(),
           "Index not found for leaf ID, ",
-          loop_domains.at(i)->toString());
+          loop_domains.at(i)->toString(),
+          ", concrete ID: ",
+          loop_concrete_id->toString());
       loop_index_vals_.push_back(index_it->second);
     }
   }
@@ -229,12 +231,13 @@ std::pair<Val*, bool> CommonIndexMap::insert(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   if (index->definition() == nullptr) {
-    // Only expression is eligible to hoist
+    // Only defined val is eligible to hoist
     return {index, false};
   }
 
   const CommonIndexKey key(
       indexed_consumer_id, consumer_td, ref_td, ref_index_map, loops);
+
   return tryInsertNewIndex(key, index);
 }
 
@@ -246,7 +249,7 @@ std::pair<Val*, bool> CommonIndexMap::insert(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   if (index->definition() == nullptr) {
-    // Only expression is eligible to hoist
+    // Only defined val is eligible to hoist
     return {index, false};
   }
 
@@ -261,6 +264,15 @@ std::pair<Val*, bool> CommonIndexMap::tryInsertNewIndex(
     Val* index) {
   Val* hoisted_index = nullptr;
   bool new_index_inserted = false;
+
+  // Hoisting is not possible if any of used loops is grouped.
+  if (std::any_of(
+          key.usedLoops().begin(), key.usedLoops().end(), [](const auto loop) {
+            return loop->iter_domain()->getParallelType() ==
+                ParallelType::Group;
+          })) {
+    return {index, false};
+  }
 
   // If already mapped, return the previously mapped index
   auto it = common_index_map_.find(key);

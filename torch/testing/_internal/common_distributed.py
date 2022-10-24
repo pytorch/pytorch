@@ -73,17 +73,17 @@ TEST_SKIPS = {
 class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
-    skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
+    skip_collective["allgather_coalesced"] = {"nccl", "mpi", "ucc"}
     skip_collective["reduce"] = set()
-    skip_collective["sendrecv anysource"] = {"nccl"}
-    skip_collective["cpu barrier"] = {"nccl"}
+    skip_collective["sendrecv anysource"] = {"nccl", "ucc"}
+    skip_collective["cpu barrier"] = {"nccl", "ucc"}
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo"}
-    backend_feature["cuda"] = {"nccl", "gloo"}
-    backend_feature["ddp"] = {"nccl", "gloo"}
-    backend_feature["subgroup"] = {"nccl", "gloo"}
+    backend_feature["gpu"] = {"nccl", "gloo"}  # TODO(ucc): add sequence number support to ucc and enable it here
+    backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
     backend_feature["plugin"] = set()
 
 
@@ -336,7 +336,7 @@ if TEST_WITH_TSAN:
     # TSAN runs much slower.
     TIMEOUT_DEFAULT = 500
 else:
-    TIMEOUT_DEFAULT = 100
+    TIMEOUT_DEFAULT = int(os.getenv('DISTRIBUTED_TESTS_DEFAULT_TIMEOUT', '300'))
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 # https://github.com/pytorch/pytorch/issues/75665

@@ -76,6 +76,16 @@ cxx_library(
 )
 
 cxx_library(
+    name = "pocketfft_header",
+    header_namespace = "",
+    exported_headers = {
+        "pocketfft_hdronly.h": "pocketfft/pocketfft_hdronly.h",
+    },
+    reexport_all_header_dependencies = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
     name = "FXdiv",
     header_namespace = "",
     exported_headers = {

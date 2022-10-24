@@ -7,6 +7,7 @@ from . import constants as rpc_contants
 
 DeviceType = Union[int, str, torch.device]
 
+__all__ = ["TensorPipeRpcBackendOptions"]
 
 def _to_device(device: DeviceType) -> torch.device:
     device = torch.device(device)
@@ -113,6 +114,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                 invertible.
 
         Example::
+            >>> # xdoctest: +SKIP("distributed")
             >>> # both workers
             >>> def add(x, y):
             >>>     print(x)  # tensor([1., 1.], device='cuda:1')

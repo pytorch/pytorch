@@ -33,6 +33,7 @@ torch.cuda
     stream
     synchronize
     utilization
+    OutOfMemoryError
 
 Random Number Generator
 -------------------------
@@ -86,6 +87,8 @@ Graphs (beta)
     graph
     make_graphed_callables
 
+.. _cuda-memory-management-api:
+
 Memory management
 -----------------
 .. autosummary::
@@ -110,6 +113,7 @@ Memory management
      reset_peak_memory_stats
      caching_allocator_alloc
      caching_allocator_delete
+     get_allocator_backend
 .. FIXME The following doesn't seem to exist. Is it supposed to?
    https://github.com/pytorch/pytorch/issues/27785
    .. autofunction:: reset_max_memory_reserved
@@ -133,3 +137,14 @@ Jiterator (beta)
 
     jiterator._create_jit_fn
     jiterator._create_multi_output_jit_fn
+
+Stream Sanitizer (prototype)
+----------------------------
+
+CUDA Sanitizer is a prototype tool for detecting synchronization errors between streams in PyTorch.
+See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
+
+.. toctree::
+    :hidden:
+
+    cuda._sanitizer

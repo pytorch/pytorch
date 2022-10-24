@@ -181,7 +181,7 @@ void parseTypes(
   std::vector<std::string> types_string_list;
   types_string_list.resize(types_list.size());
   for (size_t i = 0; i < types_list.size(); i++) {
-    types_string_list[i] = types_list[i].toString()->string();
+    types_string_list[i] = types_list[i].toStringRef();
   }
 
   std::vector<c10::TypePtr> types_ptr_list = c10::parseType(types_string_list);

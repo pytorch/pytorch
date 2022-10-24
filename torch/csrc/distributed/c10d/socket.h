@@ -12,7 +12,7 @@
 #include <string>
 
 #include <c10/macros/Macros.h>
-#include <c10d/exception.h>
+#include <torch/csrc/distributed/c10d/exception.h>
 
 namespace c10d {
 namespace detail {

@@ -28,15 +28,32 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      cuda-arch-list:
+        required: false
+        type: string
+        default: "5.2"
+        description: |
+          List of CUDA architectures CI build should target.
+
+      test-matrix:
+        required: false
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on. This
+          is moved here from the Linux test workflow so that we can apply filter
+          logic using test-config labels earlier and skip unnecessary builds
 
     outputs:
       docker-image:
         value: ${{ jobs.build.outputs.docker-image }}
         description: The docker image containing the built PyTorch.
+      test-matrix:
+        value: ${{ inputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
 
 jobs:
   build:
-    # Don't run on forked repos.
+    # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
@@ -50,18 +67,11 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-      - name: Check for new workflows
-        run: |
-          if [ ! -f "./.github/actions/setup-linux/action.yml" ]; then
-            echo "::error::Your PR is based on a version of master that is too old for our CI to work. Please rebase your PR on latest master and resubmit."
-            exit 1
-          fi
-
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -73,7 +83,7 @@ jobs:
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -88,7 +98,17 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Apply the filter logic to the build step too if the test-config label is already there
+      - name: Select all requested test configurations (if the test matrix is available)
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -97,9 +117,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-          TORCH_CUDA_ARCH_LIST: 5.2
+          TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
@@ -114,6 +135,7 @@ jobs:
             -e SHA1 \
             -e BRANCH \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -133,13 +155,13 @@ jobs:
           docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
 
       - name: Archive artifacts into zip
-        if: inputs.build-generates-artifacts
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin
+          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
-        if: inputs.build-generates-artifacts
+        if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -147,6 +169,7 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats
+        if: steps.build.outcome != 'skipped'
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |
@@ -156,5 +179,5 @@ jobs:
           path: sccache-stats-*.json
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

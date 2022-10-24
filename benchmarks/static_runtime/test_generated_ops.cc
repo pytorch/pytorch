@@ -1,4 +1,5 @@
 // @lint-ignore-every CLANGTIDY HOWTOEVEN
+// AUTO-GENERATED FROM: torchgen/static_runtime/gen_static_runtime_ops.py
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/torch.h>
@@ -863,6 +864,38 @@ TEST(StaticRuntime, autogen_clamp_max) {
       /*check_resize=*/true);
 }
 
+TEST(StaticRuntime, autogen_clamp_max_Tensor) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %max: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::clamp_max(%self, %max)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto max0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{self0, max0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+
+  auto self1 = at::rand({22, 22, 22});
+  auto max1 = at::rand({22, 22, 22});
+  std::vector<IValue> args2{self1, max1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+}
+
 TEST(StaticRuntime, autogen_clip) {
   const std::string script = R"IR(
     graph(%self: Tensor, %min: int?, %max: int?):
@@ -1522,36 +1555,6 @@ TEST(StaticRuntime, autogen_index_copy) {
   auto index1 = at::randint(0, 10, {32}, at::kLong);
   auto source1 = at::rand({32});
   std::vector<IValue> args2{self1, dim1, index1, source1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_inverse) {
-  const std::string script = R"IR(
-    graph(%self: Tensor):
-        %bias: None = prim::Constant()
-        %ret = aten::inverse(%self)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{self0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{self1};
   testStaticRuntime(
       script,
       args,
@@ -2899,6 +2902,38 @@ TEST(StaticRuntime, autogen_square) {
       /*check_resize=*/true);
 }
 
+TEST(StaticRuntime, autogen_prod) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dtype: int?):
+        %bias: None = prim::Constant()
+        %ret = aten::prod(%self, %dtype)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto dtype0 = at::ScalarType::Float;
+  std::vector<IValue> args{self0, dtype0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
+
+  auto self1 = at::rand({22, 22, 22});
+  auto dtype1 = at::ScalarType::Float;
+  std::vector<IValue> args2{self1, dtype1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
+}
+
 TEST(StaticRuntime, autogen_prod_dim_int) {
   const std::string script = R"IR(
     graph(%self: Tensor, %dim: int, %keepdim: bool, %dtype: int?):
@@ -3666,8 +3701,8 @@ TEST(StaticRuntime, autogen_bitwise_left_shift_Tensor) {
         return (%cloned)
   )IR";
 
-  auto self0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
-  auto other0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
+  auto self0 = at::randint(1, 1 << 4, {6, 6, 6}, at::kInt);
+  auto other0 = at::randint(1, 26, {6, 6, 6}, at::kInt);
   std::vector<IValue> args{self0, other0};
   testStaticRuntime(
       script,
@@ -3677,8 +3712,8 @@ TEST(StaticRuntime, autogen_bitwise_left_shift_Tensor) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto self1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
-  auto other1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
+  auto self1 = at::randint(1, 1 << 4, {22, 22, 22}, at::kInt);
+  auto other1 = at::randint(1, 26, {22, 22, 22}, at::kInt);
   std::vector<IValue> args2{self1, other1};
   testStaticRuntime(
       script,
@@ -3698,8 +3733,8 @@ TEST(StaticRuntime, autogen_bitwise_right_shift_Tensor) {
         return (%cloned)
   )IR";
 
-  auto self0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
-  auto other0 = at::randint(1, 100, {6, 6, 6}, at::kInt);
+  auto self0 = at::randint(1 << 21, 1 << 30, {6, 6, 6}, at::kInt);
+  auto other0 = at::randint(1, 22, {6, 6, 6}, at::kInt);
   std::vector<IValue> args{self0, other0};
   testStaticRuntime(
       script,
@@ -3709,8 +3744,8 @@ TEST(StaticRuntime, autogen_bitwise_right_shift_Tensor) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto self1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
-  auto other1 = at::randint(1, 100, {22, 22, 22}, at::kInt);
+  auto self1 = at::randint(1 << 21, 1 << 30, {22, 22, 22}, at::kInt);
+  auto other1 = at::randint(1, 22, {22, 22, 22}, at::kInt);
   std::vector<IValue> args2{self1, other1};
   testStaticRuntime(
       script,
@@ -5163,38 +5198,6 @@ TEST(StaticRuntime, autogen_maximum) {
       /*check_resize=*/true);
 }
 
-TEST(StaticRuntime, autogen_max_other) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %other: Tensor):
-        %bias: None = prim::Constant()
-        %ret = aten::max(%self, %other)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto other0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{self0, other0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto other1 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{self1, other1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
 TEST(StaticRuntime, autogen_minimum) {
   const std::string script = R"IR(
     graph(%self: Tensor, %other: Tensor):
@@ -5505,40 +5508,6 @@ TEST(StaticRuntime, autogen_mse_loss) {
       /*use_allclose=*/false,
       /*use_equalnan=*/false,
       /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen_l1_loss) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %target: Tensor, %reduction: int):
-        %bias: None = prim::Constant()
-        %ret = aten::l1_loss(%self, %target, %reduction)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto target0 = at::rand({6, 6, 6});
-  auto reduction0 = 1;
-  std::vector<IValue> args{self0, target0, reduction0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/false);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto target1 = at::rand({22, 22, 22});
-  auto reduction1 = 1;
-  std::vector<IValue> args2{self1, target1, reduction1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/false);
 }
 
 TEST(StaticRuntime, autogen_multi_margin_loss) {
@@ -6230,8 +6199,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool2d_backward) {
         return (%cloned)
   )IR";
 
-  auto grad_output0 = at::randint(-3, 2, {2, 2, 2});
-  auto self0 = at::randint(-3, 2, {2, 2, 2});
+  auto grad_output0 = at::rand({2, 2, 2}, at::kFloat);
+  auto self0 = at::rand({2, 2, 2}, at::kFloat);
   auto indices0 = at::randint(0, 1, {2, 2, 2}, at::kLong);
   std::vector<IValue> args{grad_output0, self0, indices0};
   testStaticRuntime(
@@ -6242,8 +6211,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool2d_backward) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto grad_output1 = at::randint(-3, 3, {3, 3, 3});
-  auto self1 = at::randint(-3, 2, {3, 3, 3});
+  auto grad_output1 = at::rand({3, 3, 3}, at::kFloat);
+  auto self1 = at::rand({3, 3, 3}, at::kFloat);
   auto indices1 = at::randint(0, 1, {3, 3, 3}, at::kLong);
   std::vector<IValue> args2{grad_output1, self1, indices1};
   testStaticRuntime(
@@ -6264,8 +6233,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool3d_backward) {
         return (%cloned)
   )IR";
 
-  auto grad_output0 = at::randint(-3, 2, {2, 2, 2, 2});
-  auto self0 = at::randint(-3, 2, {2, 2, 2, 2});
+  auto grad_output0 = at::rand({2, 2, 2, 2}, at::kFloat);
+  auto self0 = at::rand({2, 2, 2, 2}, at::kFloat);
   auto indices0 = at::randint(0, 1, {2, 2, 2, 2}, at::kLong);
   std::vector<IValue> args{grad_output0, self0, indices0};
   testStaticRuntime(
@@ -6276,8 +6245,8 @@ TEST(StaticRuntime, autogen_adaptive_max_pool3d_backward) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto grad_output1 = at::randint(-3, 3, {3, 3, 3, 3});
-  auto self1 = at::randint(-3, 2, {3, 3, 3, 3});
+  auto grad_output1 = at::rand({3, 3, 3, 3}, at::kFloat);
+  auto self1 = at::rand({3, 3, 3, 3}, at::kFloat);
   auto indices1 = at::randint(0, 1, {3, 3, 3, 3}, at::kLong);
   std::vector<IValue> args2{grad_output1, self1, indices1};
   testStaticRuntime(
@@ -7521,15 +7490,15 @@ TEST(StaticRuntime, autogen_linalg_cross) {
 
 TEST(StaticRuntime, autogen_linalg_det) {
   const std::string script = R"IR(
-    graph(%self: Tensor):
+    graph(%A: Tensor):
         %bias: None = prim::Constant()
-        %ret = aten::linalg_det(%self)
+        %ret = aten::linalg_det(%A)
         %cloned = aten::clone(%ret, %bias)
         return (%cloned)
   )IR";
 
-  auto self0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{self0};
+  auto A0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{A0};
   testStaticRuntime(
       script,
       args,
@@ -7538,8 +7507,8 @@ TEST(StaticRuntime, autogen_linalg_det) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto self1 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{self1};
+  auto A1 = at::rand({22, 22, 22});
+  std::vector<IValue> args2{A1};
   testStaticRuntime(
       script,
       args,
@@ -7613,9 +7582,39 @@ TEST(StaticRuntime, autogen_linalg_eigvals) {
 
 TEST(StaticRuntime, autogen_linalg_inv) {
   const std::string script = R"IR(
+    graph(%A: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::linalg_inv(%A)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto A0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{A0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+
+  auto A1 = at::rand({22, 22, 22});
+  std::vector<IValue> args2{A1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+}
+
+TEST(StaticRuntime, autogen_inverse) {
+  const std::string script = R"IR(
     graph(%self: Tensor):
         %bias: None = prim::Constant()
-        %ret = aten::linalg_inv(%self)
+        %ret = aten::inverse(%self)
         %cloned = aten::clone(%ret, %bias)
         return (%cloned)
   )IR";
@@ -7696,37 +7695,6 @@ TEST(StaticRuntime, autogen_outer) {
   auto self1 = at::rand({64});
   auto vec21 = at::rand({64});
   std::vector<IValue> args2{self1, vec21};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-// Disabling the test because JIT alias analysis does not support linalg_svdvals at this point.
-TEST(StaticRuntime, DISABLED_autogen_linalg_svdvals) {
-  const std::string script = R"IR(
-    graph(%A: Tensor):
-        %bias: None = prim::Constant()
-        %ret = aten::linalg_svdvals(%A)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto A0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{A0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto A1 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{A1};
   testStaticRuntime(
       script,
       args,

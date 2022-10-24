@@ -12,6 +12,23 @@
 
 namespace c10 {
 
+// These contains all device types that also have a BackendComponent
+// and therefore participate in per-backend functionality dispatch keys.
+// This is most backends except PrivateUse2 and PrivateUse3
+#define C10_FORALL_BACKEND_DEVICE_TYPES(_, extra) \
+  _(CPU, extra)                                   \
+  _(CUDA, extra)                                  \
+  _(HIP, extra)                                   \
+  _(XLA, extra)                                   \
+  _(MPS, extra)                                   \
+  _(IPU, extra)                                   \
+  _(XPU, extra)                                   \
+  _(HPU, extra)                                   \
+  _(VE, extra)                                    \
+  _(Lazy, extra)                                  \
+  _(Meta, extra)                                  \
+  _(PrivateUse1, extra)
+
 enum class DeviceType : int8_t {
   CPU = 0,
   CUDA = 1, // CUDA.
@@ -77,6 +94,9 @@ C10_API std::string DeviceTypeName(DeviceType d, bool lower_case = false);
 C10_API bool isValidDeviceType(DeviceType d);
 
 C10_API std::ostream& operator<<(std::ostream& stream, DeviceType type);
+
+C10_API void register_privateuse1_backend(std::string backend_name);
+C10_API std::string get_privateuse1_backend(bool lower_case = true);
 
 } // namespace c10
 

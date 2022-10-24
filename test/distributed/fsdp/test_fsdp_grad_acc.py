@@ -4,13 +4,16 @@ import contextlib
 import itertools
 import sys
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    BackwardPrefetch,
+    ShardingStrategy,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -88,6 +91,7 @@ class TestGradAcc(FSDPTest):
         configs: List[_GradAccConfig],
         cpu_offload: CPUOffload,
         backward_prefetch: Optional[BackwardPrefetch],
+        sharding_strategy: ShardingStrategy,
     ):
         """
         Tests gradient accumulation by comparing a run that trains sequentially
@@ -114,8 +118,10 @@ class TestGradAcc(FSDPTest):
         """
         # Gradient accumulation outside `no_sync()` is not currently compatible
         # with CPU offloading
-        if cpu_offload.offload_params and \
-                any(not config.use_no_sync for config in configs):
+        if (
+            cpu_offload.offload_params
+            and any(not config.use_no_sync for config in configs)
+        ):
             return
         old_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
         try:
@@ -126,6 +132,7 @@ class TestGradAcc(FSDPTest):
             fsdp_kwargs = {
                 "cpu_offload": cpu_offload,
                 "backward_prefetch": backward_prefetch,
+                "sharding_strategy": sharding_strategy,
             }
             fsdp_model: FSDP = TransformerWithSharedParams.init(
                 self.process_group,
@@ -210,6 +217,16 @@ class TestGradAcc(FSDPTest):
         finally:
             torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32
 
+    def _get_subtest_config(self) -> Dict[str, List[Any]]:
+        """Returns a subtest configuration that subtests prefetching."""
+        return {
+            "backward_prefetch": [
+                None,
+                BackwardPrefetch.BACKWARD_PRE,
+                BackwardPrefetch.BACKWARD_POST,
+            ]
+        }
+
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "configs",
@@ -231,14 +248,18 @@ class TestGradAcc(FSDPTest):
         [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
     )
     @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None],
+        "sharding_strategy",
+        [
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP,
+            ShardingStrategy.NO_SHARD,
+        ]
     )
     def test_grad_acc(
         self,
         configs: _GradAccConfigs,
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
+        sharding_strategy: ShardingStrategy,
     ):
         """
         Tests gradient accumulation.
@@ -255,11 +276,13 @@ class TestGradAcc(FSDPTest):
         manager is not currently compatible with CPU offloading, so those tests
         are vacuous.
         """
-        self._test_grad_acc(
+        self.run_subtests(
+            self._get_subtest_config(),
+            self._test_grad_acc,
             batch_dim=1,
             configs=configs.configs,
             cpu_offload=cpu_offload,
-            backward_prefetch=backward_prefetch,
+            sharding_strategy=sharding_strategy,
         )
 
 

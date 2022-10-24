@@ -1,7 +1,9 @@
-import torch
-from torch.utils._mode_utils import no_dispatch
-from torch.multiprocessing.reductions import StorageWeakRef
 import weakref
+
+import torch
+from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._mode_utils import no_dispatch
+
 
 def safe_is_leaf(t):
     try:
@@ -23,6 +25,7 @@ def safe_is_leaf(t):
 # references.
 # To get around this issue, we can use it as a normal key, and then set
 # `weakref.finalize` to delete the key when its contained tensor dies.
+
 
 class WeakTensorRefKey(object):
     def __init__(self, ten):
@@ -60,6 +63,7 @@ class MetaConverter:
         self.hit = 0
         self.miss = 0
         self.del_hook = None
+        self.arg_cnt = 0
 
     def successful(self):
         return self.hit > 0 and self.miss == 0
@@ -80,8 +84,9 @@ class MetaConverter:
         # even though a tensor with their storage has expired (aliasing or otherwise)
         # check for expired storages less often so as to bound the amount of work we
         # do checking for expired storages
-        self.check_expired_frequency = max(self.check_expired_frequency, len(self.maybe_storages_to_delete))
-
+        self.check_expired_frequency = max(
+            self.check_expired_frequency, len(self.maybe_storages_to_delete)
+        )
 
     def get_tensor_memo(self, t):
         return self.tensor_memo.get(WeakTensorRefKey(t), None)
@@ -90,7 +95,10 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        weak_st = StorageWeakRef(t.storage())
+        if t.is_sparse:
+            weak_st = None
+        else:
+            weak_st = StorageWeakRef(t.storage())
         tensor_ref_key = WeakTensorRefKey(t)
 
         def del_ten():
@@ -102,7 +110,7 @@ class MetaConverter:
             self_ref.tensor_memo.pop(tensor_ref_key, None)
             if weak_st and weak_st.expired():
                 self_ref.storage_memo.pop(weak_st, None)
-            else:
+            elif weak_st is not None:
                 # [expired-storages]
                 # NB: even though the tensor has died,
                 # the deallocation of its storage can take longer,
@@ -126,11 +134,27 @@ class MetaConverter:
         # Use a Weak Ref to s in order to not leak memory
         swr = StorageWeakRef(s)
         if swr not in self.storage_memo:
-            self.storage_memo[swr] = torch.empty(s.size(), dtype=s.dtype, device='meta')
+            self.storage_memo[swr] = torch.empty(s.size(), dtype=s.dtype, device="meta")
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
-    def meta_tensor(self, t):
+    def meta_tensor(self, t, shape_env=None):
+        arg_cnt = self.arg_cnt
+        self.arg_cnt += 1
+
+        make_symbolic = shape_env is not None
+
+        def sym(x):
+            if make_symbolic:
+                return shape_env.create_symbol(x)
+            else:
+                return x
+
+        def sym_sizes_strides(t):
+            if make_symbolic:
+                return shape_env.create_symbolic_sizes_strides(t)
+            return (t.size(), t.stride())
+
         # see expired-storages
         self.check_expired_count += 1
         if self.check_expired_count >= self.check_expired_frequency:
@@ -139,7 +163,26 @@ class MetaConverter:
 
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
-                if t._is_view():
+                if t.is_sparse:
+                    assert shape_env is None, "symbolic on sparse NYI"
+                    is_leaf = safe_is_leaf(t)
+                    r = torch.ops.aten._sparse_coo_tensor_with_dims(
+                        t.sparse_dim(),
+                        t.dense_dim(),
+                        t.shape,
+                        dtype=t.dtype,
+                        layout=torch.sparse_coo,
+                        device="meta",
+                    )
+                    r._coalesced_(t.is_coalesced())
+                    if t.requires_grad:
+                        r.requires_grad = True
+                    if t.requires_grad and not is_leaf:
+                        with torch.enable_grad():
+                            r = r.clone()
+                            r._coalesced_(t.is_coalesced())
+
+                elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create the view off that.  NB: doing it
                     # directly from storage is WRONG because this won't cause
@@ -148,8 +191,11 @@ class MetaConverter:
                     base = self.meta_tensor(t._base)
 
                     def is_c_of_r(complex_dtype, real_dtype):
-                        return utils.is_complex_dtype(complex_dtype) and \
-                            utils.corresponding_real_dtype(complex_dtype) == real_dtype
+                        return (
+                            utils.is_complex_dtype(complex_dtype)
+                            and utils.corresponding_real_dtype(complex_dtype)
+                            == real_dtype
+                        )
 
                     if base.dtype == t.dtype:
                         pass
@@ -164,12 +210,15 @@ class MetaConverter:
                         base = base.view(t.dtype)
 
                     with torch.enable_grad():
-                        r = base.as_strided(t.size(), t.stride(), t.storage_offset())
+                        sizes, strides = sym_sizes_strides(t)
+                        r = base.as_strided(sizes, strides, sym(t.storage_offset()))
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
                     if t.requires_grad:
-                        r = torch.empty((0,), dtype=t.dtype, device='meta', requires_grad=True)
+                        r = torch.empty(
+                            (0,), dtype=t.dtype, device="meta", requires_grad=True
+                        )
                         if not is_leaf:
                             with torch.enable_grad():
                                 # The backward function here will be wrong, but
@@ -180,14 +229,15 @@ class MetaConverter:
                                 # sort of unsupported grad_fn here
                                 r = r.clone()
                     else:
-                        r = torch.empty((0,), dtype=t.dtype, device='meta')
+                        r = torch.empty((0,), dtype=t.dtype, device="meta")
                     # As long as meta storage is not supported, need to prevent
                     # redispatching on set_(Storage, ...) which will choke with
                     # meta storage
                     s = self.meta_storage(t.storage())
                     with no_dispatch():
+                        sizes, strides = sym_sizes_strides(t)
                         with torch.no_grad():
-                            r.set_(s, t.storage_offset(), t.size(), t.stride())
+                            r.set_(s, sym(t.storage_offset()), sizes, strides)
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -195,23 +245,35 @@ class MetaConverter:
 
         return self.get_tensor_memo(t)
 
-    def __call__(self, t):
+    def __call__(self, t, shape_env=None):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-            if any([
-                t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
-                t.is_nested, torch._is_functional_tensor(t),
-                # these are supported in meta conversion but the fallbacks
-                # don't work
-                t.is_neg(), t.is_conj(),
-                # conjugate fallback does not support meta tensors
-                t.dtype in (torch.complex128, torch.complex64, torch.complex32),
-                t.device.type in ("lazy", "meta"),
-                # We need a way to test if a tensor is batched but there
-                # is no official APi to do it
-                # torch._C._is_batched(t),
-            ]):
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        if (
+            type(t) is torch.Tensor
+            or type(t) is torch.nn.Parameter
+            or isinstance(t, FakeTensor)
+        ):
+            if any(
+                [
+                    t.is_sparse_csr,
+                    t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
+                    t.is_mkldnn,
+                    t.is_quantized,
+                    t.is_nested,
+                    t._is_view() and t._base is not None and t._base.is_sparse,
+                    torch._is_functional_tensor(t),
+                    # these are supported in meta conversion but the fallbacks
+                    # don't work
+                    t.is_neg(),
+                    t.is_conj(),
+                    t.device.type in ("lazy", "meta"),
+                    # We need a way to test if a tensor is batched but there
+                    # is no official APi to do it
+                    # torch._C._is_batched(t),
+                ]
+            ):
                 # TODO: sparse should support meta
                 # NB technically to('meta') does work but our logging
                 # instrumentation will see the meta conversions and the
@@ -221,7 +283,7 @@ class MetaConverter:
                 return t
             else:
                 self.hit += 1
-                r = self.meta_tensor(t)
+                r = self.meta_tensor(t, shape_env=shape_env)
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
                 return r
@@ -237,4 +299,5 @@ class MetaConverter:
             # non-Tensor types don't count as hit or miss
             return t
 
-import torch._prims.utils as utils
+
+import torch._prims_common as utils

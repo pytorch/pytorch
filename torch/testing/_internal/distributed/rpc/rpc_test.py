@@ -394,8 +394,19 @@ def my_script_func(tensor):
 
 
 expected_err = "Expected error"
+
+# Note that it needs to inherit from Exception, not BaseException. See comment
+# in rpc/internal.py
+class CustomException(Exception):
+    def __init__(self, bool, msg):
+        self.bool = bool
+        super().__init__(msg)
+
 def raise_func():
     raise ValueError(expected_err)
+
+def custom_raise_func():
+    raise CustomException(True, "foo")
 
 @torch.jit.script
 def raise_func_script(expected_err: str) -> torch.Tensor:
@@ -3019,7 +3030,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         self.assertEqual(a.owner(), a.owner())
         self.assertEqual(a.owner(), b.owner())
         self.assertEqual(a.owner(), rpc.get_worker_info())
-        x = dict()
+        x = {}
         x[a.owner()] = a
         x[other_a.owner()] = other_a
         self.assertEqual(x[a.owner()], a)
@@ -3566,6 +3577,33 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             with _wait_all():
                 raise_func()
         self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_custom_exception_throw_during_reconstruction(self):
+        """
+        Test that we still throw info about the remote side exception even when
+        we cannot recreate it on client side.
+        """
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        if self.rank != 0:
+            exc_caught = False
+            dst = worker_name(0)
+            try:
+                rpc.rpc_sync(dst, custom_raise_func, args=())
+            except RuntimeError as e:
+                exc_caught = True
+                msg = str(e)
+                print(f"Got msg {msg}")
+                self.assertTrue("Original exception on remote side was" in msg)
+                self.assertTrue("CustomException" in msg)
+            except BaseException as e:
+                raise RuntimeError(
+                    f"Failure - expected RuntimeError, got {e}"
+                ) from e
+            finally:
+                self.assertTrue(exc_caught)
+
+        dist.barrier()
 
 
     timed_out_rpc_event = None

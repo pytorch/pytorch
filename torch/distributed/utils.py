@@ -1,14 +1,51 @@
-import collections
+from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.distributed as dist
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
-    is_namedtuple as _is_namedtuple
+    _is_namedtuple,
 )
-from typing import Dict, Any, List
+from torch.nn.utils.rnn import PackedSequence
 
 __all__ = []  # type: ignore[var-annotated]
+
+def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
+    """
+    Turn argument list into separate key list and value list (unpack_kwargs does the opposite)
+    Inspiration: https://github.com/facebookresearch/fairscale/blob/eeb6684/fairscale/internal/containers.py#L70
+    Usage::
+
+        kwarg_keys, flat_args = pack_kwargs(1, 2, a=3, b=4)
+        assert kwarg_keys == ("a", "b")
+        assert flat_args == (1, 2, 3, 4)
+        args, kwargs = unpack_kwargs(kwarg_keys, flat_args)
+        assert args == (1, 2)
+        assert kwargs == {"a": 3, "b": 4}
+    Returns:
+        Tuple[Tuple[Any, ...], Tuple[str, ...]]: The first tuple element gives
+        gives both positional args and kwarg values, where the positional args
+        proceed kwarg values and kwarg values are ordered consistently with the
+        kwarg keys. The second tuple element gives the kwarg keys.
+        The second tuple element's length is at most the first tuple element's length.
+    """
+    kwarg_keys: List[str] = []
+    flat_args: List[Any] = list(args)
+    for k, v in kwargs.items():
+        kwarg_keys.append(k)
+        flat_args.append(v)
+
+    return tuple(flat_args), tuple(kwarg_keys)
+
+
+def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+    """See _pack_kwargs."""
+    assert len(kwarg_keys) <= len(flat_args), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    if len(kwarg_keys) == 0:
+        return flat_args, {}
+    args = flat_args[: -len(kwarg_keys)]
+    kwargs = {k: v for k, v in zip(kwarg_keys, flat_args[-len(kwarg_keys) :])}
+    return args, kwargs
 
 def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     r"""
@@ -16,8 +53,9 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
     """
 
     def to_map(obj):
-        if isinstance(obj, torch.Tensor):
-            if obj.device == torch.device("cuda", target_gpu):
+        if isinstance(obj, torch.Tensor) or isinstance(obj, PackedSequence):
+            device = obj.data.device if isinstance(obj, PackedSequence) else obj.device
+            if device == torch.device("cuda", target_gpu):
                 return (obj,)
             if not use_side_stream_for_tensor_copies:
                 return (obj.to(target_gpu),)
@@ -34,28 +72,19 @@ def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
                     # main stream is complete
-                    output.record_stream(current_stream)  # type: ignore[arg-type]
+                    if isinstance(obj, PackedSequence):
+                        output.data.record_stream(current_stream)  # type: ignore[arg-type]
+                    else:
+                        output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if _is_namedtuple(obj):
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(to_map, obj)))
-        if isinstance(obj, str):
-            # Needs to be checked, otherwise it's taken as a sequence infinitely.
-            # This is because the elements of a string are also strings, and so on.
-            return [obj]
-        if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
-            try:
-                return [type(obj)(i) for i in zip(*map(to_map, obj))]  # type: ignore[call-arg]
-            except TypeError:
-                # The sequence type may not support `__init__(iterable)` (e.g., `range`).
-                return [list(i) for i in zip(*map(to_map, obj))]
-        if isinstance(obj, collections.abc.Mapping) and len(obj) > 0:
-            try:
-                return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]   # type: ignore[call-arg]
-            except TypeError:
-                # The mapping type may not support `__init__(iterable)`.
-                return [dict(i) for i in zip(*map(to_map, obj.items()))]
+        if isinstance(obj, list) and len(obj) > 0:
+            return [list(i) for i in zip(*map(to_map, obj))]
+        if isinstance(obj, dict) and len(obj) > 0:
+            return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
         return [obj]
 
     # Avoid reference cycle
