@@ -285,7 +285,9 @@ std::string _formattedArgDesc(
         if (i != 0) {
           result += ", ";
         }
-        result += py_typename(py::reinterpret_steal<py::object>(PySequence_GetItem(arg, i)).ptr());
+        result += py_typename(
+            py::reinterpret_steal<py::object>(PySequence_GetItem(arg, i))
+                .ptr());
       }
       if (is_tuple) {
         if (num_elements == 1) {
