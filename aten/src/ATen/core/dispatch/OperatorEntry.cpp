@@ -505,7 +505,6 @@ std::string post_process_dispatch_key_str(std::string dispatch_key) {
       // append the registered backend's name.
       // AutogradPrivateUse1 -> AutogradFoo
       auto backend_name = c10::get_privateuse1_backend();
-      backend_name[0] = std::toupper(backend_name[0]);
       dispatch_key = dispatch_key + backend_name;
     }
   }
