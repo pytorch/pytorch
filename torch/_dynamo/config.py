@@ -7,7 +7,7 @@ from types import ModuleType
 import torch
 
 # needed so that CODE is registered as a level in logging
-from . import logging as torchdynamo_logging # type: ignore[import]
+from . import logging as torchdynamo_logging  # noqa: F401
 
 try:
     import torch._prims
@@ -22,7 +22,8 @@ except ImportError:
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
 # logging.CODE print compiled functions + graphs
 # logging.INFO print the steps that dynamo is running
-# logging.WARN print warnings (including graph breaks)o# logging.ERROR print exceptions (and what user code was being processed when it occurred)
+# logging.WARN print warnings (including graph breaks)
+# logging.ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
 
