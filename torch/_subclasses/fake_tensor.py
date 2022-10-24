@@ -889,6 +889,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten.detach.default,
             aten.zero.default,
             aten.squeeze_copy.dim,
+            aten._fused_moving_avg_obs_fq_helper_functional.default,
             # TODO: I think there are a lot more things that could be
             # in this list; all the _copy ops should be OK to directly
             # call this way
