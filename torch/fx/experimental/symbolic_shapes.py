@@ -13,6 +13,7 @@ from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
+    from sympy.printing.precedence import precedence  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -127,7 +128,7 @@ class PySymInt(object):
         return PySymInt(self.expr, self.shape_env, constant=self.constant)
 
     def _update_expr(self):
-        self._expr = self.shape_env.simplify(self._expr)
+        self._expr = self.shape_env.replace(self._expr)
 
     def __str__(self):
         return f"{self.expr}"
@@ -176,6 +177,18 @@ if HAS_SYMPY:
         2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
         """
         nargs = (2,)
+
+        def _sympystr(self, printer):
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer._print(lhs)
+            rhs_str = printer._print(rhs)
+            if precedence(lhs) < precedence(sympy.div):
+                lhs_str = f"({lhs_str})"
+            if precedence(rhs) < precedence(sympy.div):
+                rhs_str = f"({rhs_str})"
+
+            return f"{lhs_str}//{rhs_str}"
 
         @classmethod
         def eval(cls, base, divisor):
