@@ -307,6 +307,7 @@ class StateDictType(Enum):
     LOCAL_STATE_DICT = auto()
     SHARDED_STATE_DICT = auto()
 
+
 @dataclass
 class StateDictConfig:
     """
@@ -315,7 +316,8 @@ class StateDictConfig:
     order to configure settings for the particular type of ``state_dict``
     implementation FSDP will use.
     """
-    pass
+    offload_to_cpu: bool = False
+
 
 @dataclass
 class FullStateDictConfig(StateDictConfig):
@@ -345,22 +347,18 @@ class FullStateDictConfig(StateDictConfig):
         >>> fsdp = FSDP(model, device_id=torch.cuda.current_device(), auto_wrap_policy=..., sync_module_states=True)
         >>> # After this point, all ranks have FSDP model with loaded checkpoint.
     """
-    offload_to_cpu: bool = False
     rank0_only: bool = False
+
 
 @dataclass
 class LocalStateDictConfig(StateDictConfig):
     pass
 
+
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
     pass
 
-_state_dict_type_to_config = {
-    StateDictType.FULL_STATE_DICT: FullStateDictConfig,
-    StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
-    StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
-}
 
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
@@ -572,7 +570,7 @@ class _ExecOrderData:
             tensor_kwargs = {"dtype": torch.int32, "device": device}
             world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)
             local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_num_valid_indices,
                 local_num_valid_indices,
                 group=self.process_group,
@@ -597,7 +595,7 @@ class _ExecOrderData:
                 self.world_size * num_valid_indices, **tensor_kwargs
             )
             local_indices = torch.tensor(local_indices, **tensor_kwargs)
-            dist._all_gather_base(
+            dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
             # Check that all ranks plan to all-gather the same index parameters
@@ -1072,7 +1070,7 @@ class FullyShardedDataParallel(nn.Module):
 
         self._check_single_device_module(module, ignored_params)
         device_from_device_id: Optional[torch.device] = self._get_device_from_device_id(device_id)
-        self._materialize_module(module, param_init_fn, device_from_device_id)
+        self._materialize_module(module, param_init_fn, ignored_params, device_from_device_id)
         self._move_module_to_device(module, ignored_params, device_from_device_id)
         self.compute_device = self._get_compute_device(module, ignored_params, device_from_device_id)
         params_to_flatten = list(self._get_orig_params(module, ignored_params))
@@ -1353,6 +1351,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         param_init_fn: Optional[Callable[[nn.Module], None]],
+        ignored_params: Set[nn.Parameter],
         device_from_device_id: Optional[torch.device],
     ) -> None:
         """
@@ -1367,11 +1366,11 @@ class FullyShardedDataParallel(nn.Module):
         ``reset_parameters()``, and for torchdistX fake tensors, this calls
         ``deferred_init.materialize_module()``.
         """
-        is_meta_module = any(p.is_meta for p in module.parameters())
+        is_meta_module = any(p.is_meta for p in self._get_orig_params(module, ignored_params))
         is_torchdistX_deferred_init = (
             not is_meta_module
             and _TORCHDISTX_AVAIL
-            and any(fake.is_fake(p) for p in module.parameters())
+            and any(fake.is_fake(p) for p in self._get_orig_params(module, ignored_params))
         )
         if (
             is_meta_module or is_torchdistX_deferred_init
@@ -1846,8 +1845,8 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root is not None:
             return  # no-op: already initialized
         if not torch.cuda.is_available():
-            # Allow the FSDP constructor to run even with CUDA but check this
-            # once we start real execution
+            # Allow the FSDP constructor to run even without CUDA but check
+            # this once we start real execution
             raise RuntimeError("FSDP does not support CPU only execution")
         # The following logic is only run on the root FSDP instance since it
         # will set `_is_root=False` for the non-root instances
@@ -2001,8 +2000,6 @@ class FullyShardedDataParallel(nn.Module):
         computation. This should only be called on the root FSDP instance."""
         assert self._is_root
         assert torch.cuda.is_available()
-        # Default stream for computation.
-        self._streams["computation"] = torch.cuda.current_stream()
         # Stream for unshard logic, including allocating the all-gather
         # destination tensors and the all-gathers themselves.
         self._streams["unshard"] = torch.cuda.Stream()
@@ -2021,12 +2018,12 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not self._is_root:
             return
-        computation_stream = self._streams["computation"]
-        self._streams["unshard"].wait_stream(computation_stream)
+        current_stream = torch.cuda.current_stream()
+        self._streams["unshard"].wait_stream(current_stream)
         # Having the pre-all-gather stream wait for the current stream even if
         # we do not leverage the pre-all-gather stream is tolerable since this
         # only runs once per iteration
-        self._streams["pre_unshard"].wait_stream(computation_stream)
+        self._streams["pre_unshard"].wait_stream(current_stream)
 
     def _prefetch_handles(
         self,
@@ -2112,17 +2109,16 @@ class FullyShardedDataParallel(nn.Module):
         return next(iter(training_states))
 
     @staticmethod
-    @contextlib.contextmanager
-    def state_dict_type(
+    def set_state_dict_type(
         module: nn.Module,
         state_dict_type: StateDictType,
         state_dict_config: Optional[StateDictConfig] = None,
-    ) -> Generator:
+    ) -> Tuple[StateDictType, StateDictConfig]:
         """
-        A context manager to set the ``state_dict_type`` of all the descendant
-        FSDP modules of the target module. The target module does not have to
-        be a FSDP module. If the target module is a FSDP module, its
-        ``state_dict_type`` will also be changed.
+        Set the ``state_dict_type`` and the corresponding (optional)
+        configurations of all the descendant FSDP modules of the target module.
+        The target module does not have to be a FSDP module. If the target
+        module is a FSDP module, its ``state_dict_type`` will also be changed.
 
         .. note:: This API should be called for only the top-level (root)
             module.
@@ -2130,24 +2126,36 @@ class FullyShardedDataParallel(nn.Module):
         .. note:: This API enables users to transparently use the conventional
             ``state_dict`` API to take model checkpoints in cases where the
             root FSDP module is wrapped by another ``nn.Module``. For example,
-            the following will ensure ``state_dict``  is called on all non-FSDP
-            instances, while dispatching into `local_state_dict` implementation
+            the following will ensure ``state_dict`` is called on all non-FSDP
+            instances, while dispatching into `sharded_state_dict` implementation
             for FSDP:
 
         Example::
 
             >>> # xdoctest: +SKIP("undefined variables")
             >>> model = DDP(FSDP(...))
-            >>> with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
-            >>>     checkpoint = model.state_dict()
+            >>> FSDP.set_state_dict_type(
+            >>>     model,
+            >>>     StateDictType.SHARDED_STATE_DICT,
+            >>>     ShardedStateDictConfig(offload_to_cpu=True),
+            >>> )
+            >>> checkpoint = model.state_dict()
 
         Args:
             module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
+            state_dict_config (Optional[StateDictConfig]): the configuration for the
+                target ``state_dict_type``.
         """
+        _state_dict_type_to_config = {
+            StateDictType.FULL_STATE_DICT: FullStateDictConfig,
+            StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
+            StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
+        }
+
         prev_state_dict_type = None
         prev_state_dict_config = None
-        # Use default config a state_dict config is not set.
+        # Use the default config if a state_dict config is not set.
         if state_dict_config is None:
             state_dict_config = _state_dict_type_to_config[state_dict_type]()
         for submodule in FullyShardedDataParallel.fsdp_modules(module):
@@ -2165,18 +2173,62 @@ class FullyShardedDataParallel(nn.Module):
             expected_state_dict_config_type = _state_dict_type_to_config[state_dict_type]
             if expected_state_dict_config_type != type(state_dict_config):
                 raise RuntimeError(
-                    f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
+                    f"Expected state_dict_config of type {expected_state_dict_config_type} "
+                    f"but got {type(state_dict_config)}"
                 )
             submodule._state_dict_type = state_dict_type
             submodule._state_dict_config = state_dict_config
+
+        return prev_state_dict_type, prev_state_dict_config
+
+    @staticmethod
+    @contextlib.contextmanager
+    def state_dict_type(
+        module: nn.Module,
+        state_dict_type: StateDictType,
+        state_dict_config: Optional[StateDictConfig] = None,
+    ) -> Generator:
+        """
+        A context manager to set the ``state_dict_type`` of all the descendant
+        FSDP modules of the target module. This context manager has the same
+        functions as :meth:`set_state_dict_type`. Read the document of
+        :meth:`set_state_dict_type` for the detail.
+
+        Example::
+
+            >>> # xdoctest: +SKIP("undefined variables")
+            >>> model = DDP(FSDP(...))
+            >>> with FSDP.state_dict_type(
+            >>>     model,
+            >>>     StateDictType.SHARDED_STATE_DICT,
+            >>> ):
+            >>>     checkpoint = model.state_dict()
+
+        Args:
+            module (torch.nn.Module): Root module.
+            state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
+            state_dict_config (Optional[StateDictConfig]): the configuration for the
+                target ``state_dict_type``.
+        """
+        prev_state_dict_type = None
+        prev_state_dict_config = None
         try:
+            prev_state_dict_type, prev_state_dict_config = (
+                FullyShardedDataParallel.set_state_dict_type(
+                    module, state_dict_type, state_dict_config
+                )
+            )
             yield
+        except Exception as e:
+            raise e
+        else:
+            assert prev_state_dict_type is not None
+            assert prev_state_dict_config is not None
         finally:
-            assert prev_state_dict_type is not None  # Avoid mypy warning
-            assert prev_state_dict_config is not None  # Avoid mypy warning
-            for submodule in FullyShardedDataParallel.fsdp_modules(module):
-                submodule._state_dict_type = prev_state_dict_type
-                submodule._state_dict_config = prev_state_dict_config
+            if prev_state_dict_type is not None and prev_state_dict_config is not None:
+                FullyShardedDataParallel.set_state_dict_type(
+                    module, prev_state_dict_type, prev_state_dict_config
+                )
 
     def _convert_to_wrapped_module_name(self, module_name: str) -> str:
         module_name = module_name.replace(f"{FPW_MODULE}.", "")
@@ -2193,7 +2245,16 @@ class FullyShardedDataParallel(nn.Module):
     @property
     def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
         for param_name, module_name in (
-            self._fsdp_wrapped_module.handle.parameter_module_names()
+            self._handles[0].parameter_module_names()
+        ):
+            module_name = self._convert_to_wrapped_module_name(module_name)
+            fqn = f"{module_name}{param_name}"
+            yield fqn, param_name, module_name
+
+    @property
+    def _shared_param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        for param_name, module_name in (
+            self._handles[0].shared_parameter_module_names()
         ):
             module_name = self._convert_to_wrapped_module_name(module_name)
             fqn = f"{module_name}{param_name}"
@@ -2322,10 +2383,12 @@ class FullyShardedDataParallel(nn.Module):
         local_shards = [
             Shard.from_tensor_and_offsets(flat_param, [shard_offset], self.rank)
         ]
-        state_dict[f"{prefix}{FLAT_PARAM}"] = init_from_local_shards(
+        sharded_tensor = init_from_local_shards(
             local_shards, full_numel, process_group=self.process_group
         )  # type: ignore[assignment]
-
+        if self._state_dict_config.offload_to_cpu:
+            sharded_tensor = sharded_tensor.cpu()
+        state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
         return state_dict
 
     @torch.no_grad()
@@ -2350,13 +2413,16 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _ext_chunk_tensor(
+                sharded_tensor = _ext_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
                     num_devices_per_node=torch.cuda.device_count(),
                     pg=self.process_group
-                )  # type: ignore[assignment]
+                )
+                if self._state_dict_config.offload_to_cpu:
+                    sharded_tensor = sharded_tensor.cpu()
+                state_dict[f"{prefix}{fqn}"] = sharded_tensor
         # For `use_orig_params=True`, the `FlatParameter` is not registered, so
         # there is no entry in the state dict for it to pop.
         if not self._use_orig_params:
@@ -2509,7 +2575,7 @@ class FullyShardedDataParallel(nn.Module):
         (e.g., DPP, model parallelism, and single trainer) after a valid
         resharding.
         """
-        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+        with self.state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.state_dict(self, *args, **kwargs)
 
     def _full_pre_load_state_dict_hook(
@@ -2593,15 +2659,17 @@ class FullyShardedDataParallel(nn.Module):
             )
 
         nonsharded_tensors = []
-        # TODO: Reduce the communication by using only one _all_gather_base to
-        # gather all the parameters in this layer. This can be achieved by
-        # concatenated all the local shards and then append the padding.
+        # TODO: Reduce the communication by using only one
+        # `all_gather_into_tensor()` to gather all the parameters in this
+        # layer. This can be achieved by concatenating all the local shards and
+        # then appending the padding.
         # https://github.com/pytorch/pytorch/issues/77461
-        for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{module_name}{param_name}"
-            param = state_dict.pop(fqn)
-
+        shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
+        for fqn, _, _ in self._param_fqns:
+            full_fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{fqn}"
+            param = state_dict.pop(full_fqn)
+            if fqn in shared_fqns:
+                continue
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
             assert len(shards) < 2, (
@@ -2612,7 +2680,7 @@ class FullyShardedDataParallel(nn.Module):
             chunk_size = (
                 math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
             )
-            if shards:
+            if len(shards) == 1:
                 local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
                 if not local_tensor.is_cuda:
                     local_tensor = local_tensor.cuda()
@@ -2624,7 +2692,7 @@ class FullyShardedDataParallel(nn.Module):
             tensor = torch.empty(
                 chunk_size * self.world_size, dtype=local_tensor.dtype
             ).cuda()
-            dist._all_gather_base(tensor, local_tensor, group=self.process_group)
+            dist.all_gather_into_tensor(tensor, local_tensor, group=self.process_group)
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             nonsharded_tensors.append(tensor)
 
@@ -2638,7 +2706,7 @@ class FullyShardedDataParallel(nn.Module):
         )
         loaded_flat_param.to(flat_param.device)
         assert flat_param.numel() == loaded_flat_param.numel(), (
-            f"The loaded local chunk has different numel({flat_param.numel()}) "
+            f"The loaded local chunk has different numel({loaded_flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."
         )
         assert flat_param._shard_numel_padded == num_to_pad, (
@@ -2743,7 +2811,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Load states from a unflattened, sharded state dictionary.
         """
-        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+        with self.state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.load_state_dict(state_dict, strict)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
@@ -2820,7 +2888,7 @@ class FullyShardedDataParallel(nn.Module):
             self._unshard(handles)
             handles_key = tuple(handles)
             self._needs_pre_forward_unshard[handles_key] = False
-            self._streams["computation"].wait_stream(self._streams["unshard"])
+            torch.cuda.current_stream().wait_stream(self._streams["unshard"])
             self._prefetch_handles(handles_key)
 
     def _post_forward(
@@ -3064,7 +3132,7 @@ class FullyShardedDataParallel(nn.Module):
         self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
         self._unshard(self._handles)
-        self._streams["computation"].wait_stream(self._streams["unshard"])
+        torch.cuda.current_stream().wait_stream(self._streams["unshard"])
         if with_grads:
             self._unshard_grads(self._handles)
 
@@ -3327,7 +3395,7 @@ class FullyShardedDataParallel(nn.Module):
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
                 self._unshard(_handles)
-                self._streams["computation"].wait_stream(self._streams["unshard"])
+                torch.cuda.current_stream().wait_stream(self._streams["unshard"])
 
                 # Set this to `False` to ensure that a mistargeted prefetch
                 # does not actually unshard these handles
@@ -3439,9 +3507,8 @@ class FullyShardedDataParallel(nn.Module):
             if not self._sync_gradients:
                 return
 
-            # Wait for all ops in the current stream to finish before
-            # reduce-scattering the gradient
-            # TODO (awgu): This current stream is actually the unshard stream!
+            # Wait for all ops in the current stream (e.g. gradient
+            # computation) to finish before reduce-scattering the gradient
             self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
 
             with torch.cuda.stream(self._streams["post_backward"]):
@@ -3542,7 +3609,7 @@ class FullyShardedDataParallel(nn.Module):
                         grad.detach(), non_blocking=True
                     )
                     # Don't let this memory get reused until after the transfer.
-                    grad.data.record_stream(self._streams["post_backward"])
+                    grad.data.record_stream(torch.cuda.current_stream())
 
                 # After _post_backward_hook returns, orig_grad_data will eventually
                 # go out of scope, at which point it could otherwise be freed for
@@ -3552,6 +3619,11 @@ class FullyShardedDataParallel(nn.Module):
                 orig_grad_data.record_stream(self._streams["post_backward"])
 
                 if handle._use_orig_params:
+                    # Since the handle's `FlatParameter` completed its gradient
+                    # computation, we should reset the gradient noneness mask
+                    handle._reset_is_grad_none()
+                    # Delay using sharded gradient views until after the
+                    # reduce-scatter instead of immediately after resharding
                     handle._use_sharded_grad_views()
 
     def _cast_grad_to_param_dtype(
@@ -3581,7 +3653,7 @@ class FullyShardedDataParallel(nn.Module):
             grad.data = grad.data.to(dtype=param.dtype)
             # Do not let the low precision gradient memory get reused until
             # the cast to full parameter precision completes
-            low_prec_grad_data.record_stream(self._streams["post_backward"])
+            low_prec_grad_data.record_stream(torch.cuda.current_stream())
 
     def _should_free_unsharded_flat_param(self, handle: FlatParamHandle):
         return (
@@ -3614,14 +3686,14 @@ class FullyShardedDataParallel(nn.Module):
         # module.
 
         if self._sync_gradients:
-            self._streams["computation"].wait_stream(self._streams["post_backward"])
+            torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
             if self.cpu_offload.offload_params:
                 # We need to wait for the non-blocking GPU ->
                 # CPU grad transfers to finish. We need to do this for GPU -> CPU
                 # copies because when grad is on CPU, it won't wait for any CUDA
                 # stream to finish GPU -> CPU copies unless we explicitly block the
                 # host-side with synchronize().
-                self._streams["computation"].synchronize()
+                torch.cuda.current_stream().synchronize()
         self._exec_order_data.next_iter()
 
         # A backward pass is done, clean up below.
@@ -4554,7 +4626,7 @@ def _get_param_to_unflat_param_names(
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 module_prefixed_param_names = (
-                    param._prefixed_param_names if type(param) is FlatParameter
+                    param._fqns if type(param) is FlatParameter
                     else [param_name]
                 )  # prefixed from `module`
                 fully_prefixed_param_names = [
