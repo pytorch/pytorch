@@ -582,7 +582,8 @@ class TestSummonFullParams(FSDPTest):
                     self.assertEqual(p1, p2)
 
     @skip_if_lt_x_gpu(2)
-    def test_with_grads(self):
+    def test_with_grads_core(self):
+        """Tests the core usage of ``summon_full_params(with_grads=True)``."""
         self.run_subtests(
             {
                 "writeback": [False, True],
@@ -594,10 +595,10 @@ class TestSummonFullParams(FSDPTest):
                 ],
                 "use_orig_params": [True],
             },
-            self._test_with_grads,
+            self._test_with_grads_core,
         )
 
-    def _test_with_grads(
+    def _test_with_grads_core(
         self,
         writeback: bool,
         offload_to_cpu: bool,
@@ -698,6 +699,41 @@ class TestSummonFullParams(FSDPTest):
         old_fsdp_grads = _get_fsdp_grads(fsdp_model, is_supported)
         with _get_error_context(is_supported):
             _check_grads(ddp_model, fsdp_model, old_fsdp_grads)
+
+    @skip_if_lt_x_gpu(2)
+    def test_with_grads_none_grads(self):
+        """
+        Tests that if all ranks' ``FlatParameter`` has ``None`` gradient, then
+        each original parameter sees ``None`` gradient as well.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ]
+            },
+            self._test_with_grads_none_grads
+        )
+
+    def _test_with_grads_none_grads(self, sharding_strategy: ShardingStrategy):
+        fsdp_model = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            deterministic=True,
+            fsdp_kwargs={
+                "use_orig_params": True,
+                "sharding_strategy": sharding_strategy,
+            },
+        )
+        for fsdp_module in FSDP.fsdp_modules(fsdp_model):
+            for handle in fsdp_module._handles:
+                assert handle.flat_param.grad is None
+        with FSDP.summon_full_params(fsdp_model, with_grads=True):
+            for param in fsdp_model.parameters():
+                self.assertTrue(param.grad is None)
 
 
 instantiate_parametrized_tests(TestSummonFullParams)
