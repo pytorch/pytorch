@@ -1597,7 +1597,8 @@ def _export(
                     model_file_location,
                     node_attr_to_name,
                 )
-            proto = _add_onnxscript_fn(proto, graph, custom_opsets)
+            # proto is None when model > 2GB
+            proto = _add_onnxscript_fn(proto, graph, custom_opsets, val_use_external_data_format, model_file_location)
             if verbose:
                 torch.onnx.log("Exported graph: ", graph)
             if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
@@ -1663,8 +1664,8 @@ def _export(
 
 @_beartype.beartype
 def _add_onnxscript_fn(
-    model_bytes: bytes, graph: _C.Graph, custom_opsets: Mapping[str, int]
-) -> bytes:
+    model_bytes: bytes, graph: _C.Graph, custom_opsets: Mapping[str, int], val_use_external_data_format: bool, model_file_location: str
+) -> Optional[bytes]:
     """Insert model-included custom onnx-script function into ModelProto"""
 
     # TODO(titaiwang): remove this when onnx becomes dependency
@@ -1677,11 +1678,10 @@ def _add_onnxscript_fn(
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
     for node in graph.nodes():
-        if symbolic_helper._is_custom_domain(node):
-            domain_op = node.kind()
-            domain, opname = domain_op.split("::")
+        domain, opname = jit_utils._parse_node_kind(node.kind())
+        if jit_utils._is_custom_domain(domain):
             specified_version = custom_opsets.get(domain, 1)
-            onnx_function_group = registration.registry.get_function_group(domain_op)
+            onnx_function_group = registration.registry.get_function_group(node.kind())
             if onnx_function_group is not None:
                 onnx_fn = onnx_function_group.get(specified_version)
                 if onnx_fn is not None:
@@ -1699,9 +1699,16 @@ def _add_onnxscript_fn(
                 else None,
             )
     if onnx_function_list:
-        model_proto = onnx.load_model_from_string(model_bytes)
-        model_proto.functions.extend(onnx_function_list)
-        model_bytes = model_proto.SerializeToString()
+        # For > 2GB model, we need to load from file
+        # Otherwise, we load from IO
+        if val_use_external_data_format:
+            model_proto = onnx.load(model_file_location)
+            model_proto.functions.extend(onnx_function_list)
+            onnx.save(model_proto, model_file_location)
+        else:
+            model_proto = onnx.load_model_from_string(model_bytes)
+            model_proto.functions.extend(onnx_function_list)
+            model_bytes = model_proto.SerializeToString()
     return model_bytes
 
 
@@ -1878,7 +1885,7 @@ def _run_symbolic_function(
     else:
         ns_op_name = node_kind
 
-    namespace, op_name = ns_op_name.split("::")
+    namespace, op_name = jit_utils._parse_node_kind(ns_op_name)
 
     graph_context = jit_utils.GraphContext(
         graph=graph,
@@ -1976,7 +1983,7 @@ def _verify_custom_op_name(symbolic_name: str):
             "alphanumerical characters"
         )
 
-    ns, _ = symbolic_name.split("::")
+    ns, _ = jit_utils._parse_node_kind(symbolic_name)
     if ns == "onnx":
         raise ValueError(
             f"Failed to register operator {symbolic_name}. {ns} domain cannot be modified."
