@@ -521,48 +521,99 @@ class CheckFunctionManager:
         self.check_fn = self.compile_check_fn(local_builder, global_builder)
         self._seen_ids.clear()
 
+    """
+    This is a complex bit of logic. The outline here is brief. For a line by line breakdown, see
+    the code comments below.
+
+    The role of this function is to take the current state of symbolic shape guards, tensor ids in the
+    CURRENT dynamo frame, and tensor names (dynamo's frame agnostic tensor reference mechanism, see TensorCheck and
+    guards.cpp for more info) - and produce executable python expressions for addition to our guarded code components
+    that make their way into check_fn.
+    """
+
     def _parse_symbolic_shape_expressions(self, tensor_check_names, tensor_check_ids):
-        id_to_name_map = {}
-        size_parts = []
-        stride_parts = []
+        # Output
         finished_expressions = []
-        if config.dynamic_shapes:
-            for name in tensor_check_names:
-                tensor_id = tensor_check_ids[name]
-                id_to_name_map[tensor_id] = name
-                if tensor_id in self.shape_env.expr_to_id:
-                    values_and_kind_list = self.shape_env.expr_to_id[tensor_id]
-                    for (val, kind, idx) in values_and_kind_list:
-                        val = str(val)
-                        if val in ("0", "1"):
-                            continue
-                        if kind == "size":
-                            size_parts.append((val, tensor_id, idx))
-                        if kind == "stride":
-                            stride_parts.append((val, tensor_id, idx))
 
-            expression_and_evaluation = [
-                (guard[0], guard[1]) for guard in self.shape_env.guards
-            ]
-            for expression, evaluation in expression_and_evaluation:
-                expr_as_str = str(expression)
-                for key, tensor_id, idx in size_parts:
-                    expr_as_str = expr_as_str.replace(
-                        key, f"{id_to_name_map[tensor_id]}.size()[{idx}]"
-                    )
+        # A mapping of tensor_ids to tensor names
+        id_to_name_map = {}
 
-                for key, tensor_id, idx in stride_parts:
-                    expr_as_str = expr_as_str.replace(
-                        key, f"{id_to_name_map[tensor_id]}.stride()[{idx}]"
-                    )
+        # TensorReferences to size. See PySimInt.TensorReference for more info.
+        size_parts = []
 
-                for key in self.shape_env.replacements.keys():
-                    assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
+        # TensorReferences to size. See PySimInt.TensorReference for more info.
+        stride_parts = []
 
-                if not evaluation:
-                    expr_as_str = f"not {expr_as_str}"
+        # We should not have a shape env, or guards if we are not in config.dynamic shapes
+        # But check it anyway.
+        if not config.dynamic_shapes:
+            return finished_expressions
 
-                finished_expressions.append(expr_as_str)
+        # tensor_check_names is the primary tensor association mechanism in dynamo.
+        # All other guards installations are driven off of it, so these ones will too.
+        for name in tensor_check_names:
+            tensor_id = tensor_check_ids[name]
+            id_to_name_map[tensor_id] = name
+
+            if tensor_id in self.shape_env.id_to_expr:
+                # If we made it here, this tensor_id is relevant to dynamo guard installation
+                # AND was found in the shape_env
+                tensor_ref_list = self.shape_env.id_to_expr[tensor_id]
+                for tensor_ref in tensor_ref_list:
+                    val = str(tensor_ref.expr)
+                    if val in ("0", "1"):
+                        continue
+                    if tensor_ref.kind == "size":
+                        size_parts.append(tensor_ref)
+                    if tensor_ref.kind == "stride":
+                        stride_parts.append(tensor_ref)
+
+        # Extract all the guard elements out of guards
+        # The guard format, atm, uses tuple position 0 for the expression
+        # and tuple position 1 for a negation. Eventually, these will be collapsed together.
+        expression_and_evaluation = [
+            (guard[0], guard[1]) for guard in self.shape_env.guards
+        ]
+        for expression, evaluation in expression_and_evaluation:
+            # Expression to string so we can do string replacement on it.
+            # Before you cry, this whole file generates python code,
+            # So turning an expression into a string is not a code smell, it will
+            # get passed to eval and executed later on down, along with the rest of our guards.
+            # See: py_code in this file.
+            #
+            # Ex: `Eq(s0, s1**2)`
+            expr_as_str = str(expression)
+
+            for tensor_ref in size_parts:
+                # Here, we find any symbols associated with size, and replace them
+                #
+                # Ex: `Eq(s0, s1**2)` becomes `Eq(x.size()[0], s1**2)`
+                expr_as_str = expr_as_str.replace(
+                    str(tensor_ref.expr),
+                    f"{id_to_name_map[tensor_ref.ref_id]}.size()[{tensor_ref.idx}]",
+                )
+
+            for tensor_ref in stride_parts:
+                # Here, we find any symbols associated with stride, and replace them
+                #
+                # Ex: `Eq(x.size()[0], s1**2)` becomes `Eq(x.size()[0], y.stride()[1]**2)`
+                expr_as_str = expr_as_str.replace(
+                    str(tensor_ref.expr),
+                    f"{id_to_name_map[tensor_ref.ref_id]}.stride()[{tensor_ref.idx}]",
+                )
+
+            # We may get into a state where symbolic shape keys (all should be found in replacements)
+            # Have not been removed from the expression. This is a serious enough error state that we need to assert.
+            for key in self.shape_env.replacements.keys():
+                assert (
+                    str(key) not in expr_as_str
+                ), f"Unknown shape symbol {key}. "
+
+            # Certain expressions are negated in their guards.
+            if not evaluation:
+                expr_as_str = f"not {expr_as_str}"
+
+            finished_expressions.append(expr_as_str)
         return finished_expressions
 
     def compile_check_fn(self, local_builder, global_builder):
@@ -657,8 +708,6 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
-
-    # def finalize(self):
 
 
 def guard_fail_hook(
