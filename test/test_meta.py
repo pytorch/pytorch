@@ -1013,6 +1013,16 @@ class TestMeta(TestCase):
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, inps[0].shape)
 
+    def test_fill_alias_relationship(self):
+        inps = torch.rand(2**52, device='meta')
+        r = torch.ops.aten.fill_(inps, 1.0)
+        # aten.fill_ returns an aliase
+        self.assertEqual(id(inps), id(r))
+
+        # aten.fill returns a new tensor
+        r2 = torch.ops.aten.fill(inps, 1.0)
+        self.assertNotEqual(id(inps), id(r2))
+
     def test_map_location_deserialize(self):
         import io
 
