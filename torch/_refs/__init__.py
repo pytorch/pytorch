@@ -162,12 +162,10 @@ __all__ = [
     "rsub",
     "rtruediv",
     "rfloordiv",
-    # # special.xlog1py
-    # # special.zeta
     "sub",
     "true_divide",
     "trunc_divide",
-    # 'xlogy', # where?, log, mul
+    "xlogy",
     #
     # Elementwise Ternary References
     #
@@ -221,7 +219,9 @@ __all__ = [
     "constant_pad_nd",
     "contiguous",
     "diag_embed",
+    "diag",
     "diagonal",
+    "diagonal_copy",
     "dsplit",
     "dstack",
     "expand",
@@ -1546,6 +1546,31 @@ true_divide = _make_elementwise_binary_reference(
 )
 
 
+@register_decomposition(torch.ops.aten.xlogy)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
+    utils.check(
+        isinstance(a, TensorLike) or isinstance(b, TensorLike),
+        lambda: 'Expected either argument a or b to be a Tensor"',
+    )
+
+    # Operations like eq and log do not handle scalar values, so we convert them to scalar_tensors.
+    if isinstance(b, TensorLike) and isinstance(a, Number):
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
+    elif isinstance(a, TensorLike) and isinstance(b, Number):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+
+    # mypy: expected "Tensor"
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
+    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, torch.log(b)))
+    return torch.where(torch.isnan(b), float("nan"), rhs)
+
+
 def _trunc_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
@@ -1976,6 +2001,25 @@ def _reduction(
         result = prims.convert_element_type(result, result_dtype)
 
     return result
+
+
+def _make_copy_from_view(fn):
+    """
+    Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
+    """
+    name = fn.__name__
+    fn = out_wrapper()(fn)
+
+    def _fn(*args, out=None, **kwargs):
+        result = fn(*args, out=out, **kwargs)
+        if out is None:
+            return result.clone(memory_format=torch.contiguous_format)
+        return result
+
+    copy_name = f"{name}_copy"
+    _fn.__name__ = copy_name
+    _fn = register_decomposition(getattr(torch.ops.aten, copy_name))(_fn)
+    return _fn
 
 
 # Saves Python all
@@ -3440,6 +3484,22 @@ def vsplit(
     return tensor_split(a, split_sizes, 0)
 
 
+@register_decomposition(torch.ops.aten.diag.out)
+@out_wrapper()
+def diag(
+    self: TensorLikeType,
+    offset: int = 0,
+) -> TensorLikeType:
+    ndim = self.dim()
+    utils.check(
+        ndim in (1, 2), lambda: f"diag(): Supports 1D or 2D tensors. Got {ndim}D"
+    )
+    if ndim == 1:
+        return torch.diag_embed(self, offset)
+    else:
+        return torch.diagonal_copy(self, offset)
+
+
 @register_decomposition(torch.ops.aten.diagonal, disable_meta=True)
 def diagonal(
     self: TensorLikeType,
@@ -3480,6 +3540,9 @@ def diagonal(
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
 
     return result
+
+
+diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(torch.ops.aten.diag_embed)
