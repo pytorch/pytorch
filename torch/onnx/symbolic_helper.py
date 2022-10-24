@@ -440,12 +440,6 @@ def _if_scalar_type_as(self, tensor):
 
 
 @_beartype.beartype
-def _is_custom_domain(node: _C.Node) -> bool:
-    domain = node.kind().split("::")[0]
-    return domain not in {"onnx", "aten", "prim"}
-
-
-@_beartype.beartype
 def _is_none(x: _C.Value) -> bool:
     return x.node().mustBeNone()
 
