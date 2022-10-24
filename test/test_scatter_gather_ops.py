@@ -267,30 +267,37 @@ class TestScatterGather(TestCase):
     @onlyCPU
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     def test_scatter_expanded_index(self, device, dtype):
-        def helper(dim_size, idx_size, slice_size):
-            input = torch.randn(dim_size, slice_size)
+        def helper(input_size, idx_size):
+            input = torch.randn(input_size, device=device, dtype=dtype)
             input2 = input.clone()
-            idx = torch.randint(0, dim_size, (idx_size, 1))
+
+            shape = [1] * len(input_size)
+            shape[0] = idx_size
+            dim_size = input_size[0]
+            idx = torch.randint(0, dim_size, shape)
 
             # The fast path on scatter when index is expanded
             # will depend on sorted index where the collected src indice
             # for each row in input will be mapped to rowptrs in a CSR format.
             # Create some empty rows by masking:
-            if (dtype.is_floating_point):
-                mask = (idx > 1) * (idx < 4)
-                idx[mask] = 0
+            mask = (idx > 1) * (idx < 4)
+            idx[mask] = 0
 
-            idx = idx.expand(-1, slice_size)
+            expanded_shape = input_size
+            expanded_shape[0] = idx_size
+            idx = idx.expand(expanded_shape)
             idx2 = idx.contiguous()
-            src = torch.randn(idx_size, slice_size)
+            src = torch.randn(expanded_shape, device=device, dtype=dtype)
 
             input.scatter_add_(0, idx, src)
             input2.scatter_add_(0, idx2, src)
 
             self.assertEqual(input, input2)
 
-        helper(50, 100, 17)
-        helper(50, 100, 1)
+        helper([50, 17], 100)
+        helper([50, 1], 100)
+        helper([50, 8, 7], 100)
+        helper([50, 3, 4, 5], 100)
 
 # Generic Device Test Framework instantation, see
 #   https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests

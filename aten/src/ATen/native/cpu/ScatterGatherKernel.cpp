@@ -697,7 +697,7 @@ void cpu_scatter_add_contig_kernel(const Tensor& self, const Tensor& index, cons
 }
 
 void scatter_add_config(const Tensor& self, const Tensor& index, const Tensor& src) {
-  AT_DISPATCH_ALL_TYPES_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
     "scatter_add_contig", [&] {
       cpu_scatter_add_contig_kernel<scalar_t>(self, index, src);
