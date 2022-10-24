@@ -761,6 +761,7 @@ class FakeTensorMode(TorchDispatchMode):
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
             from torch._decomp import meta_table as meta_table
+
             with no_dispatch():
                 if func == aten.size.default:
                     sys.stderr.write(
