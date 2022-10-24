@@ -26,8 +26,8 @@ namespace api {
  * always created with the corresponding VkFormat. Consequently, kHalf tensors
  * are currently unsupported in favor of enforcing inputs to be of kFloat dtype.
  */
-VkFormat vk_format(const caffe2::TypeMeta dtype) {
-  switch (c10::typeMetaToScalarType(dtype)) {
+VkFormat vk_format(const at::ScalarType dtype) {
+  switch (dtype) {
     case kFloat:
 #ifdef USE_VULKAN_FP16_INFERENCE
       return VK_FORMAT_R16G16B16A16_SFLOAT;

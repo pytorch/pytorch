@@ -74,6 +74,7 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
             glslcPath, "-fshader-stage=compute",
             srcPath, "-o", spvPath,
             "--target-env=vulkan1.0",
+            "-I", srcDirPath,
             "-Werror"
         ]
 

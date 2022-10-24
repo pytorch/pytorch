@@ -1,5 +1,8 @@
+#include <ATen/ATen.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Utils.h>
+
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -52,7 +55,7 @@ void transfer_cpu_to_vulkan(const Tensor& src, vTensor& v_dst) {
   // a 16 bit format will be used for at::kFloat.
   Tensor src_nc4hw = utils::nchw_to_nc4hw(src).to(v_dst.texture_dtype());
 
-  api::StorageBuffer staging(context, v_dst.texture_dtype(), v_dst.numcells());
+  api::StorageBuffer staging(context, v_dst.texture_dtype(), v_dst.gpu_numel());
   // Copy data into the staging buffer
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
@@ -71,7 +74,7 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
   // Temporary tensor to receive copied NC4HW data
   at::Tensor dst_tmp = utils::create_staging_tensor(v_src);
 
-  api::StorageBuffer staging(context, v_src.texture_dtype(), v_src.numcells());
+  api::StorageBuffer staging(context, v_src.texture_dtype(), v_src.gpu_numel());
 
   api::VulkanFence fence = context->fences().get_fence();
 
@@ -141,7 +144,7 @@ void pack_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
   // of floats as input. GLSL/Vulkan does not natively support 16 bit arithmetic
   // types, so for now storage buffers created for compute shaders must define
   // floats as their base data type.
-  api::StorageBuffer staging(context, at::kFloat, dst.numcells());
+  api::StorageBuffer staging(context, at::kFloat, dst.gpu_numel());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
@@ -163,7 +166,7 @@ void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
 
   // Refer to the comment in pack_cpu_to_vulkan for why at::kFloat is specified
   // for the storage buffer below.
-  api::StorageBuffer staging(context, at::kFloat, src.numcells());
+  api::StorageBuffer staging(context, at::kFloat, src.gpu_numel());
 
   api::VulkanFence fence = context->fences().get_fence();
 
@@ -243,6 +246,25 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
   }
 
   return dst;
+}
+
+ops::vTensor to_vulkan(at::Tensor& src, const StorageType storage_type) {
+  TORCH_CHECK(
+      src.device().type() == at::kCPU,
+      "Vulkan to_vulkan(): input tensor must be a CPU tensor!")
+
+  ops::vTensor v_ret{
+      api::context(), src.sizes(), src.strides(), src.options(), storage_type};
+
+  ops::pack_cpu_to_vulkan(src, v_ret);
+
+  return v_ret;
+}
+
+at::Tensor from_vulkan(ops::vTensor& v_src) {
+  at::Tensor ret = at::empty(v_src.sizes(), v_src.options().device(at::kCPU));
+  ops::pack_vulkan_to_cpu(v_src, ret);
+  return ret;
 }
 
 } // namespace ops

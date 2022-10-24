@@ -5,6 +5,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/native/vulkan/ops/Tensor.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -251,6 +252,7 @@ class VulkanAPITest : public ::testing::Test {
 };
 
 TEST_F(VulkanAPITest, copy_to_texture) {
+  using namespace at::native::vulkan;
   at::Tensor test_tensors[] = {
     // 4D
     at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
@@ -264,6 +266,8 @@ TEST_F(VulkanAPITest, copy_to_texture) {
 
   for (auto in_cpu : test_tensors) {
     at::Tensor in_vk_copied = in_cpu.vulkan();
+    ops::vTensor vten = ops::convert(in_vk_copied);
+
     at::Tensor out_copied = in_vk_copied.cpu();
 
     const auto check_copy = almostEqual(out_copied, in_cpu);
@@ -272,6 +276,63 @@ TEST_F(VulkanAPITest, copy_to_texture) {
       std::cout << "Copy failed on size " << in_cpu.sizes()
                 << "with dtype" << in_cpu.dtype() << std::endl;
     }
+
+    ASSERT_TRUE(check_copy);
+  }
+}
+
+TEST_F(VulkanAPITest, copy_to_buffer) {
+  using namespace at::native::vulkan;
+
+  at::Tensor test_tensors[] = {
+    // 4D
+    at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 3D
+    at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 2D
+    at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    // 1D
+    at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+  };
+
+  for (auto in_cpu : test_tensors) {
+    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, ops::StorageType::BUFFER);
+    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
+
+    const auto check_copy = almostEqual(out_copied, in_cpu);
+
+    if(!check_copy) {
+      std::cout << "Copy failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
+
+    ASSERT_TRUE(check_copy);
+  }
+}
+
+TEST_F(VulkanAPITest, copy_to_buffer_channels_last) {
+  using namespace at::native::vulkan;
+
+  at::TensorOptions options(at::kCPU);
+  options = options.dtype(at::kFloat);
+
+  at::Tensor test_tensors[] = {
+    // 4D
+    at::rand({7, 17, 134, 213}, options).to(at::MemoryFormat::ChannelsLast),
+  };
+
+  for (auto in_cpu : test_tensors) {
+    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, ops::StorageType::BUFFER);
+    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
+
+    const auto check_copy = almostEqual(out_copied, in_cpu);
+
+    if(!check_copy) {
+      std::cout << "Copy failed on size " << in_cpu.sizes()
+                << "with dtype" << in_cpu.dtype() << std::endl;
+    }
+
+    ASSERT_TRUE(check_copy);
   }
 }
 

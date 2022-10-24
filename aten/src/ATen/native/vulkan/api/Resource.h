@@ -18,7 +18,7 @@ namespace api {
 
 typedef uint8_t MemoryAccessFlags;
 
-VkFormat vk_format(const caffe2::TypeMeta dtype);
+VkFormat vk_format(const at::ScalarType dtype);
 
 c10::ScalarType c10_scalartype(const VkFormat image_format);
 
