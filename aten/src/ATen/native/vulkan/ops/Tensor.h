@@ -2,7 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <c10/util/accumulate.h>
@@ -26,6 +26,11 @@ struct LastAccess {
       : stage{stage_flags}, access{access_flags} {}
 };
 
+enum class StorageType {
+  TEXTURE_3D,
+  TEXTURE_2D,
+};
+
 class vTensorStorage final {
  public:
   // Do not allow empty vTensorStorage construction
@@ -34,10 +39,12 @@ class vTensorStorage final {
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
+      const StorageType storage_type,
       const TensorOptions& options);
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
+      const StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -66,6 +73,7 @@ class vTensorStorage final {
   int64_t q_zero_point{0u};
 
   // Image Texture
+  StorageType storage_type_;
   mutable api::VulkanImage image_;
 
   // Last Access - used to insert memory barriers
@@ -96,9 +104,24 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+
+  vTensor(
+      api::Context* context,
+      IntArrayRef sizes,
+      const StorageType storage_type,
+      const TensorOptions& options);
+
   vTensor(
       api::Context* const context,
       const IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      int64_t q_zero_point);
+
+  vTensor(
+      api::Context* const context,
+      const IntArrayRef sizes,
+      const StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -127,6 +150,10 @@ class vTensor final {
   /*
    Texture Access
   */
+
+  inline StorageType storage_type() const {
+    return view_->storage_type_;
+  }
 
   api::VulkanImage& image(api::PipelineBarrier&, const api::PipelineStageFlags)
       const&;
@@ -179,12 +206,20 @@ class vTensor final {
     return view_->q_scale;
   }
 
+  inline float get_scale_float() const {
+    return api::utils::safe_downcast<float>(view_->q_scale);
+  }
+
   inline void set_zero_point(const int64_t q_zero_point) const {
     view_->q_zero_point = q_zero_point;
   }
 
   inline int64_t get_zero_point() const {
     return view_->q_zero_point;
+  }
+
+  inline int32_t get_zero_point_int32() const {
+    return api::utils::safe_downcast<int32_t>(view_->q_zero_point);
   }
 
   inline size_t nbytes() const {

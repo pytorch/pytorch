@@ -36,6 +36,11 @@ targets.each do |target|
         config.build_settings['LIBRARY_SEARCH_PATHS']   = libraries_search_path
         config.build_settings['OTHER_LDFLAGS']          = other_linker_flags
         config.build_settings['ENABLE_BITCODE']         = 'No'
+        if (options[:lite])
+            config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = ['$(inherited)', "BUILD_LITE_INTERPRETER"]
+        else
+            config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = ['$(inherited)']
+        end
         dev_team_id = options[:team_id]
         if dev_team_id
             config.build_settings['DEVELOPMENT_TEAM']   = dev_team_id
