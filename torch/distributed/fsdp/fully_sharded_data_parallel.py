@@ -44,8 +44,6 @@ from torch.distributed.utils import (
     _sync_params_and_buffers,
     _to_kwargs,
 )
-from torch.nn.parameter import Parameter
-
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -79,10 +77,6 @@ from .flat_param import (
     HandleShardingStrategy,
     HandleTrainingState,
 )
-from .flatten_params_wrapper import (
-    FPW_MODULE,
-    FlattenParamsWrapper,
-)
 from .wrap import (
     ParamExecOrderWrapPolicy,
     _or_policy,
@@ -115,8 +109,12 @@ __all__ = [
 ]
 
 
+# NOTE: `FSDP_WRAPPED_MODULE` cannot be a substring of any other module wrapper
+# name (e.g. for activation checkpointing) since then `replace()`-based FQN
+# cleaning breaks.
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
-FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
+FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
+FLAT_PARAM = "_flat_param"
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 
@@ -1082,27 +1080,29 @@ class FullyShardedDataParallel(nn.Module):
             self.mixed_precision.reduce_dtype,
             self.mixed_precision.keep_low_precision_grads,
         )
-        self._fsdp_wrapped_module = FlattenParamsWrapper(
-            module,
-            params_to_flatten,
-            self.compute_device,
-            config,
-            use_orig_params,
-        )
-        if not use_orig_params:
-            self._check_orig_params_flattened(ignored_params)
         # Invariant: `self.params` contains exactly the `FlatParameter`s of the
         # handles in `self._handles`
         self._handles: List[FlatParamHandle] = []
         self.params: List[FlatParameter] = []
-        if self._fsdp_wrapped_module.has_params:
-            handle = self._fsdp_wrapped_module.handle
+        self._fsdp_wrapped_module = module
+        if params_to_flatten:
+            handle = FlatParamHandle(
+                params_to_flatten,
+                module,
+                self.compute_device,
+                config,
+                self.process_group,
+                use_orig_params,
+            )
+            self._handles.append(handle)
             self.params.append(handle.flat_param)
             self._register_param_handle(handle)
-            handle.shard(self.process_group)
+            handle.shard()
             if self.cpu_offload.offload_params and handle.flat_param.device != torch.device("cpu"):
-                with torch.no_grad():
-                    handle.flat_param_to(torch.device("cpu"))
+                handle.flat_param_to(torch.device("cpu"))
+        if not use_orig_params:
+            self._check_orig_params_flattened(ignored_params)
+            self._register_flat_param()
 
         self._sync_gradients = True
         self._communication_hook = self._get_default_comm_hook()
@@ -1168,7 +1168,7 @@ class FullyShardedDataParallel(nn.Module):
             child
             for module in ignored_root_modules
             for child in module.modules()
-            if not isinstance(child, (FullyShardedDataParallel, FlattenParamsWrapper))
+            if not isinstance(child, FullyShardedDataParallel)
         )
         if root_module in ignored_modules:
             warnings.warn(
@@ -1221,13 +1221,10 @@ class FullyShardedDataParallel(nn.Module):
         """
 
         def module_fn(module: nn.Module, prefix: str, buffer_names: Set[str]):
-            # For FSDP modules, only add the entry when considering the
-            # contained `FlattenParamsWrapper` to avoid duplication
-            if not isinstance(module, FullyShardedDataParallel):
-                for buffer_name, _ in module.named_buffers(recurse=False):
-                    # Clean module wrapper prefixes in case of nested wrapping
-                    prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
-                    buffer_names.add(prefixed_buffer_name)
+            for buffer_name, _ in module.named_buffers(recurse=False):
+                # Clean module wrapper prefixes in case of nested wrapping
+                prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
+                buffer_names.add(prefixed_buffer_name)
 
         def return_fn(buffer_names: Set[str], *args):
             return buffer_names
@@ -1531,6 +1528,8 @@ class FullyShardedDataParallel(nn.Module):
     def _unshard(
         self,
         handles: List[FlatParamHandle],
+        unshard_stream: torch.cuda.Stream,
+        pre_unshard_stream: torch.cuda.Stream,
     ) -> None:
         """
         Unshards the handles in ``handles``. If the handles are in
@@ -1547,13 +1546,13 @@ class FullyShardedDataParallel(nn.Module):
             if event:
                 event.synchronize()
         any_ran_pre_unshard = False
-        with torch.cuda.stream(self._streams["pre_all_gather"]):
+        with torch.cuda.stream(pre_unshard_stream):
             for handle in handles:
                 ran_pre_unshard = handle.pre_unshard()
                 any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
         if any_ran_pre_unshard:
-            self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
-        with torch.cuda.stream(self._streams["all_gather"]):
+            unshard_stream.wait_stream(pre_unshard_stream)
+        with torch.cuda.stream(unshard_stream):
             for handle in handles:
                 handle.unshard()
                 handle.post_unshard()
@@ -1605,18 +1604,26 @@ class FullyShardedDataParallel(nn.Module):
         """
         Returns the wrapped module (like :class:`DistributedDataParallel`).
         """
-        assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
-        return self._fsdp_wrapped_module.module
+        return self._fsdp_wrapped_module
+
+    @property
+    def _has_params(self) -> bool:
+        """Returns whether this FSDP instance manages any parameters."""
+        return hasattr(self, "_handles") and len(self._handles) > 0
+
+    @property
+    def _flat_param(self) -> Optional[FlatParameter]:
+        return self._handles[0].flat_param if self._handles else None
 
     def __getattr__(self, name: str) -> Any:
-        """Forward missing attributes to wrapped module."""
+        """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self._fsdp_wrapped_module, name)
 
     def __getitem__(self, key: int) -> Any:
-        """Forward indexing calls in case the module is a nn.Sequential."""
+        """Forward indexing calls in case the module is an ``nn.Sequential``."""
         return self._fsdp_wrapped_module.__getitem__(key)  # type: ignore[operator]
 
     def check_is_root(self) -> bool:
@@ -1978,12 +1985,15 @@ class FullyShardedDataParallel(nn.Module):
         computation. This should only be called on the root FSDP instance."""
         assert self._is_root
         assert torch.cuda.is_available()
-        # Stream for all-gathering parameters.
-        self._streams["all_gather"] = torch.cuda.Stream()
-        # Stream for overlapping grad reduction with the backward pass.
+        # Stream for unshard logic, including allocating the all-gather
+        # destination tensors and the all-gathers themselves.
+        self._streams["unshard"] = torch.cuda.Stream()
+        # Stream for overlapping gradient reduction with the backward pass
+        # gradient computation.
         self._streams["post_backward"] = torch.cuda.Stream()
-        # Stream for pre-all-gather copies (e.g. H2D or precision cast).
-        self._streams["pre_all_gather"] = torch.cuda.Stream()
+        # Stream for pre-unshard logic, namely allocations and writes for
+        # CPU offloading (H2D copy) and mixed precision (low precision cast).
+        self._streams["pre_unshard"] = torch.cuda.Stream()
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -1994,11 +2004,11 @@ class FullyShardedDataParallel(nn.Module):
         if not self._is_root:
             return
         current_stream = torch.cuda.current_stream()
-        self._streams["all_gather"].wait_stream(current_stream)
+        self._streams["unshard"].wait_stream(current_stream)
         # Having the pre-all-gather stream wait for the current stream even if
         # we do not leverage the pre-all-gather stream is tolerable since this
         # only runs once per iteration
-        self._streams["pre_all_gather"].wait_stream(current_stream)
+        self._streams["pre_unshard"].wait_stream(current_stream)
 
     def _prefetch_handles(
         self,
@@ -2014,7 +2024,7 @@ class FullyShardedDataParallel(nn.Module):
         for handles_key in handles_to_prefetch:
             # Prefetch the next set of handles without synchronizing to allow
             # the sync to happen as late as possible to maximize overlap
-            self._unshard(handles_key)
+            self._unshard(handles_key, self._streams["unshard"], self._streams["pre_unshard"])
             self._handles_prefetched[handles_key] = True
 
     def _get_handles_to_prefetch(
@@ -2208,8 +2218,8 @@ class FullyShardedDataParallel(nn.Module):
                 )
 
     def _convert_to_wrapped_module_name(self, module_name: str) -> str:
-        module_name = module_name.replace(f"{FPW_MODULE}.", "")
-        module_name = module_name.replace(f"{FPW_MODULE}", "")
+        module_name = module_name.replace(f"{FSDP_PREFIX}", "")
+        module_name = module_name.replace(f"{FSDP_WRAPPED_MODULE}", "")
         if module_name:
             module_name = f"{module_name}."
         # Activation checkpoint adds a prefix that has to be
@@ -2221,6 +2231,8 @@ class FullyShardedDataParallel(nn.Module):
 
     @property
     def _param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        if not self._has_params:
+            return
         for param_name, module_name in (
             self._handles[0].parameter_module_names()
         ):
@@ -2273,8 +2285,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> local_dict.keys()
             >>> odict_keys(['flat_param', 'inner.flat_param'])
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives may be used.
+        .. warning:: This needs to be called on all ranks since it uses
+            collective communications.
         """
         # TODO (rohan-varma): separate these out once a state_dict pre-hook
         # is available.
@@ -2324,8 +2336,8 @@ class FullyShardedDataParallel(nn.Module):
             self._state_dict_type == StateDictType.SHARDED_STATE_DICT
         ):
             if (
-                self._fsdp_wrapped_module.flat_param is not None and
-                not self._fsdp_wrapped_module.handle.uses_sharded_strategy
+                self._has_params and
+                not self._handles[0].uses_sharded_strategy
             ):
                 raise RuntimeError(
                     "sharded_state_dict/local_state_dict can only be called "
@@ -2406,10 +2418,10 @@ class FullyShardedDataParallel(nn.Module):
     ) -> None:
         """Unshards parameters in the pre-forward."""
         if handles:
-            self._unshard(handles)
+            self._unshard(handles, self._streams["unshard"], self._streams["pre_unshard"])
             handles_key = tuple(handles)
             self._needs_pre_forward_unshard[handles_key] = False
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+            torch.cuda.current_stream().wait_stream(self._streams["unshard"])
             self._prefetch_handles(handles_key)
 
     def _post_forward(
@@ -2652,8 +2664,10 @@ class FullyShardedDataParallel(nn.Module):
 
         self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
-        self._unshard(self._handles)
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+        # No need to call `wait_stream()` since we unshard in the computation
+        # stream directly
+        computation_stream = torch.cuda.current_stream()
+        self._unshard(self._handles, computation_stream, computation_stream)
         if with_grads:
             self._unshard_grads(self._handles)
 
@@ -2681,7 +2695,7 @@ class FullyShardedDataParallel(nn.Module):
                         # move parameters.
                 # TODO (awgu): This FPW call assumes 1 `FlatParameter`
                 if not self._use_orig_params:
-                    stack.enter_context(self._fsdp_wrapped_module.unflatten_as_params())
+                    stack.enter_context(self._unflatten_as_params())
                 try:
                     yield
                 finally:
@@ -2740,6 +2754,50 @@ class FullyShardedDataParallel(nn.Module):
                     existing_grad[:grad_shard.numel()].copy_(grad_shard)
 
     @contextlib.contextmanager
+    def _unflatten_as_params(self) -> Generator:
+        """
+        Assumes that the flattened parameter is unsharded. When in the context,
+        de-registers the flattened parameter and unflattens the original
+        parameters as ``nn.Parameter`` views into the flattened parameter.
+        After the context, re-registers the flattened parameter and restores
+        the original parameters as ``Tensor`` views into the flattened
+        parameter.
+        """
+        if not self._handles:
+            yield
+        else:
+            self._deregister_flat_param()
+            try:
+                with self._handles[0].unflatten_as_params():
+                    yield
+            finally:
+                if not self._handles[0]._use_orig_params:
+                    self._register_flat_param()
+
+    def _register_flat_param(self):
+        """
+        Registers the flattened parameter to the wrapped module, making it
+        visible to ``nn.Module`` methods.
+
+        We do not use :meth:`nn.Module.register_parameter` because we want
+        ``FLAT_PARAM`` to always be an attribute but dynamically change whether
+        it is visible to ``nn.Module`` methods.
+        """
+        if self._has_params:
+            self.module._parameters[FLAT_PARAM] = self._handles[0].flat_param
+
+    def _deregister_flat_param(self):
+        """
+        De-registers the flattened parameter from the wrapped module, hiding it
+        from ``nn.Module`` methods.
+
+        We do not use ``del`` because we want ``FLAT_PARAM`` to always be an
+        attribute but dynamically change whether it is visible to ``nn.Module``
+        methods.
+        """
+        self.module._parameters.pop(FLAT_PARAM, None)
+
+    @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
         """
         This deregisters the original parameters and exposes the
@@ -2778,7 +2836,7 @@ class FullyShardedDataParallel(nn.Module):
             f"handle: {handle._use_orig_params}"
         )
         handle._deregister_orig_params()
-        self._fsdp_wrapped_module._register_flat_param()
+        self._register_flat_param()
 
     def _register_orig_params(self):
         """
@@ -2787,7 +2845,7 @@ class FullyShardedDataParallel(nn.Module):
         if not self._handles:
             return
         handle = self._handles[0]
-        self._fsdp_wrapped_module._deregister_flat_param()
+        self._deregister_flat_param()
         if handle.is_sharded(handle.flat_param):
             handle._use_sharded_views()
             handle._use_sharded_grad_views()
@@ -2915,8 +2973,8 @@ class FullyShardedDataParallel(nn.Module):
 
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
-                self._unshard(_handles)
-                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+                self._unshard(_handles, self._streams["unshard"], self._streams["pre_unshard"])
+                torch.cuda.current_stream().wait_stream(self._streams["unshard"])
 
                 # Set this to `False` to ensure that a mistargeted prefetch
                 # does not actually unshard these handles
@@ -3140,6 +3198,11 @@ class FullyShardedDataParallel(nn.Module):
                 orig_grad_data.record_stream(self._streams["post_backward"])
 
                 if handle._use_orig_params:
+                    # Since the handle's `FlatParameter` completed its gradient
+                    # computation, we should reset the gradient noneness mask
+                    handle._reset_is_grad_none()
+                    # Delay using sharded gradient views until after the
+                    # reduce-scatter instead of immediately after resharding
                     handle._use_sharded_grad_views()
 
     def _cast_grad_to_param_dtype(
@@ -3377,21 +3440,14 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 m._sync_gradients = old_flag
 
-    @property
-    def params_with_grad(self) -> List[Parameter]:
-        """
-        Recursively returns a list of all module parameters that have a gradient.
-        """
-        return [p for p in self.parameters() if p.grad is not None]
-
     @torch.no_grad()
     def clip_grad_norm_(
         self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0
-    ) -> None:
+    ) -> torch.Tensor:
         """
-        Clip all gradients at this point in time. The norm is computed over all
-        gradients together, as if they were concatenated into a single vector.
-        Gradients are modified in-place.
+        Clips the gradient norm of all parameters. The norm is computed over
+        all parameters' gradients as viewed as a single vector, and the
+        gradients are modified in-place.
 
         Args:
             max_norm (float or int): max norm of the gradients
@@ -3408,18 +3464,23 @@ class FullyShardedDataParallel(nn.Module):
             calling it for FSDP models would lead to different scaling being
             applied per subset of model parameters.
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives will be used.
+        .. warning:: This needs to be called on all ranks since it uses
+            collective communications.
         """
         self._lazy_init()
         self._wait_for_previous_optim_step()
-        assert self._is_root, "clip_grad_norm should only be called on the root (parent) instance"
+        if not self._is_root:
+            raise RuntimeError(
+                "`clip_grad_norm_()` should only be called on the root FSDP instance"
+            )
         self._assert_state(TrainingState_.IDLE)
 
         max_norm = float(max_norm)
         norm_type = float(norm_type)
-        # Computes the max norm for this shard's gradients and sync's across workers
-        local_norm = _calc_grad_norm(self.params_with_grad, norm_type).cuda()  # type: ignore[arg-type]
+        # Compute the local gradient norm (only including this rank's shard
+        # of the gradients)
+        local_norm = _get_grad_norm(self.parameters(), norm_type).to(self.compute_device)
+        # Reconstruct the total gradient norm depending on the norm type
         if norm_type == math.inf:
             total_norm = local_norm
             dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group)
@@ -3427,16 +3488,21 @@ class FullyShardedDataParallel(nn.Module):
             total_norm = local_norm ** norm_type
             dist.all_reduce(total_norm, group=self.process_group)
             total_norm = total_norm ** (1.0 / norm_type)
-
         if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
 
-        clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)
-        if clip_coef < 1:
-            # multiply by clip_coef, aka, (max_norm/total_norm).
-            for p in self.params_with_grad:
-                assert p.grad is not None
-                p.grad.detach().mul_(clip_coef.to(p.grad.device))
+        clip_coef = (
+            torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device)
+            / (total_norm + 1e-6)
+        )
+        # Multiplying by the clamped coefficient is meaningless when it is
+        # equal to 1, but it avoids the host-device sync that would result from
+        # `if clip_coef < 1`
+        clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+        grads = [param.grad for param in self.parameters() if param.grad is not None]
+        for grad in grads:
+            grad.detach().mul_(clip_coef_clamped.to(grad.device))
+        return total_norm
 
     @staticmethod
     def _warn_optim_input(optim_input):
@@ -3484,10 +3550,10 @@ class FullyShardedDataParallel(nn.Module):
         and ``"param_groups"``. The flattened parameters in ``FSDP`` modules
         contained in ``model`` are mapped back to their unflattened parameters.
 
-        .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used. However, if ``rank0_only=True``, then the
-            state dict is only populated on rank 0, and all other ranks return
-            an empty :class:`dict`.
+        .. warning:: This needs to be called on all ranks since it uses
+            collective communications. However, if ``rank0_only=True``, then
+            the state dict is only populated on rank 0, and all other ranks
+            return an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
@@ -4088,30 +4154,35 @@ class FullyShardedDataParallel(nn.Module):
         return is_prep_stage
 
 
-def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
-    r"""Calculate gradient norm of an iterable of parameters.
-    Returns:
-        Total norm of the parameters (viewed as a single vector).
+def _get_grad_norm(
+    params: List[nn.Parameter],
+    norm_type: float,
+) -> torch.Tensor:
     """
-    parameters = [p for p in parameters if p.grad is not None]
-
-    if len(parameters) == 0:
+    Returns the gradient norm of parameters ``param`` s, where the gradients
+    are viewed as a single vector.
+    """
+    params_with_grad = [param for param in params if param.grad is not None]
+    if len(params_with_grad) == 0:
         return torch.tensor(0.0)
-    if p == math.inf:
-        local_norm = torch.tensor(max(par.grad.detach().abs().max() for par in parameters))
-    else:
-        # Compute the norm in full precision no matter what
-        local_norm = torch.linalg.vector_norm(
-            torch.stack(
-                [
-                    torch.linalg.vector_norm(par.grad.detach(), p, dtype=torch.float32)
-                    for par in parameters
-                ]
-            ),
-            p,
-        )
-    local_norm.to(dtype=parameters[0].dtype)
-    return local_norm
+    grads = [param.grad for param in params_with_grad]
+    grad_dtypes = set(grad.dtype for grad in grads)
+    if len(grad_dtypes) != 1:
+        raise ValueError(f"Requires uniform dtype across all gradients but got {grad_dtypes}")
+    # Compute the gradient norm in FP32, where we treat the gradients as a
+    # single vector
+    grad_norm = torch.linalg.vector_norm(
+        torch.stack(
+            [
+                torch.linalg.vector_norm(grad.detach(), norm_type, dtype=torch.float32)
+                for grad in grads
+            ],
+        ),
+        norm_type,
+        dtype=torch.float32,
+    )
+    grad_norm = grad_norm.to(grads[0].dtype)
+    return grad_norm
 
 
 def _get_param_to_unflat_param_names(
@@ -4136,25 +4207,22 @@ def _get_param_to_unflat_param_names(
             unflattened parameter names.
     """
     def module_fn(module, prefix, param_to_unflat_param_names):
-        # For FSDP modules, only add the entry when considering the contained
-        # `FlattenParamsWrapper` to avoid duplication
-        if not isinstance(module, FullyShardedDataParallel):
-            for param_name, param in module.named_parameters(recurse=False):
-                module_prefixed_param_names = (
-                    param._fqns if type(param) is FlatParameter
-                    else [param_name]
-                )  # prefixed from `module`
-                fully_prefixed_param_names = [
-                    clean_tensor_name(prefix + name)
-                    for name in module_prefixed_param_names
-                ]  # fully prefixed from the top level including `prefix`
-                # If this parameter has already been visited, then it is a
-                # shared parameter; then, only take the first parameter name
-                is_shared_param = param in param_to_unflat_param_names
-                if not is_shared_param:
-                    param_to_unflat_param_names[param] = fully_prefixed_param_names
-                elif not dedup_shared_params:
-                    param_to_unflat_param_names[param].extend(fully_prefixed_param_names)
+        for param_name, param in module.named_parameters(recurse=False):
+            module_prefixed_param_names = (
+                param._fqns if type(param) is FlatParameter
+                else [param_name]
+            )  # prefixed from `module`
+            fully_prefixed_param_names = [
+                clean_tensor_name(prefix + name)
+                for name in module_prefixed_param_names
+            ]  # fully prefixed from the top level including `prefix`
+            # If this parameter has already been visited, then it is a
+            # shared parameter; then, only take the first parameter name
+            is_shared_param = param in param_to_unflat_param_names
+            if not is_shared_param:
+                param_to_unflat_param_names[param] = fully_prefixed_param_names
+            elif not dedup_shared_params:
+                param_to_unflat_param_names[param].extend(fully_prefixed_param_names)
 
     def return_fn(param_to_unflat_param_names):
         return param_to_unflat_param_names
@@ -4207,9 +4275,7 @@ def _get_param_name_to_param(
 def clean_tensor_name(tensor_name: str) -> str:
     """Cleans the parameter or buffer name by removing any module wrapper
     prefixes."""
-    # Call `replace()` twice separately since the name may not have both
-    tensor_name = tensor_name.replace(FSDP_WRAPPED_MODULE + ".", "")
-    tensor_name = tensor_name.replace(FPW_MODULE + ".", "")
+    tensor_name = tensor_name.replace(FSDP_PREFIX, "")
     # TODO: Explicitly replacing checkpoint_wrapper prefix is not ideal,
     # as it increases coupling between CheckpointWrapper and FSDP. This is also not
     # scalable for additional wrapped modules, we should come up with a general solution
