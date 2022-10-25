@@ -141,7 +141,8 @@ class PySymInt(object):
         self._expr = self.shape_env.replace(self._expr)
 
     def __str__(self):
-        return f"{self.expr}"
+        return str(self.shape_env.size_hint(self.expr))
+        #return f"{self.expr}"
 
     def __repr__(self):
         return f"{self.expr}"
