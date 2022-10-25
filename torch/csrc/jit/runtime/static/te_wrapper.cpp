@@ -19,7 +19,7 @@ using namespace torch::jit::tensorexpr;
 // contains FP divide, which is single-ported.
 static constexpr int kVectorWidth = 16;
 
-#ifdef TORCH_ENABLE_LLVM
+#ifdef STATIC_RUNTIME_USE_LLVM
 
 void TEWrapper::update(std::unique_ptr<LLVMCodeGen>&& cg_) {
   cg = std::move(cg_);
