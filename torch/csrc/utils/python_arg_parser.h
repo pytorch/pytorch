@@ -382,7 +382,8 @@ struct FunctionParameter {
   bool check(
       PyObject* obj,
       std::vector<py::handle>& overloaded_args,
-      int argnum);
+      int argnum,
+      int64_t* failed_idx = nullptr);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
@@ -443,7 +444,7 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 
 inline bool PythonArgs::has_torch_function() {
   return !this->signature.overloaded_args.empty() ||
-      at::impl::PythonTorchFunctionTLS::get_mode();
+      at::impl::torch_function_mode_enabled();
 }
 
 inline std::string PythonArgs::get_func_name() {
