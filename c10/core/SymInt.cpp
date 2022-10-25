@@ -155,6 +155,10 @@ void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
 }
 
+void SymInt::operator/=(SymInt sci) {
+  *this = *this / sci;
+}
+
 void SymInt::operator+=(SymInt sci) {
   *this = *this + sci;
 }
@@ -194,6 +198,14 @@ std::ostream& operator<<(std::ostream& os, SymInt s) {
     os << s.as_int_unchecked();
   }
   return os;
+}
+
+SymInt operator-(SymInt s) {
+  if (s.is_symbolic()) {
+    return SymInt::toSymInt(s.toSymIntNodeImpl()->neg());
+  } else {
+    return SymInt(-s.as_int_unchecked());
+  }
 }
 
 } // namespace c10

@@ -598,7 +598,7 @@ struct cpu_scatter_gather_base_kernel {
 //   step 2: spmm reduce, parallel on M and vectorize on K
 //
 template <typename scalar_t>
-void cpu_scatter_add_contig_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
+void cpu_scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
   int64_t* index_data = index.data_ptr<int64_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
   scalar_t* src_data = src.data_ptr<scalar_t>();
@@ -697,7 +697,7 @@ void cpu_scatter_add_contig_kernel(const Tensor& self, const Tensor& index, cons
 }
 
 template <typename scalar_t>
-void cpu_gather_contig_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
+void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
   int64_t* index_data = index.data_ptr<int64_t>();
   scalar_t* result_data = result.data_ptr<scalar_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
@@ -734,24 +734,24 @@ void cpu_gather_contig_kernel(const Tensor& result, const Tensor& index, const T
   });
 }
 
-void scatter_add_config(const Tensor& self, const Tensor& index, const Tensor& src) {
+void scatter_add_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
     "scatter_add_contig", [&] {
-      cpu_scatter_add_contig_kernel<scalar_t>(self, index, src);
+      cpu_scatter_add_expanded_index_kernel<scalar_t>(self, index, src);
   });
 }
 
-void gather_config(const Tensor& result, const Tensor& index, const Tensor& self) {
+void gather_expanded_index(const Tensor& result, const Tensor& index, const Tensor& self) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
     "scatter_add_contig", [&] {
-      cpu_gather_contig_kernel<scalar_t>(result, index, self);
+      cpu_gather_expanded_index_kernel<scalar_t>(result, index, self);
   });
 }
 
 template <bool is_scatter_like = true>
-inline bool is_index_broadcasted(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+inline bool can_use_expanded_index_path(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   if (!is_radix_sort_available()) { return false; }
 
   // skip when having empty tensor
@@ -773,8 +773,8 @@ inline bool is_index_broadcasted(const Tensor& self, int64_t dim, const Tensor& 
 }
 
 void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
-  if (is_index_broadcasted</*is_scatter_like=*/false>(result, dim, index, self)) {
-    gather_config(result, index, self);
+  if (can_use_expanded_index_path</*is_scatter_like=*/false>(result, dim, index, self)) {
+    gather_expanded_index(result, index, self);
   } else {
     cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
       result, dim, index, self,
@@ -793,8 +793,8 @@ void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& inde
 }
 
 void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  if (is_index_broadcasted<>(self, dim, index, src)) {
-    scatter_add_config(self, index, src);
+  if (can_use_expanded_index_path<>(self, dim, index, src)) {
+    scatter_add_expanded_index(self, index, src);
   } else {
     cpu_scatter_gather_base_kernel<>()(
       self, dim, index, src,

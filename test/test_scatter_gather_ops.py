@@ -268,7 +268,7 @@ class TestScatterGather(TestCase):
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     def test_scatter_expanded_index(self, device, dtype):
         def helper(input_size, idx_size):
-            input = torch.randn(input_size, device=device, dtype=dtype)
+            input = torch.randn(input_size, device=device).to(dtype=dtype)
             input2 = input.clone()
 
             shape = [1] * len(input_size)
@@ -287,7 +287,7 @@ class TestScatterGather(TestCase):
             expanded_shape[0] = idx_size
             idx = idx.expand(expanded_shape)
             idx2 = idx.contiguous()
-            src = torch.randn(expanded_shape, device=device, dtype=dtype)
+            src = torch.randn(expanded_shape, device=device).to(dtype=dtype)
 
             input.scatter_add_(0, idx, src)
             input2.scatter_add_(0, idx2, src)
@@ -303,7 +303,7 @@ class TestScatterGather(TestCase):
     @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     def test_gather_expanded_index(self, device, dtype):
         def helper(input_size, idx_size):
-            input = torch.randn(input_size, device=device, dtype=dtype)
+            input = torch.randn(input_size, device=device).to(dtype=dtype)
             input2 = input.clone()
 
             shape = [1] * len(input_size)
