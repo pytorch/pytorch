@@ -11,7 +11,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import NumberType, TensorLike, TensorSequenceType
+from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -1740,7 +1740,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.mean(vals, dim=(-3, -1))
 
     def maybe_mask(vals, length, range_max, adaptive, dim):
-        if isinstance(length, int):
+        if isinstance(length, IntLike):
             return vals, length
         else:
             # zero-out the things we didn't really want to select
@@ -1852,6 +1852,7 @@ def norm(
 
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec, type="pre_autograd")
 @pw_cast_for_opmath
 def upsample_bilinear2d_vec(
     input: Tensor,
