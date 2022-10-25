@@ -7,6 +7,7 @@ from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
+from . import config
 from .codegen.common import index_prevent_reordering
 from .utils import sympy_product, sympy_str, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -145,6 +146,15 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
+
+    # Truncate the expr str by a threshold to prevent it's too long
+    # and cause process hanging. The result is not used.
+    # https://github.com/pytorch/torchdynamo/issues/1352
+    @staticmethod
+    def truncate_expr(expr):
+        if len(expr) > config.realize_bytes_threshold:
+            expr = f"{expr[:config.realize_bytes_threshold]}..."
+        return expr
 
     def canonicalize(
         self, index: sympy.Expr
