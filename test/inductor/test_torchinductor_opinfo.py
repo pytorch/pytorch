@@ -178,6 +178,7 @@ inductor_skips["cuda"] = {
     "max.reduction_with_dim": {i32, i64},
     "min.reduction_with_dim": {i32, i64},
     "linalg.lu": {f32, f64},
+    "linalg.lu_solve": {f32, f64},
     "lu_unpack": {f32, f64},
     "native_batch_norm": {f16, f32, f64},
     "native_layer_norm": {f16, f32, f64},
