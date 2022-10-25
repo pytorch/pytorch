@@ -94,10 +94,9 @@ def _apply_params(*args, **kwargs):
 @symbolic_helper.parse_args("v", "f", "f")
 @_beartype.beartype
 def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val: float):
-    try:
-        scalar_type = _type_utils.JitScalarType.from_value(self)
-    except errors.OnnxExporterError:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.FLOAT
+    )
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(min_val, dtype=scalar_type.dtype()),
@@ -125,12 +124,12 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
         else:
             return tensor
 
-    try:
-        scalar_type = _type_utils.JitScalarType.from_value(self)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    )
+    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
         min = _cast_if_not_none(min, scalar_type)
         max = _cast_if_not_none(max, scalar_type)
-    except errors.OnnxExporterError:
-        pass
 
     if symbolic_helper._is_none(min):
         return clamp_max(g, self, max)
@@ -180,10 +179,9 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 @_beartype.beartype
 def relu6(g: jit_utils.GraphContext, input):
     relu_ = opset9._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
-    try:
-        scalar_type = _type_utils.JitScalarType.from_value(input)
-    except errors.OnnxExporterError:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+    scalar_type = _type_utils.JitScalarType.from_value(
+        input, _type_utils.JitScalarType.FLOAT
+    )
     min_val = g.op(
         "Constant",
         value_t=torch.tensor(0, dtype=scalar_type.dtype()),
@@ -297,17 +295,23 @@ def index_put(
     values = symbolic_helper._reshape_helper(g, values, values_shape)
 
     try:
-        scalar_type = _type_utils.JitScalarType.from_value(self)
-        if scalar_type != _type_utils.JitScalarType.from_value(values):
-            values = g.op("Cast", values, to_i=scalar_type.onnx_type())
+        self_scalar_type = _type_utils.JitScalarType.from_value(self)
+        values_scalar_type = _type_utils.JitScalarType.from_value(
+            values, _type_utils.JitScalarType.UNDEFINED
+        )
+        if self_scalar_type != values_scalar_type:
+            values = g.op("Cast", values, to_i=self_scalar_type.onnx_type())
     except errors.OnnxExporterError:
-        scalar_type = None
+        if accumulate:
+            raise errors.SymbolicValueError(
+                "self does not have a valid scalar type.", self
+            )
 
     if accumulate:
         zeros = g.op(
             "ConstantOfShape",
             g.op("Shape", self),
-            value_t=torch.tensor([0], dtype=scalar_type.dtype()),
+            value_t=torch.tensor([0], dtype=self_scalar_type.dtype()),
         )
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)

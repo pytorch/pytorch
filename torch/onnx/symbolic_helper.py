@@ -431,12 +431,13 @@ def _if_scalar_type_as(self, tensor):
     if isinstance(self, _C.Value):
         return self
 
-    try:
-        scalar_type = _type_utils.JitScalarType.from_value(tensor)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        tensor, _type_utils.JitScalarType.UNDEFINED
+    )
+    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
         ty = scalar_type.scalar_name().lower()
         return getattr(self, ty)()
-    except errors.OnnxExporterError:
-        return self
+    return self
 
 
 @_beartype.beartype
@@ -646,10 +647,11 @@ def _block_list_in_opset(name: str):
 @_beartype.beartype
 def _try_get_scalar_type(*args) -> Optional[str]:
     for arg in args:
-        try:
-            return _type_utils.JitScalarType.from_value(arg).scalar_name()
-        except errors.OnnxExporterError:
-            pass
+        scalar_type = _type_utils.JitScalarType.from_value(
+            arg, _type_utils.JitScalarType.UNDEFINED
+        )
+        if scalar_type != _type_utils.JitScalarType.UNDEFINED:
+            return scalar_type.scalar_name()
     return None
 
 
@@ -667,15 +669,17 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
                 g, index, g.op("Constant", value_t=torch.LongTensor([1]))
             )
 
-    try:
-        index_scalar_type = _type_utils.JitScalarType.from_value(index)
-    except errors.OnnxExporterError:
-        index_scalar_type = None
-
-    if index_scalar_type is None or index_scalar_type not in {
-        _type_utils.JitScalarType.INT64,
-        _type_utils.JitScalarType.INT,
-    }:
+    index_scalar_type = _type_utils.JitScalarType.from_value(
+        index, _type_utils.JitScalarType.UNDEFINED
+    )
+    if (
+        index_scalar_type == _type_utils.JitScalarType.UNDEFINED
+        or index_scalar_type
+        not in {
+            _type_utils.JitScalarType.INT64,
+            _type_utils.JitScalarType.INT,
+        }
+    ):
         index = g.op("Cast", index, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -702,25 +706,21 @@ def _slice_helper(
 
 @_beartype.beartype
 def _is_fp(value) -> bool:
-    try:
-        return _type_utils.JitScalarType.from_value(value) in {
-            _type_utils.JitScalarType.FLOAT,
-            _type_utils.JitScalarType.DOUBLE,
-            _type_utils.JitScalarType.HALF,
-            _type_utils.JitScalarType.BFLOAT16,
-        }
-    except errors.OnnxExporterError:
-        return False
+    return _type_utils.JitScalarType.from_value(
+        value, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.FLOAT,
+        _type_utils.JitScalarType.DOUBLE,
+        _type_utils.JitScalarType.HALF,
+        _type_utils.JitScalarType.BFLOAT16,
+    }
 
 
 @_beartype.beartype
 def _is_bool(value) -> bool:
-    try:
-        return _type_utils.JitScalarType.from_value(value) in {
-            _type_utils.JitScalarType.BOOL
-        }
-    except errors.OnnxExporterError:
-        return False
+    return _type_utils.JitScalarType.from_value(
+        value, _type_utils.JitScalarType.UNDEFINED
+    ) in {_type_utils.JitScalarType.BOOL}
 
 
 @_beartype.beartype
@@ -1248,11 +1248,13 @@ def _arange_cast_helper(
 ]:
     def _is_all_integral(scalars):
         for scalar in scalars:
-            try:
-                if _type_utils.JitScalarType.from_value(scalar).scalar_name() != "Long":
-                    return False
-            except errors.OnnxExporterError:
-                pass
+            if (
+                _type_utils.JitScalarType.from_value(
+                    scalar, _type_utils.JitScalarType.UNDEFINED
+                )
+                != _type_utils.JitScalarType.INT64
+            ):
+                return False
         return True
 
     # This logic is based on torch.arange docs. If "dtype" is provided,

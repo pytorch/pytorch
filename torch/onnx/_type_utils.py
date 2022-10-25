@@ -139,24 +139,28 @@ class JitScalarType(enum.IntEnum):
     # In both cases, using typing.TypeVar or string literals didn't work
     @classmethod
     @_beartype.beartype
-    def from_value(cls, value) -> JitScalarType:
-        """Create a JitScalarType from a torch._C.Value underlying scalar type.
+    def from_value(cls, value, default=None) -> JitScalarType:
+        """Create a JitScalarType from a torch._C.Value's underlying scalar type.
 
         Args:
             value: A `Union[torch._C.Value, torch.Tensor]` object to fetch scalar type from.
+            default: The JitScalarType to return if a valid scalar cannot be fetched from value
 
         Returns:
             JitScalarType.
 
         Raises:
-            OnnxExporterError: if value is None.
-            SymbolicValueError: when value.type().scalarType() does not exist
-
+            OnnxExporterError: if value does not have a valid scalar type and default is not None.
+            SymbolicValueError: when value.type()'s info are empty and default is None
         """
 
-        if value is None:
+        if default is None and not isinstance(value, (torch._C.Value, torch.Tensor)):
             raise errors.OnnxExporterError(
-                "Cannot determine scalar type for `None` instance."
+                "value must be either torch._C.Value, torch.Tensor objects or None."
+            )
+        elif default is not None and not isinstance(default, JitScalarType):
+            raise errors.OnnxExporterError(
+                "default value must be a JitScalarType object or None."
             )
         elif isinstance(value, torch.Tensor):
             return cls.from_dtype(value.dtype)
@@ -164,10 +168,13 @@ class JitScalarType(enum.IntEnum):
             return cls.from_dtype(value.type().getElementType().dtype())
         scalar_type = value.type().scalarType()
         if scalar_type is None:
-            raise errors.SymbolicValueError(
-                f"Cannot determine scalar type for this '{type(value.type())}' instance.",
-                value,
-            )
+            if default is None:
+                raise errors.SymbolicValueError(
+                    f"Cannot determine scalar type for this '{type(value.type())}' instance.",
+                    value,
+                )
+            else:
+                return default
         return cls.from_name(scalar_type)
 
     @_beartype.beartype
