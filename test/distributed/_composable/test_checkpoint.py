@@ -29,7 +29,6 @@ class ToyModel(nn.Module):
 
 
 class TestCheckpoint(TestCase):
-
     def _get_graph_size(self, out: torch.Tensor) -> int:
         q = deque([out.grad_fn])
         num_functions = 0
@@ -41,7 +40,6 @@ class TestCheckpoint(TestCase):
                     q.append(next_fn)
 
         return num_functions
-
 
     def _test_tensor_only(self, net: nn.Module, x: torch.Tensor) -> None:
         x1 = x.clone()

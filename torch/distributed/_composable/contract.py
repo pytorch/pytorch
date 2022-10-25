@@ -21,9 +21,7 @@ state_key = _StateKey()
 def contract(func):
     def get_all_state(module: nn.Module) -> Dict[Callable, Dict]:
         d = module.__dict__.setdefault(state_key, {})
-        assert isinstance(
-            d, dict
-        ), "Distributed composable API states corrupted"
+        assert isinstance(d, dict), "Distributed composable API states corrupted"
         return d
 
     r"""
@@ -44,12 +42,8 @@ def contract(func):
         all_state.setdefault(func, {})
 
         orig_named_params = OrderedDict(module.named_parameters())
-        orig_named_buffers = OrderedDict(
-            module.named_buffers(remove_duplicate=False)
-        )
-        orig_named_modules = OrderedDict(
-            module.named_modules(remove_duplicate=False)
-        )
+        orig_named_buffers = OrderedDict(module.named_buffers(remove_duplicate=False))
+        orig_named_modules = OrderedDict(module.named_modules(remove_duplicate=False))
 
         updated = func(module, *args, **kwargs)
 
@@ -57,28 +51,20 @@ def contract(func):
             updated = module
 
         new_named_params = OrderedDict(updated.named_parameters())
-        new_named_buffers = OrderedDict(
-            updated.named_buffers(remove_duplicate=False)
-        )
-        new_named_modules = OrderedDict(
-            updated.named_modules(remove_duplicate=False)
-        )
+        new_named_buffers = OrderedDict(updated.named_buffers(remove_duplicate=False))
+        new_named_modules = OrderedDict(updated.named_modules(remove_duplicate=False))
 
         assert isinstance(updated, nn.Module), (
             "Output of composable distributed APIs must be either None or "
             f"nn.Module, but got {type(updated)}"
         )
-        assert list(orig_named_params.keys()) == list(
-            new_named_params.keys()
-        ), (
+        assert list(orig_named_params.keys()) == list(new_named_params.keys()), (
             "Composable distributed API implementations cannot modify "
             "parameter FQNs. \n"
             f"Original FQNs: {list(orig_named_params.keys())}, \n"
             f"Updated FQNs: {list(OrderedDict(module.named_parameters()).keys())}"
         )
-        assert list(orig_named_buffers.keys()) == list(
-            new_named_buffers.keys()
-        ), (
+        assert list(orig_named_buffers.keys()) == list(new_named_buffers.keys()), (
             "Composable distributed API implementations cannot modify "
             "buffer FQNs. \n"
             f"Original FQNs: {list(orig_named_buffers.keys())}, \n"
