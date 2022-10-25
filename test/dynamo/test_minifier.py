@@ -95,10 +95,8 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
 
     def setUp(self):
         super().setUp()
-        torch._dynamo.utils.debug_dir.setup()
 
     def tearDown(self):
-        torch._dynamo.utils.debug_dir.clear()
         super().tearDown()
 
     # Triggers minifier, runs the generated script, and returns
