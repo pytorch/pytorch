@@ -169,7 +169,6 @@ unittest.expectedFailure(
 
 
 # DynamicShapesSubGraphTests
-unittest.expectedFailure(DynamicShapesSubGraphTests.test_dynamic_shapes_dynamic_shapes)
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
 )

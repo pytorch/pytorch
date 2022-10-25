@@ -24,6 +24,7 @@ from functools import lru_cache
 from typing import Any, Dict
 
 import numpy as np
+import sympy
 
 import torch
 from torch import fx
@@ -677,28 +678,28 @@ try:
                     tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
                 tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
 
-            for index, symbol in enumerate(fake_tensor.size()):
+            def _extract(symbol):
                 if isinstance(symbol, int):
-                    continue
-                tensor_ref = TensorReference(
-                    id(e), "size", index, symbol.get_pyobj().expr
-                )
-                _record(tensor_ref)
+                    return None
+                sym_expr = symbol.get_pyobj().expr
+                if not isinstance(sym_expr, sympy.Symbol):
+                    return None
+                return sym_expr
+
+            def _record_ref(e, index, symbol, kind):
+                sym_expr = _extract(symbol)
+                if sym_expr:
+                    tensor_ref = TensorReference(id(e), kind, index, sym_expr)
+                    _record(tensor_ref)
+
+            for index, symbol in enumerate(fake_tensor.size()):
+                _record_ref(e, index, symbol, "size")
 
             for index, symbol in enumerate(fake_tensor.stride()):
-                if isinstance(symbol, int):
-                    continue
-                tensor_ref = TensorReference(
-                    id(e), "stride", index, symbol.get_pyobj().expr
-                )
-                _record(tensor_ref)
+                _record_ref(e, index, symbol, "stride")
 
             offset = fake_tensor.storage_offset()
-            if not isinstance(offset, int):
-                tensor_ref_storage_offset = TensorReference(
-                    id(e), "storage_offset", None, offset.get_pyobj().expr
-                )
-                _record(tensor_ref_storage_offset)
+            _record_ref(e, None, offset, "storage_offset")
 
         return fake_tensor
 

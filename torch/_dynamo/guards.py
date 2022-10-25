@@ -621,12 +621,9 @@ class CheckFunctionManager:
                 tensor_ref_set = self.output_graph.tensor_id_to_sym_shape_ref[tensor_id]
                 for tensor_ref in tensor_ref_set:
                     obj_expr = tensor_ref.expr
-                    if obj_expr in self.output_graph.shape_env.val_to_var:
-                        # Normalize in case the expr is an integer, replace with shape (ex: 10->s0)
-                        obj_expr = self.output_graph.shape_env.val_to_var[obj_expr]
                     if obj_expr not in expr_to_tensor_ref:
-                        expr_to_tensor_ref[obj_expr] = dict{}
-                    expr_to_tensor_ref[obj_expr].update(tensor_ref, '')
+                        expr_to_tensor_ref[obj_expr] = {}
+                    expr_to_tensor_ref[obj_expr][tensor_ref] = ""
             finished_expressions.append(f"isinstance({name}, torch.Tensor)")
         # Extract all the guard elements out of guards
         # The guard format, atm, uses tuple position 0 for the expression
@@ -648,12 +645,12 @@ class CheckFunctionManager:
             finished_expressions.append(expr_as_str)
 
         for expr in expr_to_tensor_ref.keys():
-            tensor_refs = expr_to_tensor_ref[expr]
+            tensor_refs = expr_to_tensor_ref[expr].keys()
             equality_candidates = [
-                    DynamoGuardPrinter.tensor_ref_as_str(x, id_to_name_map)
-                    for x in tensor_refs
-                    ]
-            
+                DynamoGuardPrinter.tensor_ref_as_str(x, id_to_name_map)
+                for x in tensor_refs
+            ]
+
             if len(equality_candidates) > 1:
                 equality_expr = " == ".join(equality_candidates)
                 finished_expressions.append(equality_expr)
