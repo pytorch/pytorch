@@ -754,7 +754,7 @@ def extend_logger_results_with_comparison(
 def prepare_n_shadows_model(
     model: torch.nn.Module,
     example_inputs: Any,
-    qconfig_mappings: QConfigMultiMapping,
+    qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
 ) -> torch.nn.Module:
     """
@@ -771,9 +771,9 @@ def prepare_n_shadows_model(
 
       args_kwargs_m -> op_m -> output_m
            |                        |
-           |---------------------------> mod_with_op_m_transformed_with_qconfig_i
+           |---------------------------> mod_with_op_m_transformed_with_qconfig_n
 
-    Where mod_with_op_m_transformed_with_qconfig_i is a submodule, and its
+    Where mod_with_op_m_transformed_with_qconfig_n is a submodule, and its
     inner graph looks like
 
     .. code::
@@ -787,12 +787,19 @@ def prepare_n_shadows_model(
     This is useful for testing different quantization of multiple layers in
     a single pass through the model.
 
+    The network will be traversed in node order, each node with at least one
+    valid qconfig will get an index (m). Each qconfig for the node will also get an index (n)
+    based on the order it was inserted (ignoring duplicates and None's). While the original nodes are left as fp32 ops, the additional
+    subgraph for the m-th node with the n-th qconfig is named 'shadow_warpper_m_n', which will hold both
+    'mod_n' (which is a copy of the fp32 node with the n-th qconfig applied) and 'shadow_m_n' (the OutputComparisonLogger
+    for this node-qconfig combination). A node shadow_m_0 will also be created which is the OutputLogger for the
+    fp32 node.
+
     High level TODOs for future PRs:
     1. add deduplication for qconfigs per subgraph
     2. figure out a better way to name the output structure
     3. return a results data structure instead of printing it out
-    4. make specifying sets of QConfigMapping more user friendly
-    5. add examples to docblocks
+    4. add examples to docblocks
     """
 
     tracer = quantize_fx.QuantizationTracer([], [])
@@ -823,7 +830,7 @@ def prepare_n_shadows_model(
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
-    for qconfig_mapping in qconfig_mappings.qconfig_mappings_list:
+    for qconfig_mapping in qconfig_multi_mapping.qconfig_mappings_list:
         node_name_to_qconfig = generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
         list_of_node_name_to_qconfig.append(node_name_to_qconfig)
@@ -839,7 +846,7 @@ def prepare_n_shadows_model(
             enumerate(subgraphs_dedup.items()):
         handle_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
-            qconfig_mappings.qconfig_mappings_list, list_of_node_name_to_qconfig)
+            qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig)
 
     mt.recompile()
     return mt

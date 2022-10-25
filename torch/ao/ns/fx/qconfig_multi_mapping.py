@@ -28,8 +28,11 @@ _QCONFIG_STYLE_TO_METHOD: Dict[str, str] = {
 def _remove_duplicates_and_none(qconfig_list: List[QConfigAny]) -> None:
     to_remove = []
     for index, cur_qconfig in enumerate(qconfig_list):
+        if cur_qconfig is None:
+            to_remove.append(index)
+            break
         for checked_qconfig in qconfig_list[:index]:
-            if torch.ao.quantization.qconfig_equals(cur_qconfig, checked_qconfig) or cur_qconfig is None:
+            if torch.ao.quantization.qconfig_equals(cur_qconfig, checked_qconfig):
                 to_remove.append(index)
                 break
     for index in to_remove[::-1]:
@@ -71,7 +74,8 @@ class QConfigMultiMapping:
     """
 
     def __init__(self):
-        self.qconfig_mappings_list: List[QConfigMapping] = []
+        # initialize this with 1 QConfigMapping to avoid corner cases
+        self.qconfig_mappings_list: List[QConfigMapping] = [QConfigMapping()]
 
     def _handle_list_size_mismatch(
         self, qconfig_list: List[QConfigAny], style: str
@@ -125,7 +129,11 @@ class QConfigMultiMapping:
         args: List[Union[str, int, Callable]],
         qconfig_list: List[QConfigAny],
     ) -> None:
+
+        # we remove duplicates and None to make the ordering of qconfigs
+        # deterministic upon insertion.
         _remove_duplicates_and_none(qconfig_list)
+
         self._handle_list_size_mismatch(qconfig_list, style)
         method_name = _QCONFIG_STYLE_TO_METHOD[style]
         for qconfig_mapping, qconfig in zip(self.qconfig_mappings_list, qconfig_list):

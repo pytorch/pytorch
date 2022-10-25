@@ -2394,7 +2394,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                     torch.quantization.default_dynamic_qconfig,
                 ]
             )
-            .set_module_name("fc2", [torch.quantization.default_qconfig])
+            .set_module_name("fc2", [None, torch.quantization.default_qconfig])
         )
         self.assertEqual(
             qconfig_multi_mapping.qconfig_mappings_list[1].module_name_qconfigs["fc2"],
