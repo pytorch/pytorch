@@ -11,7 +11,7 @@ we end up with this error
 How to fix
 ----------
 All of these options assume that you don't need running stats. If you're using a module this means
-that it's assumed you won't use batch norm in evalution mode. If you have a use case that involves
+that it's assumed you won't use batch norm in evaluation mode. If you have a use case that involves
 running batch norm with vmap in evaluation mode, please file an issue
 
 Option 1: Change the BatchNorm
