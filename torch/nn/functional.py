@@ -23,7 +23,7 @@ from . import _reduction as _Reduction
 from . import grad  # noqa: F401
 from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
-
+from ..fx.experimental.symbolic_shapes import sym_int, sym_float
 
 Tensor = torch.Tensor
 
@@ -3910,7 +3910,6 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             ]
         else:
             assert scale_factors is not None
-            from ..fx.experimental.symbolic_shapes import sym_int, sym_float
             output_size = [
                 sym_int(math.floor(sym_float(input.size(i + 2)) * scale_factors[i]))
                 for i in range(dim)

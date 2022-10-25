@@ -659,7 +659,6 @@ class CheckFunctionManager:
                 equality_expr = " == ".join(equality_candidates)
                 finished_expressions.append(equality_expr)
 
-        breakpoint()
         return finished_expressions
 
     def compile_check_fn(self, local_builder, global_builder):
