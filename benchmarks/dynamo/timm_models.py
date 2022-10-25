@@ -205,8 +205,7 @@ class TimmRunnner(BenchmarkRunner):
                     drop_rate=0.0,
                     drop_path_rate=None,
                     drop_block_rate=None,
-                    # Skip downloading pretrained models for speedy CI
-                    pretrained=not self.args.ci,
+                    pretrained=True,
                     # global_pool=kwargs.pop('gp', 'fast'),
                     # num_classes=kwargs.pop('num_classes', None),
                     # drop_rate=kwargs.pop('drop', 0.),
