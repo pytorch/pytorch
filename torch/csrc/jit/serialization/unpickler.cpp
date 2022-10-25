@@ -533,7 +533,19 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(std::move(tensor));
     } break;
     case PickleOpCode::SETITEM: {
-      // We take care of it in other opcodes.
+      // At this OpCode, stack looks like
+      // | Stack Top |
+      // | ......    |
+      // | Dict      | -> (stack_size - 3)
+      // | Key       | -> (stack_size - 2)
+      // | Value     | -> (stack_size - 1)
+      auto stack_size = stack_.size();
+      auto dict_pos = stack_size - 3;
+      auto key_pos = stack_size - 2;
+      auto val_pos = stack_size - 1;
+      auto dict = stack_.at(dict_pos).toGenericDict();
+      dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
+      stack_.erase(stack_.begin() + (key_pos), stack_.end());
     } break;
     default: {
       AT_ERROR(
@@ -553,6 +565,11 @@ void Unpickler::readGlobal(
     this->skip_next_read_global--;
     if (this->skip_next_read_global == 1) {
     } else if (this->skip_next_read_global == 0) {
+      // Corresponds to the type of `Tensor` being unpickled
+      if (module_name != "torch" || class_name != "Tensor") {
+        TORCH_WARN(
+            "Trying to load a Subclassed Tensor, it will converted to at::Tensor in C++");
+      }
       stack_.emplace_back(int64_t(globals_.size() - 1));
       return;
     } else {
@@ -647,7 +664,8 @@ void Unpickler::readGlobal(
   } else if (
       module_name == "torch._tensor" &&
       (class_name == "_rebuild_from_type_v2")) {
-    // Unpickle a tensor
+    // Unpickle a Tensor with Python attributes or
+    // a Subclassed Tensor.
     rebuildTensorFromTypeV2();
   } else if (
       module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
@@ -856,21 +874,24 @@ void Unpickler::rebuildTensorFromTypeV2() {
   this->skip_next_read_global = 2;
   auto curr_globals_idx = globals_.size();
   globals_.emplace_back([this, curr_globals_idx] {
+    // args is a tuple with following data
+    //  (function to rebuild base tensor, type of tensor,
+    //   arguments to construct base tensor, Python State (as dict))
     auto args = pop(stack_).toTuple();
     size_t tup_idx = 0;
     const auto args_elems = args->elements();
-    auto tup = args_elems.at(tup_idx + 2).toTuple();
-    auto state = args_elems.at(tup_idx + 3).toGenericDict();
-    // std::cout << "STATE PRINT:" << state << "\n";
-    // std::cout << "STATE:" << state.size() << "\n";
-    if (state.size() > 0) {
+    auto base_tensor_args = args_elems.at(tup_idx + 2).toTuple();
+    auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
+    if (py_state.size() > 0) {
       TORCH_WARN(
           "Loading Tensor with Python Attribute will be silently ignored");
     }
-    stack_.emplace_back(tup);
+    // This calls the function to rebuild the
+    // base tensor.
+    // Eg. `rebuildTensor`, `rebuildSpareTensor`.
+    stack_.emplace_back(base_tensor_args);
     globals_[curr_globals_idx + 1]();
-    auto result = pop(stack_);
-    stack_.emplace_back(std::move(result));
+    stack_.emplace_back(pop(stack_));
   });
 }
 
