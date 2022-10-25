@@ -42,6 +42,7 @@ nvprim_names = [
     "atanh",
     "cos",
     "cosh",
+    "clone",
     "bitwise_not",
     "ceil",
     "erf",
@@ -262,6 +263,15 @@ def _view_of_nvfuser(fd, a):
     return fd.ops.set(a)
 
 
+def _view_nvfuser(
+    fd,
+    a,
+    a_shape,
+    new_shape,
+):
+    return fd.ops.view(a, a_shape, new_shape)
+
+
 def _sum_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -322,12 +332,18 @@ def _amin_nvfuser(
     return fd.ops.min(a, dims, keep_dims)
 
 
+def _clone_nvfuser(fd: Any, input: TensorLikeType, *, memory_format=None):
+    return fd.ops.set(input)
+
+
 _nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
+_nvfuser_impls["clone"] = _clone_nvfuser
 _nvfuser_impls["transpose"] = _transpose_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["view_of"] = _view_of_nvfuser
+_nvfuser_impls["view"] = _view_nvfuser
 _nvfuser_impls["rand_like"] = _rand_like_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
@@ -522,9 +538,43 @@ def register_var_mean():
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
+def register_view():
+    """This function is used to register the view function in torch.ops.view module."""
+    # View is implemented as a decomposition into prims.split_dim,
+    # prims.collapse_dim, and prims.reshape, but we would like to intercept
+    # non-decomposed view for now
+    name = "view"
+
+    nvprim.define("view(Tensor inp, SymInt[] original_shape, SymInt[] shape) -> Tensor")
+    nvprim.define("view.shape(Tensor inp, SymInt[] shape) -> Tensor")
+
+    # This function is used under _AutoDispatchBelowAutograd context
+    def _prim_impl(a, original_shape, new_shape):
+        return a.reshape(new_shape)
+
+    nvprim_impl.impl(name, _prim_impl)
+
+    prim_packet = torch.ops.nvprims.view
+    prim = prim_packet.default
+
+    def _view_no_original_shape_overload_impl(a, shape):
+        if list(a.shape) == list(shape):
+            return torch.ops.nvprims.view_of(a)
+        return torch.ops.nvprims.view.default(a, a.shape, shape)
+
+    nvprim_implicit_impl.impl("view.shape", _view_no_original_shape_overload_impl)
+    nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
+
+    for p in (prim_packet, prim):
+        p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
+        p.impl_nvfuser = _nvfuser_impls["view"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
+
+
 def register_nvprims():
     """Registers all nvFuser primitives in the torch.ops.nvprims module."""
     register_var_mean()
+    register_view()
     register_native_batch_norm()
     register_rand_like()
 
