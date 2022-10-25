@@ -9,7 +9,6 @@ import unittest
 from unittest.mock import patch
 
 import torch
-
 import torch._dynamo
 from torch._dynamo.debug_utils import TEST_REPLACEABLE_COMMENT
 import torch._dynamo.test_case
@@ -78,19 +77,39 @@ def test_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
 
 
 class MinfierTests(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._exit_stack.enter_context(
+            unittest.mock.patch.object(
+                torch._dynamo.config,
+                "debug_dir_root",
+                "/tmp/_torchdynamo_debug_/",
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(torch._dynamo.config.debug_dir_root, ignore_errors=True)
+        cls._exit_stack.close()
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.utils.debug_dir.setup()
+
+    def tearDown(self):
+        torch._dynamo.utils.debug_dir.clear()
+        super().tearDown()
+
     # Triggers minifier, runs the generated script, and returns
     # the original error, the repro'd error,
     # the minifier launcher code, and the repro code.
     def _run_repro(self, fn, fn_args, fn_kwargs, repro_after, backend_code):
-        repro_dir = "/tmp/test_minifier"
-
-        launch_file = os.path.join(repro_dir, "minifier_launcher.py")
-        repro_file = os.path.join(repro_dir, "repro.py")
-        shutil.rmtree(repro_dir, ignore_errors=True)
+        launch_file = torch._dynamo.debug_utils.get_minifier_repro_path()
+        repro_file = os.path.join(torch._dynamo.debug_utils.minifier_dir(), "repro.py")
 
         @patch.object(torch._dynamo.config, "repro_after", repro_after)
         @patch.object(torch._dynamo.config, "repro_level", 2)
-        @patch.object(torch._dynamo.config, "repro_dir", repro_dir)
         def wrapped_fn():
             exn_tb = None
             try:
@@ -237,6 +256,7 @@ class MinfierTests(torch._dynamo.test_case.TestCase):
     def _test_around_aot(self, error_at_aot):
         mod = MockModule()
         opt_mod = torch._dynamo.optimize("inductor")(mod)
+
         def inner():
             x = torch.randn(4)
             x.requires_grad = error_at_aot

@@ -9,19 +9,20 @@ import textwrap
 import uuid
 from collections import Counter
 from importlib import import_module
+from tempfile import TemporaryFile
 
 import torch
 import torch.fx as fx
 
 from . import config
 from .optimizations.backends import register_backend
-from .utils import clone_inputs
+from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
 
 
 def minifier_dir():
-    path = config.repro_dir
+    path = os.path.join(get_debug_dir(), "minifier")
     if path is None:
         path = f"/tmp/minifier_{getpass.getuser()}"
     if not os.path.exists(path):
@@ -222,6 +223,8 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    if "inductor" in compiler_name:
+        fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
@@ -273,16 +276,20 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         )
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
+    stdout, stderr = TemporaryFile(), TemporaryFile()
     p = subprocess.Popen(
         ["python", file_name],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout,
+        stderr=stderr,
         env=new_env,
     )
-    out, err = p.communicate()
+    p.wait()
+
     if p.returncode != 0:
-        print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
-        print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
+        stdout.seek(0)
+        stderr.seek(0)
+        print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
+        print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
         return True
     return False
 
@@ -329,13 +336,17 @@ def nvfuser_fails(fx_g, args, check_str=None):
 
 
 def inductor_accuracy_fails(fx_g, args, check_str=None):
-    from torchinductor.compile_fx import compile_fx_inner
+    from torch._inductor.compile_fx import compile_fx_inner
 
     return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
 
+def get_minifier_repro_path():
+    return os.path.join(minifier_dir(), "minifier_launcher.py")
+
+
 def helper_for_dump_minify(contents):
-    minified_repro_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+    minified_repro_path = get_minifier_repro_path()
     log.warning(f"Writing minified repro to {minified_repro_path}")
     try:
         with open(minified_repro_path, "w") as fd:
@@ -343,15 +354,6 @@ def helper_for_dump_minify(contents):
     except OSError as e:
         log.exception(e)
         raise NotImplementedError("Could not write to {minified_repro_path}")
-
-    local_path = os.path.join(config.base_dir, "minifier_launcher.py")
-    try:
-        shutil.copyfile(minified_repro_path, local_path)
-        log.warning(
-            f"Copying minified repro from {minified_repro_path} to {local_path} for convenience"
-        )
-    except OSError:
-        log.warning(f"Don't have write permissions for {local_path}")
 
 
 def dump_to_minify(gm, args, compiler_name: str):
@@ -813,8 +815,6 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
         assert config.repro_after in ("dynamo", "aot", None)
         model_str = NNModuleToString.convert(gm)
         if config.repro_after == "dynamo":
-            # Ensure that we fail when backend fails
-            config.raise_on_backend_error = True
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
 
@@ -852,7 +852,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError("Issue deteced. Repro at minifier_launcher.py.")
+                    raise ValueError(
+                        f"Issue detected. Repro at {get_minifier_repro_path()}."
+                    )
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -903,10 +905,10 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from torchdynamo.optimizations.backends import BACKENDS
+    from torch._dynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
-        from torchinductor.compile_fx import compile_fx
+        from torch._inductor.compile_fx import compile_fx
 
         compiler_fn = compile_fx
     else:

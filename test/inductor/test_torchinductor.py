@@ -6,6 +6,7 @@ import importlib
 import os
 import random
 import sys
+import typing
 import unittest
 import weakref
 from unittest.mock import patch
@@ -167,7 +168,6 @@ def compute_grads(args, kwrags, results, grads):
 
 
 @patch.object(torch._inductor.config.triton, "cudagraphs", False)
-@patch("torch._dynamo.config.raise_on_backend_error", True)
 def check_model(
     self: TestCase,
     model,
@@ -759,6 +759,11 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
 
     def test_expanded_reduction(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "https://github.com/pytorch/torchdynamo/issues/1697"
+            )
+
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
@@ -1925,6 +1930,92 @@ class CommonTemplate:
         self.common(m, (torch.randn([16, 32]),), check_lowp=False)
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_transpose_add(self):
+        def fn(a, b):
+            return a.t() + b
+
+        self.common(
+            fn, (torch.randn([16, 32]), torch.randn([32, 16])), check_lowp=False
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_softmax_one_kernel(self):
+        def fn(x):
+            dim = 1
+            x_max = torch.amax(x, dim, keepdim=True)
+            unnormalized = torch.exp(x * x_max)
+            result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+            return result
+
+        self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_cauchy(self):
+        def fn(x, y):
+            return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
+
+        self.common(
+            fn,
+            (
+                torch.randn(32),
+                torch.randn(32),
+            ),
+            # Absolute difference: 0.0003662109375 (up to 0.0001 allowed)
+            # Relative difference: 1.8804297408767818e-05 (up to 1e-05 allowed)
+            atol=5 * 1e-4,
+            rtol=5 * 1e-5,
+            check_lowp=False,
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_gather_scatter(self):
+        def fn(node_feat, edge_index):
+            src_node_feat = node_feat[edge_index[0]]
+            dst_node_feat = node_feat[edge_index[1]]
+            edge_feat = src_node_feat - dst_node_feat + 1
+            new_node_feat = torch.zeros_like(node_feat)
+            new_node_feat.scatter_add_(
+                0, edge_index[1].unsqueeze(-1).expand_as(edge_feat), edge_feat
+            )
+            return new_node_feat
+
+        num_nodes = 16
+        num_features = 32
+        node_feat = torch.randn(num_nodes, num_features)
+        edge_index = torch.randint(0, num_nodes, size=(2, num_nodes * 5))
+        self.common(
+            fn,
+            (
+                node_feat,
+                edge_index,
+            ),
+            check_lowp=False,
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @patch.object(torch._inductor.config, "max_fusion_size", 1)
+    def test_no_mega_fusion_during_lowering(self):
+        n = 50
+
+        def fn(*args):
+            x = args[0]
+            for i in range(n):
+                x = torch.add(x, args[i])
+            return x
+
+        self.common(
+            fn,
+            [torch.randn(64) for _ in range(n)],
+            check_lowp=False,
+        )
+        print("-->", torch._inductor.metrics.generated_kernel_count)
+        if self.device != "cpu":
+            self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
 
     def test_move_arange(self):
         def fn(x):
@@ -3146,6 +3237,9 @@ class CommonTemplate:
         )
 
     def test_scatter2(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("unstable on sm86")
+
         def fn(a, dim, index, b):
             return aten.scatter.reduce(a, dim, index, b, reduce="add")
 
@@ -3260,6 +3354,11 @@ class CommonTemplate:
 
     # issue #1150
     def test_dense_mask_index(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest(
+                "https://github.com/pytorch/torchdynamo/issues/1697"
+            )
+
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
@@ -3413,6 +3512,31 @@ class CommonTemplate:
             [1, 1],
             [2, 2],
             0,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
+    # From https://github.com/pytorch/torchdynamo/issues/1352
+    def test_max_pool2d_with_indices_backward4(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [5, 5], [1, 1], [2, 2], [1, 1], False, c
+            )
+
+        x = torch.randn([2, 64, 3, 4])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [5, 5],
+            [1, 1],
+            2,
             1,
             False,
         )
@@ -3801,27 +3925,7 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
-    @unittest.skip("https://github.com/pytorch/torchdynamo/issues/1297")
-    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
-    def test_symbolic(self):
-        def f(x):
-            x = x.cos()
-            x = x.view(x.shape[0] * 2, -1)
-            return (x,)
-
-        traced = make_fx(f, tracing_mode="symbolic")(
-            torch.randn(8, 4, device=self.device)
-        )
-        compiled = compile_fx_inner(traced, [torch.randn(8, 4, device=self.device)])
-
-        out = compiled([torch.randn(8, 4, device=self.device)])
-        self.assertEqual(out[0].shape, (16, 2))
-
-        out = compiled([torch.randn(12, 4, device=self.device)])
-        self.assertEqual(out[0].shape, (24, 2))
-
     @requires_cuda()
-    @patch.object(config.triton, "cudagraphs", False)
     def test_unspec_inputs(self):
         def fn(x, y):
             return x + y, x * y, x / y
@@ -3837,16 +3941,15 @@ class CommonTemplate:
         self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @requires_cuda()
-    @patch.object(config.triton, "cudagraphs", True)
-    def test_unspec_inputs_cudagraphs(self):
+    def test_unspec_inputs_fp16(self):
         def fn(x, y):
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
 
         inputs = (
-            rand_strided((2, 3), (3, 1), device="cuda"),
-            rand_strided((), (), device="cpu"),
+            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
+            rand_strided((), (), dtype=torch.float16, device="cpu"),
         )
         self.assertTrue(same(opt(*inputs), fn(*inputs)))
         inputs = (inputs[1], inputs[0])
@@ -4059,6 +4162,29 @@ if HAS_CUDA:
                 torch.ones(shape, dtype=dtype, device="cuda") for (shape, dtype) in inps
             ]
             mod = make_fx(forward)(*inps)
+            compiled = compile_fx_inner(mod, inps)
+            compiled(inps)
+
+        # https://github.com/pytorch/torchdynamo/issues/1681#issuecomment-1283433527
+        @requires_cuda()
+        def test_unspec_inputs_interop(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, x, y):
+                    unsqueeze = torch.ops.aten.unsqueeze.default(x, 4)
+                    permute = torch.ops.aten.permute.default(unsqueeze, [0, 1, 2, 4, 3])
+                    add = torch.ops.aten.add.Tensor(y, 1)
+                    return [permute, add]
+
+            inps = [
+                rand_strided(
+                    (12, 3, 512, 64), (64, 196608, 768, 1), torch.float32, "cuda"
+                ),
+                rand_strided((), (), torch.int64, "cpu"),
+            ]
+            mod = make_fx(Repro().to(device="cuda"))(*inps)
             compiled = compile_fx_inner(mod, inps)
             compiled(inps)
 
@@ -4276,6 +4402,87 @@ if HAS_CUDA:
             ]
             result = forward(*args)
             assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
+
+    class TritonCodeGenTests(TestCase):
+        from torch._inductor.triton_ops.autotune import CachingAutotuner
+
+        class NoOpCompilerBackend:
+            def __init__(self):
+                self.example_args = None
+                self.model = None
+
+            def noop_backend(
+                self,
+                model_: torch.fx.GraphModule,
+                example_inputs_: typing.List[torch.Tensor],
+            ):
+                """
+                The Noop backend does not compile the fx graph it is given.
+                Instead, it transforms the fx graph so that its functions are
+                aten operations. It then saves this graph.
+                """
+                from functorch._src.aot_autograd import Interpreter
+                from torch._inductor.decomposition import select_decomp_table
+                from torch._subclasses import FakeTensorMode
+
+                fake_mode = FakeTensorMode()
+
+                def interpret(*args, **kwargs):
+                    return Interpreter(model_).run(*args[0:], **kwargs)
+
+                fake_flat_tensor_args = [
+                    fake_mode.from_tensor(x) for x in example_inputs_
+                ]
+                fw_module = make_fx(interpret, select_decomp_table())(
+                    *fake_flat_tensor_args
+                )
+                self.model = fw_module
+                self.example_args = fake_flat_tensor_args
+                return lambda x: example_inputs_
+
+        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
+            from torch._inductor.debug import DebugContext
+            from torch._inductor.graph import GraphLowering
+            from torch._inductor.virtualized import V
+
+            cxt = TritonCodeGenTests.NoOpCompilerBackend()
+            torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
+            graph = GraphLowering(cxt.model)
+            graph.num_static_inputs = 0
+            kernels = []
+            with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
+                graph.run(*(cxt.example_args))
+                mod = graph.compile_to_module()
+                i = 0
+                while True:
+                    attribute = f"kernel{i}"
+                    if not hasattr(mod, attribute):
+                        break
+                    else:
+                        kernels.append(getattr(mod, attribute))
+                        i = i + 1
+            return kernels
+
+        def test_divisibile_by_16_covers_numel_args(self):
+            def fn(a: torch.Tensor) -> torch.Tensor:
+                return torch.sum(a)
+
+            kernels = self.get_kernels(fn, [torch.randn([256, 256], device="cuda")])
+            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+
+            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+            # at slot 3 should be in the divisible by 16 descriptor
+            arguments_that_are_divisible_by_16_in_kernel0 = (
+                kernels[0].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+
+            # kernel1 reduces from 8 elements to a single scalar.
+            arguments_that_are_divisible_by_16_in_kernel1 = (
+                kernels[1].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
 
 
 if __name__ == "__main__":

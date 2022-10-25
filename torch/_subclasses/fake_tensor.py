@@ -747,7 +747,7 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        from torch._decomp import _disabled_meta_decomps, decomposition_table
+        from torch._decomp import decomposition_table
 
         with self:
             # Decomposes CompositeImplicitAutograd ops
@@ -760,9 +760,7 @@ class FakeTensorMode(TorchDispatchMode):
             has_symbolic_sizes
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
-            # TODO: Find better approach for this
-            # Avoid circular import
-            from torch._meta_registrations import meta_table
+            from torch._decomp import meta_table as meta_table
 
             with no_dispatch():
                 if func == aten.size.default:
@@ -783,7 +781,6 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func in decomposition_table
             and torch_decomp_decompositions(func)
-            and func not in _disabled_meta_decomps
             and all(not e.is_sparse for e in flat_arg_fake_tensors)
         ):
             with self:
