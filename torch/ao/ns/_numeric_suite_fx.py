@@ -787,14 +787,6 @@ def prepare_n_shadows_model(
     This is useful for testing different quantization of multiple layers in
     a single pass through the model.
 
-    The network will be traversed in node order, each node with at least one
-    valid qconfig will get an index (m). Each qconfig for the node will also get an index (n)
-    based on the order it was inserted (ignoring duplicates and None's). While the original nodes are left as fp32 ops, the additional
-    subgraph for the m-th node with the n-th qconfig is named 'shadow_warpper_m_n', which will hold both
-    'mod_n' (which is a copy of the fp32 node with the n-th qconfig applied) and 'shadow_m_n' (the OutputComparisonLogger
-    for this node-qconfig combination). A node shadow_m_0 will also be created which is the OutputLogger for the
-    fp32 node.
-
     High level TODOs for future PRs:
     1. add deduplication for qconfigs per subgraph
     2. figure out a better way to name the output structure

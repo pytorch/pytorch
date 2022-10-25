@@ -2435,6 +2435,36 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         self.checkQuantizedLinear(msq.shadow_wrapper_1_1.mod_0)
         self.assertRaisesRegex(AttributeError, ".*", lambda: msq.shadow_wrapper_1_2)
 
+    def test_qconfig_multi_mapping_ordering(self):
+        # test that the module ordering ignores None
+
+        m = TwoLayerLinearModel().eval()
+        example_input = m.get_example_inputs()
+        qconfig_multi_mapping = (
+            QConfigMultiMapping()
+            .set_global(
+                [
+                    torch.ao.quantization.default_qconfig,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                ]
+            )
+            .set_module_name("fc2",
+                    [
+                        None,
+                        torch.ao.quantization.default_dynamic_qconfig,
+                        torch.ao.quantization.default_qat_qconfig_v2
+                    ])
+        )
+        self.assertEqual(
+            len(qconfig_multi_mapping.qconfig_mappings_list),2
+        )
+        msq = self._test_impl(m, example_input, qconfig_multi_mapping)
+
+        self.checkQuantizedLinear(msq.shadow_wrapper_0_1.mod_0)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_0_2.mod_0, torch.qint8)
+        self.checkDynamicQuantizedLinear(msq.shadow_wrapper_1_1.mod_0, torch.qint8)
+        self.checkQuantizedLinear(msq.shadow_wrapper_1_2.mod_0)
+
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
     Tests numeric suite core APIs on non-toy models.
