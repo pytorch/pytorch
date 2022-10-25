@@ -11393,7 +11393,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M_ToDeviceDtype(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipScriptTest()
     def test_fill(self):
         class FillModule(torch.nn.Module):
             def forward(self, x, filled_value: int):
@@ -11402,6 +11401,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn((4, 5, 6))
         filled_value = 7
         self.run_test(FillModule(), (x, filled_value))
+
+        class FillFloatModule(torch.nn.Module):
+            def forward(self, x, filled_value: float):
+                return x.fill_(filled_value)
+
+        x = torch.randn((4, 5, 6))
+        filled_value = 7.5
+        self.run_test(FillFloatModule(), (x, filled_value))
 
         class FillScalarModule(torch.nn.Module):
             def forward(self, x):
@@ -11824,6 +11831,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         bias = torch.arange(33).to(torch.float) - 16
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv1d_relu(self):
+        model = torch.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(33, 16, 3), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 32)
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 

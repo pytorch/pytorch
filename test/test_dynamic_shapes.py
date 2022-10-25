@@ -4,7 +4,8 @@
 from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, \
+    IS_WINDOWS, parametrize, instantiate_parametrized_tests
 import unittest
 import torch
 import operator
@@ -334,8 +335,7 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         self.assertEqual(a0.guard_int(), 2)
-        self.assertEqual(str(shape_env.guards[0][0]), "s0")
-        self.assertEqual(shape_env.guards[0][1], 2)
+        self.assertEqual(str(shape_env.guards[0][0]), "Eq(s0, 2)")
 
     @skipIfNoSympy
     def test_int_conversion(self):
@@ -430,6 +430,7 @@ class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
         seed_symfloat = (create_symint(shape_env, 1) / 1.).get_pyobj()
+
         def get_sym_inp(inp):
             if isinstance(inp, int):
                 return create_symint(shape_env, inp)
@@ -469,6 +470,7 @@ class TestSymNumberMagicMethods(TestCase):
             tp = "float" if isinstance(inp1, float) else "int"
         else:
             tp = "float" if any(isinstance(i, float) for i in [inp1, inp2]) else "int"
+
         def guard_fn(v):
             try:
                 return getattr(v, f"guard_{tp}")()

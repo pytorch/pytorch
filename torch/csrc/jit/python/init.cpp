@@ -1892,7 +1892,8 @@ void initJITBindings(PyObject* module) {
           .def(
               "__neg__",
               [](c10::SymIntNode a) -> c10::SymIntNode { return a->neg(); })
-          // We must define `__bool__` on the subclass as the default is `return True`
+          // We must define `__bool__` on the subclass as the default is `return
+          // True`
           .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
           .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
           // Intentionally don't set file line, as the Python backtrace matters
@@ -2139,7 +2140,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "__neg__",
           [](c10::SymFloatNode a) -> c10::SymFloatNode { return a->neg(); })
-      // We must define `__bool__` on the subclass as the default is `return True`
+      // We must define `__bool__` on the subclass as the default is `return
+      // True`
       .def("__bool__", [](c10::SymFloatNode a) { return a->bool_(); })
       .def("__str__", [](c10::SymFloatNode a) { return a->str(); })
       .def("guard_float", [](c10::SymFloatNode a) {
