@@ -89,13 +89,14 @@
 #include <ATen/ops/detach_copy_native.h>
 #include <ATen/ops/detach_native.h>
 #include <ATen/ops/diag.h>
-#include <ATen/ops/diag_backward_native.h>
+#include <ATen/ops/diag_embed.h>
 #include <ATen/ops/diag_embed_native.h>
 #include <ATen/ops/diag_native.h>
 #include <ATen/ops/diagflat_native.h>
 #include <ATen/ops/diagonal.h>
 #include <ATen/ops/diagonal_backward.h>
 #include <ATen/ops/diagonal_backward_native.h>
+#include <ATen/ops/diagonal_copy.h>
 #include <ATen/ops/diagonal_copy_native.h>
 #include <ATen/ops/diagonal_native.h>
 #include <ATen/ops/diagonal_scatter_native.h>
