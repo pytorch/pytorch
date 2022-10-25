@@ -126,6 +126,8 @@ class _TensorMetadata:
     id: Optional[int]
 
     @property
+    def allocation_id(self) -> Optional[int]: ...
+    @property
     def layout(self) -> layout: ...
     @property
     def device(self) -> device: ...
@@ -150,6 +152,8 @@ class _ExtraFields_Allocation:
     total_allocated: int
     total_reserved: int
 
+    @property
+    def allocation_id(self) -> Optional[int]: ...
     @property
     def device(self) -> device: ...
 
