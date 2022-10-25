@@ -344,6 +344,24 @@ class TorchVariable(VariableTracker):
                 example_value=example_value,
                 **options,
             )
+        elif (
+            self.value == torch.numel
+            and len(args) == 1
+            and isinstance(args[0], TensorVariable)
+            and len(kwargs) == 0
+        ):
+            # TODO(voz): This is rewritten as a call_method because
+            # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "numel",
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                **options,
+            )
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.

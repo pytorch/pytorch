@@ -417,7 +417,7 @@ def _compile(
 
         assert output.guards is not None
         CleanupManager.instance[out_code] = output.cleanups
-        check_fn = CheckFunctionManager(output.guards, locals, globals)
+        check_fn = CheckFunctionManager(output, output.guards, locals, globals)
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
         guard_str = "GUARDS:\n"
