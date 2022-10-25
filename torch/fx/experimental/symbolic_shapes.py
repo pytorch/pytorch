@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast
 import operator
 import builtins
 import math
