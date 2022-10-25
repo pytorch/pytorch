@@ -735,8 +735,18 @@ inline bool can_use_expanded_index_path(const Tensor& self, int64_t dim, const T
   constexpr int64_t threshold = 16;
   if (index.numel() / index.size(0) < threshold) { return false; }
 
+  // usually the expanded index has stride on the first dimension to be 1,
+  // and strides on other dims to be 0 or 1, e.g.
+  //   shape [108365, 16]; strides [1, 0]
+  //   shape [13264, 1, 7]; strides [1, 1, 0]
+  auto index_strides = index.strides().vec();
+  bool is_index_expanded = index_strides[0] == 1;
+  for (const auto dim : c10::irange(1, index_strides.size())) {
+    if (index_strides[dim] > 1) { is_index_expanded = false; }
+  }
+
   // index is expanded
-  return dim == 0 && index.stride(0) == 1 && src.is_contiguous() && self.is_contiguous();
+  return dim == 0 && is_index_expanded && src.is_contiguous() && self.is_contiguous();
 }
 
 void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
