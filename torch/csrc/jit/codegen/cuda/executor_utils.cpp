@@ -2,7 +2,6 @@
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/irange.h>
 
 #include <torch/csrc/jit/codegen/cuda/contiguity.h>
@@ -936,7 +935,7 @@ void initializeCudaContext() {
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
-        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+        *(c10::cuda::getFreeMutex()));
     cudaFree(nullptr);
   }
 }

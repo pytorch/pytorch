@@ -16,6 +16,7 @@ import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
+from .cuda_properties import get_device_capability
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
@@ -35,7 +36,7 @@ def has_triton():
     try:
         import triton
 
-        return triton is not None
+        return triton is not None and get_device_capability() >= (7, 0)
     except ImportError:
         return False
 
@@ -197,6 +198,10 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
+def sympy_symbol(name):
+    return sympy.Symbol(name, integer=True, positive=True)
+
+
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
     """
     xreplace is faster than subs, but is way more picky
@@ -204,7 +209,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
 
     def promote_strings(key):
         if isinstance(key, str):
-            return sympy.Symbol(key)
+            return sympy_symbol(key)
         return key
 
     return expr.xreplace(

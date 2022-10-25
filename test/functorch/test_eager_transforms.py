@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE,
+    IS_FBCODE, freeze_rng_state,
 )
 import torch
 import torch.nn as nn
@@ -302,6 +302,19 @@ class TestGradTransform(TestCase):
         something = escaped[0].sum()
         self.assertEqual(torch._C._functorch.dlevel(something), 0)
         self.assertEqual(something, x.sin().sum())
+
+    def test_manual_seed_inside_grad(self, device):
+        x = torch.randn([], device=device)
+
+        def f(x):
+            torch.manual_seed(0)
+            return x * torch.randn_like(x)
+
+        with freeze_rng_state():
+            result = grad(f)(x)
+            x.requires_grad_()
+            expected, = torch.autograd.grad(f(x), x)
+            self.assertEqual(result, expected)
 
     def test_vjp(self, device):
         x = torch.randn([], device=device)

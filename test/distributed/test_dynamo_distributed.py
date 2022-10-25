@@ -3,14 +3,14 @@ import os
 import unittest
 from unittest.mock import patch
 
-import pytest
 import torch
-
 import torch._dynamo
+import torch._dynamo.test_case
 import torch.distributed as dist
 from torch import nn
 from torch._dynamo import config
-from torch._dynamo.testing import same
+from torch._dynamo.utils import same
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 class ToyModel(nn.Module):
@@ -18,8 +18,8 @@ class ToyModel(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
-            + [nn.Linear(5000, 5000), nn.ReLU()] * num_hidden
-            + [nn.Linear(5000, 5), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()] * num_hidden
+            + [nn.Linear(hidden_feat, 5), nn.ReLU()]
         )
 
     def forward(self, inputs):
@@ -35,15 +35,7 @@ class CheckSplitsCompiler:
         return gm
 
 
-def skip_if_no_active_ddp():
-    from torch.nn.parallel import DistributedDataParallel as DDP
-
-    if not hasattr(DDP, "_get_active_ddp_module"):
-        raise unittest.SkipTest("requires pytorch landing in parallel")
-
-
-@pytest.mark.skip("Module hangs in PyTorch CI")
-class TestDistributed(torch._dynamo.testing.TestCase):
+class TestDistributed(torch._dynamo.test_case.TestCase):
     """
     Test harness initializes dist process group
     """
@@ -97,8 +89,10 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    # can't run with gloo (no support for _allgather_base) and nccl not available in CI
-    @pytest.mark.xfail
+    # TODO(whc) move these tests to 'distributed' shard to get nccl, or see if it's available already in pytorch CI?
+    @unittest.skip(
+        "can't run with gloo (no support for _allgather_base) and nccl not available in CI"
+    )
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_aot_eager(self):
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -109,8 +103,7 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    # hangs/crashes with inductor currently
-    @pytest.mark.skip
+    @unittest.skip("hangs/crashes with inductor currently")
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_inductor(self):
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -129,9 +122,6 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         the user-provided compiler is called by the DDPOptimizer which is
         doing the graph splitting
         """
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
-        skip_if_no_active_ddp()
 
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
@@ -147,16 +137,13 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
     # hangs/crashes with inductor currently
-    @pytest.mark.skip
+    @unittest.skip("hangs/crashes with inductor currently")
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
         """
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
-        skip_if_no_active_ddp()
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
@@ -173,10 +160,10 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         Ensures the DDPOptimizer returns a correct, compiled module without
         introducing graph splits. (Based on model parmeters fitting in the bucket)
         """
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
-        skip_if_no_active_ddp()
-        m, inputs, correct_outputs = self.get_model()
+        # DDP will always do a 'first bucket' with a really small size;  so only a tiny model will escape this
+        m = ToyModel(hidden_feat=5).to(self.device)
+        inputs = torch.randn(20, 10).to(self.device)
+        correct_outputs = m(inputs)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=250)
 
         check_splits_compiler = CheckSplitsCompiler()
@@ -195,9 +182,6 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         Explicitly check AotAutograd family of compilers work,
         since they require example inputs propagated between graph splits.
         """
-        from torch.nn.parallel import DistributedDataParallel as DDP
-
-        skip_if_no_active_ddp()
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
@@ -208,6 +192,60 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         opt_outputs = opt_fn(inputs)
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_custom_layer(self):
+        """
+        Just ensures that the appropriate number of splits happen (based on
+        bucket size and model parameters) - verifies the number of times
+        the user-provided compiler is called by the DDPOptimizer which is
+        doing the graph splitting
+        """
+
+        class MyCustomLinear(torch.nn.Module):
+            def __init__(self):
+                super(MyCustomLinear, self).__init__()
+                self.weight = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x):
+                return torch.mm(x, self.weight.t())
+
+        class MyLinear(torch.nn.Module):
+            def __init__(self):
+                super(MyLinear, self).__init__()
+                self.linear = torch.nn.Linear(512, 512)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                mods = [
+                    (MyLinear(), torch.nn.ReLU()),
+                    # sandwitch the custom in the middle so it comes before and after
+                    (MyCustomLinear(), torch.nn.ReLU()),
+                    (MyLinear(), torch.nn.ReLU()),
+                ]
+                self.seq = torch.nn.Sequential(*[x for items in mods for x in items])
+
+            def forward(self, x):
+                return self.seq(x)
+
+        m = MyModule().to(self.device)
+        inputs = torch.randn((512, 512)).to(self.device)
+        correct_outputs = m(inputs)
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=1)
+
+        check_splits_compiler = CheckSplitsCompiler()
+
+        @torch._dynamo.optimize(check_splits_compiler.compile_fn)
+        def opt_fn(inputs):
+            return ddp_m(inputs)
+
+        opt_outputs = opt_fn(inputs)
+        self.assertTrue(same(correct_outputs, opt_outputs))
+        self.assertEqual(check_splits_compiler.compiler_called, 3)
 
     def test_empty_graph(self):
         def fn():
@@ -223,7 +261,7 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         self.assertEqual(res, 1)
 
 
-# TODO(jansel): debug issues running this in CI
-# if __name__ == "__main__":
-#     from torch._dynamo.testing import run_tests
-#     run_tests()
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
