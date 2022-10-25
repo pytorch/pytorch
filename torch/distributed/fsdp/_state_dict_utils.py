@@ -25,9 +25,6 @@ from ._fsdp_extensions import _extensions as _user_extensions
 from .flat_param import (
     FlatParamHandle,
 )
-from .flatten_params_wrapper import (
-    FLAT_PARAM,
-)
 
 
 def _full_post_state_dict_hook(
@@ -58,7 +55,7 @@ def _full_post_state_dict_hook(
     if (
         (
             not module._use_orig_params
-            and FLAT_PARAM in module._parameters
+            and FSDP.FLAT_PARAM in module._parameters
         )
         or (
             module._use_orig_params
@@ -183,7 +180,7 @@ def _local_post_state_dict_hook(
     )  # type: ignore[assignment]
     if module._state_dict_config.offload_to_cpu:
         sharded_tensor = sharded_tensor.cpu()
-    state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
+    state_dict[f"{prefix}{FSDP.FLAT_PARAM}"] = sharded_tensor
     return state_dict
 
 
@@ -200,7 +197,7 @@ def _local_pre_load_state_dict_hook(
     the ShardedTensor to a tensor. No copy happen unless padding is required.
     """
     _replace_by_prefix(state_dict, prefix, f"{prefix}{FSDP.FSDP_PREFIX}")
-    fqn = f"{prefix}{FSDP.FSDP_PREFIX}{FLAT_PARAM}"
+    fqn = f"{prefix}{FSDP.FSDP_PREFIX}{FSDP.FLAT_PARAM}"
     if fqn not in state_dict:
         assert not module._has_params, (
             "No `FlatParameter` in `state_dict` for this FSDP instance "
@@ -264,7 +261,7 @@ def _sharded_post_state_dict_hook(
     # For `use_orig_params=True`, the `FlatParameter` is not registered, so
     # there is no entry in the state dict for it to pop.
     if not module._use_orig_params:
-        state_dict.pop(f"{prefix}{FLAT_PARAM}")
+        state_dict.pop(f"{prefix}{FSDP.FLAT_PARAM}")
     return state_dict
 
 
@@ -350,7 +347,7 @@ def _sharded_pre_load_state_dict_hook(
         f"The loaded local chunk has different padding({num_to_pad}) "
         f"from the local chunk {flat_param._shard_numel_padded}."
     )
-    state_dict[f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"] = loaded_flat_tensor
+    state_dict[f"{prefix}{FSDP.FSDP_PREFIX}{FSDP.FLAT_PARAM}"] = loaded_flat_tensor
     if module._use_orig_params:
         module._deregister_orig_params()
 
