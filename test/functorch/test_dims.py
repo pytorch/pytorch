@@ -74,6 +74,7 @@ def gpu_time(lmb, name, r=100):
 class TestMin(TestCase):
 
     def setUp(self):
+        super().setUp()
         gc.disable()
         gc.collect()
         self.interesting = set()
