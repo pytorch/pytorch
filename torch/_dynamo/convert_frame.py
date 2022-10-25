@@ -231,7 +231,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
  line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
 
-        if hasattr(exc, "real_stack"):
+        if hasattr(exc, "real_stack") and len(exc.real_stack) > 0:
             msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
 
         msg += replay_record_msg()
@@ -439,7 +439,7 @@ def _compile(
         raise
     except Exception as e:
         exception_handler(e, code, frame)
-        raise InternalTorchDynamoError()
+        raise InternalTorchDynamoError() from e
 
 
 def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
@@ -452,13 +452,11 @@ def convert_frame(compiler_fn: typing.Callable, guard_export_fn=None):
             result = inner_convert(frame, cache_size)
             counters["frames"]["ok"] += 1
             return result
-        except AssertionError:
-            if config.raise_on_assertion_error:
-                raise
-        except BackendCompilerFailed:
-            raise
-        except Exception:
+        except (NotImplementedError, Unsupported):
             pass
+        except Exception:
+            if not config.suppress_errors:
+                raise
         return None
 
     _convert_frame._torchdynamo_orig_callable = compiler_fn
