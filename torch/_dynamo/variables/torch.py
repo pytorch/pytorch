@@ -344,7 +344,12 @@ class TorchVariable(VariableTracker):
                 example_value=example_value,
                 **options,
             )
-        elif self.value == torch.numel and len(args) == 1 and isinstance(args[0], TensorVariable) and len(kwargs) == 0:
+        elif (
+            self.value == torch.numel
+            and len(args) == 1
+            and isinstance(args[0], TensorVariable)
+            and len(kwargs) == 0
+        ):
             # TODO(voz): This is rewritten as a call_method because
             # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
             return TensorVariable.create(

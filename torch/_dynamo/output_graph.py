@@ -8,8 +8,6 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
-import functorch._src.config as functorch_config
-
 import torch.nn
 from torch import fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -109,7 +107,6 @@ class OutputGraph(fx.Tracer):
         self.unspec_variable_map = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref = {}
-
 
     @property
     def output(self):
