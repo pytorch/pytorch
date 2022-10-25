@@ -1342,7 +1342,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::IntArrayRef output_padding_,
          int64_t groups_,
          c10::optional<std::vector<int64_t>> bias_sizes_opt) {
-        c10::OptionalArrayRef<long int> ref = c10::nullopt;
+        c10::OptionalArrayRef<int64_t> ref = c10::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
         }
