@@ -97,10 +97,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  export BUILD_SPLIT_CUDA=ON
-fi
-
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
@@ -275,6 +271,19 @@ test_inductor_huggingface_shard() {
     --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+}
+
+test_inductor_timm_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  TEST_REPORTS_DIR=/tmp/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 8 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
 
 test_python_gloo_with_tls() {
@@ -708,6 +717,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
+  install_filelock
+  install_triton
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -741,16 +752,12 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SH
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -759,9 +766,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -779,9 +784,7 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  if ! [[ "${BUILD_ENVIRONMENT}" == *sm86 ]]; then
-    install_triton
-  fi
+  install_triton
   install_monkeytype
   test_python
   test_aten
