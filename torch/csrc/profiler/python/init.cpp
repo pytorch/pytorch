@@ -132,6 +132,7 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly("impl_ptr", &TensorMetadata::impl)
       .def_readonly("storage_data_ptr", &TensorMetadata::data_)
       .def_readonly("id", &TensorMetadata::id_)
+      .def_readonly("allocation_id", &TensorMetadata::allocation_id_)
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
