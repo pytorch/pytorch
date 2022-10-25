@@ -276,7 +276,8 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
                     kernel_sizeH, kernel_sizeW);
 
   auto returnGradInput = at::max_pool2d_with_indices_backward(gradOutput,
-                                                              input,
+                                                              input.sizes(),
+                                                              input.suggest_memory_format(),
                                                               IntArrayRef({kernel_sizeH, kernel_sizeW}),
                                                               IntArrayRef({strideH, strideW}),
                                                               IntArrayRef({0, 0}),

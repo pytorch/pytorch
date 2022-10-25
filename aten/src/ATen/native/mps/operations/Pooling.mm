@@ -96,7 +96,7 @@ Tensor _mps_max_pool2d(
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
   pool2d_shape_check(
-    input_t,
+    input_t.sizes(),
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
@@ -389,7 +389,7 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
   pool2d_shape_check(
-    input_t,
+    input_t.sizes(),
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
@@ -492,7 +492,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
 (const Tensor& grad_output,
-const Tensor& input_t,
+IntArrayRef input_sizes,
+c10::MemoryFormat memory_format,
 IntArrayRef kernel_size,
 IntArrayRef stride,
 IntArrayRef padding,
@@ -525,12 +526,11 @@ const Tensor& grad_input) {
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  const auto memory_format = input_t.suggest_memory_format();
   if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_t.ndimension() == 4,
+    TORCH_CHECK(input_sizes.size() == 4,
       "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
   } else if (memory_format == at::MemoryFormat::Contiguous) {
-    TORCH_CHECK((input_t.ndimension() == 3 || input_t.ndimension() == 4),
+    TORCH_CHECK((input_sizes.size() == 3 || input_sizes.size() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
     TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
@@ -542,7 +542,6 @@ const Tensor& grad_input) {
   struct CachedGraph : public native_mps::MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
     MPSGraphTensor *gradOutputTensor_ = nil;
     MPSGraphTensor *gradInputTensor_ = nil;
   };
@@ -574,7 +573,7 @@ const Tensor& grad_input) {
                                                to_string(dilationW) + ":" + to_string(dilationH) + ":" +
                                                to_string(padW) + ":" + to_string(padH) + ":" +
                                                to_string(ceil_mode) + ":" + mem_format_key +
-                                               mps::getTensorsStringKey({input_t, grad_output});
+                                               mps::getTensorsStringKey({grad_output});
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -588,14 +587,11 @@ const Tensor& grad_input) {
           MPSGraphPooling2DOpDescriptor* desc = [[MPSGraphPooling2DOpDescriptor new] autorelease];
           fill_pool_desc(desc, kW, kH, dW, dH, dilationW, dilationH, padW, padH, ceil_mode, memory_format);
 
-          MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
           MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
           MPSGraphTensor* gradInputTensor = [mpsGraph maxPooling2DGradientWithGradientTensor:gradOutputTensor
-                                                                                sourceTensor:inputTensor
                                                                                   descriptor:desc
                                                                                         name:nil];
 
-          newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->gradOutputTensor_ = gradOutputTensor;
           newCachedGraph->gradInputTensor_ = gradInputTensor;
         }
@@ -604,12 +600,10 @@ const Tensor& grad_input) {
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input_t);
     auto gradOutputPlaceholder = native_mps::Placeholder(cachedGraph->gradOutputTensor_, grad_output);
     auto gradInputPlaceholder = native_mps::Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
     NSDictionary<MPSGraphTensor *, MPSGraphTensorData *> *feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
       gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
     };
 

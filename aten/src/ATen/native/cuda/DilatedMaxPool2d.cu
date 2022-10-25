@@ -417,7 +417,8 @@ const Tensor& indices) {
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_cuda)
 (const Tensor& gradOutput_,
-const Tensor& input_,
+IntArrayRef input_sizes,
+MemoryFormat memory_format,
 IntArrayRef kernel_size,
 IntArrayRef stride,
 IntArrayRef padding,
@@ -429,11 +430,10 @@ const Tensor& gradInput) {
 
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
-  TensorArg input_arg{ input_, "input_", 3 };
-  TensorArg indices_arg{ indices_, "indices", 4 };
+  TensorArg indices_arg{ indices_, "indices", 3 };
 
   checkAllSameGPU(__func__,
-                  {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
+                  {gradInput_arg, gradOutput_arg, indices_arg});
   if (gradOutput_.numel() == 0) {
     return;
   }
@@ -451,19 +451,11 @@ const Tensor& gradInput) {
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  const auto memory_format = input_.suggest_memory_format();
-
-  const Tensor input = input_.contiguous(memory_format);
-
-  const int64_t nbatch = input.ndimension() == 4 ? input.size(-4) : 1;
-  const int64_t nInputPlane = input.size(-3);
-  const int64_t inputHeight = input.size(-2);
-  const int64_t inputWidth = input.size(-1);
-
-  const int64_t in_stride_n = input.ndimension() == 4 ? input.stride(-4) : 0;
-  const int64_t in_stride_c = input.stride(-3);
-  const int64_t in_stride_h = input.stride(-2);
-  const int64_t in_stride_w = input.stride(-1);
+  const int64_t ndim = input_sizes.size();
+  const int64_t nbatch = ndim == 4 ? input_sizes[0] : 1;
+  const int64_t nInputPlane = input_sizes[ndim - 3];
+  const int64_t inputHeight = input_sizes[ndim - 2];
+  const int64_t inputWidth = input_sizes[ndim - 1];
 
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
@@ -478,9 +470,9 @@ const Tensor& gradInput) {
 
   gradInput.zero_();
 
-  int64_t count = input.numel();
+  int64_t count = gradOutput_.numel();
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, gradOutput_.scalar_type(),
     "max_pool2d_with_indices_out_cuda_frame",
     [&] {
       using accscalar_t = acc_type<scalar_t, true>;

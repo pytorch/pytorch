@@ -130,7 +130,7 @@ Tensor pool2d(
       ceil_mode);
 
   pool2d_shape_check(
-      self_arg,
+      input_size,
       kernel[Layout::Parameter::height],
       kernel[Layout::Parameter::width],
       stride[Layout::Parameter::height],

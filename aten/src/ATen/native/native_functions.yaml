@@ -10756,7 +10756,7 @@
   structured_delegate: max_pool2d_with_indices.out
   tags: canonical
 
-- func: max_pool2d_with_indices_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
+- func: max_pool2d_with_indices_backward.grad_input(Tensor grad_output, int[] input_sizes, MemoryFormat memory_format, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   structured: True
   dispatch:
@@ -10764,7 +10764,7 @@
     CUDA: max_pool2d_with_indices_backward_out_cuda
     MPS: max_pool2d_with_indices_backward_out_mps
 
-- func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
+- func: max_pool2d_with_indices_backward(Tensor grad_output, int[] input_sizes, MemoryFormat memory_format, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   python_module: nn
   structured_delegate: max_pool2d_with_indices_backward.grad_input
   tags: canonical

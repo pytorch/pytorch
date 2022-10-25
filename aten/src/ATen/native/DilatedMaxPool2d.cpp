@@ -69,7 +69,7 @@ bool ceil_mode) {
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
   pool2d_shape_check(
-    input,
+    input.sizes(),
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
@@ -90,7 +90,8 @@ bool ceil_mode) {
 
 TORCH_META_FUNC(max_pool2d_with_indices_backward)
 (const Tensor& gradOutput,
-const Tensor& input,
+IntArrayRef input_sizes,
+MemoryFormat memory_format,
 IntArrayRef kernel_size,
 IntArrayRef stride,
 IntArrayRef padding,
@@ -121,31 +122,29 @@ const Tensor& indices) {
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
 
-  TORCH_CHECK(input.dtype() == gradOutput.dtype(),
-    "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());
+  const int64_t ndim = input_sizes.size();
 
-  const auto memory_format = input.suggest_memory_format();
   if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input.ndimension() == 4,
+    TORCH_CHECK(ndim == 4,
       "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
   } else if (memory_format == at::MemoryFormat::Contiguous) {
-    TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+    TORCH_CHECK((ndim == 3 || ndim == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
     TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast, Contiguous");
   }
 
   /* sizes */
-  const int64_t nInputPlane = input.size(-3);
-  const int64_t inputHeight = input.size(-2);
-  const int64_t inputWidth = input.size(-1);
+  const int64_t nInputPlane = input_sizes[ndim - 3];
+  const int64_t inputHeight = input_sizes[ndim - 2];
+  const int64_t inputWidth = input_sizes[ndim - 1];
 
   /* XXX preserve the existing shape check behavior */
   const int64_t outputHeight_for_shape_check = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth_for_shape_check = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
   max_pool2d_backward_shape_check(
-    input,
+    input_sizes,
     gradOutput,
     indices,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
@@ -154,8 +153,9 @@ const Tensor& indices) {
     outputHeight_for_shape_check, outputWidth_for_shape_check,
     memory_format);
 
-  set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format),
-             input.has_names() ? input.names() : DimnameList{});
+  // FIXME: the last argument has to be the input names
+  set_output_raw_strided(0, input_sizes, {}, gradOutput.options().memory_format(memory_format),
+             DimnameList{});
 }
 } // namespace meta
 
@@ -195,7 +195,8 @@ const Tensor& indices) {
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_cpu)
 (const Tensor& gradOutput,
-const Tensor& input,
+IntArrayRef input_sizes,
+MemoryFormat memory_format,
 IntArrayRef kernel_size,
 IntArrayRef stride,
 IntArrayRef padding,

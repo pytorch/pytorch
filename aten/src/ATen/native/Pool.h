@@ -99,13 +99,13 @@ inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
 // AveragePool2d/DilatedMaxPool2d (forward)
 static inline void
 pool2d_shape_check(
-  const Tensor& input,
+  const IntArrayRef input_sizes,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
   int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
-  const int64_t ndim = input.ndimension();
+  const int64_t ndim = input_sizes.size();
   const int64_t nOutputPlane = nInputPlane;
 
   TORCH_CHECK(kW > 0 && kH > 0,
@@ -118,17 +118,17 @@ pool2d_shape_check(
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
 
-  bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
+  bool valid_dims = input_sizes[1] != 0 && input_sizes[2] != 0;
   if (memory_format == at::MemoryFormat::ChannelsLast){
     // Expect tensor in NHWC format and allow 0-dim only for N.
-    TORCH_CHECK((ndim == 4 && valid_dims && input.size(3) != 0),
+    TORCH_CHECK((ndim == 4 && valid_dims && input_sizes[3] != 0),
       "Expected 4D (batch mode) tensor expected for input with channels_last layout"
-      " with optional 0 dim batch size for input, but got: ", input.sizes());
+      " with optional 0 dim batch size for input, but got: ", input_sizes);
   } else {
-    TORCH_CHECK((ndim == 3 && input.size(0) != 0 && valid_dims) ||
-      (ndim == 4 && valid_dims && input.size(3) != 0),
+    TORCH_CHECK((ndim == 3 && input_sizes[0] != 0 && valid_dims) ||
+      (ndim == 4 && valid_dims && input_sizes[3] != 0),
       "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
-      input.sizes());
+      input_sizes);
   }
 
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
@@ -146,7 +146,7 @@ pool2d_shape_check(
 // DilatedMaxPool2d (backward)
 static inline void
 max_pool2d_backward_shape_check(
-  const Tensor& input,
+  const IntArrayRef input_sizes,
   const Tensor& gradOutput,
   const Tensor& indices,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
@@ -155,11 +155,11 @@ max_pool2d_backward_shape_check(
   int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   pool2d_shape_check(
-    input,
+    input_sizes,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, memory_format);
 
-  const int64_t ndim = input.ndimension();
+  const int64_t ndim = input_sizes.size();
   const int64_t nOutputPlane = nInputPlane;
 
   check_dim_size(gradOutput, ndim, ndim-3, nOutputPlane);
@@ -184,7 +184,7 @@ avg_pool2d_backward_shape_check(
   MemoryFormat memory_format)
 {
   pool2d_shape_check(
-    input,
+    input.sizes(),
     kH, kW, dH, dW, padH, padW, 1, 1,
     nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
     memory_format);

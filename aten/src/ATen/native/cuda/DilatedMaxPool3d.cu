@@ -457,11 +457,11 @@ void max_pool3d_with_indices_backward_out_cuda_template(
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "max_pool2d_with_indices_backward_out_cuda_template(): ",
+    "max_pool3d_with_indices_backward_out_cuda_template(): ",
     "Expected 4D or 5D input tensor, but got ", input.sizes());
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
-    "max_pool2d_with_indices_backward_out_cuda_template(): ",
+    "max_pool3d_with_indices_backward_out_cuda_template(): ",
     "Expected 4D or 5D gradOutput tensor, but got ", gradOutput.sizes());
 
   // Resize and initialize result tensor.

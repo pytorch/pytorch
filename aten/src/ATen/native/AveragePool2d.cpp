@@ -55,7 +55,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
 
   auto memory_format = input.suggest_memory_format();
   pool2d_shape_check(
-      input,
+      input.sizes(),
       kH,
       kW,
       dH,

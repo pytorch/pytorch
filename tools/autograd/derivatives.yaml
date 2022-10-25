@@ -2187,7 +2187,7 @@
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, grad_input_mask)
 
 - name: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
-  self: max_pool2d_with_indices_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, result1)
+  self: max_pool2d_with_indices_backward(grad, c10::asIntArrayRefSlow(self.sym_sizes()), self.suggest_memory_format(), kernel_size, stride, padding, dilation, ceil_mode, result1)
   result0: gather(self_t.flatten(-2), -1, result1.flatten(-2)).view_as(result1)
   output_differentiability: [True, False]
 
@@ -2350,9 +2350,10 @@
   # is True:
   result: leaky_relu_backward(grad_output_t, self_p, negative_slope, self_is_result)
 
-- name: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
+- name: max_pool2d_with_indices_backward(Tensor grad_output, int[] input_sizes, MemoryFormat memory_format, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
   grad_output: max_pool_double_backward(grad, indices, 2)
-  self: zeros_like(self)
+  input_sizes: non_differentiable
+  memory_format: non_differentiable
   indices: non_differentiable
   result: auto_linear
 
