@@ -712,7 +712,7 @@ class {module_name}(torch.nn.Module):
         return GraphModule(self, self.graph)
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output = True):
+    def print_readable(self, print_output=True):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
