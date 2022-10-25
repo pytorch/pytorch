@@ -759,7 +759,7 @@ class FakeTensorMode(TorchDispatchMode):
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
-            and func not in self.functions_with_cpp_meta_impl_that_support_symint
+            and not self.cpp_meta_supports_symint(func)
         ):
             with no_dispatch():
                 if func == aten.size.default:
@@ -796,7 +796,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            if func not in self.functions_with_cpp_meta_impl_that_support_symint:
+            if not self.cpp_meta_supports_symint(func):
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
@@ -878,9 +878,10 @@ class FakeTensorMode(TorchDispatchMode):
 
         return wrap
 
-    @property
-    def functions_with_cpp_meta_impl_that_support_symint(self):
-        return [
+    def cpp_meta_supports_symint(self, func):
+        if torch.Tag.view_copy in func.tags:
+            return True
+        return func in [
             aten.empty_strided.default,
             aten.as_strided_scatter.default,
             aten.as_strided.default,
@@ -888,11 +889,8 @@ class FakeTensorMode(TorchDispatchMode):
             aten.zeros.default,
             aten.detach.default,
             aten.zero.default,
-            aten.squeeze_copy.dim,
+            aten.resize_.default,
             aten._fused_moving_avg_obs_fq_helper_functional.default,
-            # TODO: I think there are a lot more things that could be
-            # in this list; all the _copy ops should be OK to directly
-            # call this way
             aten._sparse_coo_tensor_with_dims_and_tensors.default,
         ]
 
