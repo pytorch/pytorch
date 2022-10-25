@@ -991,15 +991,14 @@ class TritonKernel(Kernel):
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
             "device": V.graph.scheduler.current_device.index,
-            "configs": [config_of(signature)],
             "constants": {},
         }
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                triton_meta["signature"][len(argdefs)] = signature_of(
-                    SizeArg(f"{tree.prefix}numel", tree.numel)
-                )
+                sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+                signature.append(sizearg)
+                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
@@ -1007,6 +1006,7 @@ class TritonKernel(Kernel):
                 #     tree.numel
                 # )
                 # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
+        triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
