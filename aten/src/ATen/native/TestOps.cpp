@@ -1,9 +1,24 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/FunctionalInverses.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/ScalarOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_test_ambiguous_defaults_native.h>
+#include <ATen/ops/_test_autograd_multiple_dispatch_native.h>
+#include <ATen/ops/_test_autograd_multiple_dispatch_view_native.h>
+#include <ATen/ops/_test_optional_filled_intlist_native.h>
+#include <ATen/ops/_test_optional_floatlist_native.h>
+#include <ATen/ops/_test_optional_intlist_native.h>
+#include <ATen/ops/_test_string_default_native.h>
+#include <ATen/ops/_test_warn_in_autograd_native.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 #include <c10/util/irange.h>
 
