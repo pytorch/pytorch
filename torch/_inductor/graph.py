@@ -210,8 +210,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        if example.dim() != 0:
-            self.device_types.add(example.device.type)
+        self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -300,6 +299,9 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
             result = super().run_node(n)
+
+            # Realize if (1) any user need inputs realized, or (2) there is
+            # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
@@ -308,6 +310,13 @@ class GraphLowering(torch.fx.Interpreter):
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
+
+            # Realize if the IRNode already has accumulated lots of reads
+            if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
+                # Prevent excessive accumulation in a computed buffer, when
+                # there are multiple branches meach with small number of memory
+                # reads, but they converge to a user.
+                result.realize_hint()
         return result
 
     def codegen(self):
@@ -345,3 +354,12 @@ class GraphLowering(torch.fx.Interpreter):
             if not isinstance(node, ir.NoneAsConstantBuffer)
             and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]
+
+    def is_unspec_arg(self, name):
+        # dynamo wraps unspec variable as 0d CPU tensor,
+        # need to convert to scalar during codegen (triton only)
+        return (
+            name in self.graph_inputs.keys()
+            and self.graph_inputs[name].get_numel() == 1
+            and self.graph_inputs[name].get_device().type == "cpu"
+        )
