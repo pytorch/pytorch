@@ -35,6 +35,27 @@ class Category(enum.Enum):
     GRADIENT = enum.auto()
 
 
+@dataclasses.dataclass
+class _Storage:
+    """Bundle storage pointer and id.
+
+    All profiling logic should use `allocation_id`, however it is useful to
+    print storage pointers for debugging and unit tests sometimes look up
+    values using the storage data pointer of a live Tensor."""
+
+    ptr: int
+    allocation_id: int
+
+    def __repr__(self) -> str:
+        return f"{hex(self.ptr):>18} ({self.allocation_id})"
+
+    def __eq__(self, other: "_Storage") -> bool:
+        return self.allocation_id == other.allocation_id
+
+    def __hash__(self) -> int:
+        return hash(self.allocation_id)
+
+
 @dataclasses.dataclass(eq=True, unsafe_hash=True, frozen=True)
 class TensorKey:
     """Hashable identifier for a storage which has been asigned an ID.
@@ -47,21 +68,28 @@ class TensorKey:
     """
 
     id: int
-    storage_ptr: int
+    storage: _Storage
     device: torch.device
 
     def __repr__(self) -> str:
-        return f"id={self.id}: {hex(self.storage_ptr):>18} ({self.device})"
+        return f"id={self.id}: {repr(self.storage):<24} ({self.device})"
 
     def __lt__(self, other: "TensorKey") -> bool:
         return self._as_sortable < other._as_sortable
 
     @staticmethod
     def _make(
-        tensor_id: Optional[int], ptr: Optional[int], device: torch.device
+        tensor_id: Optional[int],
+        storage_ptr: Optional[int],
+        allocation_id: Optional[int],
+        device: torch.device,
     ) -> Optional["TensorKey"]:
-        if tensor_id is not None and ptr is not None:
-            return TensorKey(tensor_id, ptr, device)
+        if (
+            tensor_id is not None
+            and storage_ptr is not None
+            and allocation_id is not None
+        ):
+            return TensorKey(tensor_id, _Storage(storage_ptr, allocation_id), device)
         return None
 
     @classmethod
@@ -70,7 +98,9 @@ class TensorKey:
 
     @classmethod
     def from_tensor(cls, t: Optional[_TensorMetadata]) -> Optional["TensorKey"]:
-        return cls._make(t.id, t.storage_data_ptr, t.device) if t else None
+        if t is not None:
+            return cls._make(t.id, t.storage_data_ptr, t.allocation_id, t.device)
+        return None
 
     @property
     def _as_sortable(self) -> Tuple[int, int, str, int]:
