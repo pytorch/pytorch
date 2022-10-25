@@ -349,7 +349,7 @@ def _get_obj_state(obj):
             )
         else:
             state = obj.__dict__
-    
+
     return state
 
 
