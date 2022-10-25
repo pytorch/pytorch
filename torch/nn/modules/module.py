@@ -500,7 +500,9 @@ class Module:
                             .format(torch.typename(tensor), name))
         else:
             for hook in _global_buffer_registration_hooks.values():
-                tensor = hook(self, name, tensor) or tensor
+                output = hook(self, name, tensor)
+                if output is not None:
+                    tensor = output
             self._buffers[name] = tensor
             if persistent:
                 self._non_persistent_buffers_set.discard(name)
@@ -548,7 +550,9 @@ class Module:
                 "the forward() method.".format(name))
         else:
             for hook in _global_parameter_registration_hooks.values():
-                param = hook(self, name, param) or param
+                output = hook(self, name, param)
+                if output is not None:
+                    param = output
             self._parameters[name] = param
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
@@ -574,7 +578,9 @@ class Module:
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
         for hook in _global_module_registration_hooks.values():
-            module = hook(self, name, module) or module
+            output = hook(self, name, module)
+            if output is not None:
+                module = output
         self._modules[name] = module
 
     def register_module(self, name: str, module: Optional['Module']) -> None:
@@ -1528,7 +1534,9 @@ class Module:
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
                 for hook in _global_module_registration_hooks.values():
-                    value = hook(self, name, value) or value
+                    output = hook(self, name, value)
+                    if output is not None:
+                        value = output
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
@@ -1536,7 +1544,9 @@ class Module:
                                     "(torch.nn.Module or None expected)"
                                     .format(torch.typename(value), name))
                 for hook in _global_module_registration_hooks.values():
-                    value = hook(self, name, value) or value
+                    output = hook(self, name, value)
+                    if output is not None:
+                        value = output
                 modules[name] = value
             else:
                 buffers = self.__dict__.get('_buffers')
@@ -1546,7 +1556,9 @@ class Module:
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
                     for hook in _global_buffer_registration_hooks.values():
-                        value = hook(self, name, value) or value
+                        output = hook(self, name, value)
+                        if output is not None:
+                            value = output
                     buffers[name] = value
                 else:
                     super().__setattr__(name, value)
