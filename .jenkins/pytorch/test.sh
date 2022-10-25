@@ -374,25 +374,27 @@ test_libtorch() {
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
-    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *tsan* ]]; then
         # Run JIT cpp tests
         python test/cpp/jit/tests_setup.py setup
     fi
 
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
-    else
+    elif [[ "$BUILD_ENVIRONMENT" != *tsan* ]]; then
+      # TODO: Enable this for TSAN
       "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
 
     # Run Lazy Tensor cpp tests
     if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
       LTC_TS_CUDA=1 "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
-    else
+    elif [[ "$BUILD_ENVIRONMENT" != *tsan* ]]; then
+      # TODO: Enable this for TSAN
       "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     fi
 
-    if [[ "$BUILD_ENVIRONMENT" != *-tsan* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *tsan* ]]; then
         python test/cpp/jit/tests_setup.py shutdown
     fi
 
@@ -402,12 +404,9 @@ test_libtorch() {
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
 
-    # TODO: this condition is never (BUILD_ENVIRONMENT doesn't start with pytorch-), need to fix this.
-    if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-      if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-        # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
-        "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
-      fi
+    if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+      # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
+      "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
     assert_git_not_dirty
   fi
@@ -782,9 +781,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
-  # TODO: TSAN check is currently failing with 415 data race warnings. This will
-  # be addressed later, the first PR can be merged first to setup the CI jobs
-  test_libtorch || true
+  test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
