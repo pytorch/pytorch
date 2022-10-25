@@ -137,8 +137,8 @@ jobs:
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_UPDATE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_UPDATE_SECRET_ACCESS_KEY }}
           UPLOAD_BUCKET: "s3://pytorch"
         run: |
             set -ex
