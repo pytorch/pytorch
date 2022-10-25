@@ -1,12 +1,35 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
 #include <ATen/NamedTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_log_softmax.h>
+#include <ATen/ops/_log_softmax_backward_data_native.h>
+#include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_masked_softmax_native.h>
+#include <ATen/ops/_softmax.h>
+#include <ATen/ops/_softmax_backward_data_native.h>
+#include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/log_softmax.h>
+#include <ATen/ops/log_softmax_native.h>
+#include <ATen/ops/softmax.h>
+#include <ATen/ops/softmax_native.h>
+#include <ATen/ops/special_log_softmax_native.h>
+#include <ATen/ops/special_softmax_native.h>
+#endif
 
 #include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>

@@ -23,6 +23,9 @@ install_nvidia_driver_amzn2() {
     (
         set -x
 
+        # Purge any nvidia driver installed from RHEL repo
+        sudo yum remove -y nvidia-driver-latest-dkms
+
         HAS_NVIDIA_DRIVER=0
         # Check if NVIDIA driver has already been installed
         if [ -x "$(command -v nvidia-smi)" ]; then
@@ -30,12 +33,7 @@ install_nvidia_driver_amzn2() {
             INSTALLED_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
 
             if [ "$INSTALLED_DRIVER_VERSION" != "$DRIVER_VERSION" ]; then
-                # TODO
-                # Remove this after torchrec and FBGEMM have both been updated to use
-                # PyTorch NVIDIA installation script instead of using the latest driver
-                # from RHEL repo
-                HAS_NVIDIA_DRIVER=1
-                echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has been installed, but we expect to have $DRIVER_VERSION instead. Skipping NVIDIA driver installation for now until torchrec and FBGEMM are updated to use PyTorch NVIDIA installation script instead of RHEL repo"
+                echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has been installed, but we expect to have $DRIVER_VERSION instead. Continuing"
             else
                 HAS_NVIDIA_DRIVER=1
                 echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has already been installed. Skipping NVIDIA driver installation"
@@ -53,7 +51,18 @@ install_nvidia_driver_amzn2() {
             sudo rm -fv /tmp/nvidia_driver
         fi
 
-        nvidia-smi
+        (
+            set +e
+            nvidia-smi
+            status=$?
+            # Allowable exit statuses for nvidia-smi, see: https://github.com/NVIDIA/gpu-operator/issues/285
+            if [ $status -eq 0 ] || [ $status -eq 14 ]; then
+                echo "INFO: Ignoring allowed status ${status}"
+            else
+                echo "ERROR: nvidia-smi exited with unresolved status ${status}"
+                exit ${status}
+            fi
+        )
     )
 }
 
