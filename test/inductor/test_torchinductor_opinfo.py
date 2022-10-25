@@ -58,8 +58,7 @@ _ops = partial(
 # Success forces pass; failure forces fail; skip unconditionally skips testing
 TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
-COLLECT_EXPECT = True # For CI Test collection - DO NOT LAND LIKE THIS
-# os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
+COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
 ALL_SAMPLES = True
 START = os.getenv("PYTORCH_TEST_RANGE_START", None)
