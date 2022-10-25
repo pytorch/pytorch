@@ -3,7 +3,7 @@ import functools
 import gc
 import itertools as it
 import textwrap
-from typing import Callable, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 import torch
 from torch._C._profiler import _EventType
@@ -68,7 +68,7 @@ class TestIdentifyGradients(TestCase):
             if key is None:
                 return False
 
-            return tensor.storage().data_ptr() == key.storage_ptr
+            return tensor.storage().data_ptr() == key.storage.ptr
 
         tree = prof.profiler.kineto_results.experimental_event_tree()
         for node in _utils.traverse_dfs(tree):
@@ -104,7 +104,7 @@ class TestIdentifyGradients(TestCase):
         for node in _utils.traverse_dfs(tree):
             for _, p_grad_key in _memory_profiler.extract_gradients(node):
                 self.assertTrue(
-                    p_grad_key.storage_ptr in allowed_set,
+                    p_grad_key.storage.ptr in allowed_set,
                     f"Tensor wrongly marked as gradient: {node.name}: {p_grad_key}",
                 )
 
@@ -772,6 +772,7 @@ class TestDataFlow(TestCase):
         )
 
 
+@skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
     @staticmethod
     def _lookup_tensor_categories(
