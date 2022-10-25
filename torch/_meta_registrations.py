@@ -4,12 +4,15 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
+from torch._decomp import meta_table as meta_table
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    FloatLike,
+    IntLike,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -21,8 +24,6 @@ from torch.utils._pytree import tree_map
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
-
-meta_table = {}
 
 
 def register_meta(op, register_dispatcher=True):
@@ -83,6 +84,11 @@ def meta_randperm(n, *, generator=None, out):
 
 @register_meta(aten.randint.default)
 def meta_randint(high, size, *, dtype=torch.long, **kwargs):
+    return torch.empty(size, dtype=dtype, **kwargs)
+
+
+@register_meta(aten.randint.low)
+def meta_randint_low(low, high, size, *, dtype=torch.long, **kwargs):
     return torch.empty(size, dtype=dtype, **kwargs)
 
 
@@ -357,24 +363,24 @@ def meta_conv(
         output_padding: Optional[Union[List[int], int]] = None,
     ):
         ret_shape = []
-        if isinstance(stride, int):
+        if isinstance(stride, IntLike):
             stride = [stride] * len(dims)
         elif len(stride) == 1:
             stride = [stride[0]] * len(dims)
 
-        if isinstance(padding, int):
+        if isinstance(padding, IntLike):
             padding = [padding] * len(dims)
         elif len(padding) == 1:
             padding = [padding[0]] * len(dims)
 
-        if isinstance(dilation, int):
+        if isinstance(dilation, IntLike):
             dilation = [dilation] * len(dims)
         elif len(dilation) == 1:
             dilation = [dilation[0]] * len(dims)
 
         output_padding_list: Optional[List[int]] = None
         if output_padding:
-            if isinstance(output_padding, int):
+            if isinstance(output_padding, IntLike):
                 output_padding_list = [output_padding] * len(dims)
             elif len(output_padding) == 1:
                 output_padding_list = [output_padding[0]] * len(dims)
@@ -1013,22 +1019,6 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@register_meta([aten.diag.default, aten.diag.out])
-@out_wrapper()
-def meta_diag(self, dim=0):
-    check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
-    if self.dim() == 1:
-        sz = self.size(0) + abs(dim)
-        return self.new_empty((sz, sz))
-
-    # case: dim is 2
-    if dim >= 0:
-        sz = min(self.size(0), self.size(1) - dim)
-    else:
-        sz = min(self.size(0) + dim, self.size(1))
-    return self.new_empty((sz,))
-
-
 @register_meta(aten._embedding_bag_forward_only.default)
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
@@ -1105,12 +1095,14 @@ def meta_zero_(self):
     return self
 
 
-@register_meta(
-    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar],
-    register_dispatcher=False,
-)
+@register_meta([aten.fill_.Tensor, aten.fill_.Scalar], register_dispatcher=False)
 def meta_fill_(self, val):
     return self
+
+
+@register_meta([aten.fill.Tensor, aten.fill.Scalar], register_dispatcher=False)
+def meta_fill(self, val):
+    return self.new_empty(self.shape)
 
 
 @register_meta(aten.relu_.default, register_dispatcher=False)
@@ -1389,11 +1381,11 @@ def meta_like(self, *args, **kwargs):
 # hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)
 def arange(end, **kwargs):
-    if isinstance(end, float):
-        end = math.ceil(end)
+    if isinstance(end, FloatLike):
+        end = math.ceil(end)  # type: ignore[arg-type]
 
     def is_integral(x):
-        return isinstance(x, int) or isinstance(x, bool)
+        return isinstance(x, IntLike) or isinstance(x, bool)
 
     set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
     if set_to_integral_dtype:
