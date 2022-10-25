@@ -1421,8 +1421,8 @@ def _validate_fixed_qparams_qconfigs(
             if qconfig is None:
                 bad_observer = False
             else:
-                for observer_ctr in allowed_observer_ctrs + \
-                    [fixed_qparams_op_to_overwrite_output_observer[module_type_or_function_or_method]]:
+                for observer_ctr in allowed_observer_ctrs + [
+                        fixed_qparams_op_to_overwrite_output_observer[module_type_or_function_or_method]]:
                     if obs_or_fq_ctr_equals(
                             qconfig.activation,
                             FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
