@@ -16,8 +16,10 @@ from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims_common import (
     check,
+    Dim,
     DimsSequenceType,
     DimsType,
+    IntLike,
     Number,
     NumberType,
     RETURN_TYPE,
@@ -930,7 +932,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
-    is_integral = isinstance(a, (bool, int)) or (
+    is_integral = isinstance(a, (bool, int, torch.SymIntNode)) or (
         isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype)
     )
 
@@ -1199,7 +1201,7 @@ def _broadcast_in_dim_meta(
     # (no relative reordering of dims) of integers and
     # each dimension must be within the new shape
     def _greater_than_reduce(acc, x):
-        assert isinstance(x, int)
+        assert isinstance(x, Dim)
         assert x > acc
         assert x < len(shape)
 
@@ -2320,7 +2322,7 @@ def _arange_meta(
     )
     if dtype is not None:
         pass
-    elif all(isinstance(arg, int) for arg in (start, end, step)):
+    elif all(isinstance(arg, IntLike) for arg in (start, end, step)):
         dtype = torch.int64
     else:
         dtype = torch.get_default_dtype()
