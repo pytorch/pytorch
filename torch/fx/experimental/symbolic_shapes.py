@@ -122,6 +122,8 @@ class PySymInt(object):
         return self._expr
 
     def wrap(self, num):
+        if not isinstance(num, int):
+            raise RuntimeError("Wrapping a non-int into a PySymInt is not valid")
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
@@ -144,7 +146,15 @@ class PySymInt(object):
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        return int(self.shape_env.evaluate_expr(self.expr))
+        val = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return int(val)
+        except Exception as e:
+            try:
+                return bool(val)
+            except:
+                # Raise the original error from the int conversion!
+                raise e
 
     def __sym_float__(self):
         if SYM_FUNCTION_MODE:
@@ -164,10 +174,36 @@ class PySymFloat:
         self.constant = constant
 
     def wrap(self, num):
+        if not isinstance(num, float):
+            raise RuntimeError("Wrapping a non-float into a PySymFloat is not valid")
         return PySymFloat(sympy.Float(num), self.shape_env, constant=num)
 
     def __str__(self):
         return f"{self.expr}"
+
+    # You can manually trigger a guard with this function
+    def guard_float(self, file, line):
+        # TODO: use the file/line for some useful diagnostic on why a
+        # guard occurred
+        val = self.shape_env.evaluate_expr(self.expr)
+        try:
+            return float(val)
+        except Exception as e:
+            try:
+                return bool(val)
+            except:
+                # Raise the original error from the float conversion!
+                raise e
+
+    def __sym_int__(self):
+        if SYM_FUNCTION_MODE:
+            return _handle_sym_dispatch(sym_int, (self,), {})
+        # TODO: same considerations as PySymInt.__sym_float__ above
+        return PySymInt(self.expr, self.shape_env)
+
+    def __bool__(self):
+        return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
+
 
 if HAS_SYMPY:
     class FloorDiv(sympy.Function):
@@ -236,19 +272,25 @@ unary_magic_methods = {
     'neg'
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+float_magic_methods = {"neg", "add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+
+always_float_magic_methods = {'truediv'}
+always_int_magic_methods = {'floordiv', 'ceil', 'floor'}
+
+magic_methods_on_builtins = {"min", "max"}
+magic_methods_on_math = {"ceil", "floor"}
 
 def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
 
     def magic_impl(self, other):
-        if method in ["min", "max"]:
+        if method in magic_methods_on_builtins:
             op = getattr(builtins, method)
         else:
             op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
             return _handle_sym_dispatch(op, (self, other), {})
-        if isinstance(other, py_type):
+        if isinstance(other, (PySymInt, PySymFloat)):
             other_expr = other.expr
         else:
             assert isinstance(other, sympy.Expr)
@@ -258,16 +300,21 @@ def _make_magic(method, func, py_type):
         other_expr = self.shape_env.replace(other_expr)
         out = func(expr, other_expr)
         out = sympy.expand(out)
-        if method in ["truediv"]:
+        if method in always_float_magic_methods:
             return PySymFloat(out, self.shape_env)
+        elif method in always_int_magic_methods:
+            return PySymInt(out, self.shape_env)
         else:
             # TODO: relational operators actually technically return a
             # PySymBool, this is a type error
-            return py_type(out, self.shape_env)
+            if py_type is PySymFloat or isinstance(other, PySymFloat):
+                return PySymFloat(out, self.shape_env)
+            else:
+                return PySymInt(out, self.shape_env)
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in ["ceil", "floor"]:
+            if method in magic_methods_on_math:
                 op = getattr(math, method)
             else:
                 op = getattr(operator, method)
@@ -276,7 +323,7 @@ def _make_magic(method, func, py_type):
         expr = self.shape_env.replace(self.expr)
         out = func(expr)
         out = sympy.expand(out)
-        if method in ["ceil", "floor"]:
+        if method in always_int_magic_methods:
             return PySymInt(out, self.shape_env)
         else:
             return py_type(out, self.shape_env)

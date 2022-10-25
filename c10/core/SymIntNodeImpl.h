@@ -27,49 +27,98 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymIntNode add(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymFloatNode add(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymIntNode sub(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode sub(const SymFloatNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode mul(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymFloatNode mul(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymFloatNode truediv(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode truediv(const SymFloatNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode floordiv(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode mod(const SymIntNode& other) {
+  virtual SymIntNode floordiv(const SymFloatNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymIntNode pow(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode pow(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  // TODO: should comparison sym ops return bool?
   virtual SymIntNode eq(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode eq(const SymFloatNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode ne(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymFloatNode ne(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymIntNode gt(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode gt(const SymFloatNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode lt(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymFloatNode lt(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymIntNode le(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode le(const SymFloatNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode ge(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode ceil() {
-    TORCH_CHECK(false, "NYI");
-  };
-  virtual SymIntNode neg() {
+  virtual SymFloatNode ge(const SymFloatNode& other) {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode min(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymFloatNode min(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymIntNode max(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode max(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode mod(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode ceil() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode floor() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode neg() {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode clone() {
@@ -78,7 +127,13 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymFloatNode sym_float() {
     TORCH_CHECK(false, "NYI");
   }
+  virtual SymIntNode mod(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymIntNode wrap(int64_t num) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode wrap(double num) {
     TORCH_CHECK(false, "NYI");
   };
   virtual int64_t guard_int(const char* file, int64_t line) {
