@@ -8537,6 +8537,7 @@
   dispatch:
     CPU: signbit_out
     CUDA: signbit_out
+    MPS: signbit_out_mps
     SparseCPU, SparseCUDA: signbit_sparse_out
     SparseCsrCPU, SparseCsrCUDA: signbit_sparse_csr_out
 
