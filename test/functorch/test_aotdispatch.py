@@ -416,6 +416,21 @@ class TestAOTAutograd(AOTTestCase):
 
         self.assertEqual(ref_out, test_out)
 
+    def test_custom_autograd(self):
+        class CustomFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def forward(ctx, grad_output):
+                return grad_output + 1
+
+        def f(x):
+            return CustomFn.apply(x)
+
+        self.verify_aot_autograd(f, [torch.randn(3)])
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_autocast_disable_guard(self):
         guard = torch._C._DisableAutocast()

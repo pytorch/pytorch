@@ -135,44 +135,85 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
 def create_joint_forward_backward(fn):
     def joint_forward_backward(
-        primals: List[Any], tangents: List[Any]
+        orig_primals: List[Any], orig_tangents: List[Any]
     ) -> Tuple[List[Any], List[Any]]:
-        # Call the forward pass
-        outs = fn(*primals)
-        # Get the inputs that need gradients
-        grad_primals = []
-        inputs_needs_grads = []
-        for p in primals:
-            is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
-            inputs_needs_grads.append(is_grad_tensor)
-            if is_grad_tensor:
-                grad_primals.append(p)
+        primals = []
+        for orig_p in orig_primals:
+            if isinstance(orig_p, Tensor):
+                p = torch._to_functional_tensor(orig_p)
+                p.requires_grad = orig_p.requires_grad
+            else:
+                p = orig_p
+            primals.append(p)
 
-        # Get the outputs that need gradients
-        assert len(tangents) == len(outs)
-        needed_outs = []
-        needed_tangents = []
-        for out, tangent in zip(outs, tangents):
-            if isinstance(out, Tensor) and out.requires_grad:
-                needed_outs.append(out)
-                needed_tangents.append(tangent)
+        torch._enable_functionalization(reapply_views=True)
+        try:
 
-        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+            # Call the forward pass
+            outs = fn(*primals)
+            # Get the inputs that need gradients
+            grad_primals = []
+            inputs_needs_grads = []
+            for p in primals:
+                is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
+                inputs_needs_grads.append(is_grad_tensor)
+                if is_grad_tensor:
+                    grad_primals.append(p)
 
-        backward_out = []
-        # Call the backwards pass
-        if grad_primals:
-            with fx_traceback.override_stack_trace():
-                backward_out = torch.autograd.grad(
-                    needed_outs,
-                    grad_primals,
-                    grad_outputs=needed_tangents,
-                    allow_unused=True,
-                )
+            # Get the outputs that need gradients
+            assert len(orig_tangents) == len(outs)
+            needed_outs = []
+            needed_orig_tangents = []
+            needed_tangents = []
+            for out, orig_tangent in zip(outs, orig_tangents):
+                if isinstance(out, Tensor) and out.requires_grad:
+                    needed_outs.append(out)
+                    needed_orig_tangents.append(orig_tangent)
+                    needed_tangents.append(torch._to_functional_tensor(orig_tangent))
+
+            setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+
+            backward_out = []
+            # Call the backwards pass
+            if grad_primals:
+                with fx_traceback.override_stack_trace():
+                    backward_out = torch.autograd.grad(
+                        needed_outs,
+                        grad_primals,
+                        grad_outputs=needed_tangents,
+                        allow_unused=True,
+                    )
+        finally:
+            torch._disable_functionalization()
         backward_out_iter = iter(backward_out)
-        return outs, [
-            next(backward_out_iter) if i else None for i in inputs_needs_grads
-        ]
+        grads = [next(backward_out_iter) if i else None for i in inputs_needs_grads]
+
+        def prop_mut(origs, news):
+            for orig, new in zip(origs, news):
+                if not isinstance(orig, Tensor):
+                    continue
+                assert torch._is_functional_tensor(new)
+                torch._sync(new)
+                new_orig = torch._from_functional_tensor(new)
+                if new_orig is not orig:
+                    # TODO: if internal resize_ this would fail
+                    assert new_orig.shape == orig.shape
+                    orig.copy_(new_orig)
+        prop_mut(orig_primals, primals)
+        # TODO: Actually, the input tangents shouldn't ever actually get
+        # mutated...
+        prop_mut(needed_orig_tangents, needed_tangents)
+
+        def defun(t):
+            if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
+                return t
+            torch._sync(t)
+            return torch._from_functional_tensor(t)
+
+        orig_outs = [defun(t) for t in outs]
+        orig_grads = [defun(t) for t in grads]
+
+        return orig_outs, orig_grads
 
     return joint_forward_backward
 
@@ -390,29 +431,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     disable_amp = torch._C._is_any_autocast_enabled()
 
-    if config.use_functionalize:
-        # Trace once without decompositions, into a graph of ATen ops.
-        # NB: tracing_mode is real, as it's assumed the calling context setup
-        # fake tensor mode / symbolic shapes if that is needed
-        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
-
-        context = disable_autocast_manager if disable_amp else nullcontext
-
-        def fake_fn(primals, tangents):
-            with torch.fx.traceback.override_stack_trace():
-                return torch.fx.Interpreter(fx_g).run(primals, tangents)
-
-        # Trace a second time, running functionalization, and THEN running decompositions.
-        # functionalization only acts on ATen today, and doesn't currently handle
-        # view and inplace ops that come from primtorch.
-        # Eventually, functionalization should support primtorch view/inplace ops,
-        # which will make it ok to run decompositions before functionalization.
-        with context():
-            fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
-        fx_g.graph.eliminate_dead_code()
-        fx_g.recompile()
-    else:
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+    fx_g.graph.eliminate_dead_code()
+    fx_g.recompile()
 
     if config.debug_joint:
         print("====== Joint graph ======")
