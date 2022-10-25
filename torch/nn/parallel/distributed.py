@@ -1,7 +1,7 @@
 import sys
 import copy
 from dataclasses import dataclass
-from typing import Callable, Any, Type
+from typing import Callable, Any, Optional, Type
 from enum import Enum, auto
 import inspect
 import itertools
@@ -194,6 +194,7 @@ class _DDPJoinHook(JoinHook):
             "DDP join hook requires passing in a DistributedDataParallel "
             "instance as the state"
         )
+        assert ddp.logger is not None
         ddp.logger._set_uneven_input_join()
         self.ddp = ddp
         self.ddp._divide_by_initial_world_size = divide_by_initial_world_size
@@ -555,6 +556,7 @@ class DistributedDataParallel(Module, Joinable):
 
         super(DistributedDataParallel, self).__init__()
         Joinable.__init__(self)
+        self.logger: Optional[dist.Logger] = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
                 RuntimeError,
@@ -835,6 +837,7 @@ class DistributedDataParallel(Module, Joinable):
         )
         if self.static_graph:
             self.reducer._set_static_graph()
+            assert self.logger is not None
             self.logger._set_static_graph()
 
     def _build_params_for_reducer(self):
@@ -1053,6 +1056,7 @@ class DistributedDataParallel(Module, Joinable):
             "DistributedDataParallel.forward"
         ):
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
+                assert self.logger is not None
                 self.logger.set_runtime_stats_and_log()
                 self.num_iterations += 1
                 self.reducer.prepare_for_forward()
@@ -1517,6 +1521,7 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
+        assert self.logger is not None
         self.logger._set_comm_hook_name(hook.__qualname__)
         dist._register_comm_hook(self.reducer, state, hook)
 
@@ -1543,6 +1548,7 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
 
         """
+        assert self.logger is not None
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
@@ -1807,6 +1813,7 @@ class DistributedDataParallel(Module, Joinable):
         these metrics are.
         This is a prototype interface and subject to change in the future.
         """
+        assert self.logger is not None
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
@@ -1841,6 +1848,7 @@ class DistributedDataParallel(Module, Joinable):
             return
         self.static_graph = True
         self.reducer._set_static_graph()
+        assert self.logger is not None
         self.logger._set_static_graph()
         if self.find_unused_parameters:
             warnings.warn(
