@@ -27,7 +27,7 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
-from .node import Argument, base_types, map_aggregate
+from .node import Argument, base_types, map_aggregate, Target, Node
 from .proxy import ParameterProxy, Proxy, TracerBase
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
@@ -250,6 +250,8 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
+        self.module_call_stack: List[str] = []
+        self.root_module_name: str = ""
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
@@ -344,6 +346,20 @@ class Tracer(TracerBase):
         return super().create_arg(a)
 
     @compatibility(is_backward_compatible=True)
+    def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...],
+                     kwargs: Dict[str, Any],
+                     name: Optional[str] = None,
+                     type_expr : Optional[Any] = None,
+                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
+
+        mod = self.module_call_stack[-1] if self.module_call_stack else ""
+
+        return super().create_proxy(kind, target, args, kwargs, name,
+                             type_expr=type_expr,
+                             proxy_factory_fn=proxy_factory_fn,
+                             parent_module=mod)
+
+    @compatibility(is_backward_compatible=True)
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         """
         A method to specify whether a given ``nn.Module`` is a "leaf" module.
@@ -430,9 +446,18 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
+        ret_mod = self.root_module_name
+        self.module_call_stack.append(module_qualified_name)
+        print(f"Calling fwd for mod {module_qualified_name} args {args}")
         if not self.is_leaf_module(m, module_qualified_name):
-            return forward(*args, **kwargs)
-        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+            ret_val =  forward(*args, **kwargs)
+        else:
+            ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        self.module_call_stack.pop()
+        if len(self.module_call_stack):
+            ret_mod = self.module_call_stack[-1]
+        print(f"Returned to module mod {ret_mod}")
+        return ret_val
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
@@ -663,6 +688,7 @@ class Tracer(TracerBase):
                 ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
 
                 fn = getattr(type(root), self.traced_func_name)
+                self.root_module_name = root._get_name()
                 self.submodule_paths = {mod: name for name, mod in root.named_modules()}
             else:
                 self.root = torch.nn.Module()
@@ -707,7 +733,8 @@ class Tracer(TracerBase):
             @functools.wraps(_orig_module_call)
             def module_call_wrapper(mod, *args, **kwargs):
                 def forward(*args, **kwargs):
-                    return _orig_module_call(mod, *args, **kwargs)
+                    ret_val = _orig_module_call(mod, *args, **kwargs)
+                    return ret_val
 
                 _autowrap_check(
                     patcher,
@@ -804,9 +831,10 @@ def _create_wrapped_func(orig_fn):
         this function call, as this function is not being traced.
         """
         proxy = _find_proxy(args, kwargs)
+        mod = self.module_call_stack[-1] if self.module_call_stack else ""
         if proxy is not None:
             return_proxy = proxy.tracer.create_proxy(
-                "call_function", orig_fn, args, kwargs
+                "call_function", orig_fn, args, kwargs, parent_module=mod
             )
             return_proxy.node.meta["is_wrapped"] = True
             return return_proxy
@@ -827,8 +855,10 @@ def _create_wrapped_method(cls, name):
         call, as this function is not being traced.
         """
         proxy = _find_proxy(args, kwargs)
+        mod = self.module_call_stack[-1] if self.module_call_stack else ""
         if proxy is not None:
-            return proxy.tracer.create_proxy("call_method", name, args, kwargs)
+            return proxy.tracer.create_proxy(
+                    "call_method", name, args, kwargs, parent_module=mod)
         return orig_fn(*args, **kwargs)
 
     return wrapped
