@@ -1529,8 +1529,8 @@ dense_dim() -> int
 
 Return the number of dense dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``len(self.shape)`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.sparse_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """,
@@ -1584,7 +1584,7 @@ See :func:`torch.diagonal_scatter`
 add_docstr_all(
     "as_strided_scatter",
     r"""
-as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(src, size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided_scatter`
 """,
@@ -4680,8 +4680,8 @@ sparse_dim() -> int
 
 Return the number of sparse dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``0`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.dense_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """,
@@ -6542,6 +6542,6 @@ add_docstr_all(
     "to_padded_tensor",
     r"""
 to_padded_tensor(padding, output_size=None) -> Tensor
-See :func:`torch.nested.to_padded_tensor`
+See :func:`to_padded_tensor`
 """,
 )

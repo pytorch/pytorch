@@ -90,7 +90,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
         )
     originally_training: bool = False
 
-    if not isinstance(model, torch.jit.ScriptFunction):
+    if hasattr(model, "training"):
         originally_training = model.training
 
         # ONNX opset 12 has better support for training amenable models, with updated
@@ -119,10 +119,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     try:
         yield
     finally:
-        if not (
-            isinstance(model, torch.jit.ScriptFunction)
-            or mode == _C_onnx.TrainingMode.PRESERVE
-        ):
+        if hasattr(model, "training") and not mode == _C_onnx.TrainingMode.PRESERVE:
             model.train(originally_training)
 
 
