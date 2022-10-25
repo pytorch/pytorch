@@ -14,7 +14,13 @@ from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
-from ..utils import is_lazy_module, istype, proxy_args_kwargs
+from ..utils import (
+    is_lazy_module,
+    is_safe_constant,
+    istensor,
+    istype,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
@@ -139,6 +145,9 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserFunctionVariable(subobj.__get__(base), **options)
             elif istype(subobj, types.FunctionType):
                 return variables.UserMethodVariable(subobj, self, **options)
+            elif is_safe_constant(subobj) or istensor(subobj):
+                # Support possibly common cases of class members
+                return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
                 unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
 
