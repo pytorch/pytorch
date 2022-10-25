@@ -240,7 +240,7 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
             )
         return node.op == "call_function" and (
             getattr(node.target, "impl_nvfuser", None) is not None
-            or node.target == operator.getitem  # allow getitem to ensure it doesn't break partition
+            or node.target == operator.getitem
         )
 
 
