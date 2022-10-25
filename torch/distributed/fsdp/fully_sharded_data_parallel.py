@@ -1549,6 +1549,8 @@ class FullyShardedDataParallel(nn.Module):
     def _unshard(
         self,
         handles: List[FlatParamHandle],
+        unshard_stream: torch.cuda.Stream,
+        pre_unshard_stream: torch.cuda.Stream,
     ) -> None:
         """
         Unshards the handles in ``handles``. If the handles are in
@@ -1565,13 +1567,13 @@ class FullyShardedDataParallel(nn.Module):
             if event:
                 event.synchronize()
         any_ran_pre_unshard = False
-        with torch.cuda.stream(self._streams["pre_unshard"]):
+        with torch.cuda.stream(pre_unshard_stream):
             for handle in handles:
                 ran_pre_unshard = handle.pre_unshard()
                 any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
         if any_ran_pre_unshard:
-            self._streams["unshard"].wait_stream(self._streams["pre_unshard"])
-        with torch.cuda.stream(self._streams["unshard"]):
+            unshard_stream.wait_stream(pre_unshard_stream)
+        with torch.cuda.stream(unshard_stream):
             for handle in handles:
                 handle.unshard()
                 handle.post_unshard()
@@ -2043,7 +2045,7 @@ class FullyShardedDataParallel(nn.Module):
         for handles_key in handles_to_prefetch:
             # Prefetch the next set of handles without synchronizing to allow
             # the sync to happen as late as possible to maximize overlap
-            self._unshard(handles_key)
+            self._unshard(handles_key, self._streams["unshard"], self._streams["pre_unshard"])
             self._handles_prefetched[handles_key] = True
 
     def _get_handles_to_prefetch(
@@ -2891,7 +2893,7 @@ class FullyShardedDataParallel(nn.Module):
     ) -> None:
         """Unshards parameters in the pre-forward."""
         if handles:
-            self._unshard(handles)
+            self._unshard(handles, self._streams["unshard"], self._streams["pre_unshard"])
             handles_key = tuple(handles)
             self._needs_pre_forward_unshard[handles_key] = False
             torch.cuda.current_stream().wait_stream(self._streams["unshard"])
@@ -3137,8 +3139,10 @@ class FullyShardedDataParallel(nn.Module):
 
         self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
-        self._unshard(self._handles)
-        torch.cuda.current_stream().wait_stream(self._streams["unshard"])
+        # No need to call `wait_stream()` since we unshard in the computation
+        # stream directly
+        computation_stream = torch.cuda.current_stream()
+        self._unshard(self._handles, computation_stream, computation_stream)
         if with_grads:
             self._unshard_grads(self._handles)
 
@@ -3444,7 +3448,7 @@ class FullyShardedDataParallel(nn.Module):
 
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
-                self._unshard(_handles)
+                self._unshard(_handles, self._streams["unshard"], self._streams["pre_unshard"])
                 torch.cuda.current_stream().wait_stream(self._streams["unshard"])
 
                 # Set this to `False` to ensure that a mistargeted prefetch
