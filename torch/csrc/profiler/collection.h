@@ -77,7 +77,7 @@ struct TensorMetadata : public RawTensorMetadataBase {
     return {device_type_, device_index_};
   }
 
-  TensorImplAddress impl() {
+  TensorImplAddress impl() const {
     return weak_self_.get();
   }
 
