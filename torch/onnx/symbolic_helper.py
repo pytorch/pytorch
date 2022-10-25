@@ -645,13 +645,13 @@ def _block_list_in_opset(name: str):
 
 
 @_beartype.beartype
-def _try_get_scalar_type(*args) -> Optional[str]:
+def _try_get_scalar_type(*args) -> Optional[_type_utils.JitScalarType]:
     for arg in args:
         scalar_type = _type_utils.JitScalarType.from_value(
             arg, _type_utils.JitScalarType.UNDEFINED
         )
         if scalar_type != _type_utils.JitScalarType.UNDEFINED:
-            return scalar_type.scalar_name()
+            return scalar_type
     return None
 
 
@@ -772,7 +772,7 @@ def _topk_helper(
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
-        if _try_get_scalar_type(k) != "Long":
+        if _try_get_scalar_type(k) != _type_utils.JitScalarType.INT64:
             k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
     if g.opset <= 10:
         if not largest:
@@ -1248,13 +1248,14 @@ def _arange_cast_helper(
 ]:
     def _is_all_integral(scalars):
         for scalar in scalars:
-            if (
-                _type_utils.JitScalarType.from_value(
-                    scalar, _type_utils.JitScalarType.UNDEFINED
-                )
-                != _type_utils.JitScalarType.INT64
-            ):
-                return False
+            try:
+                if (
+                    _type_utils.JitScalarType.from_value(scalar)
+                    != _type_utils.JitScalarType.INT64
+                ):
+                    return False
+            except errors.OnnxExporterError:
+                pass
         return True
 
     # This logic is based on torch.arange docs. If "dtype" is provided,

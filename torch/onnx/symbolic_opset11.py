@@ -294,18 +294,17 @@ def index_put(
         values = opset9.expand(g, values, values_shape, None)
     values = symbolic_helper._reshape_helper(g, values, values_shape)
 
-    try:
-        self_scalar_type = _type_utils.JitScalarType.from_value(self)
+    self_scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    )
+    if self_scalar_type != _type_utils.JitScalarType.UNDEFINED:
         values_scalar_type = _type_utils.JitScalarType.from_value(
             values, _type_utils.JitScalarType.UNDEFINED
         )
         if self_scalar_type != values_scalar_type:
             values = g.op("Cast", values, to_i=self_scalar_type.onnx_type())
-    except errors.OnnxExporterError:
-        if accumulate:
-            raise errors.SymbolicValueError(
-                "self does not have a valid scalar type.", self
-            )
+    elif accumulate:
+        raise errors.SymbolicValueError("self does not have a valid scalar type.", self)
 
     if accumulate:
         zeros = g.op(
@@ -1024,7 +1023,8 @@ def index(g: jit_utils.GraphContext, self, index):
         index = indices[0]
         if not symbolic_helper._is_none(index) and (
             symbolic_helper._is_bool(index)
-            or _type_utils.JitScalarType.from_value(index).scalar_name() == "Byte"
+            or _type_utils.JitScalarType.from_value(index)
+            == _type_utils.JitScalarType.UINT8
         ):
             index = opset9.nonzero(g, index)
             return g.op("GatherND", self, index)
@@ -1080,7 +1080,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
             to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
         )
 
-    if _type_utils.JitScalarType.from_value(self).scalar_name() == "Byte":
+    if _type_utils.JitScalarType.from_value(self) == _type_utils.JitScalarType.UINT8:
         return g.op("BitShift", self, other, direction_s="RIGHT")
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
@@ -1111,7 +1111,7 @@ def __lshift_(g: jit_utils.GraphContext, self, other):
             to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
         )
 
-    if _type_utils.JitScalarType.from_value(self).scalar_name() == "Byte":
+    if _type_utils.JitScalarType.from_value(self) == _type_utils.JitScalarType.UINT8:
         return g.op("BitShift", self, other, direction_s="LEFT")
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))

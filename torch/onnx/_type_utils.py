@@ -150,32 +150,40 @@ class JitScalarType(enum.IntEnum):
             JitScalarType.
 
         Raises:
-            OnnxExporterError: if value does not have a valid scalar type and default is not None.
+            OnnxExporterError: if value does not have a valid scalar type and default is None.
             SymbolicValueError: when value.type()'s info are empty and default is None
         """
 
-        if default is None and not isinstance(value, (torch._C.Value, torch.Tensor)):
-            raise errors.OnnxExporterError(
-                "value must be either torch._C.Value, torch.Tensor objects or None."
-            )
-        elif default is not None and not isinstance(default, JitScalarType):
-            raise errors.OnnxExporterError(
-                "default value must be a JitScalarType object or None."
-            )
-        elif isinstance(value, torch.Tensor):
-            return cls.from_dtype(value.dtype)
-        elif isinstance(value.type(), torch.ListType):
-            return cls.from_dtype(value.type().getElementType().dtype())
-        scalar_type = value.type().scalarType()
-        if scalar_type is None:
+        if not isinstance(value, (torch._C.Value, torch.Tensor)):
+            # default value of type JitScalarType is returned when value is not valid
             if default is None:
-                raise errors.SymbolicValueError(
-                    f"Cannot determine scalar type for this '{type(value.type())}' instance.",
-                    value,
+                raise errors.OnnxExporterError(
+                    "value must be either torch._C.Value or torch.Tensor objects."
                 )
-            else:
-                return default
-        return cls.from_name(scalar_type)
+            elif not isinstance(default, JitScalarType):
+                raise errors.OnnxExporterError(
+                    "default value must be a JitScalarType object."
+                )
+            return default
+
+        # Each value type has their own way of storing scalar type
+        if isinstance(value, torch.Tensor):
+            return cls.from_dtype(value.dtype)
+        if isinstance(value.type(), torch.ListType):
+            return cls.from_dtype(value.type().getElementType().dtype())
+
+        # value must be a non-list torch._C.Value scalar
+        scalar_type = value.type().scalarType()
+        if scalar_type is not None:
+            return cls.from_name(scalar_type)
+
+        # When everything fails... try to default
+        if default is not None:
+            return default
+        raise errors.SymbolicValueError(
+            f"Cannot determine scalar type for this '{type(value.type())}' instance.",
+            value,
+        )
 
     @_beartype.beartype
     def scalar_name(self) -> ScalarName:

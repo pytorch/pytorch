@@ -255,9 +255,7 @@ def mm(g: jit_utils.GraphContext, self, other):
         )
     zero_constant = g.op(
         "Constant",
-        value_t=torch.tensor(
-            [0], dtype=_type_utils.JitScalarType.from_name(scalar_type).dtype()
-        ),
+        value_t=torch.tensor([0], dtype=scalar_type.dtype()),
     )
 
     if symbolic_helper._try_get_scalar_type(self):
