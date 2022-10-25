@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import itertools
 import os
 import random
 import sys
