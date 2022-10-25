@@ -321,8 +321,19 @@ def make_pointwise(
             else:
                 return fn(*[load(index) for load in loaders])
 
+        if not override_device:
+            device = None
+            for i in inputs:
+                if i.get_device().type == "cuda":
+                    device = i.get_device()
+                    break
+            if not device:
+                device = inputs[0].get_device()
+
+        device = override_device or device
+
         return Pointwise.create(
-            device=override_device or inputs[0].get_device(),
+            device=device,
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -1073,8 +1084,6 @@ make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell)
 make_fallback(aten.topk)
-make_fallback(aten.unfold)
-make_fallback(aten.unfold_backward)
 make_fallback(aten.upsample_bicubic2d_backward)
 make_fallback(aten.upsample_bilinear2d_backward)
 
@@ -1091,11 +1100,16 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
+    is_cpu = all(
+        input.get_device().type == "cpu"
+        for input in (x, weight, bias)
+        if input is not None
+    )
     result = TensorBox.create(
         ir.Convolution.create(
             x,
             weight,
-            None,  # bias handled below
+            bias if is_cpu else None,  # For cpu path, bias can always be fused
             stride,
             padding,
             dilation,
@@ -1104,7 +1118,7 @@ def convolution(
             groups,
         )
     )
-    if bias is not None:
+    if not is_cpu and bias is not None:
         kernel_dims = len(weight.get_size()) - 2
         out_chan = result.get_size()[-1 - kernel_dims]
         bias = view(bias, [out_chan] + kernel_dims * [1])

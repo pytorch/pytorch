@@ -81,24 +81,26 @@ decompositions = get_decompositions(
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
+        aten.sgn,
         aten.sigmoid_backward,
+        aten.silu,
         aten.silu_backward,
         aten.slice_backward,
-        aten.sgn,
-        aten.std_mean.correction,
         aten._softmax,
         aten._softmax_backward_data,
+        aten.softplus,
+        aten.softplus_backward,
         aten.stack,
+        aten.std_mean.correction,
         aten.t,
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
         aten.tril.default,
+        aten.unfold,
+        aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
-        aten.softplus,
-        aten.softplus_backward,
-        aten.silu,
     ]
 )
 
@@ -300,6 +302,12 @@ def fill_tensor(self, value: Tensor):
 def bernoulli(self, *, generator=None):
     assert generator is None
     return torch.rand_like(self, dtype=torch.float32) < self
+
+
+@register_decomposition([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
 
 
 """
