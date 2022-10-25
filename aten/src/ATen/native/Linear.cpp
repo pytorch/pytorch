@@ -405,7 +405,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   std::vector<SymInt> label_size(TOTAL_LABELS, 1);
   std::vector<SymInt> ell_sizes(ell_num_dim, 1);
   std::vector<uint64_t> dim_counts(perm_index, 0);
-  std::vector<Tensor> ops;
+  std::deque<Tensor> ops;
   for (const auto i : irange(num_ops)) {
     auto op = operands[i];
     std::vector<int64_t> permutation(perm_index, -1);
@@ -536,14 +536,29 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
       b = b.sum(b_dims_to_sum, true);
     }
 
-    ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    if (path.has_value()) {
+      ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    } else {
+      ops.emplace_front(sumproduct_pair(a, b, sum_dims, true));
+    }
   }
 
   // Sum out contraction dims
   if (perm_index - out_num_dim > 0) {
-    std::vector<int64_t> sum_dims(perm_index - out_num_dim);
-    std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
-    ops[0] = ops[0].sum(sum_dims);
+    // if there were ops to contract, we would have already done so
+    // in the previous loop and all the dims to sum are now 1
+    // NB: use view instead of squeeze (or sum) for faster (mps) performance
+    if (num_ops > 1) {
+      auto sizes = ops[0].sym_sizes().vec();
+      for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {
+        sizes.erase(sizes.begin() + dim);
+      }
+      return ops[0].view_symint(sizes);
+    } else {
+      std::vector<int64_t> sum_dims(perm_index - out_num_dim);
+      std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
+      return ops[0].sum(sum_dims);
+    }
   }
 
   return ops[0];

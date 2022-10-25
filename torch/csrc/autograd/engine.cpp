@@ -466,7 +466,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // NB: The ThreadLocalStateGuard doesn't set the grad_mode because
         // GraphTask always saves ThreadLocalState without grad_mode.
         at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
-        c10::Warning::WarningHandlerGuard warnings_guard(
+        c10::WarningUtils::WarningHandlerGuard warnings_guard(
             &local_graph_task->warning_handler_);
 
         try {
