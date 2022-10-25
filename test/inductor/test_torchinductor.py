@@ -36,7 +36,7 @@ try:
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
     from torch._inductor import config
-    from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
+    from torch._inductor.compile_fx import compile_fx
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
     from torch._inductor.utils import (
@@ -4088,28 +4088,7 @@ if HAS_CPU:
         def test_timed_cpu_only(self):
             timed(lambda: torch.randn(10), ())
 
-        def test_complex_memory_overlap(self):
-            dense = torch.zeros(64, 32)
-            self.assertFalse(complex_memory_overlap(dense))
-            self.assertFalse(complex_memory_overlap(dense.t()))
-
-            strided = dense.split(4, dim=1)
-            self.assertFalse(complex_memory_overlap(strided[0]))
-            self.assertFalse(complex_memory_overlap(strided[0].t()))
-
-            unsqueezed = dense.unsqueeze(1)
-            self.assertFalse(complex_memory_overlap(unsqueezed))
-            self.assertFalse(complex_memory_overlap(unsqueezed.permute(1, 2, 0)))
-
-            expanded = unsqueezed.expand(-1, 2, -1)
-            self.assertTrue(complex_memory_overlap(expanded))
-            self.assertTrue(complex_memory_overlap(expanded.permute(1, 2, 0)))
-
-            gathered = dense.index_select(0, torch.IntTensor([1, 0, 1]))
-            self.assertFalse(complex_memory_overlap(gathered))
-            self.assertFalse(complex_memory_overlap(gathered.t()))
-
-	def test_create_static_inputs_for_views(self):
+    	def test_create_static_inputs_for_views(self):
             def run_test(inputs):
                 static_inputs = create_static_inputs(inputs, [])
                 # Check inputs all have shared storage
