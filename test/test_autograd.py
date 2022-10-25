@@ -3166,6 +3166,7 @@ class TestAutograd(TestCase):
 
     def test_current_graph_task_execution_order(self):
         predicted = [None]
+        ACC_GRAD = f"{'struct ' if IS_WINDOWS else ''}torch::autograd::AccumulateGrad"
 
         def hook(_):
             predicted[0] = torch._C._current_graph_task_execution_order()
@@ -3182,7 +3183,6 @@ class TestAutograd(TestCase):
                 else:
                     out.append(t.grad_fn)
             return out
-
 
         actual = []
 
@@ -3202,7 +3202,7 @@ class TestAutograd(TestCase):
         with torch.autograd.set_multithreading_enabled(False):
             t.backward()
         self.assertEqual(names(predicted[0]), [
-            "ExpBackward0", "SinBackward0", "CloneBackward0", "torch::autograd::AccumulateGrad"
+            "ExpBackward0", "SinBackward0", "CloneBackward0", ACC_GRAD
         ])
 
         # We don't exactly follow sequence_nr order
@@ -3229,7 +3229,7 @@ class TestAutograd(TestCase):
         with torch.autograd.set_multithreading_enabled(False):
             torch.autograd.grad((out, out3, out2), inputs=(a,))
         self.assertEqual(names(predicted[0]), [
-            'CosBackward0', 'CosBackward0', 'SinBackward0', 'MulBackward0', 'torch::autograd::AccumulateGrad'
+            'CosBackward0', 'CosBackward0', 'SinBackward0', 'MulBackward0', ACC_GRAD
         ])
         # TODO: Uncomment after update to hooks behavior
         # self.assertEqual(predicted[0], grad_fns(*actual))
@@ -3255,7 +3255,7 @@ class TestAutograd(TestCase):
         with torch.autograd.set_multithreading_enabled(False):
             torch.autograd.grad((out,), inputs=(a, b,))
         self.assertEqual(names(predicted[0]), [
-            'SinBackward0', 'MulBackward0', 'torch::autograd::AccumulateGrad'
+            'SinBackward0', 'MulBackward0', ACC_GRAD
         ])
         # TODO: Uncomment after update to hooks behavior
         # self.assertEqual(predicted[0], grad_fns(*actual))
