@@ -595,7 +595,7 @@ class CheckFunctionManager:
     """
 
     def _parse_symbolic_shape_expressions(self, tensor_check_names, tensor_check_ids):
-        # Output
+        # Pre join output
         finished_expressions = []
 
         # A mapping of tensor_ids to tensor names
@@ -604,7 +604,7 @@ class CheckFunctionManager:
         # We should not have a shape env, or guards if we are not in config.dynamic shapes
         # But check it anyway.
         if not config.dynamic_shapes:
-            return finished_expressions
+            return None
 
         expr_to_tensor_ref = {}
         guard_printer = DynamoGuardPrinter(expr_to_tensor_ref, id_to_name_map)
@@ -625,24 +625,14 @@ class CheckFunctionManager:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
             finished_expressions.append(f"isinstance({name}, torch.Tensor)")
-        # Extract all the guard elements out of guards
-        # The guard format, atm, uses tuple position 0 for the expression
-        # and tuple position 1 for a negation. Eventually, these will be collapsed together.
-        expression_and_evaluation = [
-            (guard[0], guard[1]) for guard in self.output_graph.shape_env.guards
-        ]
-        for expression, evaluation in expression_and_evaluation:
-            expr_as_str = guard_printer.doprint(expression)
-            # We may get into a state where symbolic shape keys (all should be found in replacements)
-            # Have not been removed from the expression. This is a serious enough error state that we need to assert.
-            for key in self.output_graph.shape_env.var_to_val.keys():
-                assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
 
-            # Certain expressions are negated in their guards.
-            if not evaluation:
-                expr_as_str = f"not ({expr_as_str})"
-
-            finished_expressions.append(expr_as_str)
+        guard_expression = self.output_graph.shape_env.get_guard_expr()
+        expr_as_str = guard_printer.doprint(guard_expression)
+        # We may get into a state where symbolic shape keys (all should be found in replacements)
+        # Have not been removed from the expression. This is a serious enough error state that we need to assert.
+        for key in self.output_graph.shape_env.var_to_val.keys():
+            assert str(key) not in expr_as_str, f"Unknown shape symbol {key}. "
+        finished_expressions.append(expr_as_str)
 
         for expr in expr_to_tensor_ref.keys():
             tensor_refs = expr_to_tensor_ref[expr].keys()
@@ -653,9 +643,15 @@ class CheckFunctionManager:
 
             if len(equality_candidates) > 1:
                 equality_expr = " == ".join(equality_candidates)
+                # breakpoint()
                 finished_expressions.append(equality_expr)
 
-        return finished_expressions
+        # Redundant with code_parts, but allows us to wrap it with parens nicely.
+        if len(finished_expressions) == 0:
+            return None
+
+        expression = " and ".join(finished_expressions)
+        return f"({expression})"
 
     def compile_check_fn(self, local_builder, global_builder):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
@@ -683,12 +679,12 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
-            finished_expressions = self._parse_symbolic_shape_expressions(
+            symbolic_shape_expression = self._parse_symbolic_shape_expressions(
                 tensor_check_names, tensor_check_ids
             )
-            for expression in finished_expressions:
-                code_parts.append(expression)
-                verbose_code_parts.append(expression)
+            if symbolic_shape_expression:
+                code_parts.append(symbolic_shape_expression)
+                verbose_code_parts.append(symbolic_shape_expression)
 
             tensor_check_examples = (
                 local_builder.tensor_check_examples
@@ -708,6 +704,9 @@ class CheckFunctionManager:
         def direct_equality(a, b):
             return a == b
 
+        def direct_negation(a, b):
+            return not direct_equality(a, b)
+
         code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
@@ -716,6 +715,7 @@ class CheckFunctionManager:
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
                 ("Eq", direct_equality),
+                ("Ne", direct_negation),
                 ("Mod", sympy.Mod),
                 ("FloorDiv", FloorDiv),
             ]
