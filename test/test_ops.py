@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
+    slowTest,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -97,6 +98,11 @@ _ref_test_ops = tuple(
     )
 )
 _ops_and_refs = op_db + python_ref_db
+
+# Create a list of operators that are a subset of _ref_test_ops but don't have a
+# numpy ref to compare them too, If both CPU and CUDA are compared to numpy
+# then they do not need to be compared to each other
+_ops_and_refs_with_no_numpy_ref = [op for op in _ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
 
@@ -165,6 +171,37 @@ class TestCommon(TestCase):
                 )
         finally:
             torch.set_default_dtype(cur_default)
+
+    # Tests that the cpu and gpu results are consistent
+    @onlyCUDA
+    @suppress_warnings
+    @slowTest
+    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    def test_compare_cpu(self, device, dtype, op):
+
+        def to_cpu(arg):
+            if isinstance(arg, torch.Tensor):
+                return arg.to(device='cpu')
+            return arg
+
+        samples = op.sample_inputs(device, dtype)
+
+        for sample in samples:
+            cpu_sample = sample.transform(to_cpu)
+            cuda_results = op(sample.input, *sample.args, **sample.kwargs)
+            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+            # output_process_fn_grad has a very unfortunate name
+            # We use this function in linalg extensively to postprocess the inputs of functions
+            # that are not completely well-defined. Think svd and muliplying the singular vectors by -1.
+            # CPU and CUDA implementations of the SVD can return valid SVDs that are different.
+            # We use this function to compare them.
+            cuda_results = sample.output_process_fn_grad(cuda_results)
+            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
+
+            # Lower tolerance because we are running this as a `@slowTest`
+            # Don't want the periodic tests to fail frequently
+            self.assertEqual(cuda_results, cpu_results, atol=1e-3, rtol=1e-3)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
@@ -1592,7 +1629,7 @@ class TestTags(TestCase):
 @skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs._conversions"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
@@ -1636,6 +1673,19 @@ class TestRefsOpsInfo(TestCase):
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
         # these are not aten ops?
+        '_refs._conversions.bfloat16',
+        '_refs._conversions.bool',
+        '_refs._conversions.byte',
+        '_refs._conversions.char',
+        '_refs._conversions.double',
+        '_refs._conversions.float',
+        '_refs._conversions.half',
+        '_refs._conversions.int',
+        '_refs._conversions.long',
+        '_refs._conversions.short',
+        '_refs._conversions.chalf',
+        '_refs._conversions.cfloat',
+        '_refs._conversions.cdouble',
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
@@ -1664,15 +1714,23 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isclose',
         '_refs.isfinite',
         '_refs.isreal',
+        '_refs.log_softmax',
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.log_softmax',
         '_refs.nn.functional.poisson_nll_loss',
+        '_refs.nn.functional.softmax',
+        '_refs.nn.functional.softmin',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
+        '_refs.softmax',
         '_refs.special.expit',
+        '_refs.special.log_softmax',
+        '_refs.special.softmax',
         '_refs.square',
+        '_refs.T',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',

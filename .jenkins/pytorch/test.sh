@@ -97,16 +97,16 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* || "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  export BUILD_SPLIT_CUDA=ON
-fi
-
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
 if [[ "$TEST_CONFIG" == *dynamo* ]]; then
   export PYTORCH_TEST_WITH_DYNAMO=1
+fi
+
+if [[ "$TEST_CONFIG" == *inductor* ]]; then
+  export PYTORCH_TEST_WITH_INDUCTOR=1
 fi
 
 # TODO: this condition is never true, need to fix this.
@@ -247,6 +247,43 @@ test_dynamo_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
+}
+
+
+test_inductor() {
+  echo "TODO: enable inductor unit tests"
+  # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
+
+  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
+  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
+  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
+  # PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
+}
+
+test_inductor_huggingface_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  TEST_REPORTS_DIR=/tmp/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  python benchmarks/dynamo/huggingface.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_huggingface_"$1".csv
+}
+
+test_inductor_timm_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  TEST_REPORTS_DIR=/tmp/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
+    --device cuda --inductor --float32 --total-partitions 8 --partition-id "$1" \
+    --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
+  python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
 
 test_python_gloo_with_tls() {
@@ -659,12 +696,6 @@ test_vec256() {
   fi
 }
 
-test_dynamo() {
-  pushd ../torchdynamo
-  pytest test/dynamo
-  popd
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
@@ -678,7 +709,6 @@ if [[ "${TEST_CONFIG}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
-  install_torchdynamo
   build_xla
   test_xla
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -687,33 +717,54 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_torchdynamo
+  install_filelock
+  install_triton
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "$TEST_CONFIG" == deploy ]]; then
+  checkout_install_torchdeploy
+  test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  install_triton
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
-  test_dynamo_shard 2
   install_filelock
-  test_dynamo
+  install_triton
+  test_dynamo_shard 2
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  id=$((SHARD_NUMBER-1))
+  test_inductor_timm_shard $id
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 10 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  test_inductor
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_torchdynamo
+  install_triton
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  checkout_install_torchdynamo
+  install_triton
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -722,7 +773,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_torch_function_benchmark
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
-  install_torchdynamo
+  install_triton
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -740,7 +791,7 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  install_torchdynamo
+  install_triton
   install_monkeytype
   test_python
   test_aten

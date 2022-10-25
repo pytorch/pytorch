@@ -11,8 +11,8 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import NumberType, TensorLike, TensorSequenceType
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
+from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -363,7 +363,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss_backward)
+@register_decomposition(aten.huber_loss_backward.default)
 @pw_cast_for_opmath
 def huber_loss_backward(
     grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, delta: float
@@ -375,6 +375,22 @@ def huber_loss_backward(
         -norm * grad_output * delta,
         torch.where(x > delta, norm * grad_output * delta, norm * x * grad_output),
     )
+
+
+# We cannot use @out_wrapper() here, because the output tensor is not named 'out', it's 'grad_input'
+@register_decomposition(aten.huber_loss_backward.out)
+@pw_cast_for_opmath
+def huber_loss_backward_out(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int,
+    delta: float,
+    grad_input: Tensor,
+):
+    result = huber_loss_backward(grad_output, self, target, reduction, delta)
+    _maybe_resize_out(grad_input, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
 
 
 def _nll_loss_backward(
@@ -1417,7 +1433,6 @@ def _to_copy(
     return x
 
 
-@register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
     return aten.where(
@@ -1724,7 +1739,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.mean(vals, dim=(-3, -1))
 
     def maybe_mask(vals, length, range_max, adaptive, dim):
-        if isinstance(length, int):
+        if isinstance(length, IntLike):
             return vals, length
         else:
             # zero-out the things we didn't really want to select
@@ -1836,6 +1851,7 @@ def norm(
 
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec, type="pre_autograd")
 @pw_cast_for_opmath
 def upsample_bilinear2d_vec(
     input: Tensor,
@@ -2363,7 +2379,6 @@ def matmul(tensor1, tensor2):
 
 
 @register_decomposition(aten.upsample_bicubic2d.default)
-@out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     a: Tensor,

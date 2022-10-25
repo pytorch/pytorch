@@ -25,6 +25,7 @@ from ..utils import (
 from .base import VariableTracker
 from .lists import ListVariable, TupleVariable
 from .misc import AutocastModeVariable, ProfilerContextWrapperVariable
+from .nn_module import NNModuleVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -314,7 +315,7 @@ class TorchVariable(VariableTracker):
             self.value.__name__ == "set_state"
             and hasattr(self.value, "__self__")
             and isinstance(self.value.__self__, torch._C.Generator)
-        ):
+        ) or self.value == torch.random.set_rng_state:
             assert len(args) == 1
             assert isinstance(args[0], TensorVariable)
 
@@ -324,7 +325,10 @@ class TorchVariable(VariableTracker):
                 # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
                 # However, it is imperative to record the call_function in the graph with the true args
                 # (Not the fake example_value) - for the sake of graph correctness.
-                example_value = self.value.__self__.get_state()
+                if self.value == torch.random.set_rng_state:
+                    example_value = torch.random.get_rng_state()
+                else:
+                    example_value = self.value.__self__.get_state()
             else:
                 example_value = args[0].proxy.node.meta["example_value"]
 
@@ -555,20 +559,52 @@ class TorchPyOperator(VariableTracker):
 
         def unwrap_real(arg):
             if isinstance(arg, TensorVariable):
-                return arg.as_proxy().node.meta["example_value"]
+                return arg.get_real_value()
             if isinstance(arg, UserFunctionVariable):
                 return arg.fn
+            if isinstance(arg, NNModuleVariable):
+                return tx.output.get_submodule(arg.module_key)
             if arg.has_unpack_var_sequence(tx):
                 return [
                     unwrap_real(arg_inner) for arg_inner in arg.unpack_var_sequence(tx)
                 ]
             return arg
 
+        def make_attr(name, proxy_args=None):
+            node = tx.output.create_proxy(
+                "get_attr",
+                name,
+                tuple(proxy_args) if proxy_args else tuple(),
+                {},
+            )
+            return node
+
         # Get values
         u_args = [unwrap_real(arg) for arg in args]
 
         def unwrap_proxy(arg):
             try:
+                if isinstance(arg, TensorVariable):
+                    return arg.as_proxy()
+                if isinstance(arg, NNModuleVariable):
+                    name = arg.module_key
+                    mod = unwrap_real(arg)
+                    options = VariableTracker.propagate(self, args, kwargs.values())
+                    tx.output.register_attr_or_module(
+                        mod,
+                        name,
+                        name,
+                        source=NNModuleSource(
+                            GetItemSource(self.source, arg.module_key)
+                        ),
+                        **options,
+                    )
+                    return make_attr(name)
+                if arg.has_unpack_var_sequence(tx):
+                    return [
+                        unwrap_proxy(arg_inner)
+                        for arg_inner in arg.unpack_var_sequence(tx)
+                    ]
                 return arg.as_proxy()
             except NotImplementedError:
                 return arg
@@ -623,17 +659,8 @@ class TorchPyOperator(VariableTracker):
                     true_guards == false_guards
                 ), "Guards for true and false path must be equal."
 
-            def make_attr(name):
-                node = tx.output.create_proxy(
-                    "get_attr",
-                    name,
-                    tuple(proxy_args),
-                    {},
-                )
-                return node
-
-            true_node = make_attr(true_name)
-            false_node = make_attr(false_name)
+            true_node = make_attr(true_name, proxy_args)
+            false_node = make_attr(false_name, proxy_args)
             p_args[1] = true_node
             p_args[2] = false_node
 

@@ -37,6 +37,11 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 
 
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
+
+
 @dataclass
 class GraphCompileReason:
     """Stores why a given output graph was compiled; i.e. what caused the graph break."""
@@ -64,11 +69,6 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
-
-
 class OutputGraph(fx.Tracer):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -92,6 +92,8 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
+        # Node => computed real value (see TensorVariable.get_real_value)
+        self.real_value_cache = {}
 
         # Not checkpointed
         self.compiler_fn = compiler_fn
@@ -139,6 +141,7 @@ class OutputGraph(fx.Tracer):
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
+                self.real_value_cache.pop(node, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -229,7 +232,12 @@ class OutputGraph(fx.Tracer):
                 return wrap_name(k)
 
         # create a new unique name
-        name = re.sub(r"[^a-zA-Z0-9]", "_", "_".join(map(str, names)))
+        name = "_".join(map(str, names))
+        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
@@ -380,6 +388,7 @@ class OutputGraph(fx.Tracer):
             for node in self.graph.nodes:
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
+            self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
@@ -410,9 +419,14 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
-            _step_logger()(logging.INFO, "calling compiler function")
+            name = (
+                self.compiler_fn.__name__
+                if hasattr(self.compiler_fn, "__name__")
+                else ""
+            )
+            _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            _step_logger()(logging.INFO, "done compiler function")
+            _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
             log.warning("-" * 40 + "\n")
@@ -420,8 +434,7 @@ class OutputGraph(fx.Tracer):
             log.warning(e, exc_info=True)
             log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
-            if config.raise_on_backend_error:
-                raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):
@@ -452,6 +465,7 @@ class OutputGraph(fx.Tracer):
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
+                self.real_value_cache.pop(node, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -486,6 +500,7 @@ class OutputGraph(fx.Tracer):
         for node in self.graph.nodes:
             if "example_value" in node.meta:
                 del node.meta["example_value"]
+        self.real_value_cache.clear()
 
     def create_proxy(
         self,

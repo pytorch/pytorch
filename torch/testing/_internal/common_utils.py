@@ -612,15 +612,6 @@ def sanitize_test_filename(filename):
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
-# hack until https://github.com/pytorch/pytorch/issues/82109 is resolved
-def sanitize_if_functorch_test_filename(filename):
-    # absolute filenames must be converted to relative paths, otherwise,
-    # we cannot prepend test-reports/ to it
-    # (e.g. test-reports\\C:\\... on windows is nonsense)
-    if filename.startswith(CI_FUNCTORCH_ROOT):
-        filename = filename[len(CI_PT_ROOT) + 1:]
-    return filename
-
 def lint_test_case_extension(suite):
     succeed = True
     for test_case_or_suite in suite:
@@ -640,10 +631,8 @@ def lint_test_case_extension(suite):
     return succeed
 
 
-def get_report_path(pytest=False):
-    test_filename = inspect.getfile(sys._getframe(2))
-    test_filename = sanitize_if_functorch_test_filename(test_filename)
-    test_filename = sanitize_test_filename(test_filename)
+def get_report_path(argv=UNITTEST_ARGS, pytest=False):
+    test_filename = sanitize_test_filename(argv[0])
     test_report_path = TEST_SAVE_XML + LOG_SUFFIX
     test_report_path = os.path.join(test_report_path, test_filename)
     if pytest:
@@ -935,14 +924,17 @@ TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
 TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
 
 if TEST_WITH_TORCHDYNAMO:
-    import torchdynamo
+    import torch._dynamo
     import logging
-    torchdynamo.config.log_level = logging.ERROR
+    torch._dynamo.config.log_level = logging.ERROR
     # Do not spend time on helper functions that are called with different inputs
-    torchdynamo.config.cache_size_limit = 8
+    torch._dynamo.config.cache_size_limit = 8
+    # TODO: Remove this; this is grandfathered in because we suppressed errors
+    # on test suite previously
+    torch._dynamo.config.suppress_errors = True
 
 
-def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
+def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -2031,13 +2023,13 @@ class TestCase(expecttest.TestCase):
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             if TEST_WITH_TORCHINDUCTOR:
-                super_run = torchdynamo.optimize("inductor")(super().run)
+                super_run = torch._dynamo.optimize("inductor")(super().run)
             else:
-                super_run = torchdynamo.optimize("eager")(super().run)
+                super_run = torch._dynamo.optimize("eager")(super().run)
             super_run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.
-            # torchdynamo.reset()
+            # torch._dynamo.reset()
         else:
             super().run(result=result)
 
@@ -2505,7 +2497,7 @@ class TestCase(expecttest.TestCase):
             # This emulates unittest.TestCase's behavior if a custom message passed and
             # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
             # is True (default)
-            msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
+            msg=(lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]

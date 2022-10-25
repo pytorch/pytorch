@@ -315,8 +315,9 @@ class SchedulerNode(BaseSchedulerNode):
             return super().allocate()
 
         if config.inplace_buffers:
-            raise AssertionError("https://github.com/pytorch/torchdynamo/issues/823")
-            """
+            from .codegen.triton_template import should_use_template
+            from .codegen.wrapper import buffer_reuse_key
+
             for read in self.read_writes.reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
                     read.name
@@ -332,6 +333,13 @@ class SchedulerNode(BaseSchedulerNode):
                         len(remaining_uses) == 1
                         and remaining_uses[0].can_inplace
                         and remaining_uses[0].node is self
+                        and not isinstance(
+                            input_node.node.get_layout(),
+                            (ir.MultiOutputLayout, ir.MutationLayout, ir.AliasedLayout),
+                        )
+                        and not should_use_template(input_node.node)
+                        and buffer_reuse_key(input_node.node)
+                        == buffer_reuse_key(self.node)
                     ):
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
@@ -340,7 +348,6 @@ class SchedulerNode(BaseSchedulerNode):
                             input_node.get_name(), self.get_name()
                         )
                         return
-            """
         super().allocate()
 
     def run(self, *index_vars):
@@ -988,6 +995,11 @@ class Scheduler:
                 node = self.name_to_node[name]
                 if node.can_free():
                     V.graph.wrapper_code.codegen_free(node.node)
+            elif name in V.graph.graph_inputs:
+                storage = V.graph.graph_inputs[name].data
+                assert storage.is_input_buffer()
+                V.graph.wrapper_code.codegen_free(storage.data)
+
         self.buffer_names_to_free.clear()
 
     def remove_kernel_local_buffers(self):
@@ -1002,7 +1014,16 @@ class Scheduler:
                 and name not in self.mutation_renames
                 and name not in self.mutation_real_name
             ):
-                self.remove_buffer(name)
+                # For inplace buffers subject to remove, we don't actually
+                # remove them but put them in a dedicated set. This simplifies
+                # the life cycle management of inplace buffers.
+                # This set is used to
+                # 1) avoid unnecessary store in DeferredLine.
+                # 2) avoid alias var definitions in kernel.
+                if name in V.kernel.args.inplace_buffers:
+                    V.graph.inplaced_to_remove.add(name)
+                else:
+                    self.remove_buffer(name)
 
     def remove_buffer(self, name):
         # Assign a special value instead of deleting the entry
@@ -1079,5 +1100,7 @@ class Scheduler:
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
+
+            self.available_buffer_names.update(node.get_names())
 
         self.flush()
