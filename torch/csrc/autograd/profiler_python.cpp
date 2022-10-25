@@ -314,13 +314,6 @@ class ValueCache {
   CallTypeHelper<State>::tuple_type state_;
 };
 
-TensorMetadata toTensorMetadata(PyObject* self) {
-  TORCH_INTERNAL_ASSERT(THPVariable_CheckExact(self));
-  const auto& t = THPVariable_Unpack(self);
-  RawTensorMetadata m{t};
-  return TensorMetadata{m};
-}
-
 template <CallType C>
 typename Config<C>::cls_t set_class(
     ValueCache* value_cache,
@@ -341,6 +334,31 @@ typename Config<C>::cls_t set_class(
         at::StringView(py::str(cls_handle.attr("__name__")));
   }
   return cls;
+}
+
+TensorMetadata toTensorMetadata(PyObject* self) {
+  TORCH_INTERNAL_ASSERT(THPVariable_CheckExact(self));
+  const auto& t = THPVariable_Unpack(self);
+  RawTensorMetadata m{t};
+  return TensorMetadata{m};
+}
+
+c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
+  return THPVariable_CheckExact(p.ptr())
+      ? c10::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
+      : c10::nullopt;
+}
+
+std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
+    py::dict tensor_map) {
+  std::vector<std::pair<std::string, TensorMetadata>> out;
+  for (auto& it : tensor_map) {
+    auto* value = it.second.ptr();
+    if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
+      out.push_back({py::cast<std::string>(it.first), toTensorMetadata(value)});
+    }
+  }
+  return out;
 }
 
 template <>
@@ -460,24 +478,6 @@ template <>
 ExtraFields<EventType::PyCCall>::args_t ValueCache::load<CallType::PyCCall>(
     const PyCCallKey& key) const {
   return std::get<CallType::PyCCall>(state_).at(key);
-}
-
-c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
-  return THPVariable_CheckExact(p.ptr())
-      ? c10::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
-      : c10::nullopt;
-}
-
-std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
-    py::dict tensor_map) {
-  std::vector<std::pair<std::string, TensorMetadata>> out;
-  for (auto& it : tensor_map) {
-    auto* value = it.second.ptr();
-    if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
-      out.push_back({py::cast<std::string>(it.first), toTensorMetadata(value)});
-    }
-  }
-  return out;
 }
 
 // TODO: Use re2.
