@@ -366,6 +366,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     should_check_result = should_randomize_input = args.randomize_input
     is_correct = True
 
+    baseline_model_iter_fn = get_baseline_model_iter_fn(args, model_iter_fn)
+    baseline_model = get_baseline_model(args, model)
+
     import contextlib
 
     @contextlib.contextmanager
@@ -387,7 +390,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
             # interleave the runs to handle frequency scaling and load changes
             timings[rep, 0], expected_output = timed(
-                model, model_iter_fn, inputs, return_result=True
+                baseline_model, baseline_model_iter_fn, inputs, return_result=True
             )
             timings[rep, 1], actual_output = timed(
                 model, frozen_model_iter_fn, inputs, return_result=True
@@ -784,6 +787,56 @@ def maybe_fresh_cache(fn):
     return inner
 
 
+def xla_wrapper(model_iter_fn):
+    """
+    Wrap the model_iter_fn to run the model on XLA devices.
+    """
+
+    def wrapper(xla_mod, inputs, collect_outputs=True):
+        import torch_xla.core.xla_model as xm
+
+        # Make sure the model is already moved to the xla device. Moving
+        # the model to xla device can be very expensive since model parameters
+        # need to be copied. We should not do that inside the wrapper since
+        # the wrapper will be calles for each set of inputs.
+        assert (
+            next(xla_mod.parameters()).device.type == "xla"
+        ), "The model should be already on xla device"
+
+        xla_dev = xm.xla_device()
+        eager_dev = inputs[0].device
+        xla_inputs = tree_map(lambda x: x.to(device=xla_dev), inputs)
+        xla_out = model_iter_fn(xla_mod, xla_inputs, collect_outputs)
+        if isinstance(xla_out, torch.Tensor):
+            return xla_out.to(device=eager_dev)
+        elif hasattr(xla_out, "__dict__"):
+            for k in xla_out.__dict__.keys():
+                if xla_out.__dict__[k] is None:
+                    continue
+                xla_out.__dict__[k] = tree_map(
+                    lambda x: x.to(device=eager_dev), xla_out.__dict__[k]
+                )
+            return xla_out
+        else:
+            raise RuntimeError(f"Can not handle type {type(xla_out)}")
+
+    return wrapper
+
+
+def get_baseline_model_iter_fn(args, model_iter_fn):
+    return xla_wrapper(model_iter_fn) if args.use_xla_baseline else model_iter_fn
+
+
+def get_baseline_model(args, model):
+    if args.use_xla_baseline:
+        import torch_xla.core.xla_model as xm
+
+        xla_dev = xm.xla_device()
+        return copy.deepcopy(model).to(device=xla_dev)
+    else:
+        return model
+
+
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
@@ -1101,7 +1154,9 @@ class BenchmarkRunner:
             )
 
             compilation_time = dynamo_latency - eager_latency
-            compression_ratio = eager_peak_mem / dynamo_peak_mem
+            compression_ratio = (
+                eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
+            )
             # print(
             #     f"memory: eager: {eager_peak_mem:.2f} GB, "
             #     f"dynamo: {dynamo_peak_mem:.2f} GB, "
@@ -1365,6 +1420,11 @@ def parse_args():
         "--disable-cudagraphs",
         action="store_true",
         help="Disables cudagraphs for Inductor",
+    )
+    parser.add_argument(
+        "--use-xla-baseline",
+        action="store_true",
+        help="Whether to run baseline on XLA devices or eager devices",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
