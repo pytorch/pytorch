@@ -234,7 +234,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_nested(
         return std::make_tuple(Tensor(), Tensor());
     }
 }
-
+namespace{
 
 /**
  * This function is used to calculate two pieces of metadata that are needed
@@ -242,9 +242,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_nested(
  * cumulative sequence_length over a batch of sequences and the maximum sequence
  * length.
  *
- * @return A tuple of cumulative sequence lengths and the maximum sequence length
+ * @return A tuple of cumulative sequence lengths and the maximum sequence length,
+ * and the last element in the cumulative_sequence_lengths
  */
-std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
+std::tuple<Tensor, int64_t, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
   TORCH_CHECK(
       qkv.is_nested(),
       "QKV must be nested for flash cumulative_seq_len calculation.")
@@ -274,7 +275,7 @@ std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
   // Send to GPU, this is pretty light weight calc for normal batch size
   // but maybe this needs to be on gpu
   cumulative_seqlen = cumulative_seqlen.to(TensorOptions().device(at::kCUDA));
-  return std::tuple<Tensor, int64_t>{cumulative_seqlen, max_seqlen};
+  return std::tuple<Tensor, int64_t, int64_t>{cumulative_seqlen, max_seqlen, sum};
 }
 
 /**
@@ -337,6 +338,7 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
   return true;
 }
 
+} // namespace
 std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
     const Tensor& query,
     const Tensor& key,
@@ -354,19 +356,19 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  auto cumulative_and_max_q = cumulative_and_max_seq_len(q_t);
-  auto cumulative_and_max_k = cumulative_and_max_seq_len(k_t);
+  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(q_t);
+  auto cumulative_and_max_k_and_nnz_k = cumulative_and_max_seq_len(k_t);
 
   // K and V have to have the same Nnz, should probably torch_check
   // assume in order to not iterate over v
 
-  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q);
-  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k);
+  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q_and_nnz_q);
+  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k_and_nnz_k);
 
-  const int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q);
+  const int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q_and_nnz_q);
 
-  const int64_t Nnz_q = cumulative_sequence_length_q[-1].item<int64_t>();
-  const int64_t Nnz_kv = cumulative_sequence_length_k[-1].item<int64_t>();
+  const int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
+  const int64_t Nnz_kv = std::get<2>(cumulative_and_max_k_and_nnz_k);
 
   Tensor query_buffer_reshaped;
   Tensor key_buffer_reshaped;
@@ -460,15 +462,15 @@ Tensor flash_attention_helper(
   int64_t head_dim{query.size(-1)};
   int64_t num_heads{query.size(-2)};
 
-  auto cumulative_and_max_q = cumulative_and_max_seq_len(query);
-  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q);
-  int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q);
+  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(query);
+  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q_and_nnz_q);
+  int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q_and_nnz_q);
 
   TORCH_CHECK(
       key.is_same(key) && query.is_same(value),
       "Key and Value must be the same tensor");
 
-  int64_t Nnz_q{cumulative_sequence_length_q[-1].item<int64_t>()};
+  int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
 
   // For the packed case we need to set the output size for dim 2 to 1
   auto atten_size = get_nested_size_tensor(query).clone();
