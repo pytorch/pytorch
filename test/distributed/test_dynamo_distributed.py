@@ -18,8 +18,8 @@ class ToyModel(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
-            + [nn.Linear(5000, 5000), nn.ReLU()] * num_hidden
-            + [nn.Linear(5000, 5), nn.ReLU()]
+            + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()] * num_hidden
+            + [nn.Linear(hidden_feat, 5), nn.ReLU()]
         )
 
     def forward(self, inputs):
@@ -160,7 +160,10 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         Ensures the DDPOptimizer returns a correct, compiled module without
         introducing graph splits. (Based on model parmeters fitting in the bucket)
         """
-        m, inputs, correct_outputs = self.get_model()
+        # DDP will always do a 'first bucket' with a really small size;  so only a tiny model will escape this
+        m = ToyModel(hidden_feat=5).to(self.device)
+        inputs = torch.randn(20, 10).to(self.device)
+        correct_outputs = m(inputs)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=250)
 
         check_splits_compiler = CheckSplitsCompiler()
