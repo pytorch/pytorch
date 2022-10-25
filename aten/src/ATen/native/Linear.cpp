@@ -1,17 +1,36 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <ATen/SmallVector.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <c10/macros/Macros.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
-#include <array>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_trilinear.h>
+#include <ATen/ops/_trilinear_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/bilinear_native.h>
+#include <ATen/ops/bmm.h>
+#include <ATen/ops/einsum_native.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/mkldnn_linear.h>
+#include <ATen/ops/mm.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/tensordot_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <cctype>
-#include <cstddef>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -405,7 +424,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   std::vector<SymInt> label_size(TOTAL_LABELS, 1);
   std::vector<SymInt> ell_sizes(ell_num_dim, 1);
   std::vector<uint64_t> dim_counts(perm_index, 0);
-  std::vector<Tensor> ops;
+  std::deque<Tensor> ops;
   for (const auto i : irange(num_ops)) {
     auto op = operands[i];
     std::vector<int64_t> permutation(perm_index, -1);
@@ -536,14 +555,29 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
       b = b.sum(b_dims_to_sum, true);
     }
 
-    ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    if (path.has_value()) {
+      ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    } else {
+      ops.emplace_front(sumproduct_pair(a, b, sum_dims, true));
+    }
   }
 
   // Sum out contraction dims
   if (perm_index - out_num_dim > 0) {
-    std::vector<int64_t> sum_dims(perm_index - out_num_dim);
-    std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
-    ops[0] = ops[0].sum(sum_dims);
+    // if there were ops to contract, we would have already done so
+    // in the previous loop and all the dims to sum are now 1
+    // NB: use view instead of squeeze (or sum) for faster (mps) performance
+    if (num_ops > 1) {
+      auto sizes = ops[0].sym_sizes().vec();
+      for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {
+        sizes.erase(sizes.begin() + dim);
+      }
+      return ops[0].view_symint(sizes);
+    } else {
+      std::vector<int64_t> sum_dims(perm_index - out_num_dim);
+      std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
+      return ops[0].sum(sum_dims);
+    }
   }
 
   return ops[0];
