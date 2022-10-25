@@ -3242,6 +3242,29 @@ class TestAutograd(TestCase):
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
+        # Case where two `inputs` on the same path
+        a = torch.tensor(1., requires_grad=True)
+        b = a * 2
+        out = b.sin()
+        register_logging_hooks(a, b, out)
+        out.register_hook(hook)
+        with torch.autograd.set_multithreading_enabled(False):
+            torch.autograd.grad((out,), inputs=(a, b,))
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
+        # Case where `inputs` specifies a subgraph
+        a = torch.tensor(1., requires_grad=True)
+        b = torch.tensor(1., requires_grad=True)
+        c = a * b
+        out = c.sin()
+        register_logging_hooks(a, b, c, out)
+        out.register_hook(hook)
+        with torch.autograd.set_multithreading_enabled(False):
+            torch.autograd.grad((out,), inputs=(a,))
+        self.assertEqual(predicted[0], grad_fns(*actual))
+        actual = []
+
         # Errors when not called in a backward
         with self.assertRaisesRegex(RuntimeError, "should only be called during the backward pass"):
             torch._C._current_graph_task_execution_order()
