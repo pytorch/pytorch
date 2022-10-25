@@ -408,11 +408,11 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   // We could potentially check if there is only a single device here
   // but explicitly require this context doens't seem bad either
   TORCH_CHECK(
-    !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
-    "get_current_graph_task_execution_order expects the current backward to be "
-    "executed with multithreading disabled, e.g. by running:\n\n"
-    ">>> with torch.autograd.set_multithreading_enabled(False):\n"
-    "...     torch.autograd.grad(...)\n");
+      !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
+      "get_current_graph_task_execution_order expects the current backward to be "
+      "executed with multithreading disabled, e.g. by running:\n\n"
+      ">>> with torch.autograd.set_multithreading_enabled(False):\n"
+      "...     torch.autograd.grad(...)\n");
 
   const bool check_exec_info = !task->exec_info_.empty();
   std::vector<Node*> out{};
@@ -1143,6 +1143,8 @@ auto Engine::execute(
   init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
+  // Store root nodes so we can traverse through the graph later
+  // e.g., for get_current_graph_task_execution_order
   c10::SmallVector<Node*, 4> temp_roots{root_edges.size()};
   for (const auto i : c10::irange(root_edges.size())) {
     temp_roots[i] = root_edges[i].function.get();
