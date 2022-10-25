@@ -103,14 +103,12 @@ class _TorchDynamoContext:
                 "Please refer to https://github.com/pytorch/torchdynamo#usage-example "
                 "to use torch._dynamo.optimize(...) as an annotation/decorator. "
             )
-        utils.debug_dir.setup()
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        utils.debug_dir.clear()
         set_eval_frame(self.prior)
         self.prior = unset
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
@@ -152,14 +150,12 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             on_enter()
-            utils.debug_dir.setup()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
             finally:
-                utils.debug_dir.clear()
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
 
