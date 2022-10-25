@@ -1836,9 +1836,7 @@ class TestImports(TestCase):
         out = subprocess.check_output(
             [sys.executable, "-W", "all", "-c", "; ".join(commands)],
             stderr=subprocess.STDOUT,
-            # On Windows, opening the subprocess with the default CWD makes `import torch`
-            # fail, so just set CWD to this script's directory
-            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        ).decode("utf-8")
         self.assertEqual(out.strip(), expected)
 
 class TestOpInfos(TestCase):
