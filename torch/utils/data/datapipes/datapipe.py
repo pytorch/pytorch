@@ -356,8 +356,17 @@ class _DataPipeSerializationWrapper:
 
 
 class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataPipe):
-    def __iter__(self):
-        yield from self._datapipe
+    def __init__(self, datapipe: IterDataPipe[T_co]):
+        super().__init__(datapipe)
+        self._datapipe_iter: Optional[Iterator[T_co]] = None
+
+    def __iter__(self) -> "_IterDataPipeSerializationWrapper":
+        self._datapipe_iter = iter(self._datapipe)
+        return self
+
+    def __next__(self) -> T_co:
+        assert self._datapipe_iter is not None
+        return next(self._datapipe_iter)
 
 
 class _MapDataPipeSerializationWrapper(_DataPipeSerializationWrapper, MapDataPipe):
