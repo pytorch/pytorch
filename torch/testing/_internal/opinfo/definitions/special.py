@@ -91,18 +91,11 @@ def sample_inputs_entr(op_info, device, dtype, requires_grad, **kwargs):
     if requires_grad:
         low = 0 + op_info._domain_eps
 
-    return (
-        SampleInput(
-            make_tensor(
-                (L,), dtype=dtype, device=device, low=low, requires_grad=requires_grad
-            )
-        ),
-        SampleInput(
-            make_tensor(
-                (), dtype=dtype, device=device, low=low, requires_grad=requires_grad
-            )
-        ),
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, low=low, requires_grad=requires_grad
     )
+    yield SampleInput(make_arg((L,)))
+    yield SampleInput(make_arg(()))
 
 
 op_db: List[OpInfo] = [
@@ -658,6 +651,18 @@ python_ref_db: List[OpInfo] = [
         op_db=op_db,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.special.entr",
+        torch_opinfo_name="special.entr",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.erfcx",
+        torch_opinfo_name="special.erfcx",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
         torch_opinfo_name="special.i0e",
         supports_nvfuser=False,
@@ -672,6 +677,24 @@ python_ref_db: List[OpInfo] = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i1e",
         torch_opinfo_name="special.i1e",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.log_ndtr",
+        torch_opinfo_name="special.log_ndtr",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.ndtr",
+        torch_opinfo_name="special.ndtr",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.ndtri",
+        torch_opinfo_name="special.ndtri",
         supports_nvfuser=False,
         op_db=op_db,
     ),

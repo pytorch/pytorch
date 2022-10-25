@@ -103,7 +103,7 @@ There are three types of quantization supported:
 3. static quantization aware training (weights quantized, activations quantized,
    quantization numerics modeled during training)
 
-Please see our `Introduction to Quantization on Pytorch
+Please see our `Introduction to Quantization on PyTorch
 <https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
 for a more comprehensive overview of the tradeoffs between these quantization
 types.
@@ -258,7 +258,7 @@ PTSQ API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'fbgemm' for server inference and
   # 'qnnpack' for mobile inference. Other quantization configurations such
-  # as selecting symmetric or assymetric quantization and MinMax or L2Norm
+  # as selecting symmetric or asymmetric quantization and MinMax or L2Norm
   # calibration techniques can be specified here.
   model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
 
@@ -1144,9 +1144,9 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.quantization
 .. py:module:: torch.ao.quantization.fx
 .. py:module:: torch.ao.quantization.backend_config
-.. py:module:: torch.ao.sparsity
-.. py:module:: torch.ao.sparsity.scheduler
-.. py:module:: torch.ao.sparsity.sparsifier
+.. py:module:: torch.ao.pruning
+.. py:module:: torch.ao.pruning.scheduler
+.. py:module:: torch.ao.pruning.sparsifier
 
 .. py:module:: torch.nn.qat
 .. py:module:: torch.nn.qat.modules
