@@ -137,6 +137,47 @@ function install_triton() {
   fi
 }
 
+function setup_torchdeploy_deps(){
+  conda install -y cmake
+  conda install -y -c conda-forge libpython-static=3.10
+  local CC
+  local CXX
+  CC="$(which gcc)"
+  CXX="$(which g++)"
+  export CC
+  export CXX
+  pip install --upgrade pip
+}
+
+function checkout_install_torchdeploy() {
+  local commit
+  setup_torchdeploy_deps
+  pushd ..
+  git clone --recurse-submodules https://github.com/pytorch/multipy.git
+  pushd multipy
+  pip install -e .
+  popd
+  popd
+}
+
+function test_torch_deploy(){
+ pushd ..
+ pushd multipy
+ python multipy/runtime/example/generate_examples.py
+ ./multipy/runtime/build/test_deploy
+ popd
+ popd
+}
+
+function test_torch_deploy_compat(){
+ pushd ..
+ pushd multipy
+ python -m pip install -r compat-requirements.txt
+ ./multipy/runtime/build/interactive_embedded_interpreter --pyscript multipy/runtime/test_compat.py
+ popd
+ popd
+}
+
 function test_functorch() {
   python test/run_test.py --functorch --verbose
 }
