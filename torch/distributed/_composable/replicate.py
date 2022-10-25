@@ -2,11 +2,19 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 
 class DistributedState:
     ...
+
+
+def _get_module_dist_state(module: nn.Module) -> Optional[DistributedState]:
+    return getattr(module, "_distributed_state", None)
+
+
+def _set_module_dist_state(module: nn.Module, state: DistributedState) -> None:
+    module._distributed_state = state  # type: ignore[assignment]
 
 
 class ReplicateState(DistributedState):
@@ -18,17 +26,23 @@ class ReplicateState(DistributedState):
     def add_modules(self, *modules: nn.Module) -> None:
         for module in modules:
             self.modules.append(module)
-            module._distributed_state = self
+            _set_module_dist_state(module, self)
             module.register_forward_pre_hook(self.forward_pre_hook)
             module.register_forward_hook(self.forward_post_hook)
 
-    def _recursive_add_params(self, module: nn.Module) -> None:
-        ...
+    def _recursive_collect_params(self, module: nn.Module) -> None:
+        if _get_module_dist_state(module) is not None:
+            return
+        self.parameters.extend(
+            param for param in module.parameters() if param.requires_grad
+        )
+        for child in module.children():
+            self._recursive_collect_params(child)
 
     def init_helper(self):
         self.has_initialized = True
         for module in self.modules:
-            self._recursive_add_params(module)
+            self._recursive_collect_params(module)
         # broadcast parameters, create Reducer
         ...
 
