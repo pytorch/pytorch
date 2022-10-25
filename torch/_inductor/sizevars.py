@@ -344,7 +344,7 @@ class SizeVarAllocator(object):
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
             self.guard_equals(numerator % denominator, 0)
             return True
-        return True
+        return False
 
     def guard_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
