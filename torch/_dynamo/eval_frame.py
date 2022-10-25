@@ -243,7 +243,6 @@ def catch_errors_wrapper(callback):
             with compile_lock:
                 return callback(frame, cache_size)
         except Exception:
-            log.exception("Error while processing frame")
             raise
 
     catch_errors._torchdynamo_orig_callable = callback
