@@ -382,7 +382,7 @@ test_libtorch() {
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       "$TORCH_BIN_DIR"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     elif [[ "$BUILD_ENVIRONMENT" != *tsan* ]]; then
-      # TODO: Enable this for TSAN
+      # TODO: Enable this for TSAN later if need to
       "$TORCH_BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
 
@@ -390,7 +390,7 @@ test_libtorch() {
     if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
       LTC_TS_CUDA=1 "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     elif [[ "$BUILD_ENVIRONMENT" != *tsan* ]]; then
-      # TODO: Enable this for TSAN
+      # TODO: Enable this for TSAN later if need to
       "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     fi
 
