@@ -329,7 +329,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const int64_t n_bins,
     const double ratio,
     int64_t bit_width) {
-    
+
   if (numel < 0 || numel > input_tensor.numel()) {
     TORCH_CHECK(false, "numel is out of the bound of input tensor");
   }
