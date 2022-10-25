@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Iterator, Optional, Tuple
+from typing import Any, Iterator, Optional, Tuple
 
 import torch
 from torch._C._autograd import _ProfilerResult
@@ -25,8 +25,8 @@ class _Storage:
     def __repr__(self) -> str:
         return f"{hex(self.ptr):>18} ({self.allocation_id})"
 
-    def __eq__(self, other: "_Storage") -> bool:
-        return self.allocation_id == other.allocation_id
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, _Storage) and self.allocation_id == other.allocation_id
 
     def __hash__(self) -> int:
         return hash(self.allocation_id)
