@@ -20,7 +20,7 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.CODE print compiled functions + graphs
+# logging.CODE print compiled functions + graphs (NOTE: can only be used after importing torch._dynamo.logging)
 # logging.INFO print the steps that dynamo is running
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
