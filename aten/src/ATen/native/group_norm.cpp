@@ -1,15 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
-#include <ATen/CPUApplyUtils.h>
-#include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Parallel.h>
 #include <c10/util/accumulate.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/group_norm_native.h>
+#include <ATen/ops/native_batch_norm.h>
+#include <ATen/ops/native_group_norm.h>
+#include <ATen/ops/native_group_norm_backward_native.h>
+#include <ATen/ops/native_group_norm_native.h>
+#endif
 
 #include <array>
 #include <functional>
-#include <numeric>
 #include <tuple>
 #include <vector>
 
@@ -224,8 +233,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   } else if (bias.defined()) {
     out = out.add(bias.view(affine_param_shape));
   }
-  at::Tensor mean = std::get<1>(outputs).view({N, group});
-  at::Tensor rstd = std::get<2>(outputs).view({N, group});
+  // convert mean/std to have the same dtype as input.
+  // This follows the same behavior as the CPU and CUDA kernels.
+  at::Tensor mean = std::get<1>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
+  at::Tensor rstd = std::get<2>(outputs).to(c10::TensorOptions().dtype(input.scalar_type())).view({N, group});
   return std::make_tuple(out, mean, rstd);
 }
 } // namespace native
