@@ -41,7 +41,6 @@ from .scatter_gather import gather, is_namedtuple, scatter_kwargs  # noqa: F401
 
 __all__ = ["DistributedDataParallel"]
 
-
 logger = logging.getLogger(__name__)
 
 
