@@ -200,7 +200,8 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
       check_for_attn_weights,
       check_for_attn_mask,
       check_head_dim_size,
-      check_gpu_sm75_or_greater};
+      check_gpu_sm75_or_greater,
+      check_for_seq_len_1_nested_tensor};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

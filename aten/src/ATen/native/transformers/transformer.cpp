@@ -127,25 +127,11 @@ Tensor transformer_encoder_layer_forward(
 #if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
   }
 #endif
-  x = std::get<0>(at::_native_multi_head_attention(
-      x,
-      x,
-      x,
-      embed_dim,
-      num_heads,
-      qkv_weight,
-      qkv_bias,
-      proj_weight,
-      proj_bias,
-      mask,
-      false /* need_weights */,
-      true /* average_attn_weights */,
-      mask_type));
-
   x.add_(src);
   if (!norm_first) {
     x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
   }
+
 
   auto pre_ffn_res = x;
 

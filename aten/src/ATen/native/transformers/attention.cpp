@@ -715,21 +715,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
-     // We are not training and we are falling back to math case.
-  // Inputs are required to be contiguous if nested
-    Tensor query_contiguous = query_;
-    Tensor key_contiguous = key;
-    Tensor value_contiguous = value;
-    if (query_.is_nested()) {
-      query_contiguous = query_.contiguous();
-    }
-    if (key.is_nested()) {
-      key_contiguous = key.contiguous();
-    }
-    if (value.is_nested()) {
-      value_contiguous = value.contiguous();
-    }
-
+  if (query_.is_nested() || key.is_nested() || value.is_nested()) {
+    TORCH_CHECK(
+        query_.is_contiguous() && key.is_contiguous() &&
+            value.is_contiguous(),
+        "scaled_dot_product_attention: If inputs are nested tensors they must be contiguous");
+  }
     auto attn_mask = attn_mask_;
     // Naive, composite implementation defined here.
     const auto embed_size = query_.size(-1);
@@ -737,15 +728,15 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
-        TORCH_CHECK(!query.is_nested() && !key_contiguous.is_nested(),
+        TORCH_CHECK(!query.is_nested() && !key.is_nested(),
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
 
         // Replace attn_mask with causal mask; lower triangular elements take part in attention.
-        const auto L = query.size(-2), S = key_contiguous.size(-2);
+        const auto L = query.size(-2), S = key.size(-2);
         attn_mask = at::ones({L, S}, query.options().dtype(at::kBool)).tril();
     }
     if (attn_mask.has_value()) {
-        TORCH_CHECK(!query.is_nested() && !key_contiguous.is_nested(),
+        TORCH_CHECK(!query.is_nested() && !key.is_nested(),
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported "
                 "when an explicit attn_mask is set");
         // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
@@ -764,7 +755,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     if (dropout_p > 0.0) {
       attn = at::dropout(attn, dropout_p, true);
     }
-    const auto output = at::matmul(attn, value_contiguous);
+    const auto output = at::matmul(attn, value);
     return std::make_tuple(output, attn);
 }
 
