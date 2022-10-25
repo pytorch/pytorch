@@ -2448,16 +2448,16 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                     torch.ao.quantization.default_dynamic_qconfig,
                 ]
             )
-            .set_module_name("fc2",
-                    [
-                        None,
-                        torch.ao.quantization.default_dynamic_qconfig,
-                        torch.ao.quantization.default_qat_qconfig_v2,
-                    ])
+            .set_module_name(
+                "fc2",
+                [
+                    None,
+                    torch.ao.quantization.default_dynamic_qconfig,
+                    torch.ao.quantization.default_qat_qconfig_v2,
+                ],
+            )
         )
-        self.assertEqual(
-            len(qconfig_multi_mapping.qconfig_mappings_list), 2
-        )
+        self.assertEqual(len(qconfig_multi_mapping.qconfig_mappings_list), 2)
         msq = self._test_impl(m, example_input, qconfig_multi_mapping)
 
         self.checkQuantizedLinear(msq.shadow_wrapper_0_1.mod_0)
