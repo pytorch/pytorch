@@ -13,12 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-bionic-cuda11_6-py3_10-gcc7-inductor-build:
-    name: cuda11.6-py3.10-gcc7-sm86
+  pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12-inductor-build:
+    name: cuda11.6-py3.8-clang12
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      build-environment: linux-jammy-cuda11.6-cudnn8-py3.8-clang12
+      docker-image-name: pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -36,11 +36,11 @@ jobs:
           { config: "inductor", shard: 12, num_shards: 12, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
-    name: cuda11.6-py3.10-gcc7-sm86
+  pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12-inductor-test:
+    name: cuda11.6-py3.8-clang12
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_10-gcc7-inductor-build
+    needs: pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12-inductor-build
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda11.6-py3.8-clang12
+      docker-image: ${{ needs.pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12-inductor-build.outputs.test-matrix }}

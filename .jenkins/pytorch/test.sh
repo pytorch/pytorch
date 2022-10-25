@@ -756,25 +756,7 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 # 2: Huggingface
 # 3-10: TIMM
 # 11-12: TorchBench
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  test_inductor
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_huggingface
-  test_inductor_huggingface_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 11 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  install_timm
-  id=$((SHARD_NUMBER-3))
-  test_inductor_timm_shard $id
-elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 13 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER == 11 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchtext
   install_torchvision
   install_filelock
