@@ -1818,6 +1818,27 @@ class TestImports(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
         self.assertEquals(out, "")
 
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
+    @parametrize('path', ['torch', 'functorch'])
+    def test_no_mutate_global_logging_on_import(self, path) -> None:
+        # Calling logging.basicConfig, among other things, modifies the global
+        # logging state. It is not OK to modify the global logging state on
+        # `import torch` (or other submodules we own) because users do not expect it.
+        expected = 'abcdefghijklmnopqrstuvwxyz'
+        commands = [
+            'import logging',
+            f'import {path}',
+            '_logger = logging.getLogger("torch_test_testing")',
+            'logging.root.addHandler(logging.StreamHandler())',
+            'logging.root.setLevel(logging.INFO)',
+            f'_logger.info("{expected}")'
+        ]
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "; ".join(commands)],
+            stderr=subprocess.STDOUT,
+        ).decode("utf-8")
+        self.assertEqual(out.strip(), expected)
+
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
         a, b, c, d, e = [object() for _ in range(5)]
@@ -1913,6 +1934,7 @@ class TestOpInfoSampleFunctions(TestCase):
 
 
 instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_parametrized_tests(TestImports)
 
 
 if __name__ == '__main__':
