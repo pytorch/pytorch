@@ -148,10 +148,11 @@ def cpp_compile_command(input, output, include_pytorch=False):
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
         macros = ""
-        if config.cpp.simdlen == 16:
-            macros = " " + "-DCPU_CAPABILITY_AVX512"
-        elif config.cpp.simdlen == 8:
-            macros = " " + "-DCPU_CAPABILITY_AVX2"
+        if config.cpp.simdlen:
+            if config.cpp.simdlen == 16:
+                macros = " " + "-DCPU_CAPABILITY_AVX512"
+            elif config.cpp.simdlen == 8:
+                macros = " " + "-DCPU_CAPABILITY_AVX2"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
