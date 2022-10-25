@@ -342,10 +342,9 @@ class SizeVarAllocator(object):
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            multiple = self.size_hint(numerator) // self.size_hint(denominator)
-            self.guard_equals(multiple * denominator, numerator)
+            self.guard_equals(numerator % denominator, 0)
             return True
-        return False
+        return True
 
     def guard_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
@@ -461,6 +460,11 @@ class SizeVarAllocator(object):
             code.writeline(f"{name}_stride = {name}.stride()")
             return f"{name}_stride"
 
+        @functools.lru_cache(None)
+        def storageoffsetof(name):
+            code.writeline(f"{name}_storage_offset = {name}.storage_offset()")
+            return f"{name}_storage_offset"
+
         # TODO: This should be the below, but causes test/test_torchinductor.py::GpuTests::test_triton_conv_cuda to fail
         # needed_vars = set(self.var_to_val.keys()) - set(self.replacements.keys())
 
@@ -482,6 +486,12 @@ class SizeVarAllocator(object):
                 if shape in needed:
                     needed.remove(shape)
                     code.writeline(f"{shape} = {strideof(name)}[{dim}]")
+
+        for name, value in graph_inputs.items():
+            offset = str(value.data.get_layout().offset)
+            if offset in needed:
+                needed.remove(offset)
+                code.writeline(f"{offset} = {storageoffsetof(name)}")
 
         assert not needed
 

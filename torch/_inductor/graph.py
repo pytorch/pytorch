@@ -206,18 +206,23 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        if config.static_weight_shapes and (
-            len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
-        ):
+        weight_tensor = len(self.graph_inputs) < self.num_static_inputs
+        if config.static_weight_shapes and (weight_tensor or not config.dynamic_shapes):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
+
+        storage_offset = example.storage_offset()
+        if not (weight_tensor and config.static_weight_shapes):
+            storage_offset = self.sizevars[storage_offset]
         tensor = TensorBox.create(
             InputBuffer(
                 target,
-                FixedLayout(example.device, example.dtype, sizes, strides),
+                FixedLayout(
+                    example.device, example.dtype, sizes, strides, storage_offset
+                ),
             )
         )
         self.graph_inputs[target] = tensor

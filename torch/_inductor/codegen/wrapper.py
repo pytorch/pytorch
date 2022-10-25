@@ -368,13 +368,16 @@ class WrapperCodeGen(CodeGen):
         if not config.benchmark_harness:
             return
 
-        def add_fake_input(name, shape, stride, device, dtype):
-            output.writeline(
+        def add_fake_input(name, shape, stride, device, dtype, storage_offset):
+            line = (
                 f"{name} = rand_strided("
                 f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
                 f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
-                f"device='{device.type}', dtype={dtype})"
+                f"device='{device.type}', dtype={dtype}"
             )
+            if storage_offset:
+                line = f"{line}, storage_offset={storage_offset}"
+            output.writeline(f"{line})")
 
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
@@ -388,14 +391,25 @@ class WrapperCodeGen(CodeGen):
 
             for name, value in V.graph.constants.items():
                 add_fake_input(
-                    name, value.size(), value.stride(), value.device, value.dtype
+                    name,
+                    value.size(),
+                    value.stride(),
+                    value.device,
+                    value.dtype,
+                    value.storage_offset(),
                 )
 
             for name, value in V.graph.graph_inputs.items():
                 shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
                 stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                storage_offset = V.graph.sizevars.size_hint(value.get_layout().offset)
                 add_fake_input(
-                    name, shape, stride, value.get_device(), value.get_dtype()
+                    name,
+                    shape,
+                    stride,
+                    value.get_device(),
+                    value.get_dtype(),
+                    storage_offset,
                 )
 
             output.writeline(

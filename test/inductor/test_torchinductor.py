@@ -1438,6 +1438,18 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    def test_offset_input(self):
+        def fn(x):
+            return (torch.ops.aten.select.int(x, 1, 2),)
+
+        x = torch.rand([3, 4, 5, 6], device=self.device)
+        y = x[1]
+        opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
+        self.assertEqual(opt_fn(y), fn(y))
+
+        z = x[2]
+        self.assertEqual(opt_fn(z), fn(z))
+
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
