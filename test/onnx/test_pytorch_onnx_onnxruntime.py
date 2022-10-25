@@ -6855,6 +6855,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(trilModelwithNegDiagonal(), (x))
 
+        class trilModelWithDiagonalInput(torch.nn.Module):
+            def forward(self, x, diagnonal: int):
+                return torch.tril(x, diagonal=diagnonal)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelWithDiagonalInput(), (x, 5))
+
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_triu(self):
         class triuModel(torch.nn.Module):
@@ -6871,12 +6878,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(triuModelwithDiagonal(), (x))
 
-        class trilModelwithNegDiagonal(torch.nn.Module):
+        class triuModelwithNegDiagonal(torch.nn.Module):
             def forward(self, x):
-                return torch.tril(x, diagonal=-1)
+                return torch.triu(x, diagonal=-1)
 
         x = torch.randn(2, 3, 4)
-        self.run_test(trilModelwithNegDiagonal(), (x))
+        self.run_test(triuModelwithNegDiagonal(), (x))
+
+        class triuModelWithDiagonalInput(torch.nn.Module):
+            def forward(self, x, diagnonal: int):
+                return torch.triu(x, diagonal=diagnonal)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(triuModelWithDiagonalInput(), (x, 5))
 
     def test_mish(self):
         class MishModel(torch.nn.Module):
@@ -9075,7 +9089,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"output_1": [1]},
         )
 
-    @skipScriptTest(min_opset_version=11)  # dynamic split support addded in 11
+    @skipScriptTest(
+        skip_before_opset_version=11, reason="dynamic split support addded in 11"
+    )
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
@@ -9974,11 +9990,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(Module(), (boxes, scores))
 
-    @unittest.skip(
-        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
-    )
     @skipIfUnsupportedMinOpsetVersion(11)
-    # TODO: Fails with vision 0.13. See #77671
     def test_batched_nms(self):
         num_boxes = 100
         boxes = torch.rand(num_boxes, 4)
@@ -10014,10 +10026,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(boxes, size), (boxes, size_2)],
         )
 
-    @unittest.skip(
-        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
+    @skipScriptTest(
+        reason="Conditioning on input type via prim::isinstance unsupported in ONNX"
     )
-    @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -10025,11 +10036,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torchvision.ops.RoIAlign((5, 5), 1.0, 2)
         self.run_test(model, (x, single_roi))
 
-    @unittest.skip(
-        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
+    @skipScriptTest(
+        reason="Conditioning on input type via prim::isinstance unsupported in ONNX"
     )
-    @skipIfUnsupportedMaxOpsetVersion(15)  # TODO: Opset 16 RoiAlign result mismatch
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(16)
     def test_roi_align_aligned(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
         single_roi = torch.tensor([[0, 1.5, 1.5, 3, 3]], dtype=torch.float32)
@@ -10051,8 +10061,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model4 = torchvision.ops.RoIAlign((2, 2), 2.5, 0, aligned=True)
         self.run_test(model4, (x, single_roi))
 
-    @unittest.skip(
-        "Broken in recent TorchVision, see https://github.com/pytorch/pytorch/issues/81121"
+    @skipScriptTest(
+        reason="Conditioning on input type via prim::isinstance unsupported in ONNX"
     )
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_pool(self):
@@ -11383,7 +11393,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M_ToDeviceDtype(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipScriptTest()
     def test_fill(self):
         class FillModule(torch.nn.Module):
             def forward(self, x, filled_value: int):
@@ -11392,6 +11401,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn((4, 5, 6))
         filled_value = 7
         self.run_test(FillModule(), (x, filled_value))
+
+        class FillFloatModule(torch.nn.Module):
+            def forward(self, x, filled_value: float):
+                return x.fill_(filled_value)
+
+        x = torch.randn((4, 5, 6))
+        filled_value = 7.5
+        self.run_test(FillFloatModule(), (x, filled_value))
 
         class FillScalarModule(torch.nn.Module):
             def forward(self, x):
@@ -12493,6 +12510,33 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
         self.run_test(LerpModel(), torch.rand(5, 4, 3))
+
+    @common_utils.parametrize("input_dtype", [torch.cfloat, torch.float])
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_print_tensor_within_torch_nn_module(self, input_dtype: torch.dtype):
+        class PrintTensorOnMyModel(torch.nn.Module):
+            def forward(self, x):
+                # 'print' has side effect calling 'resolve_conj' and 'resolve_neg'.
+                x_firsts = x[:, 0]
+                print(f"x_firsts: {x_firsts}")
+                # 'tolist' has side effect calling 'resolve_conj' and 'resolve_neg'.
+                # Annotation added to pass torch script.
+                _: List[float] = x.tolist()
+                return x_firsts
+
+        m = PrintTensorOnMyModel()
+        x = torch.randn(10, 5, dtype=input_dtype)
+        if input_dtype == torch.cfloat:
+            with self.assertRaises(RuntimeError):
+                self.run_test(
+                    m,
+                    x,
+                )
+        else:
+            self.run_test(
+                m,
+                x,
+            )
 
     # Cannot export with older opsets because of "ConstantFill" op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime

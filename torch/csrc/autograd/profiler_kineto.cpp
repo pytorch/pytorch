@@ -12,10 +12,10 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/containers.h>
-#include <torch/csrc/profiler/itt_observer.h>
 #include <torch/csrc/profiler/kineto_shim.h>
-#include <torch/csrc/profiler/nvtx_observer.h>
 #include <torch/csrc/profiler/orchestration/observer.h>
+#include <torch/csrc/profiler/standalone/itt_observer.h>
+#include <torch/csrc/profiler/standalone/nvtx_observer.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <ATen/Context.h>
@@ -134,11 +134,15 @@ struct AddTensorboardFields : public MetadataBase {
 };
 
 struct AddGenericMetadata : public MetadataBase {
-  AddGenericMetadata(std::shared_ptr<Result>& result) : MetadataBase(result) {
+  AddGenericMetadata(std::shared_ptr<Result>& result, const bool verbose)
+      : MetadataBase(result) {
     result->visit(*this);
-    result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
-      this->addMetadata("Python thread", std::to_string(i.python_tid_));
-    });
+    if (verbose) {
+      result->visit_if_base<PyExtraFieldsBase>(
+          [&, this](const auto& i) -> void {
+            this->addMetadata("Python thread", std::to_string(i.python_tid_));
+          });
+    }
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
@@ -311,7 +315,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
         kineto_events_.emplace_back(e, config_.experimental_config.verbose);
         AddTensorboardFields add_tb(e, kineto_events_.back());
-        AddGenericMetadata add_generic(e);
+        AddGenericMetadata add_generic(e, config_.experimental_config.verbose);
 
         // It is not safe to use the activity after post processing.
         e->kineto_activity_ = nullptr;

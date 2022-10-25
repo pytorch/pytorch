@@ -307,7 +307,10 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // Profiling support: the last launch param used
   LaunchParams launch_params_;
 
-  // Profiling support: knob to disable caching of launch params
+  // Profiling support: disable caching of launch params and output allocation
+  // output allocation is also disable when output sizes are dependent on
+  // runtime scalar inputs, such as for the case of tensor factory. see
+  // https://github.com/csarofeen/pytorch/issues/2002
   bool disable_parameter_cache_ = false;
 
   // Profiling support: kept copy of the cuda kernel
