@@ -90,9 +90,7 @@ class TestContract(TestCase):
 
         model = ToyModel()
 
-        with self.assertRaisesRegex(
-            AssertionError, "cannot modify parameter FQNs"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "cannot modify FQNs"):
             wrap_module(model.seq1)
 
 
