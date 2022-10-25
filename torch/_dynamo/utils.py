@@ -931,35 +931,13 @@ class CompileProfiler:
         return rpt
 
 
-class DebugDir:
-    def __init__(self):
-        self.num_setup_calls = 0
-        self.debug_path = None
-
-    def setup(self):
-        assert self.num_setup_calls >= 0
-        if self.num_setup_calls == 0:
-            debug_root = config.debug_dir_root
-            dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
-            self.debug_path = os.path.join(debug_root, dir_name)
-
-        self.num_setup_calls += 1
-
-    def clear(self):
-        assert self.num_setup_calls >= 0
-        if self.num_setup_calls == 1:
-            self.debug_path = None
-
-        self.num_setup_calls -= 1
-        assert self.num_setup_calls >= 0
-
-    def get(self):
-        assert self.debug_path is not None
-        return self.debug_path
-
-
-debug_dir = DebugDir()
+# return same dir unless user changes config between calls
+@functools.lru_cache(None)
+def _get_debug_dir(root_dir):
+    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    return os.path.join(root_dir, dir_name)
 
 
 def get_debug_dir():
-    return debug_dir.get()
+    debug_root = config.debug_dir_root
+    return _get_debug_dir(debug_root)
