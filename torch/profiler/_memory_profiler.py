@@ -51,8 +51,8 @@ class _Storage:
     def __repr__(self) -> str:
         return f"{hex(self.ptr):>18} ({self.allocation_id})"
 
-    def __eq__(self, other: "_Storage") -> bool:
-        return self.allocation_id == other.allocation_id
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, _Storage) and self.allocation_id == other.allocation_id
 
     def __hash__(self) -> int:
         return hash(self.allocation_id)
@@ -96,7 +96,7 @@ class TensorKey:
 
     @classmethod
     def from_allocation(cls, alloc: _ExtraFields_Allocation) -> Optional["TensorKey"]:
-        return cls._make(alloc.id, alloc.ptr, alloc.device)
+        return cls._make(alloc.id, alloc.ptr, alloc.allocation_id, alloc.device)
 
     @classmethod
     def from_tensor(cls, t: Optional[_TensorMetadata]) -> Optional["TensorKey"]:
@@ -106,7 +106,7 @@ class TensorKey:
 
     @property
     def _as_sortable(self) -> Tuple[int, int, str, int]:
-        return self.id, self.storage_ptr, self.device.type, self.device.index
+        return self.id, self.storage.allocation_id, self.device.type, self.device.index
 
 
 def _extract_parameters_and_gradients(
