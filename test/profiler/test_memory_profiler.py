@@ -299,7 +299,7 @@ class TestDataFlow(TestCase):
 
         memory_profile = prof._memory_profile()
         graph = memory_profile._data_flow_graph
-        storage_to_id = {key.storage_ptr: key.id for key in graph._active_version}
+        storage_to_id = {key.storage.ptr: key.id for key in graph._active_version}
 
         lines: List[str] = []
         for name, t in it.chain(inputs.items(), outputs.items()):
