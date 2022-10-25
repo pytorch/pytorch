@@ -1897,8 +1897,6 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "svd_lowrank",
     "sgn",
     "cholesky",
-    "linalg.eigh",
-    "symeig",
 }
 
 fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {

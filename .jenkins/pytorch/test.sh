@@ -252,7 +252,7 @@ test_dynamo_shard() {
 
 test_inductor() {
   python test/test_modules.py --verbose
-  pytest test/test_ops_gradients.py --verbose -k "not _complex"
+  pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
 }
 
 test_inductor_huggingface_shard() {
@@ -733,24 +733,17 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_filelock
   install_triton
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
-  install_timm
-  id=$((SHARD_NUMBER-1))
-  test_inductor_timm_shard $id
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_inductor
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
   install_triton
   install_huggingface
   test_inductor_huggingface_shard 0
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 10 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_filelock
-  install_triton
-  test_inductor
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
