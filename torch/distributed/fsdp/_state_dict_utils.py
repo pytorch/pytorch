@@ -54,7 +54,7 @@ def _full_post_state_dict_hook(
     if (
         (
             not module._use_orig_params
-            and FSDP.FLAT_PARAM in module._parameters
+            and FSDP.FLAT_PARAM in module.module._parameters
         )
         or (
             module._use_orig_params
@@ -236,7 +236,7 @@ def _sharded_post_state_dict_hook(
     with a unflattened, sharded parameter (a ShardedTensor).
     """
     _replace_by_prefix(state_dict, f"{prefix}{FSDP.FSDP_PREFIX}", prefix)
-    if not module.has_params:
+    if not module._has_params:
         return state_dict
 
     assert module.training_state != FSDP.TrainingState_.SUMMON_FULL_PARAMS, (
@@ -277,10 +277,10 @@ def _sharded_pre_load_state_dict_hook(
     a new FlatParameter and shards the new FlatParameter to the local chunk.
     """
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP.FSDP_PREFIX}")
-    if not module.has_params:
+    if not module._has_params:
         return
 
-    if not module._fsdp_wrapped_module.handle.uses_sharded_strategy:
+    if not module._handles[0].uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
             "are flatten and sharded."
