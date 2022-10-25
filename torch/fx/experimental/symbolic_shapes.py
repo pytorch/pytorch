@@ -458,26 +458,26 @@ class ShapeEnv(object):
         # and wrap_fake_symbolic
         meta_converter = MetaConverter()
         pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
-        return all(guard.xreplace(new_env.var_to_val) == value for guard, value, _ in self.guards)
+        return all(guard.xreplace(new_env.var_to_val) for guard, _ in self.guards)
+
+    def get_guard_expr(self):
+        """
+        Returns a sympy expression representing all of the shape env guards.
+
+        NOTE: Does not include implicit 0/1 or duck-shaping guards
+        """
+        return sympy.And(*[guard for guard, _ in self.guards])
 
     def get_nontrivial_guards(self):
-        return [(self.simplify(guard), val) for guard, val, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+        return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]
 
     def format_guards(self, verbose=False):
-        def format_val(guard, val):
-            if val is sympy.true:
-                return str(guard)
-            elif val is sympy.false:
-                return f"Not({guard})"
-            else:
-                return f"Eq({guard}, {val})"
-
         def format_tb(tb):
             if not verbose:
                 return ""
             return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
 
-        return '\n'.join(f" - {format_val(guard, val)}{format_tb(tb)}" for guard, val, tb in self.guards)
+        return '\n'.join(f" - {guard}{format_tb(tb)}" for guard, tb in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -624,5 +624,10 @@ class ShapeEnv(object):
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
         stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
-        self.guards.append((expr, concrete_val, stack))
+        if concrete_val is sympy.true:
+            self.guards.append((expr, stack))
+        elif concrete_val is sympy.false:
+            self.guards.append((sympy.Not(expr), stack))
+        else:
+            self.guards.append((sympy.Eq(expr, concrete_val), stack))
         return concrete_val

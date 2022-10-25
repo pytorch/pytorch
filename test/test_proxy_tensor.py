@@ -1018,6 +1018,15 @@ def forward(self, a_1):
             return x.shape
         self._test_dynamic(f, [(5, 3)], [[(4, 6)]])
 
+    def test_mega_guard(self):
+        def f(a, b):
+            assert a.shape[0] == b.shape[0] * 2
+            assert b.shape[0] == 8
+            return a.cos()
+        fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
+        self.assertExpectedInline(str(fx_g.shape_env.get_guard_expr()), "Eq(s1, 8) & Eq(s0, 2*s1)")
+
+
     def _assert_no_guards(self, fx_g, free_symbols):
         assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
         assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
