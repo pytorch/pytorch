@@ -13,6 +13,7 @@ from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
+    from sympy.printing.precedence import precedence  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -94,6 +95,13 @@ def sym_float(a):
         return a
     return float(a)
 
+def sym_int(a):
+    if hasattr(a, '__sym_int__'):
+        return a.__sym_int__()
+    elif isinstance(a, torch._C.SymIntNode):
+        return a
+    return int(a)
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -104,15 +112,23 @@ class PySymInt(object):
     implementation of symbolic shapes.
     """
     def __init__(self, expr, shape_env, constant=None):
-        self.expr = expr
+        self._expr = expr
         self.shape_env = shape_env
         self.constant = constant
+
+    @property
+    def expr(self):
+        self._update_expr()
+        return self._expr
 
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
         return PySymInt(self.expr, self.shape_env, constant=self.constant)
+
+    def _update_expr(self):
+        self._expr = self.shape_env.replace(self._expr)
 
     def __str__(self):
         return f"{self.expr}"
@@ -161,6 +177,18 @@ if HAS_SYMPY:
         2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
         """
         nargs = (2,)
+
+        def _sympystr(self, printer):
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer._print(lhs)
+            rhs_str = printer._print(rhs)
+            if precedence(lhs) < precedence(sympy.div):
+                lhs_str = f"({lhs_str})"
+            if precedence(rhs) < precedence(sympy.div):
+                rhs_str = f"({rhs_str})"
+
+            return f"{lhs_str}//{rhs_str}"
 
         @classmethod
         def eval(cls, base, divisor):
@@ -218,12 +246,14 @@ magic_methods = {
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
     'ceil': lambda a: Ceil(a),
+    'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
 }
 
 unary_magic_methods = {
-    'ceil'
+    'ceil',
+    'neg'
 }
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
@@ -368,13 +398,13 @@ class ShapeEnv(object):
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
-                val, i = sorted(
+                val, i = min(
                     [
                         (ex.stride()[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
                     ]
-                )[0]
+                )
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
