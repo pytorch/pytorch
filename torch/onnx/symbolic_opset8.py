@@ -167,7 +167,10 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
     if arg0_type is not None:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
-            args = tuple(g.op("Cast", arg, to_i=_C_onnx.TensorProtoDataType.FLOAT) for arg in args)
+            args = tuple(
+                g.op("Cast", arg, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+                for arg in args
+            )
         else:
             return (None,) + args
     else:
