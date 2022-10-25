@@ -1,5 +1,15 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_local_scalar_dense.h>
+#include <ATen/ops/_local_scalar_dense_native.h>
+#include <ATen/ops/item_native.h>
+#endif
 
 namespace at {
 namespace native {
