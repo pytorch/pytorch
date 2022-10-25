@@ -141,5 +141,88 @@ const Tensor& resize_(
   return self;
 }
 
+void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
+  TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
+  storage->set_nbytes(size_bytes);
+}
+
+
+static void maybe_resize_storage_meta(TensorImpl* self, c10::SymInt new_size_bytes) {
+  // It does not make sense to try to resize a storage
+  // to hold 0 elements, and this can break
+  // if storage_offset is positive but
+  // new_size is 0, so just bail in that case
+  // (same comment is in Resize.h)
+  if (self->sym_numel() == 0) {
+    return;
+  }
+
+  const Storage& storage = self->unsafe_storage();
+  if (!storage) {
+    TORCH_INTERNAL_ASSERT(0, "NYI, this should only be Caffe2");
+  } else if (new_size_bytes > storage.nbytes()) {
+    resize_bytes_meta(storage.unsafeGetStorageImpl(), new_size_bytes);
+  }
+}
+
+inline TensorImpl* resize_impl_meta_(
+    TensorImpl* self,
+    c10::SymIntArrayRef size,
+    at::OptionalSymIntArrayRef stride,
+    bool resize_storage = true) {
+  if (self->sym_sizes() == size && (!stride || self->sym_strides() == stride.value())) {
+    return self;
+  }
+
+  const auto itemsize = self->dtype().itemsize();
+  const auto storage_offset = self->sym_storage_offset();
+  auto storage_size = c10::SymInt(1);
+  std::vector<SymInt> strides;
+  int64_t dim = size.size();
+  if (!stride.has_value()) {
+    strides.resize(dim);
+    // TODO: Move this into TensorImpl
+    // this is duped with empty_symint_meta
+    if (dim > 0) {
+      const auto last_idx = dim - 1;
+      strides.at(last_idx) = 1;
+      for (auto i = last_idx - 1; i >= 0; --i) {
+        // TODO: max with 1
+        strides.at(i) = strides.at(i+1) * size.at(i+1);
+      }
+    }
+    stride = c10::make_optional<c10::SymIntArrayRef>(strides);
+  }
+  self->set_sizes_and_strides(size, *stride);
+  storage_size = at::detail::computeStorageNbytes(
+      size, *stride, itemsize, storage_offset);
+  if (resize_storage) {
+    maybe_resize_storage_meta(self, storage_size);
+  }
+
+  return self;
+}
+
+const Tensor& resize__symint(
+    const Tensor& self,
+    c10::SymIntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  TORCH_INTERNAL_ASSERT(!self.has_names())
+  auto* self_ = self.unsafeGetTensorImpl();
+  // NOLINTNEXTLINE(bugprone-argument-comment)
+  resize_impl_meta_(self_, size, /*strides=*/c10::nullopt);
+  if (optional_memory_format.has_value()) {
+    auto memory_format =
+        optional_memory_format.value();
+    TORCH_CHECK(
+        memory_format != MemoryFormat::Preserve,
+        "Unsupported memory format",
+        memory_format);
+    // NB: This doesn't actually work with symbolic shapes
+    self_->empty_tensor_restride(memory_format);
+  }
+  return self;
+}
+
 } // namespace native
 } // namespace at
