@@ -149,6 +149,7 @@ CI_SKIP_INDUCTOR_TRAINING = [
     "convit_base",  # fp64_OOM
     "gernet_l",  # accuracy
     "gluon_xception65",
+    "hrnet_w18",  # accuracy
     "lcnet_0500",  # accuracy
     "levit_128",  # levit_128
     "rexnet_100",  # accuracy
