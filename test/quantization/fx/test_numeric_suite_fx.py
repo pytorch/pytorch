@@ -2452,11 +2452,11 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
                     [
                         None,
                         torch.ao.quantization.default_dynamic_qconfig,
-                        torch.ao.quantization.default_qat_qconfig_v2
+                        torch.ao.quantization.default_qat_qconfig_v2,
                     ])
         )
         self.assertEqual(
-            len(qconfig_multi_mapping.qconfig_mappings_list),2
+            len(qconfig_multi_mapping.qconfig_mappings_list), 2
         )
         msq = self._test_impl(m, example_input, qconfig_multi_mapping)
 

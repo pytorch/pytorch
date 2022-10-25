@@ -119,10 +119,6 @@ from .fx.ns_types import (
     NSResultsType,
     NSNodeTargetType,
 )
-
-from torch.ao.quantization import (
-    QConfigMapping,
-)
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
