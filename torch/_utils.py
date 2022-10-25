@@ -1,6 +1,6 @@
+import copyreg
 import sys
 import traceback
-import copyreg
 import warnings
 from collections import defaultdict
 from typing import Any, DefaultDict, List, Optional
@@ -307,6 +307,7 @@ def _rebuild_qtensor(
     tensor._backward_hooks = backward_hooks
     return tensor
 
+
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
@@ -327,6 +328,7 @@ def _rebuild_parameter_v2(data, requires_grad, backward_hooks, state):
     # Restore state on Parameter like python attr.
     param = _set_obj_state(param, state)
     return param
+
 
 def _get_obj_state(obj):
     # Get the state of the python subclass
