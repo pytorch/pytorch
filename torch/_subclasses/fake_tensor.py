@@ -9,7 +9,6 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
-from torch._meta_registrations import active_meta_table
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -753,6 +752,8 @@ class FakeTensorMode(TorchDispatchMode):
                     )
                     # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
                     return None
+
+            from torch._meta_registrations import active_meta_table
 
             with self:
                 if func in active_meta_table:
