@@ -64,10 +64,6 @@ def index_expanded_dims(t, expanded_dims):
     return t
 
 
-def is_unspec_input(t):
-    return t.device.type == "cpu" and t.dim() == 0
-
-
 @functools.lru_cache(None)
 def _step_logger():
     return dynamo_logging.get_step_logger(log)
@@ -209,9 +205,6 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
     assert isinstance(inputs, (list, tuple))
-    # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
-    inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
-
     static_inputs = create_static_inputs(inputs, static_input_idxs)
 
     inps_expanded_dims = [
