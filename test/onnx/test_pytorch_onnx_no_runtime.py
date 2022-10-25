@@ -777,19 +777,6 @@ class TestONNXExport(common_utils.TestCase):
             model, inputs, f, dynamic_axes={"x": [0, 1]}, input_names=["x"]
         )
 
-    def test_0d_tensor_broadcast(self):
-        class fn(torch.nn.Module):
-            def forward(self, x, y):
-                a = torch.add(x, y)
-                b = torch.mul(y, y)
-                return a + b
-
-        x = torch.ones(0)
-        y = torch.ones(1)
-        torch.onnx.export(
-            fn(), (x, y), io.BytesIO(), input_names=["x", "y"], output_names=["output"]
-        )
-
 
 if __name__ == "__main__":
     common_utils.run_tests()
