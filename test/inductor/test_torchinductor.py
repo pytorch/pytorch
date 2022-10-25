@@ -1990,6 +1990,92 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_transpose_add(self):
+        def fn(a, b):
+            return a.t() + b
+
+        self.common(
+            fn, (torch.randn([16, 32]), torch.randn([32, 16])), check_lowp=False
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_softmax_one_kernel(self):
+        def fn(x):
+            dim = 1
+            x_max = torch.amax(x, dim, keepdim=True)
+            unnormalized = torch.exp(x * x_max)
+            result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+            return result
+
+        self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_cauchy(self):
+        def fn(x, y):
+            return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
+
+        self.common(
+            fn,
+            (
+                torch.randn(32),
+                torch.randn(32),
+            ),
+            # Absolute difference: 0.0003662109375 (up to 0.0001 allowed)
+            # Relative difference: 1.8804297408767818e-05 (up to 1e-05 allowed)
+            atol=5 * 1e-4,
+            rtol=5 * 1e-5,
+            check_lowp=False,
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_gather_scatter(self):
+        def fn(node_feat, edge_index):
+            src_node_feat = node_feat[edge_index[0]]
+            dst_node_feat = node_feat[edge_index[1]]
+            edge_feat = src_node_feat - dst_node_feat + 1
+            new_node_feat = torch.zeros_like(node_feat)
+            new_node_feat.scatter_add_(
+                0, edge_index[1].unsqueeze(-1).expand_as(edge_feat), edge_feat
+            )
+            return new_node_feat
+
+        num_nodes = 16
+        num_features = 32
+        node_feat = torch.randn(num_nodes, num_features)
+        edge_index = torch.randint(0, num_nodes, size=(2, num_nodes * 5))
+        self.common(
+            fn,
+            (
+                node_feat,
+                edge_index,
+            ),
+            check_lowp=False,
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @patch.object(torch._inductor.config, "max_fusion_size", 1)
+    def test_no_mega_fusion_during_lowering(self):
+        n = 50
+
+        def fn(*args):
+            x = args[0]
+            for i in range(n):
+                x = torch.add(x, args[i])
+            return x
+
+        self.common(
+            fn,
+            [torch.randn(64) for _ in range(n)],
+            check_lowp=False,
+        )
+        print("-->", torch._inductor.metrics.generated_kernel_count)
+        if self.device != "cpu":
+            self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
+
     def test_move_arange(self):
         def fn(x):
             return torch.arange(len(x), device="cpu").to(x.device) + x
@@ -3485,6 +3571,31 @@ class CommonTemplate:
             [1, 1],
             [2, 2],
             0,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
+    # From https://github.com/pytorch/torchdynamo/issues/1352
+    def test_max_pool2d_with_indices_backward4(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [5, 5], [1, 1], [2, 2], [1, 1], False, c
+            )
+
+        x = torch.randn([2, 64, 3, 4])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [5, 5],
+            [1, 1],
+            2,
             1,
             False,
         )
