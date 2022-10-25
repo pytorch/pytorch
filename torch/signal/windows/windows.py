@@ -308,8 +308,10 @@ The Kaiser window is defined as follows:
 .. math::
     out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
 
-where :math:`I_0` is the zeroth order modified Bessel function of the first kind (see :func:`torch.special.i0`), and
-:math:`N = M - 1` for symmetric windows or :math:`N = M` for periodic windows, where :math:`M` is the window length.
+where ``I_0`` is the zeroth order modified Bessel function of the first kind (see :func:`torch.special.i0`), and 
+``N = M - 1 if sym else M``.
+
+``M`` is the window length.
 
     """,
     r"""
