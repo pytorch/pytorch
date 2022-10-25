@@ -476,11 +476,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     from functorch._src.aot_autograd import make_boxed_func
 
-    from .testing import (
-        collect_results,
-        reduce_to_scalar_loss,
-        requires_bwd_pass,
-    )
+    from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
     new_args = clone_inputs(args)
@@ -868,6 +864,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 @register_backend
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
+
     from torch._dynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
