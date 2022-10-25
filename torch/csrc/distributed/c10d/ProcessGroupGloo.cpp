@@ -1149,7 +1149,6 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
   // Every process then sums the resulting sparse tensors locally.
   // The nnz for sparse tensors may be different across processes, so first
   // we run allgather on the nnz, and then allgather with max(nnz).
-  // We could use an allgatherv for this, if it were available.
   at::Tensor allreduce(std::vector<at::Tensor>& tensors) {
     // TODO: This is a massive hack!  There is some confusion about
     // Variable/Tensor inside the body of this function.  Turning off

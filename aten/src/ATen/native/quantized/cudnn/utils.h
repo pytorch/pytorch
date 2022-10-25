@@ -19,6 +19,12 @@ This file contains some of the auxiliary functions used by both Conv.cpp & Linea
 #include <c10/util/ArrayRef.h>
 #include <cudnn_frontend.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
+
 struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
   PackedLinearWeightCudnn(
       at::Tensor orig_weight,
@@ -207,7 +213,11 @@ uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  while (address % alignment == 0 && alignment < 16) alignment *= 2;
+  for (; alignment < 16; alignment *= 2) {
+    if (address % (alignment * 2)) {
+      return alignment;
+    }
+  }
   return alignment;
 }
 

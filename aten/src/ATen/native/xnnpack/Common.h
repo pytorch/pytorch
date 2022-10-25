@@ -1,11 +1,12 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <c10/util/ArrayRef.h>
+#include <limits>
+#include <memory>
 
 namespace at {
 namespace native {

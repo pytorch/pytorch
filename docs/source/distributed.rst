@@ -39,7 +39,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -349,6 +349,10 @@ as they should never be created manually, but they are guaranteed to support two
 .. autofunction:: isend
 
 .. autofunction:: irecv
+
+.. autofunction:: batch_isend_irecv
+
+.. autoclass:: P2POp
 
 Synchronous and asynchronous collective operations
 --------------------------------------------------
