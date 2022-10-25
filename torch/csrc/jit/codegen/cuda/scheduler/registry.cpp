@@ -1732,8 +1732,8 @@ void HeuristicSummary::validate() const {
             entry_type_map_.count(EntryType::CAN_SCHEDULE_TRANSPOSE));
         auto can_schedule_transpose =
             entry_type_map_.at(EntryType::CAN_SCHEDULE_TRANSPOSE)
-                ->as<
-                    CompileTimeInfo<HeuristicCompileTime::CanScheduleTranspose>>()
+                ->as<CompileTimeInfo<
+                    HeuristicCompileTime::CanScheduleTranspose>>()
                 ->get();
         if (!*can_schedule_transpose) {
           break;
