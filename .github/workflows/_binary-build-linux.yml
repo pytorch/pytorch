@@ -67,7 +67,7 @@ on:
 
 jobs:
   build:
-    runs-on: linux.4xlarge
+    runs-on: linux.12xlarge
     timeout-minutes: 270
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
