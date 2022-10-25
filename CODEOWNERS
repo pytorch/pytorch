@@ -106,11 +106,3 @@ torch/csrc/autograd/profiler* @robieta
 torch/autograd/profiler* @robieta
 torch/csrc/profiler/ @robieta
 torch/profiler/ @robieta
-
-# TorchDynamo
-benchmarks/dynamo @jansel
-test/dynamo @jansel
-test/inductor @jansel
-torch/csrc/dynamo @jansel
-torch/_dynamo @jansel
-torch/_inductor @jansel
