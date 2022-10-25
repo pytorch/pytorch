@@ -819,10 +819,14 @@ PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
   HANDLE_TH_ERRORS
   std::vector<torch::autograd::Node*> nodes =
       torch::autograd::get_current_graph_task_execution_order();
+  TORCH_CHECK(
+      nodes.size(),
+      "_current_graph_task_execution_order should only be called during the backward pass");
   auto list = THPObjectPtr(PyList_New(nodes.size()));
   if (!list)
     return nullptr;
   for (const auto i : c10::irange(nodes.size())) {
+    // This node is guaranteed to be alive since the backward is still running
     PyObject* pyobj_node =
         torch::autograd::functionToPyObject(nodes[i]->getptr());
     PyList_SET_ITEM(list.get(), i, pyobj_node);
