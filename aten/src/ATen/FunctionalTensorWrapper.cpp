@@ -49,7 +49,7 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
   // Instead, it's sufficient to remove the `Dense` dispatch key,
   // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
-  key_set_ = key_set_.remove(c10::DispatchKey::Dense);
+  // key_set_ = key_set_.remove(c10::DispatchKey::Dense);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
