@@ -2837,6 +2837,8 @@ class FallbackKernel(ExternKernelAlloc):
                 else:
                     new_args.append(next(it_non_tensors))
             return pytree.tree_unflatten(new_args, args_spec)
+        
+        tensor_args = [cls.realize_input(x) for x in tensor_args]
 
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
