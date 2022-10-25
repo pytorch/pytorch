@@ -1754,6 +1754,26 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(len(tensor_impls), repeats)
         self.assertEqual(len(set(tensor_impls)), repeats)
 
+    def test_allocation_id_uniqueness(self) -> None:
+        repeats = 1_000
+        with profile(profile_memory=True, record_shapes=True) as p:
+            for _ in range(repeats):
+                torch.ones((1,))
+                gc.collect()
+
+        roots = p.profiler.kineto_results.experimental_event_tree()
+        id_set = set()
+        for e in _utils.traverse_dfs(roots):
+            fields = e.extra_fields
+            if isinstance(fields, torch._C._profiler._ExtraFields_TorchOp):
+                id_set |= {t.allocation_id for t in fields.inputs.tensor_metadata if t is not None}
+
+            elif isinstance(fields, torch._C._profiler._ExtraFields_Allocation):
+                id_set.add(fields.allocation_id)
+
+        id_set.difference_update([None])
+        self.assertEqual(repeats, len(id_set))
+
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
