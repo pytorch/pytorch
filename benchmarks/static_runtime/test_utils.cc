@@ -124,7 +124,7 @@ void compareTensorLists(
     const bool use_allclose,
     const bool use_equalnan) {
   EXPECT_TRUE(l.size() == r.size());
-  for (int i = 0; i < l.size(); ++i) {
+  for (auto i = 0; i < l.size(); ++i) {
     ASSERT_TRUE(l[i].isTensor());
     ASSERT_TRUE(r[i].isTensor());
     VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
