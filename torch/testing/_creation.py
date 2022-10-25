@@ -6,7 +6,6 @@ import torch
 from typing import Optional, List, Tuple, Union, cast
 import math
 import collections.abc
-import random
 
 # Used by make_tensor for generating complex tensor.
 complex_to_corresponding_float_type_map = {torch.complex32: torch.float16,
@@ -31,7 +30,7 @@ def make_tensor(
     low: Optional[float] = None,
     high: Optional[float] = None,
     requires_grad: bool = False,
-    noncontiguous: bool = True,
+    noncontiguous: bool = False,
     exclude_zero: bool = False
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
@@ -154,10 +153,8 @@ def make_tensor(
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
 
     if noncontiguous and result.numel() > 1:
-        # result = torch.repeat_interleave(result, 2, dim=-1)
-        # result = result[..., ::2]
-        if result.dim() == 2 and result.size(0) == result.size(1) and random.random() < 0.5:
-            result = result.t()
+        result = torch.repeat_interleave(result, 2, dim=-1)
+        result = result[..., ::2]
 
     if exclude_zero:
         if dtype in _integral_types or dtype is torch.bool:

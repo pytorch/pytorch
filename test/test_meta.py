@@ -198,8 +198,8 @@ CHECK_STRIDES_SKIPS = {
     torch.ops.aten._scaled_dot_product_attention_forward.default,  # test_dispatch_symbolic_meta_outplace_nn_functional__scaled_dot_product_attention_cuda_float32
     torch.ops.aten.prelu.default,  # test_dispatch_symbolic_meta_outplace_nn_functional_prelu_cuda_float32
     torch.ops.aten.diag_embed.default,  # test_dispatch_symbolic_meta_outplace_diag_embed_cuda_float32
-    torch.ops.aten.index_add.default,  # test_dispatch_symbolic_meta_outplace_index_add_cuda_float32
-    torch.ops.aten.index_put.default,  # test_dispatch_symbolic_meta_outplace_index_put_cuda_float32
+    # torch.ops.aten.index_add.default,  # test_dispatch_symbolic_meta_outplace_index_add_cuda_float32
+    # torch.ops.aten.index_put.default,  # test_dispatch_symbolic_meta_outplace_index_put_cuda_float32
     torch.ops.aten.masked_fill.Tensor,  # test_dispatch_symbolic_meta_outplace_masked_fill_cuda_float32
     torch.ops.aten.masked_fill.Scalar,  # test_dispatch_symbolic_meta_outplace_masked_fill_cuda_float32
     torch.ops.aten.tril.default,  # test_dispatch_symbolic_meta_outplace_tril_cuda_float32
