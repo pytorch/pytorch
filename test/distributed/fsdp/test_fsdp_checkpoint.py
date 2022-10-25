@@ -3,6 +3,7 @@
 import contextlib
 from copy import deepcopy
 from functools import partial
+import sys
 
 import torch
 import torch.distributed as dist
@@ -23,11 +24,26 @@ from torch.testing._internal.common_fsdp import (
     _maybe_wrap_fsdp,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     run_tests,
     parametrize,
     instantiate_parametrized_tests,
 )
 from torch.utils.checkpoint import checkpoint
+
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+
 
 _save_on_cpu_called = False
 def get_patched_save_on_cpu():
