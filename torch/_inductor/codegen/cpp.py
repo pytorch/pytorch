@@ -937,7 +937,7 @@ class CppScheduling:
         ).group
 
         with CppVecKernelChecker(
-            deepcopy(self.kernel_group.args), self.kernel_group.ws.num_threads
+            deepcopy(self.kernel_group.args), parallel_num_threads()
         ) as kernel_checker:
             vars, reduction_vars = kernel_checker.set_ranges(group, reduction_group)
             for node in nodes:
