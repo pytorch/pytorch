@@ -351,7 +351,10 @@ def get_c2_aten_cpu_fbobjc_macosx_deps():
             "fbsource//xplat/caffe2:cpukernel_avx2",
         ]
     else:
-        return []
+        return select({
+            "DEFAULT": [],
+            "ovr_config//os:macos-x86_64": ["fbsource//xplat/deeplearning/fbgemm:fbgemm"],
+        }) if is_arvr_mode() else []
 
 def get_c2_aten_cpu_fbobjc_macosx_platform_deps():
     if is_focus_enabled():
