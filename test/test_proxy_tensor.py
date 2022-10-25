@@ -857,7 +857,7 @@ def forward(self, a_1):
         def f(a):
             return torch.empty(-a.shape[0] + 10)
 
-        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(1)).code).strip()
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
