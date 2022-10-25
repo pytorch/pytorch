@@ -18,7 +18,7 @@ class ReplicateState(DistributedState):
     def add_modules(self, *modules: nn.Module) -> None:
         for module in modules:
             self.modules.append(module)
-            module._distributed_state = self
+            module._distributed_state = self  # type: ignore[assignment]
             module.register_forward_pre_hook(self.forward_pre_hook)
             module.register_forward_hook(self.forward_post_hook)
 
