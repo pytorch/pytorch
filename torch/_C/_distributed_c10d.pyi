@@ -28,13 +28,6 @@ class GradBucket:
     def set_buffer(self, tensor: Tensor) -> None: ...
     def parameters(self) -> List[Tensor]: ...
 
-kDefaultBucketBytesCap = (
-    25 * 1024 * 1024
-)  # kDefaultBucketBytesCap from reducer.hpp
-kDefaultFirstBucketBytes = (
-    1024 * 1024
-)  # kDefaultFirstBucketBytes from reducer.hpp
-
 class Reducer:
     def __init__(
         self,
@@ -43,11 +36,11 @@ class Reducer:
         per_bucket_size_limits: List[int],
         process_group: ProcessGroup,
         expect_sparse_gradients: List[bool] = [],
-        bucket_bytes_cap: int = kDefaultBucketBytesCap,
+        bucket_bytes_cap: int = ...,  # kDefaultBucketBytesCap in reducer.hpp
         find_unused_parameters: bool = False,
         gradient_as_bucket_view: bool = False,
         param_to_name_mapping: Dict[int, str] = {},
-        first_bucket_types_cap: int = kDefaultFirstBucketBytes,
+        first_bucket_types_cap: int = ...,  # kDefaultFirstBucketBytes in reducer.hpp
     ): ...
     def prepare_for_forward(self) -> None: ...
     def prepare_for_backward(self, output: List[Tensor]) -> None: ...
