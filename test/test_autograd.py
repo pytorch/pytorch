@@ -3075,13 +3075,12 @@ class TestAutograd(TestCase):
 
     def test_current_graph_task_execution_order(self):
         predicted = [None]
-        ACC_GRAD = f"{'struct ' if IS_WINDOWS else ''}torch::autograd::AccumulateGrad"
 
         def hook(_):
             predicted[0] = torch._C._current_graph_task_execution_order()
 
         def names(nodes):
-            return [node.name() for node in nodes]
+            return ", ".join([node.name().split(' ')[-1] for node in nodes]) + '\n'
 
         def grad_fns(*tensors):
             # or grad accumulator
@@ -3110,9 +3109,9 @@ class TestAutograd(TestCase):
         t.register_hook(hook)
         with torch.autograd.set_multithreading_enabled(False):
             t.backward()
-        self.assertEqual(names(predicted[0]), [
-            "ExpBackward0", "SinBackward0", "CloneBackward0", ACC_GRAD
-        ])
+        self.assertExpectedInline(names(predicted[0]), """\
+ExpBackward0, SinBackward0, CloneBackward0, torch::autograd::AccumulateGrad
+""")
 
         # We don't exactly follow sequence_nr order
         a = torch.tensor(1., requires_grad=True)
@@ -3137,9 +3136,9 @@ class TestAutograd(TestCase):
         out3.register_hook(hook)
         with torch.autograd.set_multithreading_enabled(False):
             torch.autograd.grad((out, out3, out2), inputs=(a,))
-        self.assertEqual(names(predicted[0]), [
-            'CosBackward0', 'CosBackward0', 'SinBackward0', 'MulBackward0', ACC_GRAD
-        ])
+        self.assertExpectedInline(names(predicted[0]), """\
+CosBackward0, CosBackward0, SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
+""")
         # TODO: Uncomment after update to hooks behavior
         # self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
@@ -3163,9 +3162,9 @@ class TestAutograd(TestCase):
         out.register_hook(hook)
         with torch.autograd.set_multithreading_enabled(False):
             torch.autograd.grad((out,), inputs=(a, b,))
-        self.assertEqual(names(predicted[0]), [
-            'SinBackward0', 'MulBackward0', ACC_GRAD
-        ])
+        self.assertEqual(names(predicted[0]), """\
+SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
+""")
         # TODO: Uncomment after update to hooks behavior
         # self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
@@ -3179,9 +3178,9 @@ class TestAutograd(TestCase):
         out.register_hook(hook)
         with torch.autograd.set_multithreading_enabled(False):
             torch.autograd.grad((out,), inputs=(a,))
-        self.assertEqual(names(predicted[0]), [
-            'SinBackward0', 'MulBackward0', 'torch::autograd::AccumulateGrad'
-        ])
+        self.assertEqual(names(predicted[0]), """\
+SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
+""")
         # TODO: Uncomment after update to hooks behavior
         # self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
