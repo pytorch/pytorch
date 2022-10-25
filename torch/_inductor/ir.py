@@ -2218,6 +2218,53 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
+    def process_kernel(cls, kernel, *args, **kwargs):
+        args_flat, args_spec = pytree.tree_flatten(args)
+
+        is_arg_tensor = []
+        tensor_args = []
+        non_tensor_args = []
+        for arg in args_flat:
+            is_arg_tensor.append(isinstance(arg, IRNode))
+            if is_arg_tensor[-1]:
+                tensor_args.append(arg)
+            else:
+                non_tensor_args.append(arg)
+
+        def unflatten_args(new_tensor_args, new_non_tensor_args):
+            new_args = []
+            it_tensors = iter(new_tensor_args)
+            it_non_tensors = iter(new_non_tensor_args)
+            for is_tensor in is_arg_tensor:
+                if is_tensor:
+                    new_args.append(next(it_tensors))
+                else:
+                    new_args.append(next(it_non_tensors))
+            return pytree.tree_unflatten(new_args, args_spec)
+
+        # We don't have generic shape formulas, so just burn in the
+        # shapes and run an example input.
+        # TODO(jansel): replace this with dynamic shape formulas
+        example_args = []
+        for x in tensor_args:
+            size = [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()]
+            stride = [
+                V.graph.sizevars.guard_static_shape(s) for s in x.get_layout().stride
+            ]
+            dtype = x.get_dtype()
+            device = x.get_device()
+            arg = torch.empty_strided(
+                size=size, stride=stride, dtype=dtype, device=device
+            ).zero_()
+            example_args.append(arg)
+
+        example_output = kernel(
+            *unflatten_args(example_args, non_tensor_args), **kwargs
+        )
+
+        return example_output, tensor_args, non_tensor_args, unflatten_args
+
+    @classmethod
     def convert_to_reinterpret_view(cls, x):
         """
         In order to pass this to an extern kernel we need a
@@ -2815,56 +2862,13 @@ class FallbackKernel(ExternKernelAlloc):
         return list(map(repr, self.unflatten_args(tensor_args, constant_args))) + kwargs
 
     @classmethod
-    def process_kernel(cls, kernel, *args, **kwargs):
-        args_flat, args_spec = pytree.tree_flatten(args)
-
-        is_arg_tensor = []
-        tensor_args = []
-        non_tensor_args = []
-        for arg in args_flat:
-            is_arg_tensor.append(isinstance(arg, IRNode))
-            if is_arg_tensor[-1]:
-                tensor_args.append(arg)
-            else:
-                non_tensor_args.append(arg)
-
-        def unflatten_args(new_tensor_args, new_non_tensor_args):
-            new_args = []
-            it_tensors = iter(new_tensor_args)
-            it_non_tensors = iter(new_non_tensor_args)
-            for is_tensor in is_arg_tensor:
-                if is_tensor:
-                    new_args.append(next(it_tensors))
-                else:
-                    new_args.append(next(it_non_tensors))
-            return pytree.tree_unflatten(new_args, args_spec)
-
-        # We don't have generic shape formulas, so just burn in the
-        # shapes and run an example input.
-        # TODO(jansel): replace this with dynamic shape formulas
-        example_args = []
-        for x in tensor_args:
-            size = [V.graph.sizevars.guard_static_shape(s) for s in x.get_size()]
-            stride = [
-                V.graph.sizevars.guard_static_shape(s) for s in x.get_layout().stride
-            ]
-            dtype = x.get_dtype()
-            device = x.get_device()
-            arg = torch.empty_strided(
-                size=size, stride=stride, dtype=dtype, device=device
-            ).zero_()
-            example_args.append(arg)
-
-        example_output = kernel(
-            *unflatten_args(example_args, non_tensor_args), **kwargs
-        )
-
-        return example_output, tensor_args, non_tensor_args, unflatten_args
-
-
-    @classmethod
     def create(cls, kernel, *args, **kwargs):
-        example_output, tensor_args, non_tensor_args, unflatten_args = cls.process_kernel(kernel, *args, **kwargs)
+        (
+            example_output,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+        ) = cls.process_kernel(kernel, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
@@ -2972,23 +2976,36 @@ class Convolution(ExternKernelAlloc):
     ):
         x = cls.require_stride1(cls.realize_input(x))
         weight = cls.require_stride1(cls.realize_input(weight))
+        stride = tuple(stride_)
+        padding = tuple(padding_)
+        dilation = tuple(dilation_)
+        assert isinstance(transposed, bool)
+        output_padding = tuple(output_padding_)
+        assert isinstance(groups, int)
 
         # TODO - enable FakeTensorMode for propagation more globally. incorrect stride metas for fallback
         # kernels will lead to runtime failures
         with FakeTensorMode():
             output, *_ = cls.process_kernel(
-                cls,
-                aten.convolution,
+                torch.ops.aten.convolution,
                 x,
                 weight,
                 bias,
-                stride_,
-                padding_,
-                dilation_,
+                stride,
+                padding,
+                dilation,
                 transposed,
-                output_padding_,
+                output_padding,
                 groups,
             )
+
+        output_size = output.shape
+
+        weight_shape = [
+            sympy.Integer(V.graph.sizevars.guard_static_shape(s))
+            for s in weight.get_size()
+        ]
+        _, _, *kernel_size = weight.get_size()
 
         # choose runtime kernel
         config_conv = config.triton.convolution
