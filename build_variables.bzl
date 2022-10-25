@@ -1399,6 +1399,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
     "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SpectralOps.cpp",
+    "aten/src/ATen/native/nested/NestedTensorFactories.cpp",
     "aten/src/ATen/native/nested/NestedTensorMath.cpp",
     "aten/src/ATen/native/nested/NestedTensorAliases.cpp",
     "aten/src/ATen/native/nested/NestedTensorTransformerFunctions.cpp",

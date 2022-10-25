@@ -442,6 +442,20 @@ PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
       c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
   END_HANDLE_TH_ERRORS
 }
+static PyObject* THModule_rename_privateuse1_backend(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_rename_privateuse1_backend expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  const std::string backend_name = THPUtils_unpackString(arg);
+  c10::register_privateuse1_backend(backend_name);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 
 PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
@@ -608,15 +622,31 @@ PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
       "setWarnOnlyOnce expects a bool, "
       "but got %s",
       THPUtils_typename(arg));
-  c10::Warning::set_warnAlways(arg == Py_True);
+  c10::WarningUtils::set_warnAlways(arg == Py_True);
   Py_RETURN_NONE;
 }
 
 PyObject* THPModule_warnAlways(PyObject* _unused, PyObject* noargs) {
-  if (c10::Warning::get_warnAlways()) {
+  if (c10::WarningUtils::get_warnAlways()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+}
+
+// Used only for testing C++ to Python warning translations.
+PyObject* THPModule_warn(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  TORCH_WARN("Test message for TORCH_WARN");
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Used only for testing C++ to Python warning translations.
+PyObject* THPModule_warnDeprecation(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION("Test message for TORCH_WARN_DEPRECATION");
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPModule_setBenchmarkCuDNN(PyObject* _unused, PyObject* arg) {
@@ -936,6 +966,8 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS, nullptr},
     {"_set_warnAlways", THPModule_setWarnAlways, METH_O, nullptr},
+    {"_warn", THPModule_warn, METH_NOARGS, nullptr},
+    {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
     {"_get_float32_matmul_precision",
@@ -973,6 +1005,10 @@ static PyMethodDef TorchMethods[] = {
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
+    {"_rename_privateuse1_backend",
+     THModule_rename_privateuse1_backend,
+     METH_O,
+     nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},

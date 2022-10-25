@@ -883,6 +883,26 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
+    def test_call_fn_with_non_const_inputs_safe(self):
+        class ModuleSpecialFwd(torch.nn.Module):
+            def __init__(self):
+                super(ModuleSpecialFwd, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=20, kernel_size=(5, 5)
+                )
+
+            def _conv_forward(self, x):
+                return self.conv._conv_forward(x, self.conv.weight, self.conv.bias)
+
+            def forward(self, x):
+                return self._conv_forward(x)
+
+        mod = ModuleSpecialFwd()
+        rx = torch.randn([3, 10, 10])
+        real = mod(rx)
+        graph, _ = torch._dynamo.export(mod, rx)
+        self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
