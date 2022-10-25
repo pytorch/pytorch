@@ -1019,22 +1019,6 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@register_meta([aten.diag.default, aten.diag.out])
-@out_wrapper()
-def meta_diag(self, dim=0):
-    check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
-    if self.dim() == 1:
-        sz = self.size(0) + abs(dim)
-        return self.new_empty((sz, sz))
-
-    # case: dim is 2
-    if dim >= 0:
-        sz = min(self.size(0), self.size(1) - dim)
-    else:
-        sz = min(self.size(0) + dim, self.size(1))
-    return self.new_empty((sz,))
-
-
 @register_meta(aten._embedding_bag_forward_only.default)
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
@@ -1111,12 +1095,14 @@ def meta_zero_(self):
     return self
 
 
-@register_meta(
-    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar],
-    register_dispatcher=False,
-)
+@register_meta([aten.fill_.Tensor, aten.fill_.Scalar], register_dispatcher=False)
 def meta_fill_(self, val):
     return self
+
+
+@register_meta([aten.fill.Tensor, aten.fill.Scalar], register_dispatcher=False)
+def meta_fill(self, val):
+    return self.new_empty(self.shape)
 
 
 @register_meta(aten.relu_.default, register_dispatcher=False)
