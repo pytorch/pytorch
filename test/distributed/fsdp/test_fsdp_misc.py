@@ -206,8 +206,8 @@ class TestFSDPMisc(FSDPTest):
             loss.backward()
 
             # self.a receives grad, self.b does not
-            a_grad = fsdp.module.a._fsdp_wrapped_module.flat_param.grad
-            b_grad = fsdp.module.b._fsdp_wrapped_module.flat_param.grad
+            a_grad = fsdp.module.a._handles[0].flat_param.grad
+            b_grad = fsdp.module.b._handles[0].flat_param.grad
             self.assertIsNotNone(a_grad)
             self.assertIsNone(b_grad)
 

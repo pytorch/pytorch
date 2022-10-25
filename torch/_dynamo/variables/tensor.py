@@ -212,7 +212,11 @@ class TensorVariable(VariableTracker):
 
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
-            parameter_value = initial_example_value if is_parameter else None
+            should_specialize = options.pop("should_specialize", False)
+            if is_parameter or should_specialize:
+                specialized_value = initial_example_value
+            else:
+                specialized_value = None
 
             example_value = _clone_input(example_value)
             proxy.node.meta["example_value"] = example_value
@@ -222,7 +226,7 @@ class TensorVariable(VariableTracker):
                     torch.nn.Parameter if is_parameter else torch.Tensor
                 )
 
-            specialized_props["parameter_value"] = parameter_value
+            specialized_props["specialized_value"] = specialized_value
 
             options.update(specialized_props)
             return cls(proxy, **options)
@@ -328,7 +332,7 @@ class TensorVariable(VariableTracker):
                 )
         elif (
             proxy.node.target == torch._C._DisableFuncTorch
-            or proxy.node.target == torch._C._cuda_isInBadFork
+            or proxy.node.target == torch.cuda._is_in_bad_fork
         ):
             from . import UserDefinedObjectVariable
 
@@ -352,7 +356,7 @@ class TensorVariable(VariableTracker):
         is_contiguous=None,
         is_sparse=None,
         class_type=torch.Tensor,
-        parameter_value=None,
+        specialized_value=None,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -367,7 +371,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.parameter_value = parameter_value
+        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
