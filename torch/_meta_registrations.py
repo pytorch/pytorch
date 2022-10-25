@@ -1658,8 +1658,6 @@ def activate_meta():
             "aten::clone",  # causing infinite recursion
             "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
             "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
-            "aten::zeros.names",  # TypeError: zeros() got an unexpected keyword argument 'names', inductor/test_torchinductor.py -k test_zeros_cpu  # noqa: B950
-            "aten::empty.names",  # TypeError: empty() got an unexpected keyword argument 'names', inductor/test_torchinductor.py -k test_zeros_cpu  # noqa: B950
             "aten::add.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
             "aten::sub.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
             "aten::mul.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950

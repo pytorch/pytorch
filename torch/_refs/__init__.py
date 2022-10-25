@@ -3729,7 +3729,7 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_decomposition(torch.ops.aten.empty)
+@register_decomposition(torch.ops.aten.empty.memory_format)
 @out_wrapper()
 def empty(
     *shape,
@@ -3822,7 +3822,7 @@ def new_empty_strided(
     )
 
 
-@register_decomposition(torch.ops.aten.zeros)
+@register_decomposition(torch.ops.aten.zeros.default)
 @out_wrapper()
 def zeros(
     *size,
@@ -3874,7 +3874,7 @@ def new_zeros(
     )
 
 
-@register_decomposition(torch.ops.aten.ones)
+@register_decomposition(torch.ops.aten.ones.default)
 @out_wrapper()
 def ones(
     *size,
@@ -4409,7 +4409,7 @@ zeros_like = partial(full_like, fill_value=False)
 ones_like = partial(full_like, fill_value=True)
 
 # TODO: add pin_memory support
-@register_decomposition(torch.ops.aten.randn)
+@register_decomposition(torch.ops.aten.randn.default)
 @out_wrapper()
 def randn(
     *shape,
