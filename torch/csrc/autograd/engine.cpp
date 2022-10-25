@@ -399,23 +399,22 @@ void add_node_to_current_graph_task_exec_info(Node* fn) {
 }
 
 // NB: The engine itself does not use the outputs of this function.
-//
-//     WARNING: the predicted order is only correct when the following
-//     conditions are met
-//       1) all inputs to forward are computed on the same device
-//       2) all Nodes during forward have all constructed on the same thread
-//
-// Implementation notes:
-// - Don't need to count dependencies because we have sequence_nr
-// - Don't need to check topological_nr because we have exec_info
 std::vector<Node*> get_current_graph_task_execution_order() {
   std::shared_ptr<GraphTask> task = current_graph_task;
   if (!task) {
     return {};
   }
-  // TODO: Use a small vector for the roots
+
+  // We could potentially check if there is only a single device here
+  // but explicitly require this context doens't seem bad either
+  TORCH_CHECK(
+    !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
+    "get_current_graph_task_execution_order expects the current backward to be "
+    "executed with multithreading disabled, e.g. by running:\n\n"
+    ">>> with torch.autograd.set_multithreading_enabled(False):\n"
+    "...     torch.autograd.grad(...)\n");
+
   const bool check_exec_info = !task->exec_info_.empty();
-  std::vector<Node*> graph_root_ptrs = {};
   std::vector<Node*> out{};
   std::unordered_set<Node*> seen{};
 
@@ -425,11 +424,13 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   std::priority_queue<Node*, std::vector<Node*>, decltype(compare_seq_nr)> heap(
       compare_seq_nr);
 
-  for (std::shared_ptr<Node>& sptr : task->graph_roots_) {
-    Node* ptr = sptr.get();
+  for (Node* ptr : task->graph_roots_) {
     heap.push(ptr);
   }
 
+  // Implementation notes:
+  // - Don't need to count dependencies because we have sequence_nr
+  // - Don't need to check topological_nr because we have exec_info
   while (!heap.empty()) {
     Node* fn = heap.top();
     heap.pop();
@@ -1142,9 +1143,9 @@ auto Engine::execute(
   init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
-  std::vector<std::shared_ptr<Node>> temp_roots{};
-  for (const auto& edge : root_edges) {
-    temp_roots.push_back(edge.function);
+  c10::SmallVector<Node*, 4> temp_roots{root_edges.size()};
+  for (const auto i : c10::irange(root_edges.size())) {
+    temp_roots[i] = root_edges[i].function.get();
   }
 
   auto graph_task = std::make_shared<GraphTask>(

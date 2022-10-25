@@ -37,7 +37,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   // Records the nodes that are in the graph
   std::unordered_set<Node*> nodes_in_graph_;
-  std::vector<std::shared_ptr<Node>> graph_roots_;
+  c10::SmallVector<Node*, 4> graph_roots_;
   // Note [Exec info]
   // Exec info is created for each GraphTask, which allows filtering paths on
   // the graph that are not needed. It has a bit complicated semantics. If it's
@@ -165,10 +165,10 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
       bool grad_mode,
       int reentrant_depth,
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
-      std::vector<std::shared_ptr<Node>> graph_roots,
+      c10::SmallVector<Node*, 4> graph_roots,
       bool exit_on_error = false)
       : keep_graph_(keep_graph),
-        graph_roots_(graph_roots),
+        graph_roots_(std::move(graph_roots)),
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),

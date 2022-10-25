@@ -3095,7 +3095,8 @@ class TestAutograd(TestCase):
 
         actual = []
 
-        def register_validation_hooks(*tensors):
+        def register_logging_hooks(*tensors):
+            # register hooks that log the order in which they are called
             def get_hook(i):
                 def hook(t_):
                     actual.append(tensors[i])
@@ -3107,7 +3108,8 @@ class TestAutograd(TestCase):
         # Basic example: single path
         t = torch.tensor(1., requires_grad=True).clone().sin().exp()
         t.register_hook(hook)
-        t.backward()
+        with torch.autograd.set_multithreading_enabled(False):
+            t.backward()
         self.assertEqual(names(predicted[0]), [
             "ExpBackward0", "SinBackward0", "CloneBackward0", "torch::autograd::AccumulateGrad"
         ])
@@ -3118,9 +3120,10 @@ class TestAutograd(TestCase):
         c = b.sin()
         d = a.cos()
         out = c * d
-        register_validation_hooks(a, b, c, d, out)
+        register_logging_hooks(a, b, c, d, out)
         out.register_hook(hook)
-        out.backward()
+        with torch.autograd.set_multithreading_enabled(False):
+            out.backward()
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
@@ -3130,9 +3133,10 @@ class TestAutograd(TestCase):
         out = b.sin()
         out2 = b.cos()
         out3 = b.cos()
-        register_validation_hooks(a, b, out, out2, out3)
+        register_logging_hooks(a, b, out, out2, out3)
         out3.register_hook(hook)
-        torch.autograd.grad((out, out3, out2), inputs=(a,))
+        with torch.autograd.set_multithreading_enabled(False):
+            torch.autograd.grad((out, out3, out2), inputs=(a,))
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
@@ -3140,14 +3144,22 @@ class TestAutograd(TestCase):
         a = torch.tensor(1., requires_grad=True)
         b = a * 2
         out = b.sin()
-        register_validation_hooks(a, b, out)
+        register_logging_hooks(a, b, out)
         out.register_hook(hook)
-        out.backward()
+        with torch.autograd.set_multithreading_enabled(False):
+            out.backward()
         self.assertEqual(predicted[0], grad_fns(*actual))
         actual = []
 
-        # When not called in a backward, empty list is returned
-        self.assertEqual(torch._C._current_graph_task_execution_order(), [])
+        # Errors when not called in a backward
+        with self.assertRaisesRegex(RuntimeError, "should only be called during the backward pass"):
+            torch._C._current_graph_task_execution_order()
+
+        # Errors when context manager not enabled
+        t = torch.tensor(1., requires_grad=True).clone().sin().exp()
+        t.register_hook(hook)
+        with self.assertRaisesRegex(RuntimeError, "expects the current backward to be executed with multithreading disabled"):
+            t.backward()
 
     def test_profiler(self):
         x = torch.randn(10, 10)
