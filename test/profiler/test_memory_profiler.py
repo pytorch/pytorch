@@ -785,7 +785,7 @@ class TestMemoryProfilerE2E(TestCase):
         return {
             (key, version): category
             for (key, version), category in memory_profile._category_snapshot().items()
-            if key.storage_ptr == storage.data_ptr() and key.device == storage.device
+            if key.storage.ptr == storage.data_ptr() and key.device == storage.device
         }
 
     def _run_and_check_gradients(self, inner_fn, model):
