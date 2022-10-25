@@ -326,7 +326,7 @@ def nvfuser_fails(fx_g, args, check_str=None):
 
 
 def inductor_accuracy_fails(fx_g, args, check_str=None):
-    from torchinductor.compile_fx import compile_fx_inner
+    from torch._inductor.compile_fx import compile_fx_inner
 
     return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
@@ -874,10 +874,11 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 @register_backend
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
-    from torchdynamo.optimizations.backends import BACKENDS
+
+    from torch._dynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
-        from torchinductor.compile_fx import compile_fx
+        from torch._inductor.compile_fx import compile_fx
 
         compiler_fn = compile_fx
     else:
