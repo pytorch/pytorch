@@ -614,7 +614,7 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
                 model_str, args, compiler_name, check_accuracy
             )
         )
-    latest_repro = os.path.join(curdir, "fully_minified_repro.py")
+    latest_repro = os.path.join(curdir, "repro.py")
     log.warning(f"Copying {file_name} to {latest_repro} for convenience")
     shutil.copyfile(file_name, latest_repro)
 
