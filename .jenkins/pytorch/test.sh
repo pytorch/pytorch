@@ -251,13 +251,8 @@ test_dynamo_shard() {
 
 
 test_inductor() {
-  echo "TODO: enable inductor unit tests"
   python test/test_modules.py --verbose
-  python test/test_ops_gradients.py --verbose
-  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
-  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
-  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
-  # PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
+  pytest test/test_ops_gradients.py --verbose -k "not _complex"
 }
 
 test_inductor_huggingface_shard() {

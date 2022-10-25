@@ -12,7 +12,6 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple
 from torchgen.utils import dataclass_repr
 
 import torch
-from torch._prims_common import _complex_dtypes
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     skipCPUIfNoFFT,
@@ -29,7 +28,6 @@ from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     noncontiguous_like,
     TEST_WITH_ROCM,
-    TEST_WITH_TORCHINDUCTOR,
     torch_to_numpy_dtype_dict,
 )
 from torch.testing._internal.opinfo import utils
@@ -1215,11 +1213,6 @@ class OpInfo(object):
         return result
 
     def supported_dtypes(self, device_type):
-        if TEST_WITH_TORCHINDUCTOR:
-            dtypes = self.dtypesIfCUDA if device_type == "cuda" else self.dtypes
-            # Inductor does not support complex type yet
-            return dtypes - set(_complex_dtypes)
-
         if device_type == "cpu":
             return self.dtypes
         if device_type == "cuda":

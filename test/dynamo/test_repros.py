@@ -1015,6 +1015,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
 
+    # TODO: make set_rng_state work with fake tensor
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_rng_state(self):
         def fn():
             state = torch.get_rng_state()
