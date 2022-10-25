@@ -11,9 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/avg_pool3d_backward_meta.h>
 #include <ATen/ops/avg_pool3d_backward_native.h>
-#include <ATen/ops/avg_pool3d_meta.h>
 #include <ATen/ops/avg_pool3d_native.h>
 #endif
 

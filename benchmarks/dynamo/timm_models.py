@@ -205,7 +205,8 @@ class TimmRunnner(BenchmarkRunner):
                     drop_rate=0.0,
                     drop_path_rate=None,
                     drop_block_rate=None,
-                    pretrained=True,
+                    # Skip downloading pretrained models for speedy CI
+                    pretrained=not self.args.ci,
                     # global_pool=kwargs.pop('gp', 'fast'),
                     # num_classes=kwargs.pop('num_classes', None),
                     # drop_rate=kwargs.pop('drop', 0.),
@@ -315,7 +316,7 @@ class TimmRunnner(BenchmarkRunner):
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
-        mod.zero_grad(True)
+        self.optimizer_zero_grad()
         with self.autocast():
             pred = mod(*cloned_inputs)
             if isinstance(pred, tuple):

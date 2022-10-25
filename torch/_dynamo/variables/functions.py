@@ -263,7 +263,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
 def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
     def convert(x):
         if isinstance(x, variables.TensorVariable):
-            return x.proxy.node.meta["example_value"]
+            return x.get_real_value()
         return x.as_python_constant()
 
     args = [convert(x) for x in args]

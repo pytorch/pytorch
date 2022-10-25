@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 1
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.8
           architecture: x64
@@ -30,7 +30,7 @@ jobs:
             **/.github/requirements-gha-cache.txt
 
       - name: Install lintrunner
-        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
         with:
           timeout_minutes: 5
           max_attempts: 3
@@ -83,7 +83,7 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.x
           architecture: x64
@@ -147,7 +147,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.x
           architecture: x64
@@ -199,7 +199,7 @@ jobs:
           fetch-depth: 1
       # This is not a node project so there is no package-lock.json to cache
       - name: Setup Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
       - name: Install markdown-toc
         run: npm install -g markdown-toc
       - name: Regenerate ToCs and check that they didn't change
@@ -226,6 +226,39 @@ jobs:
             false
           fi
 
+  check-labels:
+    name: Check labels
+    runs-on: linux.20_04.16x
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.8
+          architecture: x64
+          cache: 'pip'
+          cache-dependency-path: |
+            **/.github/requirements-gha-cache.txt
+
+      - name: Install requirements
+        id: requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
+
+      - name: Check labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.number }}
+        run: |
+          set -ex
+          python3 .github/scripts/check_labels.py "${PR_NUM}"
+
   test-tools:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
@@ -238,7 +271,7 @@ jobs:
         with:
           submodules: false
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.8
           architecture: x64
@@ -283,7 +316,7 @@ jobs:
           fetch-depth: 1
       - name: Setup Python 3.5
         if: matrix.test_type == 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.5
           architecture: x64
@@ -292,7 +325,7 @@ jobs:
             **/.github/requirements-gha-cache.txt
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.8
           architecture: x64
