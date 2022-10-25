@@ -519,8 +519,6 @@ bool isResurrectable(THPVariable* self) {
   if (!tensor.unsafeGetTensorImpl()
            ->check_pyobj(self_interpreter.get())
            .has_value()) {
-    // TODO: debug only
-    TORCH_INTERNAL_ASSERT(c10::impl::HermeticPyObjectTLS::get_state());
     return false;
   }
   if (!tensor.defined() || tensor.use_count() <= 1) {
@@ -621,8 +619,6 @@ static int THPVariable_clear(THPVariable* self) {
         !tensor.unsafeGetTensorImpl()
              ->check_pyobj(self_interpreter.get())
              .has_value()) {
-      // TODO: debug only
-      TORCH_INTERNAL_ASSERT(c10::impl::HermeticPyObjectTLS::get_state());
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
