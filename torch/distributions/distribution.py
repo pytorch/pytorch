@@ -2,7 +2,8 @@ import torch
 import warnings
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
-from typing import Dict, Optional, Any
+from torch.types import _size
+from typing import Dict, Optional, Any, Tuple
 
 __all__ = ['Distribution']
 
@@ -244,7 +245,7 @@ class Distribution(object):
         """
         return torch.exp(self.entropy())
 
-    def _extended_shape(self, sample_shape: torch.Size = torch.Size()) -> torch.Size:
+    def _extended_shape(self, sample_shape: _size = torch.Size()) -> Tuple[int, ...]:
         """
         Returns the size of the sample returned by the distribution, given
         a `sample_shape`. Note, that the batch and event shapes of a distribution
