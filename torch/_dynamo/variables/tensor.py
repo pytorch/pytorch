@@ -17,7 +17,7 @@ if fake_tensors_available:
         DataDependentOutputException,
         DynamicOutputShapeException,
     )
-    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor
+    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
 import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
@@ -98,7 +98,7 @@ def _get_fake_value(node, tx):
     Run the computation represented by `node` using fake tensors and return the result.
     """
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=tx.fake_mode)
+    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
     from ..utils import wrap_fake_exception
 
     def visit(n: torch.fx.Node):
@@ -204,7 +204,7 @@ class TensorVariable(VariableTracker):
                 proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
                 if use_fake_tensors:
                     fake_wrapper = functools.partial(
-                        wrap_to_fake_tensor, fake_mode=tx.fake_mode
+                        wrap_to_fake_tensor_and_record, tx=tx
                     )
                     example_value = fake_wrapper(example_value)
 
@@ -239,14 +239,14 @@ class TensorVariable(VariableTracker):
             return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
             sizes = []
             for i, v in enumerate(example_value):
                 proxy_i = proxy[i]
                 proxy_i.node.meta["example_value"] = v
-                sizes.append(DynamicShapeVariable(proxy_i, int))
+                sizes.append(DynamicShapeVariable(proxy_i, v))
             return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
@@ -256,7 +256,7 @@ class TensorVariable(VariableTracker):
             getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and all(
             [isinstance(x, int) for x in example_value]
         ):
@@ -335,6 +335,9 @@ class TensorVariable(VariableTracker):
             from . import UserDefinedObjectVariable
 
             return UserDefinedObjectVariable(example_value)
+        elif isinstance(example_value, torch.SymIntNode):
+            proxy.node.meta["example_value"] = example_value
+            return cls(proxy, **options)
         else:
             raise AssertionError(
                 "torch.* op returned non-Tensor "
@@ -472,7 +475,6 @@ class TensorVariable(VariableTracker):
         kwargs = dict(kwargs)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
@@ -576,12 +578,12 @@ class DynamicShapeVariable(TensorVariable):
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
 
-    def __init__(self, proxy, dyn_shape_cls, **kwargs):
+    def __init__(self, proxy, dyn_shape, **kwargs):
         super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
-        self.dyn_shape_cls = dyn_shape_cls
+        self.dyn_shape = dyn_shape
 
     def python_type(self):
-        return self.dyn_shape_cls
+        return type(self.dyn_shape)
 
     def unpack_var_sequence(self, tx):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
