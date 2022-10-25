@@ -61,7 +61,7 @@ def contract(func):
             f"nn.Module, but got {type(updated)}"
         )
 
-        def check_fqn(orig_fqns: List[str], new_fqns: list[str]):
+        def check_fqn(orig_fqns: List[str], new_fqns: List[str]):
             if orig_fqns == new_fqns:
                 return
 
