@@ -21,8 +21,9 @@ from torch._prims_common import is_boolean_dtype, is_float_dtype
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
+from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
-from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs
+from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs, sympy_symbol
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -291,7 +292,7 @@ class Loops(IRNode):
     @staticmethod
     def _index(ranges, prefix="i"):
         return [
-            sympy.Integer(0) if s == 1 else sympy.Symbol(f"{prefix}{n}")
+            sympy.Integer(0) if s == 1 else sympy_symbol(f"{prefix}{n}")
             for n, s in enumerate(ranges)
         ]
 
@@ -450,7 +451,7 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
-        num_sm = torch.cuda.get_device_properties(device).multi_processor_count
+        num_sm = get_device_properties(device).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -1166,7 +1167,7 @@ class View(BaseView):
         return idx
 
     def reindex_str(self):
-        index_old = [sympy.Symbol(f"i{n}") for n in range(len(self.size))]
+        index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
@@ -1235,7 +1236,7 @@ class View(BaseView):
         Perform a reshape entirely by modifying indexing math
         """
         size_hint = V.graph.sizevars.size_hint
-        vars = [sympy.Symbol(f"view{i}") for i in range(len(new_size))]
+        vars = [sympy_symbol(f"view{i}") for i in range(len(new_size))]
 
         stack_new = list(zip(vars, new_size))
         stack_old = list(old_size)
@@ -1835,6 +1836,15 @@ class NoneAsConstantBuffer(IRNode):
         return "None"
 
 
+class ShapeAsConstantBuffer(IRNode):
+    def __init__(self, shape):
+        super().__init__()
+        self.shape = shape
+
+    def codegen_reference(self):
+        return str(self.shape)
+
+
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: Loops
@@ -1951,7 +1961,6 @@ class ComputedBuffer(Buffer):
             for i, reads_buf in enumerate(reads_bufs):
                 if isinstance(reads_buf, Convolution):
                     priority_idx.append(i)
-
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -2262,6 +2271,8 @@ class ExternKernel(InputsKernel):
     def realize_input(cls, x):
         if x is None:
             return NoneAsConstantBuffer()
+        if isinstance(x, sympy.Expr):
+            return ShapeAsConstantBuffer(x)
         if isinstance(x, Constant):
             return V.graph.add_tensor_constant(
                 torch.tensor(x.value, dtype=x.get_dtype(), device=x.get_device())
@@ -2366,7 +2377,7 @@ class ExternKernel(InputsKernel):
         sizes = self.get_size()
         strides = self.get_stride()
         strides = [sizevars.size_hint(x) for x in strides]
-        index_vars = [sympy.Symbol(f"d{i}") for i in range(len(sizes))]
+        index_vars = [sympy_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
         index_order = sorted(range(len(strides)), key=strides.__getitem__, reverse=True)
         lookup = {pos: idx for idx, pos in enumerate(index_order)}
@@ -3086,7 +3097,7 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
-        elif config.tune_layout:
+        elif config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
             output_layout_str = tuned_conv_layout(
@@ -3110,13 +3121,16 @@ class Convolution(ExternKernelAlloc):
 
             # CUDA channels_last path depend on cudnn version, see
             # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
-            valid_device = True
+            valid_cudnn = False
             if (
-                x.get_device() == "cuda"
-                and torch.backends.cudnn.is_available()
-                and torch.backends.cudnn.version() < 8302
+                torch.backends.cudnn.is_available()
+                and torch.backends.cudnn.version() >= 7603
             ):
-                valid_device = False
+                valid_cudnn = True
+
+            valid_device = x.get_device().type == "cpu" or (
+                x.get_device().type == "cuda" and valid_cudnn
+            )
             if (
                 valid_device
                 and len(x.get_size()) == 4
@@ -3438,7 +3452,7 @@ class LoopBody:
 
     def add_indirect(self):
         name = f"indirect{len(self.indirect_vars)}"
-        var = sympy.Symbol(name)
+        var = sympy_symbol(name)
         self.indirect_vars.append([var])
         return var
 
