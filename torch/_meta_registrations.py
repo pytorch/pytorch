@@ -1012,22 +1012,6 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@register_meta([aten.diag.default, aten.diag.out])
-@out_wrapper()
-def meta_diag(self, dim=0):
-    check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
-    if self.dim() == 1:
-        sz = self.size(0) + abs(dim)
-        return self.new_empty((sz, sz))
-
-    # case: dim is 2
-    if dim >= 0:
-        sz = min(self.size(0), self.size(1) - dim)
-    else:
-        sz = min(self.size(0) + dim, self.size(1))
-    return self.new_empty((sz,))
-
-
 @register_meta(aten._embedding_bag_forward_only.default)
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
@@ -1653,9 +1637,9 @@ def activate_meta():
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
-        dispatch_key_registration = torch._C._dispatch_dump(op_overload.name())
-
-        if "CompositeImplicitAutograd" in dispatch_key_registration:
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            op_overload.name(), "CompositeImplicitAutograd"
+        ):
             # Internally, we shouldn't be registering meta kernels for any operators that
             # have CompositeImplicitAutograd kernels.
             # Instead, we should be letting those decompositions run, and writing meta kernels
