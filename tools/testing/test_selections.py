@@ -29,7 +29,6 @@ def calculate_shards(
 ) -> List[Tuple[float, List[TestJob]]]:
     known_tests = [x for x in tests if x in test_times]
     unknown_tests = [x for x in tests if x not in known_tests]
-    test_times["distributed/test_distributed_spawn"] = 8000.0
 
     test_jobs: List[TestJob] = []
     for test in known_tests:
