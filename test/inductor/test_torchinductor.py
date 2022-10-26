@@ -19,6 +19,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -54,6 +55,9 @@ except (ImportError, AssertionError) as e:
 
 HAS_CPU = False
 try:
+    if IS_FBCODE:
+        raise torch._inductor.exc.CppCompileError
+
     from subprocess import CalledProcessError
 
     from torch._inductor.codecache import CppCodeCache
@@ -408,13 +412,6 @@ class SweepInputs2:
         for name1 in cls.input_gen_types1:
             for name2 in cls.input_gen_types2:
                 cls.gen_template(name1, name2)
-
-
-class SweepInputsCpuTest(SweepInputs2, TestCase):
-    gen = InputGen(10, "cpu")
-
-
-SweepInputsCpuTest.populate()
 
 
 class TestIndexingSimplification(TorchTestCase):
@@ -4026,6 +4023,10 @@ class CommonTemplate:
 
 
 if HAS_CPU:
+    class SweepInputsCpuTest(SweepInputs2, TestCase):
+        gen = InputGen(10, "cpu")
+
+    SweepInputsCpuTest.populate()
 
     class CpuTests(TestCase):
         common = check_model
