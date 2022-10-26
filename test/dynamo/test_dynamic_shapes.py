@@ -142,11 +142,6 @@ unittest.expectedFailure(
     # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
 )
 
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_call_fn_with_non_const_inputs_safe_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
 
 # DynamicShapesExportTests
 unittest.expectedFailure(
