@@ -1307,7 +1307,7 @@ Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_
   checkContiguous("embedding_bag", offsets_arg);
 
   Tensor offset2bag_;
-  if (indices.numel() != 0 && offset2bag.numel() == 0) {
+  if (indices.sym_numel() != 0 && offset2bag.sym_numel() == 0) {
     offset2bag_ = offsets.new_zeros(
       {indices.size(0) + 1}, offsets.options()); // offset2bag = [0 0 0 0 0]
 

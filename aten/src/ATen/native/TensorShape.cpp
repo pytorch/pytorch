@@ -917,9 +917,12 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   }
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
+std::vector<Tensor> tensor_split_sections_symint(const Tensor& self, c10::SymInt sym_sections, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  // NB: intentional, sections specifies number of output tensors, which
+  // cannot be polymorphic
+  int64_t sections = sym_sections.guard_int(__FILE__, __LINE__);
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
   const auto dim_size = self.sym_size(dim_);
   std::vector<Tensor> splits(sections);
@@ -934,19 +937,28 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   return splits;
 }
 
-std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+template <typename T>
+std::vector<Tensor> _tensor_split_indices(const Tensor& self, ArrayRef<T> indices, int64_t dim) {
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
-  int64_t start_idx = 0;
+  T start_idx(0);
   for (const auto split_idx : c10::irange(num_indices)) {
-    int64_t end_idx = indices[split_idx];
-    splits[split_idx] = at::slice(self, dim_, start_idx, end_idx);
+    auto end_idx = indices[split_idx];
+    splits[split_idx] = at::symint::slice<T>(self, dim_, start_idx, end_idx);
     start_idx = end_idx;
   }
-  splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
+  splits[num_indices] = at::symint::slice<T>(self, dim_, start_idx, at::symint::size<T>(self, dim_));
   return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
+}
+
+std::vector<Tensor> tensor_split_indices_symint(const Tensor& self, SymIntArrayRef indices, int64_t dim) {
+  return _tensor_split_indices(self, indices, dim);
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indices_or_sections, int64_t dim) {
@@ -1174,8 +1186,8 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
-const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
+const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymIntArrayRef stride, optional<c10::SymInt> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.sym_storage_offset());
   setStrided(self, size, stride, storage_offset);
   return self;
 }
