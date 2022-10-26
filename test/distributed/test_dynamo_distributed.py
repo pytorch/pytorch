@@ -94,10 +94,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    # TODO(whc) move these tests to 'distributed' shard to get nccl, or see if it's available already in pytorch CI?
-    @unittest.skip(
-        "can't run with gloo (no support for _allgather_base) and nccl not available in CI"
-    )
+    @unittest.expectedFailure  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode...
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_aot_eager(self):
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -108,7 +105,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @unittest.skip("hangs/crashes with inductor currently")
+    @unittest.expectedFailure  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode...
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_inductor(self):
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
