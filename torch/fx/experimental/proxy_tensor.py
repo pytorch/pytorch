@@ -374,6 +374,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
 
 
 class PythonKeyTracer(Tracer):
+    record_stack_traces = True
     def __init__(self):
         super().__init__()
 
