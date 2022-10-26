@@ -1505,6 +1505,23 @@ class TestTorchTidyProfiler(TestCase):
             lambda: torch.zeros((1,)).cos()
         )
 
+    def test_impl_reuse(self) -> None:
+        repeats = 1_000
+        with profile(profile_memory=True, record_shapes=True) as p:
+            for _ in range(repeats):
+                torch.ones((1,))
+            gc.collect()
+
+        roots = p.profiler.kineto_results.experimental_event_tree()
+        tensor_impls = tuple(
+            e.extra_fields.inputs.tensor_metadata[0].impl_ptr
+            for e in _utils.traverse_dfs(roots)
+            if e.name == "aten::fill_"
+        )
+
+        self.assertEqual(len(tensor_impls), repeats)
+        self.assertEqual(len(set(tensor_impls)), repeats)
+
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
