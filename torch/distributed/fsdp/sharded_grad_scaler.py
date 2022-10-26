@@ -1,12 +1,16 @@
-from collections import abc, defaultdict
 import logging
+from collections import abc, defaultdict
 from typing import Dict, List, Optional, Union
 
 import torch
-from torch.cuda import FloatTensor  # type: ignore[attr-defined]
-from torch.cuda.amp.grad_scaler import GradScaler, OptState, _MultiDeviceReplicator
-from torch.distributed.distributed_c10d import ProcessGroup
 import torch.distributed as dist
+from torch.cuda import FloatTensor  # type: ignore[attr-defined]
+from torch.cuda.amp.grad_scaler import (
+    GradScaler,
+    OptState,
+    _MultiDeviceReplicator,
+)
+from torch.distributed.distributed_c10d import ProcessGroup
 from torch.optim.sgd import SGD
 
 

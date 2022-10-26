@@ -6,24 +6,20 @@ from typing import Any, cast, Dict
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
+
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._shard.sharded_tensor import (
+    init_from_local_shards,
     Shard,
     ShardedTensor,
-    init_from_local_shards,
 )
-from torch.distributed.utils import (
-    _replace_by_prefix,
-)
+from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
-from .flat_param import (
-    FlatParamHandle,
-)
+from .flat_param import FlatParamHandle
 
 
 def _full_post_state_dict_hook(
@@ -52,16 +48,12 @@ def _full_post_state_dict_hook(
     # exiting `summon_full_params()` via the parameter shape. However, for
     # `NO_SHARD`, we cannot tell from the shape, so we do not return early.
     if (
-        (
-            not module._use_orig_params
-            and FSDP.FLAT_PARAM in module.module._parameters
-        )
-        or (
-            module._use_orig_params
-            and module._handles
-            and module._handles[0].uses_sharded_strategy
-            and module._handles[0].is_sharded(module._handles[0].flat_param)
-        )
+        not module._use_orig_params and FSDP.FLAT_PARAM in module.module._parameters
+    ) or (
+        module._use_orig_params
+        and module._handles
+        and module._handles[0].uses_sharded_strategy
+        and module._handles[0].is_sharded(module._handles[0].flat_param)
     ):
         return state_dict
 
@@ -78,7 +70,7 @@ def _full_post_state_dict_hook(
         # do not have prefix considered as they are not computed in `state_dict`
         # call.
         if clean_key.startswith(clean_prefix):
-            clean_key = clean_key[len(clean_prefix):]
+            clean_key = clean_key[len(clean_prefix) :]
 
         # Clone non-ignored parameters before exiting the
         # `_summon_full_params()` context
@@ -87,8 +79,9 @@ def _full_post_state_dict_hook(
             f"only has {state_dict.keys()}. prefix={prefix}, "
             f"module_name={module_name} param_name={param_name} rank={module.rank}."
         )
-        if clean_key not in module._ignored_param_names and \
-                not getattr(state_dict[fqn], "_has_been_cloned", False):
+        if clean_key not in module._ignored_param_names and not getattr(
+            state_dict[fqn], "_has_been_cloned", False
+        ):
             try:
                 state_dict[fqn] = state_dict[fqn].clone().detach()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
@@ -128,11 +121,9 @@ def _full_pre_load_state_dict_hook(
 ) -> None:
     # We do not expect to be calling pre-hooks twice without post-hook
     # call in between.
-    assert getattr(module, '_full_param_ctx', None) is None
+    assert getattr(module, "_full_param_ctx", None) is None
     # Note that it needs writeback=True to persist.
-    module._full_param_ctx = module._summon_full_params(
-        recurse=False, writeback=True
-    )
+    module._full_param_ctx = module._summon_full_params(recurse=False, writeback=True)
     module._full_param_ctx.__enter__()
     _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP.FSDP_PREFIX}")
 
@@ -140,7 +131,7 @@ def _full_pre_load_state_dict_hook(
 def _full_post_load_state_dict_hook(module, *args, **kwargs) -> None:
     # We should exit summon_full_params context.
     module._assert_state([FSDP.TrainingState_.SUMMON_FULL_PARAMS])
-    assert getattr(module, '_full_param_ctx', None) is not None
+    assert getattr(module, "_full_param_ctx", None) is not None
     module._full_param_ctx.__exit__(None, None, None)
     module._full_param_ctx = None
 
@@ -188,7 +179,9 @@ def _local_post_load_state_dict_hook(module, *args, **kwargs) -> None:
 
 
 def _local_pre_load_state_dict_hook(
-    module, state_dict: Dict[str, Any], prefix: str,
+    module,
+    state_dict: Dict[str, Any],
+    prefix: str,
 ) -> None:
     """
     This hook finds the local flat_param for this FSDP module from the
@@ -252,7 +245,7 @@ def _sharded_post_state_dict_hook(
                 rank=module.rank,
                 world_size=module.world_size,
                 num_devices_per_node=torch.cuda.device_count(),
-                pg=module.process_group
+                pg=module.process_group,
             )
             if module._state_dict_config.offload_to_cpu:
                 sharded_tensor = sharded_tensor.cpu()
@@ -270,7 +263,9 @@ def _sharded_post_load_state_dict_hook(module, *args, **kwargs) -> None:
 
 
 def _sharded_pre_load_state_dict_hook(
-    module, state_dict: Dict[str, Any], prefix: str,
+    module,
+    state_dict: Dict[str, Any],
+    prefix: str,
 ) -> None:
     """
     The hook combines the unflattened, sharded parameters (ShardedTensor) to
@@ -328,7 +323,9 @@ def _sharded_pre_load_state_dict_hook(
 
     # Get the chunk from the loaded flat_param for the local rank.
     loaded_flat_tensor, num_to_pad = FlatParamHandle._get_shard(
-        loaded_flat_param, module.rank, module.world_size,
+        loaded_flat_param,
+        module.rank,
+        module.world_size,
     )
     loaded_flat_tensor.to(flat_param.device)
     assert flat_param.numel() == loaded_flat_tensor.numel(), (
@@ -369,10 +366,7 @@ def _post_state_dict_hook(
     # back to their mixed precision type. This is because buffers are cast
     # during lazy_init() and stay at their mixed precision type before/after
     # forward/backward. As a result state_dict() should maintain this.
-    if (
-        fsdp_module._is_root
-        and fsdp_module._mixed_precision_enabled_for_buffers()
-    ):
+    if fsdp_module._is_root and fsdp_module._mixed_precision_enabled_for_buffers():
         fsdp_module._cast_buffers(recurse=True)
     return processed_state_dict
 
