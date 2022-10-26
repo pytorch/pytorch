@@ -192,23 +192,13 @@ C10_DEFINE_int(
     google::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
-// Google glog's api does not have an external function that allows one to check
-// if glog is initialized or not. It does have an internal function - so we are
-// declaring it here. This is a hack but has been used by a bunch of others too
-// (e.g. Torch).
-namespace google {
-namespace glog_internal_namespace_ {
-bool IsGoogleLoggingInitialized();
-} // namespace glog_internal_namespace_
-} // namespace google
-
 namespace c10 {
 namespace {
 
 void initGoogleLogging(char const* name) {
 #if !defined(_MSC_VER)
   // This trick can only be used on UNIX platforms
-  if (!::google::glog_internal_namespace_::IsGoogleLoggingInitialized())
+  if (!::google::IsGoogleLoggingInitialized())
 #endif
   {
     ::google::InitGoogleLogging(name);
