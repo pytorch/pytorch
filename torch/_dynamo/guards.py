@@ -643,7 +643,6 @@ class CheckFunctionManager:
 
             if len(equality_candidates) > 1:
                 equality_expr = " == ".join(equality_candidates)
-                # breakpoint()
                 finished_expressions.append(equality_expr)
 
         # Redundant with code_parts, but allows us to wrap it with parens nicely.

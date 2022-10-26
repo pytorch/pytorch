@@ -241,7 +241,6 @@ class TensorVariable(VariableTracker):
             return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            # breakpoint()
             return DynamicShapeVariable.create(tx, proxy, example_value, **options)
         elif istype(example_value, torch.Size) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
@@ -258,7 +257,6 @@ class TensorVariable(VariableTracker):
             getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
-            # breakpoint()
             return DynamicShapeVariable.create(tx, proxy, example_value, **options)
         elif istype(example_value, torch.Size) and all(
             [isinstance(x, int) for x in example_value]
@@ -314,7 +312,6 @@ class TensorVariable(VariableTracker):
             )
             and config.capture_scalar_outputs
         ):
-            # breakpoint()
             if use_fake_tensors:
                 # item raw value should not be accessed
                 return FakeItemVariable.create(

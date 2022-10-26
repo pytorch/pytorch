@@ -122,13 +122,10 @@ def stack_op(fn: typing.Callable):
 
 
 def generic_jump(truth_fn: typing.Callable, push: bool):
-    # breakpoint()
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
-        # breakpoint()
         if value.is_python_constant():
-            # breakpoint()
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
                 self.jump(inst)
@@ -137,7 +134,6 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             and self.should_compile_partial_graph()
         ):
             # compile a partial subgraph prefix then jump into user code
-            # breakpoint()
             self.push(value)
             self.output.compile_subgraph(
                 self,
@@ -159,12 +155,10 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
-            # breakpoint()
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
         else:
-            # breakpoint()
             unimplemented(f"generic_jump {typestr(value)}")
 
     return inner

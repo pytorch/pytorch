@@ -368,7 +368,6 @@ class VariableBuilder:
                 ),
             )
         elif value in tensor_dunder_fns:
-            # breakpoint()
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
@@ -494,7 +493,6 @@ class VariableBuilder:
         )
 
     def wrap_symint(self, value: torch.SymIntNode):
-        # breakpoint()
         if not is_constant_source(self.get_source()):
             self.tx.output.graphargs.append(
                 GraphArg(self.get_source(), value, False)
