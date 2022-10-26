@@ -303,18 +303,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
     }
   }
 
-  // detaching creates a "view", although the view is a no-op from the original tensor.
-  at::functionalization::ViewMeta nop_meta = at::functionalization::ViewMeta(
-    [](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
-      return base;
-    },
-    [](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return mutated_view;
-    }
-  );
-
   auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
-
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
