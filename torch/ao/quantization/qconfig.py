@@ -415,7 +415,7 @@ def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
     return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
 def _assert_valid_qconfig(qconfig: Optional[QConfig],
-                         mod: torch.nn.Module) -> None:
+                          mod: torch.nn.Module) -> None:
     """
     Verifies that this `qconfig` is valid.
     """
