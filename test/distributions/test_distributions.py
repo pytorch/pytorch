@@ -2413,12 +2413,12 @@ class TestDistributions(DistributionsTestCase):
 
         def mean_var(lambd, sample):
             sample.exponential_(lambd)
-            mean = sample.mean()
-            var = sample.var()
-            self.assertEqual((1. / lambd), mean, atol=1e-2, rtol=1e-2)
-            self.assertEqual((1. / lambd) ** 2, var, atol=2e-2, rtol=1e-2)
+            mean = sample.float().mean()
+            var = sample.float().var()
+            self.assertEqual((1. / lambd), mean, atol=2e-2, rtol=2e-2)
+            self.assertEqual((1. / lambd) ** 2, var, atol=2e-2, rtol=2e-2)
 
-        for dtype in [torch.float, torch.double]:
+        for dtype in [torch.float, torch.double, torch.bfloat16, torch.float16]:
             for lambd in [0.2, 0.5, 1., 1.5, 2., 5.]:
                 sample_len = 50000
                 mean_var(lambd, torch.rand(sample_len, dtype=dtype))
