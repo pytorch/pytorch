@@ -141,8 +141,6 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    # hangs/crashes with inductor currently
-    @unittest.skip("hangs/crashes with inductor currently")
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
