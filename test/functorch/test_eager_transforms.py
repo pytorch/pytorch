@@ -1034,7 +1034,7 @@ class TestVmapOfGrad(TestCase):
         # TODO: Check if the rtol is a problem
         self.assertEqual(result, expected, atol=0, rtol=5e-4)
 
-    def test_per_sample_grads_embeddingnet(self, device):
+    def _embeddingnet_example(self, device):
         class SampleNet(nn.Module):
             def __init__(self, vocab_size: int):
                 super().__init__()
@@ -1063,6 +1063,10 @@ class TestVmapOfGrad(TestCase):
 
         # Construct our module
         net = SampleNet(vocab_size).to(device=device)
+        return net, data, targets
+
+    def test_per_sample_grads_embeddingnet(self, device):
+        net, data, targets = self._embeddingnet_example(device)
         criterion = nn.CrossEntropyLoss()
 
         net_func, weights = make_functional(net)
@@ -1078,6 +1082,27 @@ class TestVmapOfGrad(TestCase):
 
         result = vmap(partial(grad(compute_loss), weights))(data, targets)
         for r, e in zip(result, expected):
+            # TODO: Check if the rtol is a problem
+            self.assertEqual(r, e, atol=0, rtol=1e-3)
+
+    def test_per_sample_grads_embeddingnet_module_as_pytree(self, device):
+        net, data, targets = self._embeddingnet_example(device)
+        criterion = nn.CrossEntropyLoss()
+
+        def compute_loss(net, data, target):
+            output = net(data)
+            result = criterion(output, target)
+            return result
+
+        expected_in = [grad(compute_loss)(net, data[i], targets[i]) for i in range(64)]
+        expected = {}
+        for key in expected_in[0]:
+            expected[key] = torch.stack([shard[key] for shard in expected_in])
+
+        result = vmap(partial(grad(compute_loss), net))(data, targets)
+        for key in result:
+            r = result[key]
+            e = expected[key]
             # TODO: Check if the rtol is a problem
             self.assertEqual(r, e, atol=0, rtol=1e-3)
 
@@ -2545,7 +2570,7 @@ class TestMakeFunctional(TestCase):
         for param in params:
             self.assertEqual(param.requires_grad, not disable_autograd_tracking)
 
-    def test_parameter_tying_grad(self):
+    def _parameter_tying_grad_model(self, for_pytree):
         class Foo(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2562,13 +2587,22 @@ class TestMakeFunctional(TestCase):
         torch.manual_seed(0)
         mod = Foo()
         loss = mod(x).sum()
-        expected = torch.autograd.grad(loss, mod.parameters())
+        if for_pytree:
+            params = {k: v for k, v in mod.named_parameters()}
+            expected = torch.autograd.grad(loss, params.values())
+            expected = {k: v for k, v in zip(params.keys(), expected)}
+        else:
+            expected = torch.autograd.grad(loss, mod.parameters())
 
-        mod = Foo()
-        fmod, _, _ = make_functional_with_buffers(mod)
+        mod1 = Foo()
         torch.manual_seed(0)
-        mod = Foo()
-        _, params, buffers = make_functional_with_buffers(mod)
+        mod2 = Foo()
+        return mod1, mod2, x, expected
+
+    def test_parameter_tying_grad(self):
+        mod1, mod2, x, expected = self._parameter_tying_grad_model(False)
+        fmod, _, _ = make_functional_with_buffers(mod1)
+        _, params, buffers = make_functional_with_buffers(mod2)
 
         def compute_loss(params, buffers, x):
             return fmod(params, buffers, x).sum()
@@ -2576,6 +2610,26 @@ class TestMakeFunctional(TestCase):
         result = grad(compute_loss)(params, buffers, x)
 
         self.assertEqual(result, expected)
+
+    def test_parameter_tying_grad_module_as_pytree(self):
+        def get_elem(dict, name, tied_name):
+            return dict[name] if name in dict else dict[tied_name]
+
+        _, mod2, x, expected = self._parameter_tying_grad_model(True)
+
+        def compute_loss(mod, x):
+            return mod(x).sum()
+
+        result = grad(compute_loss)(mod2, x)
+
+        # we can no longer guarantee which names will be returned from each
+        expected_weight_grad = get_elem(expected, 'weight', 'linear.weight')
+        result_weight_grad = get_elem(result, 'weight', 'linear.weight')
+        self.assertEqual(result_weight_grad, expected_weight_grad)
+
+        expected_bias_grad = get_elem(expected, 'bias', 'linear.bias')
+        result_bias_grad = get_elem(result, 'bias', 'linear.bias')
+        self.assertEqual(result_bias_grad, expected_bias_grad)
 
     def test_parameter_tying_ensemble(self):
         class Foo(nn.Module):
@@ -2828,7 +2882,8 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_grads, expected_grads)
 
     @parametrize('originally_track_running_stats', [True, False])
-    def test_update_batch_norm(self, device, originally_track_running_stats):
+    @parametrize('with_pytree', [True, False])
+    def test_update_batch_norm(self, device, originally_track_running_stats, with_pytree):
         dtype = torch.double
         inplace_relu = False
         classes = 5
@@ -2842,27 +2897,38 @@ class TestExamplesCorrectness(TestCase):
 
         replace_all_batch_norm_modules_(net)
         transformed_net = net
-        fnet, params, buffers = make_functional_with_buffers(transformed_net)
-        net = (params, buffers, fnet)
         criterion = nn.CrossEntropyLoss()
 
-        def compute_loss(x, y, params, buffers):
-            return criterion(fnet(params, buffers, x), y)
+        if with_pytree:
+            def compute_loss(x, y, net):
+                return criterion(net(x), y)
+        else:
+            fnet, params, buffers = make_functional_with_buffers(transformed_net)
+            def compute_loss(x, y, params, buffers):
+                return criterion(fnet(params, buffers, x), y)
 
         # Get some sample inputs...
         x = torch.randn(num_batches, 1, 64, 28, 28, device=device, dtype=dtype)
         y = torch.randint(0, classes, (num_batches, 1), device=device)
 
-        # compute some per sample grads with vmap + grad
-        result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None, None))(x, y, params, buffers)
+        # compute some per sample grads with, then without vmap + grad
+        if with_pytree:
+            result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None))(x, y, transformed_net)
+            out = partial(compute_loss, net=transformed_net)
+            named_params = {k: v for k, v in transformed_net.named_parameters()}
+            params = named_params.values()
+        else:
+            result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None, None))(x, y, params, buffers)
+            fnet, params, buffers = make_functional_with_buffers(transformed_net)
+            out = partial(compute_loss, params=params, buffers=buffers)
 
-        # compute some per sample grads without vmap + grad
-        fnet, params, buffers = make_functional_with_buffers(transformed_net)
         expected_grads = [
-            torch.autograd.grad(compute_loss(x[i], y[i], params, buffers), params)
+            torch.autograd.grad(out(x[i], y[i]), params)
             for i in range(num_batches)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
+        if with_pytree:
+            expected_grads = {k: v for k, v in zip(named_params.keys(), expected_grads)}
 
         self.assertEqual(result_grads, expected_grads)
 
@@ -3079,35 +3145,94 @@ class TestExamplesCorrectness(TestCase):
                             tuple(weight[1] for weight in result_weights))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
-    def test_resnet18_per_sample_grads(self, device):
+    @parametrize('with_pytree', [True, False])
+    def test_resnet18_per_sample_grads(self, device, with_pytree):
         import torchvision.models as models
         model = models.__dict__['resnet18'](
             pretrained=False, norm_layer=(lambda c: nn.GroupNorm(min(32, c), c))
         ).to(device)
         criterion = nn.CrossEntropyLoss(reduction='sum')  # avoid cross batch reductions for for loop comparison
 
-        func_model, weights = make_functional(model)
+        if with_pytree:
+            def compute_loss(net, image, target):
+                image = image.unsqueeze(0)
+                target = target.unsqueeze(0)
+                output = net(images)
+                loss = criterion(output, targets)
+                return loss
+        else:
+            func_model, weights = make_functional(model)
 
-        def compute_loss(weights, image, target):
-            image = image.unsqueeze(0)
-            target = target.unsqueeze(0)
-            output = func_model(weights, image)
-            loss = criterion(output, target)
-            return loss
+            def compute_loss(weights, image, target):
+                image = image.unsqueeze(0)
+                target = target.unsqueeze(0)
+                output = func_model(weights, images)
+                loss = criterion(output, targets)
+                return loss
 
         batch_size = 3
         images = torch.randn(batch_size, 3, 32, 32, device=device)
         targets = torch.randint(0, 10, (batch_size,), device=device)
 
-        result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
-
-        expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
-            for i in range(batch_size)
-        ]
+        vmap_func = vmap(grad(compute_loss), in_dims=(None, 0, 0))
+        if with_pytree:
+            result_grads = vmap_func(model, images, targets)
+            names, weights = zip(*model.named_parameters())
+            expected_grads = [
+                torch.autograd.grad(compute_loss(model, images[i], targets[i]), weights)
+                for i in range(batch_size)
+            ]
+            result_grads = [result_grads[i] for i in names]
+        else:
+            result_grads = vmap_func(weights, images, targets)
+            expected_grads = [
+                torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
+                for i in range(batch_size)
+            ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
 
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
+
+    @parametrize('transform', ['vjp', 'jvp'])
+    def test_modules_as_pytree_with(self, transform):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = nn.Parameter(torch.randn(3, 3))
+                self.register_buffer("y", torch.randn(3, 3))
+
+            def forward(self, input):
+                return self.x * input + self.y
+
+        # like a loss function but returns a tensor instead of a scalar so need vjp/jvp
+        def loss_ish_pytree(model, input):
+            return model(input)
+
+        model = Foo()
+        model_fn, weights, buffers = make_functional_with_buffers(model)
+        def loss_ish_make_functional(weights, input, buffers):
+            return model_fn(weights, buffers, input)
+
+        input = torch.randn(3, 3)
+
+        if transform == "vjp":
+            value_pytree, vjp_fn = vjp(loss_ish_pytree, model, input)
+            grad_pytree = vjp_fn(torch.ones_like(value_pytree))
+            value_make_functional, vjp_fn = vjp(partial(loss_ish_make_functional, buffers=buffers), weights, input)
+            grad_make_functional = vjp_fn(torch.ones_like(value_make_functional))
+
+            self.assertEqual(value_pytree, value_make_functional)
+            # x is the only differentiated value so we don't worry about ordering
+            self.assertEqual(tuple(grad_pytree[0].values()), grad_make_functional[0])
+        else:
+            assert transform == "jvp"
+            pytree_tangents = copy.deepcopy(model)
+            pytree_tangents.x = nn.Parameter(torch.ones(3, 3))
+            # there's no real way to match the structure of the input since it saves a copy of the model
+            with self.assertRaisesRegex(RuntimeError, "Expected primals and tangents to have the same python structure"):
+                value_pytree, grad_pytree = jvp(loss_ish_pytree, (model, input), (pytree_tangents, torch.zeros(3, 3)))
+
+
 
 def normalize_devices(fx_g):
     for node in fx_g.graph.nodes:
