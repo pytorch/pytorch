@@ -234,7 +234,7 @@ class FakeTensorConverter(object):
             warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
             grad_not_none = t.grad is not None
         if grad_not_none:
-            out.grad = self.from_real_tensor(fake_mode, t.grad)
+            out.grad = self.from_real_tensor(fake_mode, t.grad, shape_env=shape_env)
         self.set_tensor_memo(t, out)
         return out
 
@@ -430,6 +430,8 @@ def conv(fake_mode, func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     device = kwargs["input"].fake_device
+    # meta kernel needs to not have unsqueezed input/weight
+    kwargs_orig = dict(kwargs)
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
         # if the input manipulation is done in Convolution.cpp we get segfault
@@ -465,7 +467,7 @@ def conv(fake_mode, func, *args, **kwargs):
         return FakeTensor(fake_mode, t, device)
 
     with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
+        out = func(**kwargs_orig)
 
         if func is aten.convolution.default:
             return convert(out, mem_fmt)
