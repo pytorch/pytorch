@@ -6,6 +6,9 @@ from types import ModuleType
 
 import torch
 
+# needed so that CODE is registered as a level in logging
+from . import logging as torchdynamo_logging  # noqa: F401
+
 try:
     import torch._prims
     import torch._refs
@@ -17,7 +20,7 @@ except ImportError:
 
 # log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# torchdynamo.logging.CODE print compiled functions + graphs
+# logging.CODE print compiled functions + graphs (NOTE: can only be used after importing torch._dynamo.logging)
 # logging.INFO print the steps that dynamo is running
 # logging.WARN print warnings (including graph breaks)
 # logging.ERROR print exceptions (and what user code was being processed when it occurred)
@@ -83,7 +86,6 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 replay_record_enabled = False
-replay_record_dir_name = "./torchdynamo_error_records"
 
 # Show a warning on every graph break
 print_graph_breaks = False
@@ -126,9 +128,6 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
-# Specify the directory where to save the repro artifacts
-repro_dir = os.environ.get("TORCHDYNAMO_REPRO_DIR", None)
-
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 capture_scalar_outputs = False
@@ -158,6 +157,8 @@ if "torch." in dynamo_import:
     base_dir = dirname(dirname(dirname(abspath(__file__))))
 else:
     base_dir = dirname(dirname(abspath(__file__)))
+
+debug_dir_root = os.path.join(os.getcwd(), "torchdynamo_debug")
 
 
 class _AccessLimitingConfig(ModuleType):

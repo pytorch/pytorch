@@ -66,11 +66,12 @@ install_ubuntu() {
     software-properties-common \
     wget \
     sudo \
-    unzip \
     vim \
     jq \
-    libtool
-    vim
+    libtool \
+    vim \
+    unzip \
+    gdb
 
   # Should resolve issues related to various apt package repository cert issues
   # see: https://github.com/pytorch/pytorch/issues/65931
@@ -129,7 +130,9 @@ install_centos() {
     sudo \
     wget \
     unzip \
-    vim
+    vim \
+    unzip \
+    gdb
 
   # Cleanup
   yum clean all
