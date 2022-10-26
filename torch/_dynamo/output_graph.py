@@ -31,6 +31,7 @@ from .variables.builder import VariableBuilder
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     TensorVariable,
+    DynamicShapeVariable,
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
 )
@@ -219,7 +220,14 @@ class OutputGraph(fx.Tracer):
 
             def wrap_name(module_key):
                 return NNModuleVariable(type(mod), module_key, **options)
-
+        elif isinstance(mod, torch.SymIntNode):
+            def wrap_name(module_key):
+                return DynamicShapeVariable.create(
+                    self,
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    dyn_shape=mod,
+                    **options,
+                )
         else:
 
             def wrap_name(module_key):

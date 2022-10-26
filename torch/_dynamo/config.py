@@ -88,7 +88,7 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 replay_record_enabled = False
 
 # Show a warning on every graph break
-print_graph_breaks = False
+print_graph_breaks = True
 
 # If a PyTorch module is in this allowlist, torchdynamo will be allowed
 # to inline objects from it or its children.

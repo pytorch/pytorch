@@ -241,14 +241,14 @@ class TensorVariable(VariableTracker):
             return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, example_value, **options)
+            # breakpoint()
+            return DynamicShapeVariable.create(tx, proxy, example_value, **options)
         elif istype(example_value, torch.Size) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
             sizes = []
             for i, v in enumerate(example_value):
                 proxy_i = proxy[i]
-                proxy_i.node.meta["example_value"] = v
-                sizes.append(DynamicShapeVariable(proxy_i, v))
+                sizes.append(DynamicShapeVariable.create(tx, proxy_i, v, **options))
             return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
@@ -258,7 +258,8 @@ class TensorVariable(VariableTracker):
             getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, example_value, **options)
+            # breakpoint()
+            return DynamicShapeVariable.create(tx, proxy, example_value, **options)
         elif istype(example_value, torch.Size) and all(
             [isinstance(x, int) for x in example_value]
         ):
@@ -313,6 +314,7 @@ class TensorVariable(VariableTracker):
             )
             and config.capture_scalar_outputs
         ):
+            # breakpoint()
             if use_fake_tensors:
                 # item raw value should not be accessed
                 return FakeItemVariable.create(
@@ -522,13 +524,30 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "item":
             if config.capture_scalar_outputs:
+                use_fake_tensors = (
+                    fake_tensors_available and config.fake_tensor_propagation
+                )
+                if use_fake_tensors:
+                    example_value = _get_fake_value(self.proxy.node, tx)
+                else:
+                    example_value = _get_real_value(self.proxy.node, tx.output).item()
                 return self.__class__.create(
                     tx,
                     tx.output.create_proxy(
                         "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
                     ),
+                    example_value=example_value,
                     **options,
                 )
+                # else:
+                #     return DynamicShapeVariable.create(
+                #     tx,
+                #     tx.output.create_proxy(
+                #         "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
+                #     ),
+                #     dyn_shape=self.get_real_value().item(),
+                #     **options,
+                # )
             else:
                 unimplemented(f"Tensor.{name}")
         elif name == "__len__":
@@ -575,13 +594,23 @@ class TensorVariable(VariableTracker):
             )
 
 
-class DynamicShapeVariable(TensorVariable):
+class DynamicShapeVariable(VariableTracker):
     """
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
 
+    @classmethod
+    def create(cls, tx, proxy, dyn_shape, **options):
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == dyn_shape
+        if not dyn_shape:
+            dyn_shape = _get_fake_value(proxy.node, tx)
+        proxy.node.meta["example_value"] = dyn_shape
+        return DynamicShapeVariable(proxy, dyn_shape, **options)
+
     def __init__(self, proxy, dyn_shape, **kwargs):
-        super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
+        super(DynamicShapeVariable, self).__init__(**kwargs)
+        self.proxy = proxy
         self.dyn_shape = dyn_shape
 
     def python_type(self):
@@ -589,6 +618,33 @@ class DynamicShapeVariable(TensorVariable):
 
     def unpack_var_sequence(self, tx):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
+
+    def as_python_constant(self):
+        return self.dyn_shape
+
+    def as_proxy(self):
+        return self.proxy
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        return self.__class__.create(
+            tx,
+            tx.output.create_proxy(
+                "call_method",
+                name,
+                *proxy_args_kwargs([self] + list(args), kwargs),
+                current_tx=tx,
+            ),
+            dyn_shape=None,
+            **options,
+        )
 
 
 class TensorWithTFOverrideVariable(VariableTracker):

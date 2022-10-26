@@ -187,6 +187,8 @@ class VariableBuilder:
 
     def _wrap(self, value):
         make_guards = self.make_guards
+        if istype(value, torch.SymIntNode):
+            return self.wrap_symint(value)
         if istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
@@ -366,6 +368,7 @@ class VariableBuilder:
                 ),
             )
         elif value in tensor_dunder_fns:
+            # breakpoint()
             return TorchVariable(
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
@@ -489,6 +492,31 @@ class VariableBuilder:
                 else True
             )
         )
+
+    def wrap_symint(self, value: torch.SymIntNode):
+        # breakpoint()
+        if not is_constant_source(self.get_source()):
+            self.tx.output.graphargs.append(
+                GraphArg(self.get_source(), value, False)
+            )
+        with torch._C.DisableTorchFunction():
+            if is_constant_source(self.get_source()):
+                return self.tx.output.register_attr_or_module(
+                    value,
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    source=None,
+                    dyn_shape=value
+                    # Guards are added inside register_attr_or_module
+                )
+            tensor_variable = DynamicShapeVariable.create(
+                tx=self.tx,
+                proxy=self.tx.output.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                ),
+                dyn_shape=value
+                # shape Guards live their own rich life via shape_env
+            )
+        return tensor_variable
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():

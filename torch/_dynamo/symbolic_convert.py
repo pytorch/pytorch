@@ -81,7 +81,7 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
+from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -122,15 +122,22 @@ def stack_op(fn: typing.Callable):
 
 
 def generic_jump(truth_fn: typing.Callable, push: bool):
+    # breakpoint()
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
+        # breakpoint()
         if value.is_python_constant():
+            # breakpoint()
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
+        elif (
+            isinstance(value, (TensorVariable, DynamicShapeVariable))
+            and self.should_compile_partial_graph()
+        ):
             # compile a partial subgraph prefix then jump into user code
+            # breakpoint()
             self.push(value)
             self.output.compile_subgraph(
                 self,
@@ -152,10 +159,12 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
+            # breakpoint()
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
         else:
+            # breakpoint()
             unimplemented(f"generic_jump {typestr(value)}")
 
     return inner
@@ -696,6 +705,7 @@ class InstructionTranslatorBase(object):
                 left,
                 (
                     TensorVariable,
+                    DynamicShapeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -714,16 +724,6 @@ class InstructionTranslatorBase(object):
                 )
             )
         elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                TensorVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
             left.is_python_constant()
             and right.is_python_constant()
             and op in supported_any
@@ -734,6 +734,28 @@ class InstructionTranslatorBase(object):
                     supported_any[op](
                         left.as_python_constant(), right.as_python_constant()
                     ),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
+        ) and op in supported_tensors:
+            self.push(
+                TensorVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, DynamicShapeVariable)
+            or isinstance(right, DynamicShapeVariable)
+        ) and op in supported_tensors:
+            self.push(
+                DynamicShapeVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    dyn_shape=None,
                     **options,
                 )
             )
