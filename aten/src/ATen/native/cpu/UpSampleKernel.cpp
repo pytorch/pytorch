@@ -8,6 +8,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include "my_interp.h"
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1376,8 +1377,22 @@ void upsample_bilinear2d_aa_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
-      output, input, align_corners, {scales_h, scales_w});
+  if (input.dtype() == at::kByte) {
+    // TODO:
+    // - Use dispatcher instead
+    // - Put the proper guards in place: this only works for (1, 3, H, W) images that are channel_last
+    // - Re-organize files
+    // - Use vec.h instead of hardcoded AVX2 intrinsics
+    // - As much as possible, re-use existing code e.g. for coeff computation
+    // - Use pytorch types instead of UINT32, INT16 etc.
+    // - There's a segfault when input_shape == output_shape
+    // - This could be extended to other filters, not just bilinear
+    // - License?
+    beepidiboop(input, output);
+  } else {
+    separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpLinear>(
+        output, input, align_corners, {scales_h, scales_w});
+  }
 }
 
 void upsample_trilinear3d_kernel_impl(
