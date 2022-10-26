@@ -215,6 +215,29 @@ class TestPrims(TestCase):
         )
         self.assertFalse(include_any_nvprims_sin)
 
+    def test_partitioner_tuple_output(self, device):
+        # This test verifies that the partitioner doesn't segment on nodes with
+        # tuple outputs.
+        from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+        from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
+
+        a = make_tensor(5, 3, 3, device=device, dtype=torch.float32)
+
+        def func(x):
+            xx = torch.ops.nvprims.add(x, 1)
+            var, mean = torch.ops.nvprims.var_mean(x, correction=0)
+            var_cos = torch.ops.nvprims.cos(var)
+            mean_sin = torch.ops.nvprims.sin(mean)
+            return torch.ops.nvprims.add(var_cos, mean_sin)
+
+        gm = make_fx(func)(a)
+        supported_ops = NvfuserPrimOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            gm, supported_ops, allows_single_node_partition=False
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(len(partitions), 1)
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_empty_fusion(self, device):

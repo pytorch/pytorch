@@ -1,3 +1,4 @@
+import operator
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
@@ -89,7 +90,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
-        if node.op == "call_function" and "getitem" in node.name:
+        if node.op == "call_function" and node.target == operator.getitem:
             continue
         if (
             node.op == "call_function"
@@ -152,7 +153,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
             def call_function(self, target, args, kwargs):
                 # This handles tuple unpacking
-                if "getitem" in str(target):
+                if target == operator.getitem:
                     assert isinstance(args[0], tuple)
                     return target(*args, **kwargs)
                 args = tuple(map(_to_nvfuser_constant, args))
@@ -237,10 +238,9 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
                 )
                 is not None
             )
-        return (
-            node.op == "call_function"
-            and getattr(node.target, "impl_nvfuser", None) is not None
-            or "getitem" in node.name  # getitem is a special case
+        return node.op == "call_function" and (
+            getattr(node.target, "impl_nvfuser", None) is not None
+            or node.target == operator.getitem
         )
 
 
