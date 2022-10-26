@@ -1658,11 +1658,6 @@ def activate_meta():
             "aten::clone",  # causing infinite recursion
             "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
             "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
-            "aten::add.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::sub.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::mul.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::div.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test_fake_tensor.py -k test_scalar_inputs  # noqa: B950
-            "aten::div.Tensor_mode",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_div8_cpu  # noqa: B950
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
