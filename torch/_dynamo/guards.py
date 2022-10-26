@@ -528,8 +528,9 @@ class DynamoGuardPrinter(StrPrinter):
         if expr == 1:
             return "1"
         if expr not in self.expr_to_tensor_ref:
-            if expr not in self.intermediary_symbols:
-                log.warning(f"DROPPING GUARD SYMBOL: {expr}")
+            # Please keep these 2 lines here for debugging
+            # if expr not in self.intermediary_symbols:
+            # log.warning(f"DROPPING GUARD SYMBOL: {expr}")
             # This is an intermediary symbol with no tensor association, skip it
             # If we did not make the symbol, it came from something dynamo does not know about
             # So either: (A) skipping the guard is safe because something else (like module id check)
