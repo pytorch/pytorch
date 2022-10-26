@@ -1278,7 +1278,7 @@ class TritonScheduling:
             kernel_name = wrapper.next_kernel_name()
             wrapper.kernels[src_code] = kernel_name
             subs_name = (
-                kernel_name if config.triton.ordered_kernel_names else "triton#kernel"
+                kernel_name if config.triton.ordered_kernel_names else "triton__kernel"
             )
             src_code = src_code.replace("KERNEL_NAME", subs_name)
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
