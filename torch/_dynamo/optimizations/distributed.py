@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any, List, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -48,13 +48,20 @@ class DDPOptimizer:
         parameters_to_ignore: List[str],
         backend_compile_fn,
         debug=False,
-        first_bucket_cap: int = torch.distributed._DEFAULT_FIRST_BUCKET_BYTES,
+        first_bucket_cap: Optional[int] = None,
     ):
+        if first_bucket_cap is not None:
+            self.first_bucket_cap = first_bucket_cap
+        elif torch.distributed.is_available():
+            # this constant comes from C10D lib which is not always built
+            self.first_bucket_cap = torch.distributed._DEFAULT_FIRST_BUCKET_BYTES
+        else:
+            self.first_bucket_cap = bucket_bytes_cap
+
         self.bucket_bytes_cap = bucket_bytes_cap
         assert (
-            first_bucket_cap <= bucket_bytes_cap
+            self.first_bucket_cap <= self.bucket_bytes_cap
         ), "First bucket should be smaller/equal to other buckets to get comms warmed up ASAP"
-        self.first_bucket_cap = first_bucket_cap
         self.parameters_to_ignore = parameters_to_ignore
         self.backend_compile_fn = backend_compile_fn
         self.debug = debug
