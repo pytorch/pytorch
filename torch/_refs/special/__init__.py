@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch._prims as prims
@@ -8,7 +8,13 @@ import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, TensorLikeType
+from torch._prims_common import (
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    Number,
+    NumberType,
+    TensorLike,
+    TensorLikeType,
+)
 from torch._prims_common.wrappers import elementwise_type_promotion_wrapper, out_wrapper
 from torch._refs import (
     _make_elementwise_binary_reference,
@@ -33,6 +39,7 @@ __all__ = [
     "ndtri",
     "softmax",
     "spherical_bessel_j0",
+    "xlog1py",
     "zeta",
 ]
 
@@ -132,6 +139,31 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     hi = 1 - eps
     self = torch.clamp(self, lo, hi)
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
+
+
+@register_decomposition(torch.ops.aten.special_xlog1py)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "b"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def xlog1py(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
+    utils.check(
+        isinstance(a, TensorLike) or isinstance(b, TensorLike),
+        lambda: 'Expected either argument a or b to be a Tensor"',
+    )
+
+    # Operations like eq and log do not handle scalar values, so we convert them to scalar_tensors.
+    if isinstance(a, TensorLike) and isinstance(b, Number):
+        b = refs.scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(b, TensorLike) and isinstance(a, Number):
+        a = refs.scalar_tensor(a, dtype=b.dtype, device=b.device)
+
+    # mypy: expected "Tensor"
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
+    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, refs.log1p(b)))
+    return torch.where(torch.isnan(b), float("nan"), rhs)
 
 
 @register_decomposition(torch.ops.aten.mvlgamma)
