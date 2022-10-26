@@ -166,7 +166,6 @@ jobs:
         uses: ./.github/actions/upload-test-artifacts
         if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
-          use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload test statistics
