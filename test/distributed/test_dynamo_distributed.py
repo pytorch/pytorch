@@ -58,9 +58,9 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
             )
         )
         cls.rank = 0
-        cls.device = f"cuda:{cls.rank}"
-        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
-        dist.init_process_group("nccl", rank=cls.rank, world_size=1)
+        cls.device = f"cpu:{cls.rank}"
+        cls.device_ids = None if "cpu" in cls.device else [cls.rank]
+        dist.init_process_group("gloo", rank=cls.rank, world_size=1)
 
     @classmethod
     def tearDownClass(cls):

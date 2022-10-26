@@ -306,8 +306,11 @@ class DebugFormatter:
         self.handler = handler
 
     def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
-        with self.fopen("fx_graph.py") as fd:
+        with self.fopen("fx_graph_runnable.py") as fd:
             dynamo_debug_utils.save_graph_repro(fd, gm, inputs, "inductor")
+
+        with self.fopen("fx_graph_readable.py") as fd:
+            fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList):
         self._write_ir("ir_pre_fusion.txt", nodes)
