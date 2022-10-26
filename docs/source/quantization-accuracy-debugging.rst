@@ -6,7 +6,7 @@ accuracy. If a quantized model has error compared to the original model,
 we can categorize the error into:
 
 1. **data insensitive error** - caused by intrinsic model quantization error,
-   large portion of input data has large errror
+   large portion of input data has large error
 2. **data sensitive error** - caused by outlier input data, small
    portion of input data has large error
 3. **implementation error** - quantized kernel is not matching reference implementation
