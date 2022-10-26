@@ -53,7 +53,7 @@ Tensor nested_from_padded_cuda(
     TORCH_CHECK(
         (padded.dim() == 4 && do_transform_0213) ||
             (padded.dim() == 3 && !do_transform_0213),
-        "padded tensor size error");
+        "padded tensor size error: ", padded.dim());
     Tensor target_offsets =
         NestedTensor_batch_offsets_from_size_tensor(sizes, 0);
     Tensor padded_sizes_tensor = at::tensor(padded.sizes());
