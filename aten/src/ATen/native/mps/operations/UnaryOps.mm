@@ -31,7 +31,7 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
   }
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, output}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self, output});
     auto cachedGraph = cache_->LookUpAs<MPSUnaryCachedGraph>(key);
 
     if(!cachedGraph) {
@@ -188,45 +188,17 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output)
 
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
 {
-    using namespace mps;
-    if (!output.is_same_size(self)) {
-      output.resize_(self.sizes());
-    }
-    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-    @autoreleasepool {
-      string key = string("log1p_out_mps") + getTensorsStringKey({self});
-      auto cachedGraph = cache_->LookUpAs<MPSUnaryCachedGraph>(key);
-
-      if(!cachedGraph) {
-        cachedGraph = cache_->CreateCachedGraphAs<MPSUnaryCachedGraph>(key, ^ MPSCachedGraph* () {
-          MPSUnaryCachedGraph *newCachedGraph = nil;
-          @autoreleasepool {
-            MPSGraph* mpsGraph = make_mps_graph();
-            newCachedGraph = new MPSUnaryCachedGraph(mpsGraph);
-            newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
-              MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
-                                                          shape:getMPSShape(self)
-                                                       dataType:mps::getMPSDataType(self.scalar_type())];
-              MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:newCachedGraph->inputTensor_
-                                                         secondaryTensor:oneTensor
-                                                                    name:nil];
-            newCachedGraph->outputTensor_ = [mpsGraph logarithmWithTensor:addedTensor
-                                                                    name:nil];
-          }
-          return newCachedGraph;
-        });
-      }
-
-      Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-        selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
-      };
-      NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-        outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-      };
-      runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
-    }
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support log1p op with int64 input");
+  mps::unary_op(self, output, "log1p_out_mps",
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+                  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
+                                                                  dataType:inputTensor.dataType];
+                  MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:inputTensor
+                                                                    secondaryTensor:oneTensor
+                                                                               name:nil];
+                  return [mpsGraph logarithmWithTensor:addedTensor
+                                                  name:nil];
+                });
 }
 
 TORCH_IMPL_FUNC(frac_out_mps) (const Tensor& self, const Tensor& output) {
