@@ -30,12 +30,9 @@ jobs:
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
 
-      - name: Install lintrunner
-        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          command: pip install lintrunner==0.9.2
+      - name: Install requirements
+        run: |
+          pip install -r .github/requirements-gha-cache.txt --user
 
       - name: Initialize lint dependencies
         run: lintrunner init
