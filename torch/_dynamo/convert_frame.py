@@ -9,24 +9,26 @@ import weakref
 from typing import Callable
 
 import torch
-from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+from torch.fx.graph_module import (
+    _forward_from_src as original_forward_from_src,
+)
 
 from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
 from .eval_frame import (
-    always_optimize_code_objects,
-    skip_code,
     TorchPatcher,
     WrapperBackend,
+    always_optimize_code_objects,
+    skip_code,
 )
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
     TorchRuntimeError,
-    unimplemented,
     Unsupported,
+    unimplemented,
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .replay_record import ExecutionRecord
@@ -244,7 +246,8 @@ def augment_exc_message(exc, msg="\n"):
         )
 
     msg += "=" * 10
-    new_msg = exc.args[0] + msg
+    old_msg = "" if len(exc.args) == 0 else exc.args[0]
+    new_msg = old_msg + msg
     exc.args = (new_msg,) + exc.args[1:]
 
 
