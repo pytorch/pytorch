@@ -69,6 +69,8 @@ from .custom_config import (
     PrepareCustomConfig,
 )
 from .lower_to_fbgemm import lower_to_fbgemm
+# importing the lib so that the quantized_decomposed ops are registered
+from ._decomposed import quantized_decomposed_lib  # noqa: F401
 
 
 # TODO: revisit this list. Many helper methods shouldn't be public
@@ -485,7 +487,8 @@ def convert(
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
         qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
-        backend_config: Union[BackendConfig, Dict[str, Any], None] = None) -> torch.nn.Module:
+        backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
+        is_decomposed: bool = False) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
     quantized model, the rule is simple:
@@ -497,13 +500,21 @@ def convert(
        is stored in observed_node_names, we can decide whether we need to swap the
        module based on this set
 
-    standalone_module means it a submodule that is not inlined in
-    parent module, and will be quantized separately as one unit.
+    Args:
+       * `is_standalone_module`: when this flag is True, it means we are quantizing
+       a submodule that is not inlined in parent module, and will be quantized
+       separately as one unit.
 
-    Returns a quantized standalone module, whether input/output is quantized is
-    specified by prepare_custom_config, with
-    input_quantized_idxs, output_quantized_idxs, please
-    see docs for prepare_fx for details
+       * `is_decomposed`: a boolean flag to indicate whether we want to use the
+        quantize operator for decomposed quantized tensor
+        (torch.ops.quantized_decomposed.quantize_per_tensor) or default/standalone
+        quantized tensor (torch.quantize_per_tensor)
+
+    Returns:
+         a quantized standalone module, whether input/output is quantized is
+         specified by prepare_custom_config, with
+         input_quantized_idxs, output_quantized_idxs, please
+         see docs for :func:`~torch.ao.quantization.prepare_fx` for details
     """
     if convert_custom_config is None:
         convert_custom_config = ConvertCustomConfig()
@@ -595,7 +606,8 @@ def convert(
             node: Node,
             modules: Dict[str, torch.nn.Module],
             node_name_to_scope: Dict[str, Tuple[str, type]],
-            node_name_to_qconfig: Dict[str, QConfigAny]) -> None:
+            node_name_to_qconfig: Dict[str, QConfigAny],
+            is_decomposed: bool) -> None:
         """ Replace activation_post_process module call node with quantize and
         dequantize node
 
@@ -608,7 +620,7 @@ def convert(
         assert isinstance(node.target, str)
         module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope, node_name_to_qconfig)
         observer_module = modules[node.target]
-        maybe_quantize_node_info = get_quantize_node_info(observer_module)
+        maybe_quantize_node_info = get_quantize_node_info(observer_module, is_decomposed)
         # Skip replacing observers to quant/dequant nodes if the qconfigs of all
         # consumers and producers of this observer are None
         skip_replacement = all([
@@ -626,7 +638,7 @@ def convert(
             # replace observer node with quant - dequant node
             with graph.inserting_before(node):
                 input_node = node.args[0]
-                inputs = [input_node]
+                quantize_op_inputs = [input_node]
                 for key, value in qparams.items():
                     # TODO: we can add the information of whether a value needs to
                     # be registered as an attribute in qparams dict itself
@@ -634,13 +646,22 @@ def convert(
                         # For scale and zero_point values we register them as buffers in the root module.
                         # TODO: maybe need more complex attr name here
                         qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
-                        inputs.append(qparam_node)
+                        quantize_op_inputs.append(qparam_node)
                     else:
                         # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
-                        inputs.append(value)
+                        quantize_op_inputs.append(value)
 
-                quantized_node = graph.create_node(node_type, quantize_op, tuple(inputs), {})
-                dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
+                quantized_node = graph.create_node(node_type, quantize_op, tuple(quantize_op_inputs), {})
+                if is_decomposed:
+                    # use the same qparams from quantize op
+                    dq_inputs = [quantized_node] + quantize_op_inputs[1:]
+                    dequantized_node = graph.call_function(
+                        torch.ops.quantized_decomposed.dequantize_per_tensor,
+                        tuple(dq_inputs),
+                        {}
+                    )
+                else:
+                    dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
                 node.replace_all_uses_with(dequantized_node)
                 graph.erase_node(node)
 
@@ -711,7 +732,7 @@ def convert(
                 else:
                     replace_observer_with_quantize_dequantize_node(
                         model, model.graph, node, modules, node_name_to_scope,
-                        node_name_to_qconfig)
+                        node_name_to_qconfig, is_decomposed)
             elif isinstance(mod, DeQuantStub):
                 replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
             elif is_observed_standalone_module(mod):

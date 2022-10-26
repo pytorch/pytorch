@@ -18,9 +18,11 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     convert_to_reference_fx,
+    _convert_to_reference_decomposed_fx,
     prepare_qat_fx,
     fuse_fx,
 )
+
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
 
@@ -5236,6 +5238,30 @@ class TestQuantizeFx(QuantizationTestCase):
                 qconfig_mapping = get_default_qconfig_mapping(invalid_backend)
             with self.assertRaisesRegex(AssertionError, "not supported"):
                 qconfig_mapping = get_default_qat_qconfig_mapping(invalid_backend)
+
+    def test__convert_to_reference_decomposed_fx(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        qconfig_mapping = get_default_qconfig_mapping("fbgemm")
+        example_inputs = (torch.randn(1, 5),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs)
+        m = _convert_to_reference_decomposed_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+        # make sure it runs
+        m(*example_inputs)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
