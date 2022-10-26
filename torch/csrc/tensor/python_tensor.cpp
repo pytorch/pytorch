@@ -234,7 +234,7 @@ static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
   THPObjectPtr storage(
       PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
   if (!storage.get()) {
-    throw TypeError("couldn't find storage object %s", storage_name.c_str());
+    C10_THROW_ERROR(TypeError, c10::str("couldn't find storage object ", storage_name));
   }
   return storage;
 }

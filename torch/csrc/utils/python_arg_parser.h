@@ -474,7 +474,16 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   if (size != N) {
-    throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
+    C10_THROW_ERROR(
+        TypeError,
+        c10::str(
+            "expected tuple of ",
+            // TODO(shikanime): maybe need to fix the %d format specifier
+            N,
+            " elements but got ",
+            // TODO(shikanime): maybe need to fix the %d
+            // format specifier
+            (int)size));
   }
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
@@ -505,13 +514,20 @@ inline void throw_intlist_exception(
     size_t i,
     PyObject* obj,
     size_t idx) {
-  throw TypeError(
-      "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-      args->signature.name.c_str(),
-      args->signature.params[i].name.c_str(),
-      args->signature.params[i].type_name().c_str(),
-      Py_TYPE(obj)->tp_name,
-      idx + 1);
+  C10_THROW_ERROR(
+      TypeError,
+      c10::str(
+          args->signature.name,
+          "(): argument '",
+          args->signature.params[i].name,
+          "' must be ",
+          args->signature.params[i].type_name(),
+          ", but found element of type ",
+          Py_TYPE(obj)->tp_name,
+          " at pos ",
+          // TODO(shikanime): maybe need to fix the %ld format
+          // specifier
+          idx + 1));
 }
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
@@ -665,13 +681,19 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception& e) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          idx + 1);
+      C10_THROW_ERROR(
+          TypeError,
+          c10::str(
+              signature.name,
+              "(): argument '",
+              signature.params[i].name,
+              "' must be ",
+              signature.params[i].type_name(),
+              ", but found element of type ",
+              Py_TYPE(obj)->tp_name,
+              " at pos ",
+              // TOOD(shikanime): fix %ld format specifier
+              idx + 1));
     }
   }
   return res;
@@ -1020,8 +1042,10 @@ inline c10::Stream PythonArgs::stream(int i) {
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
   if (!THPStream_Check(args[i])) {
-    throw TypeError(
-        "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
+    C10_THROW_ERROR(
+        TypeError,
+        c10::str(
+            "expected Stream object. Got '", Py_TYPE(args[i])->tp_name, "'"));
   }
   return c10::Stream::unpack(((THPStream*)args[i])->cdata);
 }

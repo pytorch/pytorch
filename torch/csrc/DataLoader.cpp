@@ -179,7 +179,7 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
 static PyObject* THPModule_setWorkerPIDs(PyObject* module, PyObject* args) {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 2) {
-    throw TypeError("_set_worker_pids expects exactly 2 arguments.");
+    C10_THROW_ERROR(TypeError, "_set_worker_pids expects exactly 2 arguments.");
   }
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
   if (worker_pids.find(key) != worker_pids.end()) {
@@ -188,9 +188,12 @@ static PyObject* THPModule_setWorkerPIDs(PyObject* module, PyObject* args) {
   }
   PyObject* child_pids = PyTuple_GET_ITEM(args, 1);
   if (!PyTuple_Check(child_pids)) {
-    throw TypeError(
-        "_set_worker_pids expects a tuple for child_pids, but got %s.",
-        Py_TYPE(child_pids)->tp_name);
+    C10_THROW_ERROR(
+        TypeError,
+        c10::str(
+            "_set_worker_pids expects a tuple for child_pids, but got ",
+            Py_TYPE(child_pids)->tp_name,
+            "."));
   }
 
   std::set<pid_t> pids_set = {};

@@ -58,9 +58,11 @@ static PyObject* THPVariable_pynew(
         "Variable can't be volatile and require_grad at the same time!");
   }
   if (grad_fn && !THPFunction_Check(grad_fn)) {
-    throw TypeError(
-        "_grad_fn has to be a Function object or None, but got %s",
-        Py_TYPE(grad_fn)->tp_name);
+    C10_THROW_ERROR(
+        TypeError,
+        c10::str(
+            "_grad_fn has to be a Function object or None, but got ",
+            Py_TYPE(grad_fn)->tp_name));
   }
   Variable var;
   if (!data || data == Py_None) {

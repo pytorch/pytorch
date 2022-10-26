@@ -151,7 +151,8 @@ at::Storage createStorageGetType(
 
   if (Py_TYPE(untyped_storage_obj) !=
       reinterpret_cast<PyTypeObject*>(THPStorageClass)) {
-    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
+    C10_THROW_ERROR(
+        TypeError, c10::str("not a storage '", Py_TYPE(obj)->tp_name, "'"));
   }
 
   c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(

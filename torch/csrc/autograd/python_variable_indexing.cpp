@@ -87,10 +87,13 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
 }
 
 [[noreturn]] static inline void invalid_index(PyObject* obj) {
-  throw IndexError(
-      "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
-      "Variables are valid indices (got %s)",
-      Py_TYPE(obj)->tp_name);
+  C10_THROW_ERROR(
+      IndexError,
+      c10::str(
+          "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
+          "Variables are valid indices (got ",
+          Py_TYPE(obj)->tp_name,
+          ")"));
 }
 
 static inline Variable sequenceToVariable(
@@ -117,10 +120,13 @@ inline Variable valueToTensor(
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
   } else {
-    throw TypeError(
-        "can't assign a %s to a %s",
-        Py_TYPE(value)->tp_name,
-        torch::utils::options_to_string(options).c_str());
+    C10_THROW_ERROR(
+        TypeError,
+        c10::str(
+            "can't assign a ",
+            Py_TYPE(value)->tp_name,
+            " to a ",
+            torch::utils::options_to_string(options)));
   }
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
@@ -431,7 +437,7 @@ void dispatch_set_item(
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
   if (py_value == nullptr) {
-    throw TypeError("Tensor does not support deleting items");
+    C10_THROW_ERROR(TypeError, "Tensor does not support deleting items");
   }
   if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
       (!THPVariable_CheckExact(py_value) &&
@@ -445,7 +451,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
       self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
       self_.layout() == kSparseBsc) {
-    throw TypeError("Cannot assign to a sparse tensor");
+    C10_THROW_ERROR(TypeError, "Cannot assign to a sparse tensor");
   }
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
