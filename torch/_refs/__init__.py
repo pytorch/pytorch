@@ -726,14 +726,9 @@ def nan_to_num(
 
 
 def _neg_meta(a: TensorLikeType):
-    check(
-        a.dtype is not torch.bool,
-        lambda: (
-            "Negation, the `-` operator, on a bool tensor is not supported. "
-            "If you are trying to invert a mask, use the `~` or `logical_not()` "
-            "operator instead."
-        ),
-    )
+    if a.dtype is torch.bool:
+        msg = "neg is not supported on bool tensors."
+        raise RuntimeError(msg)
 
 
 @_make_elementwise_unary_reference(
@@ -2283,15 +2278,11 @@ def mean(
     # reduces over all dimensions if dim=() is passed
     if dim == () or dim == []:
         dim = None
-    which_dtype = "Optional"
     if dtype is None:
-        which_dtype = "Input"
         dtype = a.dtype
     # can't use out wrapper because of this argument
-    check(
-        out is None or out.dtype == dtype,
-        lambda: f"Expected out tensor to have dtype {dtype}, but got {out.dtype} instead",
-    )
+    if out is not None and out.dtype != dtype:
+        raise RuntimeError("expected out dtype and dtype to match")
     result = _reduction(
         a,
         prims.sum,
@@ -2301,13 +2292,8 @@ def mean(
         out=None,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.KEEP_PROMOTED_TYPE,
     )
-    check(
-        utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
-        lambda: (
-            f"mean(): could not infer output dtype. {which_dtype} dtype must be either "
-            f"a floating point or complex dtype. Got: {dtype}"
-        ),
-    )
+    if utils.is_integer_dtype(dtype):
+        raise RuntimeError("result type should be floating point or complex")
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
@@ -2494,19 +2480,12 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
-    check(len(tensors) > 0, lambda: "torch.cat(): expected a non-empty list of Tensors")
+    if len(tensors) == 0:
+        msg = "cat expects at least one tensor, but received zero!"
+        raise ValueError(msg)
 
-    for i, tensor in enumerate(tensors):
-        # The order of checks here is important. First, make sure it's a tensor.
-        check(
-            isinstance(tensor, TensorLike),
-            lambda: f"expected Tensor as element {i} in argument 0, but got {type(tensor)}",
-            exc_type=TypeError,
-        )
-        check(
-            tensor.ndim > 0,
-            lambda: f"zero-dimensional tensor (at position {i}) cannot be concatenated",
-        )
+    for tensor in tensors:
+        assert isinstance(tensor, TensorLike)
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
@@ -3235,7 +3214,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     dim = utils.canonicalize_dim(t.ndim, dim)
     check(
         len(t.shape) > 0,
-        lambda: "Dimension specified as 0 but tensor has no dimensions",
+        lambda: "dimension specified as 0 but tensor has no dimensions",
         IndexError,
     )
     return tuple(
@@ -3481,12 +3460,12 @@ def vsplit(
         check(
             (split_size != 0 and a.shape[0] % split_size == 0),
             lambda: (
-                f"torch.vsplit attempted to split along dimension 0"
-                f", but the size of the dimension "
-                f"{a.shape[0]}"
-                f" is not divisible by the split_size "
-                f"{split_size}"
-                f"!"
+                "torch.vsplit attempted to split along dimension 0 "
+                + ", but the size of the dimension "
+                + str(a.shape[0])
+                + " is not divisible by the split_size "
+                + str(split_size)
+                + "!"
             ),
         )
         return tensor_split(a, split_size, 0)
@@ -3628,7 +3607,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
         )
     if isinstance(sections, IntLike) and (sections == 0 or a.shape[2] % sections != 0):
         raise RuntimeError(
-            "torch.dsplit attempted to split along dimension 2, "
+            "torch._refs.dsplit attempted to split along dimension 2, "
             + f"but the size of the dimension {a.shape[2]} is not divisible by the split_size {sections}!"
         )
     return tensor_split(a, sections, 2)
@@ -4262,17 +4241,12 @@ def movedim(
     if type(destination) is int:
         destination = (destination,)
 
-    # Convert to list to produce a compatible error message with core PyTorch,
-    # which prints sequences in square brackets.
-    def _format_seq(seq):
-        return list(seq)
-
     utils.check(
         len(source) == len(destination),  # type: ignore[arg-type]
         lambda: (
             "movedim: Invalid source or destination dims: source "
-            f"({_format_seq(source)} dims) should contain the same number of dims as "
-            f"destination ({_format_seq(destination)} dims)"
+            f"({source} dims) should contain the same number of dims as "
+            f"destination ({destination} dims)"
         ),
     )
 
@@ -4285,11 +4259,11 @@ def movedim(
 
     utils.check(
         len(ss) == len(sss),
-        lambda: f"movedim: repeated dim in `source` ({_format_seq(source)})",
+        lambda: f"movedim: repeated dim in `source` {source}",
     )
     utils.check(
         len(ds) == len(dss),
-        lambda: f"movedim: repeated dim in `destination` ({_format_seq(destination)})",
+        lambda: f"movedim: repeated dim in `destination` {destination}",
     )
 
     m = dict(zip(ds, ss))
@@ -4527,6 +4501,8 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: "Expected `value` to be on same device as `a`",
         )
         value_type = utils.dtype_to_type(value.dtype)
+        if utils.is_cpu_scalar_tensor(value):
+            value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
@@ -4535,7 +4511,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # Ref: https://github.com/pytorch/pytorch/issues/79195
         check(
             utils.is_weakly_lesser_type(value_type, python_type),
-            lambda: f"value cannot be converted to type {python_type} without overflow",
+            lambda: f"could not convert to type {python_type} without overflow",
         )
 
     # Since `where` allows type-promotion,

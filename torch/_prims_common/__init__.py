@@ -565,12 +565,15 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             if device is None:
                 device = arg.device
 
-            check(
-                device == arg.device,
-                lambda: (
-                    f"Expected all tensors to be on the same device, but "
-                    f"found at least two devices, {device} and {arg.device}!"
-                ))
+            if device != arg.device:
+                msg = (
+                    "Tensor on device "
+                    + str(arg.device)
+                    + " is not on the expected device "
+                    + str(device)
+                    + "!"
+                )
+                raise RuntimeError(msg)
         else:
             msg = (
                 "Unexpected type when checking for same device, " + str(type(arg)) + "!"
@@ -708,14 +711,12 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
     if dim is not None:
-        # Convert to list to produce a compatible error message with core
-        # PyTorch, which prints sequences in square brackets.
-        shape = list(shape)
         check(
             newsize != 0,
-            lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
-                     f"unspecified dimension size -1 can be any value and is ambiguous"),
+            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+            f"unspecified dimension size -1 can be any value and is ambiguous",
         )
+        shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
 

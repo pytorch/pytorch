@@ -285,10 +285,8 @@ TORCH_META_FUNC(amax)
 (const Tensor& self, IntArrayRef dim, bool keepdim) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
-    TORCH_CHECK(
-      self.scalar_type() == maybe_result.scalar_type(),
-      "Attempting to cast from ", self.scalar_type(), " to out tensor with dtype ", maybe_result.scalar_type(),
-      ", but this can't be cast because it is not safe!");
+    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+            self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
   }
   if (self.numel() == 0) {
     at::native::zero_numel_check_dims(self, dim, "amax()");
@@ -301,10 +299,8 @@ TORCH_META_FUNC(amin)
 (const Tensor& self, IntArrayRef dim, bool keepdim) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
-    TORCH_CHECK(
-      self.scalar_type() == maybe_result.scalar_type(),
-      "Attempting to cast from ", self.scalar_type(), " to out tensor with dtype ", maybe_result.scalar_type(),
-      ", but this can't be cast because it is not safe!");
+    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+                self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
   }
   if (self.numel() == 0) {
     at::native::zero_numel_check_dims(self, dim, "amin()");
