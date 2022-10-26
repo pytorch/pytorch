@@ -144,11 +144,11 @@ def forward(self, a_1):
     as_strided_copy_4 = torch.ops.aten.as_strided_copy.default(as_strided_copy_2, [16, 64, 128, 128], [1048576, 16384, 128, 1], 0)
     clone_1 = torch.ops.aten.clone.default(as_strided_copy_4, memory_format = torch.contiguous_format);  as_strided_copy_4 = None
     threshold_backward = torch.ops.aten.threshold_backward.default(clone_1, relu, 0);  clone_1 = relu = None
-    _reshape_alias_copy = torch.ops.aten._reshape_alias_copy.default(as_strided_copy_2, [16, 64, 128, 128], [1048576, 16384, 128, 1])
-    detach_copy = torch.ops.aten.detach_copy.default(_reshape_alias_copy);  _reshape_alias_copy = None
+    view_copy_2 = torch.ops.aten.view_copy.default(as_strided_copy_2, [16, 64, 128, 128])
+    detach_copy = torch.ops.aten.detach_copy.default(view_copy_2);  view_copy_2 = None
     as_strided_scatter_1 = torch.ops.aten.as_strided_scatter.default(as_strided_copy_2, threshold_backward, [16, 64, 128, 128], [1048576, 16384, 128, 1], 0);  as_strided_copy_2 = threshold_backward = None
-    _reshape_alias_copy_1 = torch.ops.aten._reshape_alias_copy.default(as_strided_scatter_1, [16, 64, 128, 128], [1048576, 16384, 128, 1]);  as_strided_scatter_1 = None
-    detach_copy_1 = torch.ops.aten.detach_copy.default(_reshape_alias_copy_1);  _reshape_alias_copy_1 = None
+    view_copy_3 = torch.ops.aten.view_copy.default(as_strided_scatter_1, [16, 64, 128, 128]);  as_strided_scatter_1 = None
+    detach_copy_1 = torch.ops.aten.detach_copy.default(view_copy_3);  view_copy_3 = None
     return detach_copy_1
     """)  # noqa: B950
 
