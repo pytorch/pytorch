@@ -115,8 +115,7 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<G
 #else
 void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<Generator> gen) {
   Tensor self = iter.tensor(0);
-  if (lambda > 0 && !std::isinf(lambda) && !std::isnan(lambda) && cpuinfo_initialize() &&
-      cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+  if (lambda > 0 && !std::isinf(lambda) && !std::isnan(lambda)) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     int64_t seed;
     {
@@ -179,7 +178,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
       }
     });
   } else {
-    // The situation of AMD, move to using the default version
+    // The situation of inf and nan, move to using the default version
     exponential_kernel_default(iter, lambda, gen);
   }
 }
