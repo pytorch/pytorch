@@ -108,6 +108,7 @@ class OutputGraph(fx.Tracer):
         self.unspec_variable_map = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref = {}
+        self.intermediary_symbols = {}
 
     @property
     def output(self):
@@ -224,6 +225,7 @@ class OutputGraph(fx.Tracer):
                 return NNModuleVariable(type(target), module_key, **options)
 
         elif isinstance(target, torch.SymIntNode):
+            self.intermediary_symbols.update({target.get_pyobj().expr: ""})
 
             def wrap_name(module_key):
                 return DynamicShapeVariable.create(
