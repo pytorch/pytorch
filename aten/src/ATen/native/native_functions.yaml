@@ -5311,10 +5311,12 @@
   variants: function, method
   dispatch:
     CPU, CUDA: nansum
+    MPS: nansum_mps
 
 - func: nansum.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: nansum_out
+    MPS: nansum_out_mps
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   variants: method
