@@ -1475,6 +1475,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
