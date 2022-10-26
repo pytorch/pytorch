@@ -45,7 +45,7 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         return self.graph.create_node(kind, target, args, kwargs, name,
-                type_expr, parent_module=parent_module)
+                                      type_expr, parent_module=parent_module)
 
     @compatibility(is_backward_compatible=True)
     def proxy(self, node: Node) -> 'Proxy':
