@@ -24,10 +24,10 @@ class ExportDiagnostic(infra.Diagnostic):
         self,
         rule: infra.Rule,
         level: infra.Level,
-        message_args: Optional[Tuple[Any, ...]],
+        message: str,
         **kwargs,
     ) -> None:
-        super().__init__(rule, level, message_args, **kwargs)
+        super().__init__(rule, level, message, **kwargs)
         self._record_current_frame()
 
     def _record_current_frame(self) -> None:
@@ -63,22 +63,6 @@ class ExportDiagnostic(infra.Diagnostic):
         return self
 
 
-class ExportDiagnosticTool(infra.DiagnosticTool):
-    """Base class for all export diagnostic tools.
-
-    This class is used to represent all export diagnostic tools. It is a subclass
-    of infra.DiagnosticTool.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(
-            name="torch.onnx.export",
-            version=torch.__version__,
-            rules=_rules.rules,
-            diagnostic_type=ExportDiagnostic,
-        )
-
-
 class ExportDiagnosticEngine(infra.DiagnosticEngine):
     """PyTorch ONNX Export diagnostic engine.
 
@@ -100,7 +84,7 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
     def __init__(self) -> None:
         super().__init__()
         self._background_context = infra.DiagnosticContext(
-            ExportDiagnosticTool(), options=None
+            name="torch.onnx.export", version=torch.__version__, options=None
         )
 
     @property
@@ -129,8 +113,24 @@ def create_export_diagnostic_context():
     export internals via global variable. See `ExportDiagnosticEngine` for more details.
     """
     global context
-    context = engine.create_diagnostic_context(ExportDiagnosticTool())
+    context = engine.create_diagnostic_context("torch.onnx.export", torch.__version__)
     try:
         yield context
     finally:
         context = engine.background_context
+
+
+def diagnose(
+    rule: infra.Rule,
+    level: infra.Level,
+    message: str,
+    **kwargs,
+) -> ExportDiagnostic:
+    """Creates a diagnostic and record it in the global diagnostic context.
+
+    This is a wrapper around `context.record` that uses the global diagnostic context.
+    """
+    global context
+    diagnostic = ExportDiagnostic(rule, level, message, **kwargs)
+    context.add_diagnostic(diagnostic)
+    return diagnostic

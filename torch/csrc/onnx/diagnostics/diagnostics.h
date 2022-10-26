@@ -55,15 +55,16 @@ inline py::object _PyLevel(Level level) {
 inline void Diagnose(
     Rule rule,
     Level level,
-    std::vector<std::string> messageArgs = {}) {
+    std::unordered_map<std::string, std::string> messageArgs = {}) {
   py::object py_rule = _PyRule(rule);
   py::object py_level = _PyLevel(level);
   py::object py_context = _PyContext();
 
-  py::dict kwargs = py::dict();
   // TODO: statically check that size of messageArgs matches with rule.
-  kwargs["message_args"] = messageArgs;
-  py_context.attr("diagnose")(py_rule, py_level, **kwargs);
+  py::object py_message =
+      py_rule.attr("format_message")(**py::cast(messageArgs));
+
+  py_context.attr("diagnose")(py_rule, py_level, py_message);
 }
 
 } // namespace diagnostics

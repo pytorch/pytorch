@@ -1888,8 +1888,7 @@ def _run_symbolic_function(
             )
 
         raise errors.UnsupportedOperatorError(
-            domain,
-            op_name,
+            symbolic_function_name,
             opset_version,
             symbolic_function_group.get_min_supported()
             if symbolic_function_group
