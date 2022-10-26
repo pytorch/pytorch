@@ -36,7 +36,7 @@ def get_source_lines_and_file(
 
 def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     """
-    This helper function accepts a list of source lines. It finds the
+  This helper function takes a list of source lines as input. It finds the
     indentation level of the function definition (`def`), then it indents
     all lines in the function body to a point at or greater than that
     level. This allows for comments and continued string literals that
