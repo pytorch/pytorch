@@ -28,7 +28,7 @@ Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descen
 
   @autoreleasepool {
     string key = "argsort_stable_mps:" + getTensorsStringKey({self});
-    
+
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -40,11 +40,11 @@ Tensor argsort_stable(const Tensor & self, bool stable, int64_t dim, bool descen
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          
+
           MPSGraphTensor* outputTensor = [mpsGraph argSortWithTensor:inputTensor
-                                                                axis:dim 
+                                                                axis:dim
                                                                 name:nil];
-          
+
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->outputTensor_ = outputTensor;
         }
