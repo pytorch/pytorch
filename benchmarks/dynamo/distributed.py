@@ -63,6 +63,8 @@ def run_model(args, model, inputs, rank, world_size, key, result_q):
     if args.dynamo:
         if args.verbose:
             dynamo.config.verbose = True
+        if args.dynamo_optimize_ddp:
+            dynamo.config.optimize_ddp = True
 
         def print_compile(gm, ex):
             print(
@@ -128,6 +130,11 @@ if __name__ == "__main__":
     parser.add_argument("--repeat", default=10, help="Repeats for timing run")
     parser.add_argument(
         "--world_size", type=int, default=2, help="Number of ranks/gpus for experiments"
+    )
+    parser.add_argument(
+        "--dynamo_optimize_ddp",
+        action="store_true",
+        help="Enable dynamo's ddp optimizer",
     )
     parser.add_argument(
         "--fsdp_checkpoint",
