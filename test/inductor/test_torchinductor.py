@@ -4023,6 +4023,7 @@ class CommonTemplate:
 
 
 if HAS_CPU:
+
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
 
