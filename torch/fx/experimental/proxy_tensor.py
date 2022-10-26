@@ -418,8 +418,13 @@ def dispatch_trace(
         tracer: Tracer,
         concrete_args: Optional[Tuple[Any, ...]] = None,
 ) -> GraphModule:
-    graph = tracer.trace(root, concrete_args)
     name = root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__
+    try:
+        graph = tracer.trace(root, concrete_args)
+    except:
+        print("incomplete graph: ")
+        GraphModule(tracer.root, tracer.graph, name).print_readable()
+        raise
     return GraphModule(tracer.root, graph, name)
 
 
