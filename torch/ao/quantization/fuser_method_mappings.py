@@ -159,7 +159,7 @@ def _sequential_wrapper2(sequential):
         return sequential(m1, m2)
     return fuser_method
 
-DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
+_DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
@@ -184,7 +184,7 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     '''
     if additional_fuser_method_mapping is None:
         additional_fuser_method_mapping = {}
-    all_mappings = get_combined_dict(DEFAULT_OP_LIST_TO_FUSER_METHOD,
+    all_mappings = get_combined_dict(_DEFAULT_OP_LIST_TO_FUSER_METHOD,
                                      additional_fuser_method_mapping)
     fuser_method = all_mappings.get(op_list, None)
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
@@ -211,7 +211,7 @@ def _reverse3(f):
         return f(is_qat, z, y, x)
     return reversed
 
-DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] = {
+_DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] = {
     (nn.BatchNorm1d, nn.Conv1d): _reverse2(fuse_conv_bn),
     (nn.ReLU, (nn.BatchNorm1d, nn.Conv1d)): _reverse3(fuse_conv_bn_relu),
     (nn.BatchNorm2d, nn.Conv2d): _reverse2(fuse_conv_bn),
@@ -268,7 +268,7 @@ def get_fuser_method_new(
     Would like to implement this first and have a separate PR for deprecation
     """
     if fuser_method_mapping is None:
-        fuser_method_mapping = DEFAULT_PATTERN_TO_FUSER_METHOD
+        fuser_method_mapping = _DEFAULT_PATTERN_TO_FUSER_METHOD
 
     op_patterns = _get_valid_patterns(op_pattern)
     fuser_method = None
