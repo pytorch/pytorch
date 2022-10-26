@@ -445,7 +445,7 @@ By default, ATen code generation will generate device check,
 which will ensure all the tensor parameters passed to kernel are
 on the same device.
 
-However, in some cases, checking the device is unncessary, because,
+However, in some cases, checking the device is unnecessary, because,
 e.g., you call a function allows to work on multiple devices.
 In that case, code generation of the device check can be disabled by adding
 `device_check: NoCheck` to your function definition.
@@ -556,7 +556,7 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: to support training, you're required to write a formula in
       derivatives.yaml since your backend implementations don't support autograd.
 
-    - Yes: you're likely calling other `at::` ops in the implemetation. Go to step 2.
+    - Yes: you're likely calling other `at::` ops in the implementation. Go to step 2.
 
 2. Think about training: does your kernel support autograd? [check autograd support](#will-your-function-be-automatically-differentiable)
     - Yes: in other words, you're providing a `CompositeImplicitAutograd` kernel which supports both inference and autograd.
@@ -610,7 +610,7 @@ It shows for a certain operator, what the computed dispatch table looks like aft
 4. TODO: AutogradCPUOrCUDA
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
-  - direct registration to backend always has higher precendence than alias
+  - direct registration to backend always has higher precedence than alias
   - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `CompositeExplicitAutograd > CompositeImplicitAutograd`,
     e.g. adding both `CompositeImplicitAutograd` and `CompositeExplicitAutograd` kernels for one op will completely ignore `CompositeImplicitAutograd` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
