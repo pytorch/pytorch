@@ -1,8 +1,7 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union, Set
 import functools
 from collections import namedtuple, OrderedDict
 from dataclasses import dataclass
-import torch
 
 T = TypeVar('T')
 S = TypeVar('S')
@@ -46,8 +45,12 @@ class GradNodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
     tangenttype_fn: UnflattenFunc
 
+LEAF_NODES: Set[Type[Any]] = set()
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 GRAD_NODES: Dict[Type[Any], GradNodeDef] = {}
+
+def _register_leaf_node(typ: Any) -> None:
+    LEAF_NODES.add(typ)
 
 def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc) -> None:
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
@@ -108,7 +111,7 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
 def _get_node_type(pytree: Any) -> Any:
     if _is_namedtuple_instance(pytree):
         return namedtuple
-    options = [i for i in type(pytree).mro() if i in SUPPORTED_NODES.keys()]
+    options = [i for i in type(pytree).mro() if i in SUPPORTED_NODES.keys() or i in LEAF_NODES]
     return options[0] if len(options) > 0 else None
 
 
@@ -147,19 +150,16 @@ class LeafSpec(TreeSpec):
         return '*'
 
 
-def leaf_flatten(pytree):
-    return [pytree], LeafSpec()
-
-
 def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
     node_type = _get_node_type(pytree)
 
-    if not node_type:
-        flatten_fn = leaf_flatten
-    elif grad_fn and node_type in GRAD_NODES:
+    if not node_type or node_type in LEAF_NODES:
+        return [pytree], LeafSpec()
+
+    if grad_fn and node_type in GRAD_NODES:
         flatten_fn = GRAD_NODES[node_type].flatten_fn
     else:
         flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
@@ -179,10 +179,6 @@ def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], Tree
     return result, TreeSpec(node_type, context, children_specs)
 
 
-def leaf_unflatten(values, context):
-    return values[0]
-
-
 def tree_unflatten(values: List[Any], spec: TreeSpec, grad_fn: bool = False, output: bool = False) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
@@ -197,7 +193,7 @@ def tree_unflatten(values: List[Any], spec: TreeSpec, grad_fn: bool = False, out
             f'but the spec refers to a pytree that holds {spec.num_leaves} '
             f'items ({spec}).')
     if isinstance(spec, LeafSpec):
-        return leaf_unflatten(values, spec)
+        return values[0]
 
     if grad_fn and spec.type in GRAD_NODES:
         unflatten_fn = GRAD_NODES[spec.type].unflatten_fn if not output else GRAD_NODES[spec.type].tangenttype_fn
