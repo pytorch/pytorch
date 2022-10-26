@@ -410,8 +410,6 @@ class ShapeEnv(object):
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
     def create_symintnode(self, expr: "sympy.Expr"):
-        if expr.is_constant():
-            return int(expr)
         py_sym_int = PySymInt(expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         return cpp_sym_int
