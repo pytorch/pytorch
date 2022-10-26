@@ -234,7 +234,7 @@ class FakeTensorConverter(object):
             warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
             grad_not_none = t.grad is not None
         if grad_not_none:
-            out.grad = self.from_real_tensor(fake_mode, t.grad)
+            out.grad = self.from_real_tensor(fake_mode, t.grad, shape_env=shape_env)
         self.set_tensor_memo(t, out)
         return out
 
@@ -747,7 +747,7 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        from torch._decomp import _disabled_meta_decomps, decomposition_table
+        from torch._decomp import decomposition_table
 
         with self:
             # Decomposes CompositeImplicitAutograd ops
@@ -781,7 +781,6 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func in decomposition_table
             and torch_decomp_decompositions(func)
-            and func not in _disabled_meta_decomps
             and all(not e.is_sparse for e in flat_arg_fake_tensors)
         ):
             with self:
