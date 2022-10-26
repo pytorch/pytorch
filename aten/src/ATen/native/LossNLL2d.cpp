@@ -1,11 +1,22 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/nll_loss2d_backward_native.h>
+#include <ATen/ops/nll_loss2d_forward.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
+#include <ATen/ops/nll_loss2d_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -487,7 +498,7 @@ Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optiona
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
 }
 
 } // namespace native
