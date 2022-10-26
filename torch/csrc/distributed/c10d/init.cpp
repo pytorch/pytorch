@@ -807,10 +807,6 @@ Example::
 Deletes the key-value pair associated with ``key`` from the store. Returns
 `true` if the key was successfully deleted, and `false` if it was not.
 
-.. warning::
-    The ``delete_key`` API is only supported by the :class:`~torch.distributed.TCPStore` and :class:`~torch.distributed.HashStore`. Using this API
-    with the :class:`~torch.distributed.FileStore` will result in an exception.
-
 Arguments:
     key (str): The key to be deleted from the store
 
@@ -820,7 +816,7 @@ Returns:
 Example::
     >>> import torch.distributed as dist
     >>> from datetime import timedelta
-    >>> # Using TCPStore as an example, HashStore can also be used
+    >>> # Using TCPStore as an example, other store types can also be used
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key")
     >>> # This should return true
