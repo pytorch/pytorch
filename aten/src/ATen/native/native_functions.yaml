@@ -2334,6 +2334,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: expm1_out
+    MPS: expm1_out_mps
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
 
