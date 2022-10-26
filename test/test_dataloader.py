@@ -1679,11 +1679,33 @@ except RuntimeError as e:
     def test_distributed_sampler_invalid_rank(self):
         from torch.utils.data.distributed import DistributedSampler
         dataset = torch.IntTensor(range(10))
-        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+        with self.assertRaisesRegex(ValueError, "Invalid rank subset sampler."):
             sampler = DistributedSampler(dataset, 3, 3)
 
-        with self.assertRaisesRegex(ValueError, "Invalid rank"):
+        with self.assertRaisesRegex(ValueError, "Invalid rank subset sampler."):
             sampler = DistributedSampler(dataset, 3, -1)
+
+        from torch.utils.data.distributed import DistributedSubsetSampler
+        sampled_indices = torch.IntTensor(range(0, 10, 2))
+        with self.assertRaisesRegex(ValueError, "Invalid rank for distributed subset sampler."):
+            sampler = DistributedSubsetSampler(dataset, sampled_indices, 3, 3)
+
+        with self.assertRaisesRegex(ValueError, "Invalid rank for distributed subset sampler."):
+            sampler = DistributedSubsetSampler(dataset, sampled_indices, 3, -1)
+
+    def test_sampled_indices_within_subset(self):
+        from torch.utils.data.distributed import DistributedSubsetSampler
+        num_processes = 4
+        num_batches = 30
+
+        data_set = torch.IntTensor(range(num_batches))
+        for i in range(num_processes):
+            subset_indices = torch.IntTensor(range(0, num_batches, 2))
+            subset_sampler = DistributedSubsetSampler(dataset, subset_indices, num_processes, i)
+            subset_d_loader = self._get_data_loader(data_set, batch_size=int(num_batches / num_processes),
+                                                    drop_last=True, sampler=subset_sampler)
+            for data in subset_d_loader:
+                self.assertObjectIn(data, subset_indices)
 
     def test_duplicating_data_with_drop_last(self):
 
@@ -1694,11 +1716,20 @@ except RuntimeError as e:
         data_set = torch.IntTensor(range(num_batches))
         scanned_data = torch.IntTensor([])
         for i in range(num_processes):
-            s = DistributedSampler(data_set, num_processes, i)
-            d_loader = self._get_data_loader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=s)
+            whole_data_sampler = DistributedSampler(data_set, num_processes, i)
+            d_loader = self._get_data_loader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=whole_data_sampler)
             for data in d_loader:
                 scanned_data = torch.cat((scanned_data, data), 0)
+        self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
+        scanned_data = torch.IntTensor([])
+        subset_indices = torch.IntTensor(range(0, num_batches, 2))
+        from torch.utils.data.distributed import DistributedSubsetSampler
+        for i in range(num_processes):
+            subset_sampler = DistributedSubsetSampler(dataset, subset_indices, num_processes, i)
+            subset_d_loader = self._get_data_loader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=subset_sampler)
+            for data in subset_d_loader:
+                scanned_data = torch.cat((scanned_data, data), 0)
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
     def test_sampler_reproducibility(self):

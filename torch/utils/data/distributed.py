@@ -5,7 +5,7 @@ import torch
 from . import Sampler, Dataset
 import torch.distributed as dist
 
-__all__ = ["DistributedSampler", ]
+__all__ = ["DistributedSampler", "DistributedSubsetSampler"]
 
 T_co = TypeVar('T_co', covariant=True)
 
