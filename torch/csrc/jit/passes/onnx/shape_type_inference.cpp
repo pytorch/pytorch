@@ -1897,7 +1897,7 @@ void UpdateReliable(
     diagnostics::Diagnose(
         diagnostics::Rule::kNodeMissingOnnxShapeInference,
         diagnostics::Level::kWarning,
-        {output->node()->kind().toDisplayString()});
+        {{"op_name", output->node()->kind().toDisplayString()}});
   }
   auto reliable = false;
   if (inferred) {
