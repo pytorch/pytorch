@@ -432,6 +432,12 @@ def conv(fake_mode, func, *args, **kwargs):
     device = kwargs["input"].fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
+        # if the input manipulation is done in Convolution.cpp we get segfault
+        k = kwargs["weight"].ndim
+        if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+            kwargs["input"] = kwargs["input"].contiguous().unsqueeze(2)
+            kwargs["weight"] = kwargs["weight"].unsqueeze(2)
+
         if func is aten.convolution.default:
             conv_backend = torch._C._select_conv_backend(*args, **kwargs)
         else:
