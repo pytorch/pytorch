@@ -320,6 +320,9 @@ class TorchVariable(VariableTracker):
             assert isinstance(args[0], TensorVariable)
 
             if config.fake_tensor_propagation:
+                unimplemented(
+                    "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
+                )
                 # In fake tensor case, this state doesn't matter, but
                 # it needs to be valid to not segfault. Pull a real tensor out.
                 # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.

@@ -4,8 +4,9 @@ from functools import partial, wraps
 from itertools import chain
 import torch
 
-from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, gradcheck, gradgradcheck, is_slow_gradcheck_env)
+from torch.testing._internal.common_utils import (
+    TestCase, is_iterable_of_tensors, run_tests, gradcheck, gradgradcheck, is_slow_gradcheck_env,
+    skipIfTorchInductor)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
@@ -253,6 +254,7 @@ class TestGradients(TestCase):
         self._forward_grad_helper(device, dtype, op, op.get_op(), is_inplace=False)
 
     @_gradcheck_ops(op_db)
+    @skipIfTorchInductor("to be fixed")
     def test_inplace_forward_mode_AD(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 
