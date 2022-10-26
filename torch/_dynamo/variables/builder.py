@@ -495,24 +495,22 @@ class VariableBuilder:
     def wrap_sym(self, value: Union[torch.SymIntNode, torch.SymFloatNode]):
         if not is_constant_source(self.get_source()):
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
-        with torch._C.DisableTorchFunction():
-            if is_constant_source(self.get_source()):
-                return self.tx.output.register_attr_or_module(
-                    value,
-                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                    source=None,
-                    dyn_shape=value
-                    # Guards are added inside register_attr_or_module
-                )
-            tensor_variable = DynamicShapeVariable.create(
-                tx=self.tx,
-                proxy=self.tx.output.create_graph_input(
-                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-                ),
+        if is_constant_source(self.get_source()):
+            return self.tx.output.register_attr_or_module(
+                value,
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                source=None,
                 dyn_shape=value
                 # shape Guards live their own rich life via shape_env
             )
-        return tensor_variable
+        return DynamicShapeVariable.create(
+            tx=self.tx,
+            proxy=self.tx.output.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+            ),
+            dyn_shape=value
+            # shape Guards live their own rich life via shape_env
+        )
 
     def wrap_tensor(self, value: torch.Tensor):
         if self.get_source().guard_source().is_nn_module():
