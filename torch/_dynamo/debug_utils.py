@@ -88,7 +88,7 @@ class NNModuleToString:
             # should be on the same device.
             example_param = next(module.parameters(), None)
             if example_param is not None and example_param.is_cuda:
-                module_str = f"{module_str}.cuda()" 
+                module_str = f"{module_str}.cuda()"
             model_str += f"{tab*2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in gm._buffers.items():
@@ -155,6 +155,9 @@ def _cuda_system_info_comment():
     return model_str
 
 
+TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
+
+
 def generate_compiler_repro_string(gm, args):
     model_str = textwrap.dedent(
         f"""
@@ -164,6 +167,8 @@ def generate_compiler_repro_string(gm, args):
         from {config.dynamo_import}.testing import rand_strided
         from math import inf
         from torch.fx.experimental.proxy_tensor import make_fx
+
+        {TEST_REPLACEABLE_COMMENT}
 
         """
     )
@@ -180,7 +185,7 @@ def generate_compiler_repro_string(gm, args):
     model_str += (
         "args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]\n"
     )
-    model_str += 'mod = make_fx(Repro())(*args)\n'
+    model_str += "mod = make_fx(Repro())(*args)\n"
     return model_str
 
 
@@ -213,7 +218,8 @@ def dump_compiler_graph_state(gm, args, compiler_name):
     log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
     with open(file_name, "w") as fd:
         save_graph_repro(fd, gm, args, compiler_name)
-    repro_path = os.path.join(config.base_dir, "repro.py")
+    curdir = os.getcwd()
+    repro_path = os.path.join(curdir, "repro.py")
     try:
         shutil.copyfile(file_name, repro_path)
         log.warning(f"Copying repro file for convenience to {repro_path}")
@@ -232,7 +238,10 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                assert same_two_models(mod, compiled, args, only_fwd=True), "Accuracy failed"
+                class AccuracyError(Exception):
+                    pass
+                if not same_two_models(mod, compiled, args, only_fwd=True):
+                    raise AccuracyError("Bad accuracy detected")
                 """
             )
         )
@@ -247,7 +256,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
         )
 
 
-def isolate_fails(fx_g, args, compiler_name: str, env=None):
+def isolate_fails(fx_g, args, compiler_name: str, env=None, patch_code=None):
     if env is None:
         env = {}
     subdir = os.path.join(os.getcwd(), "isolate")
@@ -255,7 +264,10 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
     with open(file_name, "w") as fd:
-        fd.write(generate_compiler_repro_string(fx_g, args))
+        repro_code = generate_compiler_repro_string(fx_g, args)
+        if patch_code is not None:
+            repro_code = repro_code.replace(TEST_REPLACEABLE_COMMENT, patch_code)
+        fd.write(repro_code)
         fail_fn = COMPILER_REPRO_OPTIONS[compiler_name][2]
         fd.write(
             textwrap.dedent(
@@ -361,6 +373,8 @@ def dump_to_minify(gm, args, compiler_name: str):
 
     contents = textwrap.dedent(
         f"""
+isolate_fails_code_str = None
+
 {generate_compiler_repro_string(gm, args)}
 
 from functools import partial
@@ -375,12 +389,16 @@ env_variables = {{"CUDA_VISIBLE_DEVICES": "{favored_device}"}}
 minifier(
     mod,
     args,
-    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}"),
+    module_fails=partial(isolate_fails, env=env_variables, compiler_name="{compiler_name}", patch_code=isolate_fails_code_str),
     dump_state=partial(dump_compiler_graph_state, compiler_name="{compiler_name}"),
 )
         """
     )
     return helper_for_dump_minify(contents)
+
+
+class CompilerError(Exception):
+    pass
 
 
 def wrap_compiler_debug(compiler_fn, compiler_name: str):
@@ -442,7 +460,7 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                         copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
-                    raise ValueError("Bad accuracy detected")
+                    raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
                     return inner_compiled_fn(real_inputs)
@@ -467,7 +485,8 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                             copy_tensor_attrs,
                             compiler_name,
                         )
-                    raise e
+                    log.exception(e)
+                    raise CompilerError("Failed to compile.")
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
@@ -556,9 +575,6 @@ def cast_to_fp64(model, inputs):
     return cast_to(torch.float64, model, inputs)
 
 
-TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
-
-
 def generate_dynamo_fx_repro_string(
     model_str, args, compiler_name, check_accuracy=False
 ):
@@ -579,9 +595,14 @@ with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
             f"""
 mod.eval()
 opt_mod.eval()
+
+class AccuracyError(Exception):
+    pass
+
 with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     assert same_two_models(mod, mod, args), "Eager itself failed"
-    assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+    if not same_two_models(mod, opt_mod, args):
+        raise AccuracyError("Dynamo failed")
     """
         )
 
@@ -742,8 +763,9 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
     if config.repro_level == 4:
         minifier_backend = "dynamo_accuracy_minifier_backend"
 
-    custom_compiler_error = textwrap.dedent(
-        f"""
+    custom_compiler_error = (
+        textwrap.dedent(
+            """\
         raise RuntimeError(
             'Compiler name is None - this likely means that a custom compiler '
             'was called by torchdynamo. Please remove this error, import your '
@@ -751,7 +773,10 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
             'line below to compiler_name=<my_imported_custom_function>'
         )
         """
-    ) if compiler_name is None else ""
+        )
+        if compiler_name is None
+        else ""
+    )
 
     contents = textwrap.dedent(
         f"""
@@ -790,6 +815,14 @@ with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     helper_for_dump_minify(contents)
 
 
+class AccuracyError(Exception):
+    pass
+
+
+class BackendError(Exception):
+    pass
+
+
 def wrap_backend_debug(compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
@@ -819,7 +852,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                         example_inputs,
                         compiler_name,
                     )
-                    raise ValueError("Bad accuracy detected")
+                    raise AccuracyError("Bad accuracy detected")
             else:
                 try:
                     compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
@@ -842,7 +875,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError(
+                    raise BackendError(
                         f"Issue detected. Repro at {get_minifier_repro_path()}."
                     )
         else:
