@@ -32,7 +32,7 @@ bool isClampFusable(
 // runtime cost
 struct PatternInfo {
   std::string pattern_string;
-  std::unique_ptr<Graph> pattern_graph;
+  std::shared_ptr<Graph> pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   std::vector<MatchFilter> filters;
 
@@ -40,10 +40,7 @@ struct PatternInfo {
       std::string pattern_string,
       const std::vector<MatchFilter>& filters = {}) {
     PatternInfo rv{
-        std::move(pattern_string),
-        std::make_unique<Graph>(),
-        decltype(vmap){},
-        filters};
+        std::move(pattern_string), Graph::create(), decltype(vmap){}, filters};
     parseIR(rv.pattern_string, rv.pattern_graph.get(), rv.vmap);
     return rv;
   }

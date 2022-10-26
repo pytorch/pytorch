@@ -406,7 +406,7 @@ void mergeNodeIntoSubgraph(
 Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
   auto graph = n->owningGraph();
   auto subgraph = graph->create(subgraphKind, 0);
-  subgraph->g_(attr::Subgraph, std::make_shared<Graph>(graph->current_scope()));
+  subgraph->g_(attr::Subgraph, Graph::create(graph->current_scope()));
   subgraph->insertBefore(n);
   mergeNodeIntoSubgraph(n, subgraph);
   return subgraph;

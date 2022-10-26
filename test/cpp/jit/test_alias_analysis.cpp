@@ -29,7 +29,7 @@ class TopologicalMoveTest : public ::testing::Test {
   // Nodes are named after their output.
   // e.g. "a" is an alias for "the node that outputs the value `a`"
   void createGraph() {
-    graph = std::make_shared<Graph>();
+    graph = Graph::create();
     createNode("a", {});
     createNode("b", {"a"});
     createNode("c", {});
@@ -315,7 +315,7 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
 } // namespace
 
 TEST(AliasAnalysisTest, AliasingMutationBlocksMoves) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->addInput();
 
@@ -344,7 +344,7 @@ TEST(AliasAnalysisTest, AliasingMutationBlocksMoves) {
 }
 
 TEST(AliasAnalysisTest, AliasingMutationBlocksMoves2) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->addInput();
 
@@ -365,7 +365,7 @@ TEST(AliasAnalysisTest, AliasingMutationBlocksMoves2) {
 
 TEST(AliasAnalysisTest, SideEffectsBlockMoves) {
   // Test moves across side effectful nodes
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto print1 = graph->insertNode(graph->create(prim::Print, {a}, 0));
   WithInsertPoint guard(print1);
@@ -407,7 +407,7 @@ TEST(AliasAnalysisTest, MovingAcrossInnerBlocks) {
   // if True:
   //   a.add_(b)
   // c = a + b
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto constant = graph->insertConstant(1);
   auto a = graph->insert(aten::rand, {constant});
   auto b = graph->insert(aten::rand, {constant});
@@ -432,7 +432,7 @@ TEST(AliasAnalysisTest, MovingAcrossInnerBlocks) {
 }
 
 TEST(AliasAnalysisTest, NoneHasNoWriters) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -450,7 +450,7 @@ TEST(AliasAnalysisTest, NoneHasNoWriters) {
 }
 
 TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -496,7 +496,7 @@ TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNorm) {
   auto isTraining = std::get<2>(param);
   std::string isTrainingStr = std::to_string((int)isTraining);
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   parseIR(
       R"IR(
@@ -534,7 +534,7 @@ TEST_P(BatchAndInstanceNormFixture, BatchAndInstanceNormTrainingUnknown) {
   auto fnName = std::get<0>(param);
   auto nodeKind = std::get<1>(param);
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   parseIR(
       R"IR(
@@ -572,7 +572,7 @@ TEST_P(BatchAndInstanceNormFixture, BatchNormTrainingWithNoMeanOrVar) {
   auto isTraining = std::get<2>(param);
   std::string isTrainingStr = std::to_string((int)isTraining);
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   parseIR(
       R"IR(
@@ -620,7 +620,7 @@ TEST(WriteTrackingTest, Basic) {
       [](Stack&) {},
       aliasAnalysisFromSchema())});
   const auto creates_alias = Symbol::fromQualString("prim::creates_alias");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->addInput();
 
@@ -650,7 +650,7 @@ TEST(WriteTrackingTest, Basic) {
 }
 
 TEST(WriteTrackingTest, IsMutable) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
   graph(%x: Tensor):
@@ -665,7 +665,7 @@ TEST(WriteTrackingTest, IsMutable) {
 }
 
 TEST(WriteTrackingTest, IsImmutable) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
   graph(%x: Tensor, %y : Tensor):
@@ -680,7 +680,7 @@ TEST(WriteTrackingTest, IsImmutable) {
 }
 
 TEST(WriteTrackingTest, HasWriters) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -698,7 +698,7 @@ TEST(WriteTrackingTest, HasWriters) {
 }
 
 TEST(ContainerAliasingTest, MayContainAlias) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -735,7 +735,7 @@ TEST(ContainerAliasingTest, MayContainAlias) {
 }
 
 TEST(ContainerAliasingTest, MayContainAlias_cast) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -772,7 +772,7 @@ TEST(ContainerAliasingTest, MayContainAlias_cast) {
 }
 
 TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
   graph():
@@ -798,7 +798,7 @@ TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
 }
 
 TEST(ContainerAliasingTest, UnionAliasing) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
   graph(%a : Dict(str, Tensor),
@@ -824,7 +824,7 @@ TEST(ContainerAliasingTest, UnionAliasing) {
 
 TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
   // Test input aliasing
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
   graph(%x: Tensor, %y: Tensor):
@@ -845,7 +845,7 @@ TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
 
 // Test tuple that doesn't come from construct
 TEST(ContainerAliasingTest, NestedTupleConstruct) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%x : int,
@@ -877,7 +877,7 @@ graph(%x : int,
 
 // test nested types
 TEST(ContainerAliasingTest, NestedTypes) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph():
@@ -904,7 +904,7 @@ graph():
 
 // simple example
 TEST(ContainerAliasingTest, Simple) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph():
@@ -934,7 +934,7 @@ graph():
 }
 
 TEST(ContainerAliasingTest, Lists) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -962,7 +962,7 @@ TEST(ContainerAliasingTest, Lists) {
 
 TEST(ContainerAliasingTest, Lists2) {
   // Test list container aliasing
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -1005,7 +1005,7 @@ TEST(ContainerAliasingTest, Conservative) {
   auto ops = torch::RegisterOperators(
       "custom::conservative", [](torch::List<at::Tensor> in) { return in; });
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -1037,7 +1037,7 @@ TEST(ContainerAliasingTest, MovesAcrossContainedWrites) {
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   // Write to the inside of a list. Check that we can't reorder a
   // print across it.
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -1077,7 +1077,7 @@ TEST(ContainerAliasingTest, MovesAcrossContainedWritesNested) {
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   // Write to the inside of a list. Check that we can't reorder a
   // print across it.
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -1121,7 +1121,7 @@ TEST(WildcardsTest, Basic) {
       Symbol::fromQualString("prim::returns_wildcard");
   const auto writes = Symbol::fromQualString("prim::writes");
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   const auto a = graph->addInput();
 
   const auto constant = graph->insertConstant(1);
@@ -1164,7 +1164,7 @@ TEST(WildcardsTest, Basic) {
 
 // test that wildcards are correctly divided by type
 TEST(WildcardsTest, TypeIsolation) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -1201,7 +1201,7 @@ TEST(WildcardsTest, TypeIsolation) {
 // however they may contain elements which alias each other
 TEST(WildcardsTest, InvariantContainerAliasing) {
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     std::unordered_map<std::string, Value*> vmap;
     parseIR(
         R"IR(
@@ -1221,7 +1221,7 @@ TEST(WildcardsTest, InvariantContainerAliasing) {
     EXPECT_FALSE(aliasDb.mayAlias(ten_list, ten_opt_list));
   }
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     std::unordered_map<std::string, Value*> vmap;
     parseIR(
         R"IR(
@@ -1235,7 +1235,7 @@ TEST(WildcardsTest, InvariantContainerAliasing) {
   }
 
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     std::unordered_map<std::string, Value*> vmap;
     parseIR(
         R"IR(
@@ -1260,7 +1260,7 @@ TEST(AliasRegistrationTest, ConservativeWithInferredSchema) {
           })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand1");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->insert(rand_op, {a});
   AliasDb aliasDb(graph);
@@ -1277,7 +1277,7 @@ TEST(AliasRegistrationTest, ConservativeWithSpecifiedSchema) {
           })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand2");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->insert(rand_op, {a});
   AliasDb aliasDb(graph);
@@ -1295,7 +1295,7 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError) {
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
 
   const auto rand_op = Symbol::fromQualString("foo::rand3");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   graph->insert(rand_op, {a});
 
@@ -1315,7 +1315,7 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
           })
           .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
   const auto rand_op = Symbol::fromQualString("foo::rand4");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   graph->insert(rand_op, {a});
 
@@ -1349,7 +1349,7 @@ TEST(AliasRegistrationTest, FromSchemaInferredPure) {
           })
           .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
   const auto rand_op = Symbol::fromQualString("foo::rand6");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->insert(rand_op, {a});
   AliasDb aliasDb(graph);
@@ -1366,7 +1366,7 @@ TEST(AliasRegistrationTest, FromSchemaAliased) {
           .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
   const auto rand_op = Symbol::fromQualString("foo::rand7");
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->insert(rand_op, {a});
   AliasDb aliasDb(graph);
@@ -1381,7 +1381,7 @@ TEST(AliasRegistrationTest, FromSchemaPure) {
           .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
           .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA));
   const auto rand_op = Symbol::fromQualString("foo::rand8");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->insert(rand_op, {a});
   AliasDb aliasDb(graph);
@@ -1398,7 +1398,7 @@ TEST(AliasRegistrationTest, PureNoSchema) {
           })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand9");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->insert(rand_op, {a});
   AliasDb aliasDb(graph);
@@ -1415,7 +1415,7 @@ TEST(AliasRegistrationTest, PureWithSchema) {
           })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand10");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   auto b = graph->insert(rand_op, {a});
   AliasDb aliasDb(graph);
@@ -1430,7 +1430,7 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
           .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand11");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   graph->insert(rand_op, {a});
 
@@ -1442,7 +1442,7 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
 }
 
 TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
   graph():
@@ -1470,7 +1470,7 @@ TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
 TEST(
     AliasRegistrationTest,
     AliasMoveForTupleConstructWithSingleUseAsGraphOutput) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
   graph():
@@ -1488,7 +1488,7 @@ TEST(
 }
 
 TEST(AliasRegistrationTest, RecursiveSubgraphTupleContainment) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
   graph():
@@ -1509,7 +1509,7 @@ TEST(AliasRegistrationTest, RecursiveSubgraphTupleContainment) {
 }
 
 TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
   graph():
@@ -1538,7 +1538,7 @@ TEST(AliasRegistrationTest, WildcardAliasForTupleConstructWithUses) {
 }
 
 TEST(AliasRegistrationTest, ATenSplitIntListAliasCheck) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
   graph():
@@ -1565,7 +1565,7 @@ TEST(AliasRegistrationTest, ATenSplitIntListAliasCheck) {
 }
 
 TEST(AliasRegistrationTest, ATenSplitIntAliasCheck) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   auto graph_string = R"IR(
   graph():
@@ -1597,7 +1597,7 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
           .catchAllKernel([](at::Tensor t) -> at::Tensor { return t * 2; })
           .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
   const auto rand_op = Symbol::fromQualString("foo::rand12");
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto a = graph->addInput();
   graph->insert(rand_op, {a});
 
@@ -1609,7 +1609,7 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
 }
 
 TEST(IRNonDeterminismTest, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto graph_string = R"IR(
   graph():
     %x : Tensor = prim::MakeTestTensor()
@@ -1630,7 +1630,7 @@ TEST(IRNonDeterminismTest, Basic) {
 }
 
 TEST(IRNonDeterminismTest, DropoutSpecialCase) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto graph_string = R"IR(
   graph():
     %x : Tensor = prim::MakeTestTensor()

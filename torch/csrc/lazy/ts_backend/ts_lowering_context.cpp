@@ -10,7 +10,7 @@ TSLoweringContext::TSLoweringContext(
     const std::string& name,
     BackendDevice device)
     : torch::lazy::LoweringContext(name, device),
-      graph_(std::make_shared<torch::jit::Graph>()),
+      graph_(torch::jit::Graph::create()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {}
 
@@ -20,7 +20,7 @@ TSLoweringContext::TSLoweringContext(
     c10::ArrayRef<Node*> post_order,
     Util::EmissionMap emit_status)
     : torch::lazy::LoweringContext(name, device, post_order, emit_status),
-      graph_(std::make_shared<torch::jit::Graph>()),
+      graph_(torch::jit::Graph::create()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
   for (auto node : post_order) {

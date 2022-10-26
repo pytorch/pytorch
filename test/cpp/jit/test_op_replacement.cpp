@@ -44,7 +44,7 @@ TEST(OpReplacementTest, ReplaceDivInSimpleFunction) {
             %2 : Tensor = aten::add(%0, %1)
             %3 : Tensor  = aten::div(%2, %1)
             return (%3))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   test_only_populate_upgraders(test_upgraders);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
@@ -65,7 +65,7 @@ TEST(OpReplacementTest, ReplaceTwoOpsInSimpleFunction) {
             %4 : int = prim::Constant[value=1]()
             %5: Tensor = aten::_test_serialization_subcmul(%0, %1, %4)
             return (%3, %5))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   test_only_populate_upgraders(test_upgraders);
   UpgraderEntry test_entry{
       3,
@@ -99,7 +99,7 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
                     %10 : bool = aten::is_floating_point(%4)
                     -> (%10)
             return (%7))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   test_only_populate_upgraders(test_upgraders);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
@@ -123,7 +123,7 @@ TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
             %3 : int = prim::Constant[value=1]()
             %2 : Tensor = aten::_test_serialization_subcmul(%0, %1, %3)
             return (%2))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   test_only_populate_upgraders(test_upgraders);
   UpgraderEntry test_entry{
       3,

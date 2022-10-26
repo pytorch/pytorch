@@ -14,7 +14,7 @@ namespace jit {
 std::shared_ptr<Graph> Canonicalize(
     const std::shared_ptr<Graph>& graph,
     bool keep_unique_names) {
-  auto r = std::make_shared<Graph>(graph->current_scope());
+  auto r = Graph::create(graph->current_scope());
   std::unordered_map<Value*, Value*> rn_env;
   auto rn_fn = [&](Value* v) { return rn_env.at(v); };
   for (auto* input : graph->inputs()) {

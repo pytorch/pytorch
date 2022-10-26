@@ -49,7 +49,7 @@ TEST(SubgraphUtilsTest, Basic) {
 }
 
 TEST(SubgraphUtilsTest, MergeSubgraphs) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> parse_map;
   parseIR(
       R"IR(
@@ -117,7 +117,7 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
 }
 
 TEST(SubgraphUtilsTest, GraphName) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   std::unordered_map<std::string, Value*> parse_map;
   parseIR(

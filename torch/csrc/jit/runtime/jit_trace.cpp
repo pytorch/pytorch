@@ -31,7 +31,7 @@ struct TracingData {
   std::shared_ptr<Graph> traced_graph_ = nullptr;
 
   TracingData() {
-    traced_graph_ = std::make_shared<Graph>();
+    traced_graph_ = Graph::create();
   }
 };
 

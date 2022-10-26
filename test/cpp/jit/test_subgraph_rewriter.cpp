@@ -10,7 +10,7 @@ namespace jit {
 using namespace testing;
 
 TEST(SubgraphRewriterTest, FilterMatch) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   parseIR(
       R"IR(
@@ -82,7 +82,7 @@ graph(%a, %b):
 }
 
 TEST(SubgraphRewriterTest, FilterNoMatch) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%0):
@@ -124,7 +124,7 @@ graph(%a, %b):
 
 TEST(SubgraphRewriterTest, MultiOutput) {
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
 
     // Basic multi-output pattern rewriting
     parseIR(
@@ -159,7 +159,7 @@ graph(%a, %b):
     FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
   }
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
 
     // Mimic a real model case
     parseIR(
@@ -206,7 +206,7 @@ graph(%a, %b):
     FileCheck().check("ab::ababab")->check("ab::ababab")->run(*g);
   }
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
 
     // A case where no rewriting should occur due to data dependencies
     parseIR(
@@ -270,7 +270,7 @@ graph(%a, %b):
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
 
     parseIR(
         R"IR(
@@ -289,7 +289,7 @@ graph(%a, %b):
         ->run(*graph);
   }
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
 
     parseIR(
         R"IR(

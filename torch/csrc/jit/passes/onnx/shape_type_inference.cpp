@@ -1945,7 +1945,7 @@ void ONNXShapeTypeInference(
   if (IsValidONNXNode(n)) {
     // Create a Graph containing only the single node n.
     // This graph is later converted to ONNX to run shape inference.
-    auto n_graph = std::make_shared<Graph>();
+    auto n_graph = Graph::create();
     auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
     n_graph->insertNode(clone_node);
 

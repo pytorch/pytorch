@@ -995,7 +995,7 @@ void InsertObserversHelper::insertObserverResetMinMax(
   }
   auto reset_min_max_opt = module.find_method(reset_observer_method_name_);
   if (!reset_min_max_opt.has_value()) {
-    std::shared_ptr<Graph> reset_observer_graph = std::make_shared<Graph>();
+    std::shared_ptr<Graph> reset_observer_graph = Graph::create();
     Value* module_value = reset_observer_graph->addInput("self");
     Node* output_node = reset_observer_graph->createNone();
     reset_observer_graph->insertNode(output_node);

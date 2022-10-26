@@ -1003,7 +1003,7 @@ TEST(ExternalCall, JitCustomFusionOp) {
       %res : Float(10, 20, strides=[20, 1], device=cpu) = nnc_custom::add_mul(%a, %b, %c)
       return (%res))IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   torch::jit::parseIR(graph_string, graph.get());
 
   std::string shape_compute_python_string = R"PY(

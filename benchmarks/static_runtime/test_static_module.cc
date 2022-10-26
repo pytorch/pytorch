@@ -101,8 +101,8 @@ TEST(StaticModule, ValueGroup) {
       %3 : (Tensor) = prim::TupleConstruct(%2)
       return (%3)
     )IR";
-  auto input_graph = std::make_shared<torch::jit::Graph>();
-  torch::jit::parseIR(src, input_graph.get());
+  auto input_graph = torch::jit::Graph::create();
+  torch::jit::parseIR(src, input_graph);
   torch::jit::StaticModule sm(input_graph);
   const Graph& graph = sm.graph();
   std::vector<const Node*> nodes(graph.nodes().begin(), graph.nodes().end());
@@ -676,8 +676,8 @@ TEST(
       %2 : (Tensor) = prim::TupleConstruct(%1)
       return (%2)
   )IR";
-  auto g = std::make_shared<torch::jit::Graph>();
-  torch::jit::parseIR(test_graph, g.get());
+  auto g = torch::jit::Graph::create();
+  torch::jit::parseIR(test_graph, g);
   torch::jit::StaticModuleOptions opts{
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
@@ -784,8 +784,8 @@ TEST(StaticRuntime, DisableManageOutputTensors) {
       %2 : (Tensor) = prim::TupleConstruct(%1)
       return (%2)
   )IR";
-  auto g = std::make_shared<torch::jit::Graph>();
-  torch::jit::parseIR(test_graph, g.get());
+  auto g = torch::jit::Graph::create();
+  torch::jit::parseIR(test_graph, g);
   torch::jit::StaticModuleOptions opts{
       /*enable_out_variant=*/true,
       /*optimize_memory=*/true,
@@ -946,7 +946,7 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
 }
 
 TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
-  auto g = std::make_shared<torch::jit::Graph>();
+  auto g = torch::jit::Graph::create();
   torch::jit::parseIR(
       R"IR(
     graph(%0):
@@ -1097,9 +1097,9 @@ TEST(ManagedTensorRanges, NoAliases) {
         %output : Tensor = aten::mul(%z, %z)
         return (%output)
   )IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
+  parseIR(src, graph, vmap);
 
   auto* y = vmap["y"];
   auto* z = vmap["z"];
@@ -1136,9 +1136,9 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
         %output : Tensor = aten::mul(%z1, %z2)
         return (%output)
   )IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
+  parseIR(src, graph, vmap);
 
   auto* y = vmap["y"];
   auto* z1 = vmap["z1"];
@@ -1184,9 +1184,9 @@ TEST(ManagedTensorRanges, LifetimeOverlap) {
         %output : Tensor = aten::mul(%e, %e)
         return (%output)
   )IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
+  parseIR(src, graph, vmap);
   auto* b = vmap["b"];
   auto* c = vmap["c"];
   auto* d = vmap["d"];
@@ -1220,9 +1220,9 @@ TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
         %output : Tensor = aten::mul(%d, %d)
         return (%output)
   )IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
+  parseIR(src, graph, vmap);
   auto* b = vmap["b"];
   auto* c = vmap["c"];
   auto* d = vmap["d"];
@@ -1242,9 +1242,9 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
         %b : Tensor = aten::mul(%a, %a)
         return (%output)
   )IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
+  parseIR(src, graph, vmap);
   auto* b = vmap["b"];
   auto* output = vmap["output"];
 
@@ -1319,9 +1319,9 @@ void testAssignStorageToManagedTensors(
     const std::string& src,
     FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor,
     size_t min_reused_tensors) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
+  parseIR(src, graph, vmap);
 
   FastSet<const Value*> managed_tensor_values;
   FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
@@ -1746,7 +1746,6 @@ TEST(FuseClampNaNToNum, NoFusion) {
         z = y.nan_to_num()
         return z.clone()
   )JIT";
-
 
   auto checkScript = [](const char* src) {
     torch::jit::Module mod("m");

@@ -10,7 +10,7 @@ namespace torch {
 namespace jit {
 
 TEST(StackOptTest, UseVariadicStack) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -57,7 +57,7 @@ TEST(StackOptTest, UseVariadicStack) {
 }
 
 TEST(StackOptTest, UseVariadicStackReplaceMultiple) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -104,7 +104,7 @@ TEST(StackOptTest, UseVariadicStackReplaceMultiple) {
 }
 
 TEST(StackOptTest, UseVariadicStackWithMultipleListUses) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -143,7 +143,7 @@ TEST(StackOptTest, UseVariadicStackWithMultipleListUses) {
 }
 
 TEST(StackOptTest, UseVariadicStackWithListMutationAfterCat) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -188,7 +188,7 @@ TEST(StackOptTest, UseVariadicStackWithListMutationAfterCat) {
 }
 
 TEST(StackOptTest, UseVariadicStackWithListMutationBeforeCat) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -248,7 +248,7 @@ TEST(StackOptTest, UseVariadicStackWithListMutationBeforeCat) {
 }
 
 TEST(StackOptTest, UseVariadicStackWithMultipleListMutations) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(

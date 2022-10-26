@@ -180,7 +180,7 @@ TEST(THNNConvTest, Basic) {
       {true, true, true});
 
   // make JIT graph
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto ksz_val = graph->insertConstant(kernel_size);
   auto kst_val = graph->insertConstant(stride);
   auto pad_val = graph->insertConstant(padding);
@@ -292,7 +292,7 @@ TEST(ATenNativeBatchNormTest, Basic) {
       {true, true, true});
 
   // make JIT graph
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto training_val = graph->insertConstant(IValue(training));
   auto momentum_val = graph->insertConstant(IValue(momentum));
   auto eps_val = graph->insertConstant(IValue(eps));
@@ -374,7 +374,7 @@ TEST(CustomFusionTest, Basic) {
       %2 : Tensor = aten::mul(%0, %1)
       %3 : Tensor = aten::mul(%2, %0)
       return (%3))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
 
   torch::jit::overrideCanFuseOnCPU(true);
@@ -422,7 +422,7 @@ TEST(CustomFusionTest, NestedBlocks) {
         -> (%8)
     %9 : Tensor = aten::add(%4, %2, %3)
     return (%4))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
 
   CustomFuseGraph(
@@ -1534,7 +1534,7 @@ TEST(FallbackGraphsTest, Basic) {
       %2 : Tensor = aten::mul(%0, %1)
       %3 : Tensor = aten::mul(%2, %0)
       return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   torch::jit::parseIR(graph_string, graph.get());
 
   {
@@ -1635,7 +1635,7 @@ TEST(NoneSchemaMatchTest, Basic) {
   // testing that its type is set appropriately and schema matching  doesn't
   // fail when running is_none
 
-  auto r = std::make_shared<Graph>();
+  auto r = Graph::create();
   auto& g = *r;
   auto opt_int = g.insert(Symbol::fromQualString("prim::test_none"), {});
   auto out_bool = g.insert(Symbol::fromQualString("prim::is_none"), {opt_int});
@@ -1656,7 +1656,7 @@ void fakePass(std::shared_ptr<Graph>& g) {
 RegisterPass p(fakePass);
 
 TEST(PassManagementTest, Basic) {
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   parseIR(
       R"IR(
 graph(%a):
@@ -2121,7 +2121,7 @@ TEST(ProfilerTest, Basic) {
 }
 
 TEST(ProfilerTest, OptionalProfiling) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -2954,14 +2954,14 @@ TEST(ComputeFlopsTest, Basic) {
 }
 
 TEST(TestConstant, TensorGrad) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   IValue ten = torch::randn({3, 5}).requires_grad_(true);
   auto con = tryInsertConstant(*graph, ten);
   ASSERT_TRUE(con == c10::nullopt);
 }
 
 TEST(TestMutation, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -2981,7 +2981,7 @@ graph(%x.1 : Tensor):
 }
 
 TEST(TestInplaceToFunctionalActivation, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -2998,7 +2998,7 @@ graph(%x.1 : Tensor):
 }
 
 TEST(TestRegisterShapeOp, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -3009,7 +3009,7 @@ graph():
       &*graph,
       vmap);
 
-  auto g2 = std::make_shared<Graph>();
+  auto g2 = Graph::create();
   parseIR(
       R"IR(
 graph():
@@ -3025,7 +3025,7 @@ graph():
 }
 
 TEST(TestFunctionalToInplaceActivation, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -3042,7 +3042,7 @@ graph(%x.1 : Tensor):
 }
 
 TEST(TestFunctionExecutor, SimpleExecutorTest) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%x.1 : Tensor):
@@ -3136,7 +3136,7 @@ TEST_F(Composed, ComposedOp) {
         %3 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %2)
         %4 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %3)
         return (%3, %4))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   // wrong input sizes so we hit the fallback path
@@ -3193,7 +3193,7 @@ TEST(ConstantPropagation, CustomClassesCanBePropagated) {
         %params: __torch__.torch.classes.quantized.LinearPackedParamsBase = quantized::linear_prepack(%weight_q, %none)
         return (%params)
   )IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(src, graph.get(), vmap);
 

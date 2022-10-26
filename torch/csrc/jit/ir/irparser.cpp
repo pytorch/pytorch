@@ -25,12 +25,12 @@ struct ParsedLiteral;
 class IRParser {
   friend void parseIR(
       const std::string& str,
-      torch::jit::Graph* graph,
+      std::shared_ptr<torch::jit::Graph> graph,
       std::unordered_map<std::string, Value*>& vmap,
       bool parse_tensor_constants);
   IRParser(
       const std::string& str,
-      torch::jit::Graph* graph,
+      std::shared_ptr<torch::jit::Graph> graph,
       std::unordered_map<std::string, Value*>& vmap,
       bool parse_tensor_constants)
       : L(std::make_shared<Source>(str)),
@@ -71,7 +71,7 @@ class IRParser {
   Value* findValueInVMap(const std::string& name);
 
   torch::jit::Lexer L;
-  torch::jit::Graph* g = nullptr;
+  std::shared_ptr<torch::jit::Graph> g = nullptr;
   std::unordered_map<std::string, Value*>& vmap;
   SchemaTypeParser type_parser;
   bool parse_tensor_constants_;

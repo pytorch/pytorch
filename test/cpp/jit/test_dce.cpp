@@ -7,7 +7,7 @@
 namespace torch {
 namespace jit {
 TEST(EliminateDeadCodeTest, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   // Consider the following loop:
   //   for i in range(3):

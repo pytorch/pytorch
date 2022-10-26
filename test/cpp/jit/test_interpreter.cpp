@@ -21,7 +21,7 @@ class TypeCheckTest : public ::testing::Test {
 
  private:
   static InterpreterState makeInterp() {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     std::unordered_map<std::string, Value*> vmap;
     parseIR(
         R"IR(
@@ -95,7 +95,7 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 // TODO: These tests weren't doing anything.
 // TEST(TypeCheckErrorTest, EmptyCheckRaises) {
 //   // Test empty Typecheck raises an internal assertion
-//   auto graph = std::make_shared<Graph>();
+//   auto graph = Graph::create();
 //   std::unordered_map<std::string, Value*> vmap;
 //   EXPECT_ANY_THROW(parseIR(
 //       R"IR(
@@ -111,7 +111,7 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 // TODO: These tests weren't doing anything.
 // TEST(TypeCheckErrorTest, WrongInputOutputCountRaises) {
 //   // Test for assertion if num_inputs + 1 != num_outputs
-//   auto graph = std::make_shared<Graph>();
+//   auto graph = Graph::create();
 //   std::unordered_map<std::string, Value*> vmap;
 //   EXPECT_ANY_THROW(parseIR(
 //       R"IR(
@@ -224,7 +224,7 @@ TEST(InterpreterTest, runAsyncBasicTest) {
 TEST(
     EnableRethrowCaughtExceptionTest,
     EnableRethrowCaughtExceptionTestRethrowsCaughtException) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(

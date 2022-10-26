@@ -16,7 +16,7 @@ namespace jit {
 // values are used for closed over values.
 void liftClosure(Node* closure) {
   auto block = closure->blocks().at(0);
-  auto subgraph = std::make_shared<Graph>();
+  auto subgraph = Graph::create();
   // closures/forks can be nested, so use closure owning graph
   auto g = closure->owningGraph();
   Node* pack_context =

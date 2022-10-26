@@ -1020,7 +1020,7 @@ void runOptimization(
 }
 
 Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   // we are copying the block inside If or prim::Loop otherwise we are copying
   // the whole graph we need to differentiate the two cases  because cloneFrom

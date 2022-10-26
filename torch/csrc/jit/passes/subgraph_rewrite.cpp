@@ -82,13 +82,13 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
   std::unordered_map<Value*, Value*> rewrite_map;
   std::vector<Value*> values_to_rewrite;
 
-  Graph pattern_graph;
+  auto pattern_graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(pattern.pattern, &pattern_graph, vmap);
+  parseIR(pattern.pattern, pattern_graph.get(), vmap);
 
-  Graph replacement_graph;
+  auto replacement_graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap_replacement;
-  parseIR(pattern.replacement, &replacement_graph, vmap_replacement);
+  parseIR(pattern.replacement, replacement_graph.get(), vmap_replacement);
 
   // First construct map of Node*-to-Node*
   // This maps Nodes in replacement graph to nodes in pattern graph
@@ -110,7 +110,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     }
   }
 
-  const auto& matches = findPatternMatches(pattern_graph, *graph);
+  const auto& matches = findPatternMatches(*pattern_graph, *graph);
   for (const Match& match : matches) {
     if (!std::all_of(filters.begin(), filters.end(), [&](const MatchFilter& f) {
           return f(match, vmap);
@@ -129,7 +129,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // inserted.
     Node* ins_point = nullptr;
     std::vector<Value*> inputs, outputs;
-    for (Value* v : pattern_graph.inputs()) {
+    for (Value* v : pattern_graph->inputs()) {
       Value* input = match.values_map.at(v);
       if (!ins_point || ins_point->isBefore(input->node())) {
         ins_point = input->node();
@@ -141,7 +141,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // Check that the insertion point we've chosen precedes all the uses of the
     // outputs - otherwise the replacement is incorrect and we have to skip it.
     bool ins_point_before_uses = true;
-    for (Value* v : pattern_graph.outputs()) {
+    for (Value* v : pattern_graph->outputs()) {
       Value* output = match.values_map.at(v);
       outputs.push_back(match.values_map.at(v));
 
@@ -169,7 +169,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     // new ones.
     WithInsertPoint insert_point(ins_point->next());
     std::vector<Value*> new_outputs =
-        insertGraph(*graph, replacement_graph, inputs);
+        insertGraph(*graph, *replacement_graph, inputs);
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());
@@ -179,7 +179,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
           new_outputs[idx]->setType(outputs[idx]->type());
     }
     // Record all planned deletions
-    for (Node* pattern_n : pattern_graph.nodes()) {
+    for (Node* pattern_n : pattern_graph->nodes()) {
       if (match.nodes_map.count(pattern_n)) {
         Node* n = match.nodes_map.at(pattern_n);
         nodes_to_delete_.insert(n);

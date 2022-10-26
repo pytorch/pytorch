@@ -38,7 +38,7 @@ TEST_F(Kernel, ParallelExternalCallBuf) {
       %3 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::mul(%0, %1)
       %4 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::matmul(%3, %2)
       return (%4))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   torch::jit::parseIR(graph_string, &*graph);
   const std::string& verification_pattern =
       R"IR(
@@ -64,7 +64,7 @@ TEST_F(Kernel, InliningIntermediates) {
           %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
           %5: Float(5, 3, strides=[3, 1]) = aten::add(%4, %1, %one)
           return (%5))IR";
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
     TensorExprKernel k(graph);
     auto stmt = k.getCodeGenStmt();
@@ -90,7 +90,7 @@ TEST_F(Kernel, InliningIntermediates) {
       at::jit::TemplateEnv env;
       env.s("device", use_cuda ? "cuda:0" : "cpu");
       const auto graph_string = format(graph_template, env);
-      auto graph = std::make_shared<Graph>();
+      auto graph = Graph::create();
       parseIR(graph_string, &*graph);
       TensorExprKernel k(graph);
       auto stmt = k.getCodeGenStmt();
@@ -114,7 +114,7 @@ graph(%a.1 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu),
   %c.2 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::matmul(%a.1, %b.1) # test_matmul.py:12:12
   %3 : Float(8, 8, strides=[8, 1], requires_grad=0, device=cpu) = aten::add(%a.1, %c.2, %2) # test_matmul.py:13:15
   return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -151,7 +151,7 @@ TEST_F(Kernel, _1) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -188,7 +188,7 @@ TEST_F(Kernel, _2) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -226,7 +226,7 @@ TEST_F(Kernel, _3) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -264,7 +264,7 @@ TEST_F(Kernel, Huge) {
         %2 : Float(1, 4000000000, strides=[4000000000, 1], requires_grad=0, device=cpu) = aten::unsqueeze(%x.1, %1)
         %3 : Float(1, 4000000000, strides=[4000000000, 1], requires_grad=0, device=cpu) = aten::relu(%2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   TensorExprKernel k(graph);
   std::ostringstream oss;
@@ -284,7 +284,7 @@ TEST_F(Kernel, ParallelStrided) {
         %2 : Float(5, 3, 40005, strides=[120015, 40005, 1]) = aten::mul(%0, %1)
         %3 : Float(5, 3, 40005, strides=[120015, 40005, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({5, 3, 40005}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -317,7 +317,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
         %2 : Tensor = aten::mul(%0, %1)
         %3 : Tensor = aten::mul(%0, %2)
         return (%3))IR";
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
 
     auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -355,7 +355,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
         %3 : Tensor, %4 : Tensor = prim::ConstantChunk[dim=1,chunks=2](%2)
         %r : Tensor = aten::mul(%3, %4)
         return (%r))IR";
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
 
     auto a = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -403,7 +403,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
         %ab : Tensor = aten::mul(%a2, %b1)         # expected size: [4,3,2,1]
         %abc : Tensor = aten::mul(%ab, %c1)        # expected size: [4,3,2,2]
         return (%abc))IR";
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
 
     auto a = at::rand({4, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -458,7 +458,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
         %r : Tensor = aten::cat(%inputs, %dim)               # new size: [5,19,2]
         return (%r))IR";
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
 
     auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -509,7 +509,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
         %inputs : Tensor[] = prim::ListConstruct()
         %r : Tensor = aten::cat(%inputs, %dim)
         return (%r))IR";
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
     auto compile = [&]() {
       TensorExprKernel k(graph);
@@ -536,7 +536,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
         return (%r))IR";
 
     auto compile = [](const std::string& graph_string) {
-      auto graph = std::make_shared<Graph>();
+      auto graph = Graph::create();
       parseIR(graph_string, &*graph);
       TensorExprKernel k(graph);
       k.getCodeGenStmt();
@@ -558,7 +558,7 @@ TEST_F(Kernel, CatInputTypesPromotion) {
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
         %r : Double(5, 19, 2, strides=[38, 2, 1]) = aten::cat(%inputs, %dim)
         return (%r))IR";
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
 
     auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -620,7 +620,7 @@ TEST_F(Kernel, ToDType) {
         %k.3 : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::to(%j.3, %3, %2, %2, %1)
         return (%k.3))IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   TensorExprKernel k(graph);
   StmtPtr s = k.getCodeGenStmt();
@@ -663,7 +663,7 @@ TEST_F(Kernel, CatAndInlineWithAConstantDim) {
         %8 : Float(1, 1024, strides=[1024, 1], requires_grad=0, device=cpu) = aten::_cast_Float(%7, %2)
         return (%8, %7))IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   TensorExprKernel k(graph);
 
@@ -694,7 +694,7 @@ TEST_F(Kernel, CatWithEmptyInputs) {
           %11 : Float(10, 64, strides=[64, 1], requires_grad=0, device=cpu) = aten::cat(%10, %3)
           return (%11))IR";
 
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
     TensorExprKernel k(graph);
 
@@ -725,7 +725,7 @@ TEST_F(Kernel, CatWoConditionals) {
         %r : Float(5, 19, 2, strides=[38, 2, 1]) = aten::cat(%inputs, %dim)
         return (%r))IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
@@ -788,7 +788,7 @@ TEST_F(Kernel, OptimizeConditionals) {
         %t : Float(5, 19, strides=[19, 1]) = aten::relu(%r)
         return (%t))IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
@@ -885,7 +885,7 @@ TEST_F(Kernel, SumAllAxes) {
     }
     const auto graph_string = format(graph_template, env);
 
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
 
     auto o = at::empty({}, TensorOptions(kCPU));
@@ -961,7 +961,7 @@ TEST_F(Kernel, SumOneAxis) {
         env.s("size", li_to_str(ref.sizes()));
         env.s("strides", li_to_str(ref.strides()));
         const auto graph_string = format(graph_template, env);
-        auto graph = std::make_shared<Graph>();
+        auto graph = Graph::create();
         parseIR(graph_string, &*graph);
 
         auto o = at::empty({}, TensorOptions(kCPU));
@@ -1023,7 +1023,7 @@ TEST_F(Kernel, SumMultipleAxes) {
 
         const auto graph_string = format(graph_template, env);
 
-        auto graph = std::make_shared<Graph>();
+        auto graph = Graph::create();
         parseIR(graph_string, &*graph);
 
         TensorExprKernel k(graph);
@@ -1096,7 +1096,7 @@ TEST_F(Kernel, Softmax2D) {
 
         const auto graph_string = format(graph_template, env);
 
-        auto graph = std::make_shared<Graph>();
+        auto graph = Graph::create();
         parseIR(graph_string, &*graph);
 
         TensorExprKernel k(graph);
@@ -1174,7 +1174,7 @@ TEST_F(Kernel, Softmax3D) {
 
       const auto graph_string = format(graph_template, env);
 
-      auto graph = std::make_shared<Graph>();
+      auto graph = Graph::create();
       parseIR(graph_string, &*graph);
 
       TensorExprKernel k(graph);
@@ -1255,7 +1255,7 @@ TEST_F(Kernel, Softmax4D) {
 
       const auto graph_string = format(graph_template, env);
 
-      auto graph = std::make_shared<Graph>();
+      auto graph = Graph::create();
       parseIR(graph_string, &*graph);
 
       TensorExprKernel k(graph);
@@ -1296,7 +1296,7 @@ TEST_F(Kernel, SignTest) {
         return (%2))IR";
 
   auto run_test = [](const std::string& graph_string, const at::Tensor& input) {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(graph_string, &*graph);
 
     TensorExprKernel k(graph);
@@ -1376,7 +1376,7 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
         %3 : int = prim::Constant[value=7]()
         %4 : Double(device=cpu) = aten::sum(%2, %3)
         return (%4))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
@@ -1415,7 +1415,7 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
         %4 : Float(device=cpu) = aten::sum(%2, %3)
         %5 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%2, %4)
         return (%5))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   TensorExprKernel k(graph);
@@ -1453,7 +1453,7 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %4 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%4))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   graph->inputs().at(0)->setDebugName("aten::add:");
   graph->inputs().at(1)->setDebugName("aten::add_");
@@ -1478,7 +1478,7 @@ TEST_F(Kernel, SanitizeConstants_CUDA) {
           %y : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::ones(%sizes, %none, %none, %30, %none)
           %z : Float(16, 16, strides=[16, 1], device=cuda:0) = aten::mul(%x, %y)
           return (%z))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we insert a call to
   // aten::ones and then const-prop it
@@ -1514,7 +1514,7 @@ TEST_F(Kernel, ConstantTensors) {
           %y : Float(16, 16, strides=[16, 1], device=cpu) = aten::ones(%sizes, %none, %none, %none, %none)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we insert a call to
   // aten::ones and then const-prop it
@@ -1546,7 +1546,7 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
           %y : Tensor = aten::t(%y_t)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we generate several aten
   // calls to produce non-contiguos constant tensor and then const-prop it
@@ -1576,7 +1576,7 @@ TEST_F(Kernel, RunFast) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -1601,7 +1601,7 @@ TEST_F(Kernel, RunWithAllocatedOutputs) {
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -1635,7 +1635,7 @@ TEST_F(Kernel, CodegenInspection) {
           %y : Tensor = aten::t(%y_t)
           %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
           return (%z))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
   // IRParser doesn't support tensor constants, so we generate several aten
   // calls to produce non-contiguos constant tensor and then const-prop it
@@ -1688,7 +1688,7 @@ TEST_F(Kernel, CustomLowering) {
           %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
           return (%y)
 )IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> lowerings = {
@@ -1712,7 +1712,7 @@ TEST_F(Kernel, Vectorize) {
         %2 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %1)
         %3 : Float(100, 16, strides=[16, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({100, 16}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -1748,7 +1748,7 @@ TEST_F(Kernel, DISABLED_FlattenVectorize) {
         %2 : Float(100, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : Float(100, 3, strides=[3, 1]) = aten::mul(%0, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto a = at::rand({100, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -1782,7 +1782,7 @@ TEST_F(Kernel, Strided1dWithinBounds) {
         %2 : int = prim::Constant[value=1]()
         %3 : Float(3, strides=[1]) = aten::add(%0, %1, %2)
         return (%3))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(ir, graph.get(), vmap);
   TensorExprKernel k(graph);
@@ -1810,7 +1810,7 @@ TEST_F(Kernel, InputAsOutput) {
       graph(%x : Float(5, 3, strides=[3, 1], device=cpu),
             %y : Float(5, 3, strides=[1, 5], device=cpu)):
         return (%x, %y))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -1831,7 +1831,7 @@ graph(%x : int, %y : int):
   %z : int = aten::mul(%x, %y)
   %r : int = aten::mul(%z, %x)
   return (%r, %z))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(ir, graph.get(), vmap);
   TensorExprKernel k(graph);
@@ -1877,7 +1877,7 @@ graph(%x : int,
   %zt : Long(3, strides=[1], device=cpu) = aten::mul(%xt, %y)
   %rt : Long(3, strides=[1], device=cpu) = aten::mul(%zt, %xt)
   return (%r, %rt, %z, %zt))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(ir, graph.get(), vmap);
   TensorExprKernel k(graph);
@@ -1921,7 +1921,7 @@ TEST_F(Kernel, FuseLoopsWithVariableBounds) {
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
         %r : Float(SS(-2), 19, SS(-3), requires_grad=0, device=cpu) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
         return (%r))IR";
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   torch::jit::parseIR(graph_string, graph.get());
 
   std::vector<int64_t> symbolic_shape_inputs = {-2, -3};
@@ -1996,7 +1996,7 @@ TEST_F(Kernel, FuseLoopsWithVariableConcatDim) {
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
         %r : Float(SS(-2), SS(-5), SS(-3), requires_grad=0, device=cpu) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
         return (%r))IR";
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   torch::jit::parseIR(graph_string, graph.get());
 
   std::vector<int64_t> symbolic_shape_inputs = {-2, -3, -4, -5};
@@ -2073,7 +2073,7 @@ TEST_F(Kernel, DoNotFuseLoopsWithMismatchingVariableDims) {
         %inputs : Tensor[] = prim::ListConstruct(%a, %b)
         %r : Float(SS(-2), SS(-6), SS(-3), requires_grad=0, device=cpu) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
         return (%r))IR";
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   torch::jit::parseIR(graph_string, graph.get());
 
   std::vector<int64_t> symbolic_shape_inputs = {-2, -3, -4, -5, -6};

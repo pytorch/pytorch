@@ -1383,14 +1383,14 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     return;
   }
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   const auto graph0_string = R"IR(
     graph(%0 : Float(2, strides=[1]),
           %1 : Float(2, strides=[1])):
       %c0 : Float(2, strides=[1]) = aten::mul(%0, %1)
       %d0 : Float(2, strides=[1]) = aten::mul(%c0, %0)
       return (%d0))IR";
-  parseIR(graph0_string, g.get());
+  parseIR(graph0_string, g);
 
   // strides are not yet supported in the irparser.
   for (auto val : g->block()->inputs()) {
@@ -19083,14 +19083,14 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     return;
   }
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   const auto graph0_string = R"IR(
   graph(%0 : Half(8, 4, 10, 16, strides=[640, 1, 64, 4]),
         %1 : Half(8, 4, 10, 16, strides=[640, 160, 16, 1])):
     %o.1 : Half(8, 4, 10, 16, strides=[640, 1, 64, 4]) = aten::mul(%0, %1) # sum_dyn.py:5:6
     %3 : Half(8, 4, 10, 16, strides=[640, 1, 64, 4]) = aten::relu(%o.1) # sum_dyn.py:6:9
     return (%3))IR";
-  parseIR(graph0_string, g.get());
+  parseIR(graph0_string, g);
 
   // strides are not yet supported in the irparser.
   {
@@ -23076,8 +23076,8 @@ graph(%x.1 : Tensor,
   %13 : Tensor = aten::sum(%8, %10, %11, %12)
   return (%13)
 )IR";
-  auto g = std::make_shared<Graph>();
-  torch::jit::parseIR(ir, g.get());
+  auto g = Graph::create();
+  torch::jit::parseIR(ir, g);
   GraphFunction fn("nvfuser_test", g, nullptr);
 
   auto run_kernel = [&fn]() {
@@ -23122,8 +23122,8 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
     %13 : Tensor = aten::sum(%8, %10, %11, %12)
     return (%13)
   )IR";
-    auto g = std::make_shared<Graph>();
-    torch::jit::parseIR(ir, g.get());
+    auto g = Graph::create();
+    torch::jit::parseIR(ir, g);
     GraphFunction fn("nvfuser_test", g, nullptr);
 
     auto x = torch::rand({32, 32}, at::TensorOptions(at::kCUDA));

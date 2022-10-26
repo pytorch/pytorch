@@ -166,7 +166,7 @@ std::shared_ptr<Graph> ToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto constant_value_map = ConstantValueMap::getInstance();
   ConstantValueMap::ClearMaps();
-  auto new_graph = std::make_shared<Graph>(graph->current_scope());
+  auto new_graph = Graph::create(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
   try {
     BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);

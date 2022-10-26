@@ -39,7 +39,7 @@ TEST_F(Quantization, QuantDequantInt8) {
         %q.1 : QInt8(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
         %6 : Float(2, 2) = aten::dequantize(%q.1)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -69,7 +69,7 @@ TEST_F(Quantization, QuantDequantUInt8) {
         %q.1 : QUInt8(2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
         %6 : Float(2, 2) = aten::dequantize(%q.1)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x = 2 * at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -99,7 +99,7 @@ TEST_F(Quantization, QuantDequantUInt8_NLC) {
         %q.1 : QUInt8(1, 2, 2) = aten::quantize_per_tensor(%x.1, %4, %3, %2)
         %6 : Float(1, 2, 2) = aten::dequantize(%q.1)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x = 2 * at::rand({1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -150,7 +150,7 @@ TEST_F(Quantization, QuantAddDequantInt8) {
         %qa : QInt8(2, 2) = quantized::add(%q1, %q2, %qsa, %qza)
         %6 : Float(2, 2) = aten::dequantize(%qa)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -193,7 +193,7 @@ TEST_F(Quantization, QuantAddDequantUInt8) {
         %qa : QUInt8(2, 2) = quantized::add(%q1, %q2, %qsa, %qza)
         %6 : Float(2, 2) = aten::dequantize(%qa)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -232,7 +232,7 @@ TEST_F(Quantization, QuantSigmoidDequantUInt8) {
         %qa : QUInt8(2, 2) = aten::sigmoid(%q1)
         %6 : Float(2, 2) = aten::dequantize(%qa)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -285,7 +285,7 @@ TEST_F(Quantization, QuantMulDequantUInt8) {
         %qa : QUInt8(2, 2) = quantized::mul(%q1, %q2, %qsa, %qza)
         %6 : Float(2, 2) = aten::dequantize(%qa)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x1 = at::rand({2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -326,7 +326,7 @@ TEST_F(Quantization, QuantUpsampleNearst2dDequantUInt8) {
         %qu : QUInt8(1, 1, 6, 6) = aten::upsample_nearest2d(%q, %3, %4)
         %6 : Float(1, 1, 6, 6) = aten::dequantize(%qu)
         return (%6))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x = at::rand({1, 1, 4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -359,7 +359,7 @@ TEST_F(Quantization, UpsampleNearst2d) {
         %3 : int[] = prim::Constant[value=[4, 4]]()
         %u : Float(1, 1, 4, 4) = aten::upsample_nearest2d(%x, %3, %4)
         return (%u))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x = at::rand({1, 1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
@@ -415,7 +415,7 @@ TEST_F(Quantization, QuantCatDequantUInt8) {
         %qcat : QUInt8(3, 1, 2, 2) = quantized::cat(%catx, %catd, %qxs, %qxz)
         %cat : Float(3, 1, 2, 2) = aten::dequantize(%qcat)
         return (%cat))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(graph_string, &*graph);
 
   auto x = at::rand({1, 1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));

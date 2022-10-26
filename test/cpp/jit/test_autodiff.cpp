@@ -183,7 +183,7 @@ TEST(AutodiffTest, ADFormulas) {
 
 TEST(AutodiffTest, Differentiate) {
   // Note: can't use IRParser for this test due to issue #23989
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::vector<int64_t> sizes{2, 3, 4};
   std::vector<int64_t> strides{12, 4, 1};
   const auto type = TensorType::create(
@@ -247,7 +247,7 @@ TEST(AutodiffTest, DifferentiateWithRequiresGrad) {
       %6 : Tensor = aten::mul(%5, %0)
       %7 : Tensor = aten::add(%6, %1, %2)
       return (%4, %7))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
 
   auto a_var = autograd::make_variable(
@@ -303,7 +303,7 @@ class AutodiffRemoveUnusedGradientsTest : public ::testing::Test {
 };
 
 TEST_F(AutodiffRemoveUnusedGradientsTest, Linear) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   const std::string input =
       R"IR(
 graph(%inp.1 : Tensor,

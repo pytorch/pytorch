@@ -602,7 +602,7 @@ static void _append_subgraph(
     bool unpack_output) {
   node->g_(
       torch::jit::attr::Subgraph,
-      std::make_shared<torch::jit::Graph>(graph->current_scope()));
+      torch::jit::Graph::create(graph->current_scope()));
   auto subgraph = node->g(torch::jit::attr::Subgraph);
 
   std::unordered_map<Value*, Value*> value_map;

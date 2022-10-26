@@ -1208,11 +1208,9 @@ struct Graph : std::enable_shared_from_this<Graph> {
   c10::optional<size_t> op_version_;
 
  public:
-  Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
-      : next_unique_(0),
-        current_scope_(std::move(scope_root)),
-        block_(new Block(this, nullptr)),
-        insert_before_(return_node()) {}
+  static std::shared_ptr<Graph> create(ScopePtr scope_root = c10::make_intrusive<Scope>()) {
+    return std::shared_ptr<Graph>(new Graph(scope_root));
+  }
 
   at::ArrayRef<Value*> inputs() {
     return block_->inputs();
@@ -1438,10 +1436,15 @@ struct Graph : std::enable_shared_from_this<Graph> {
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
   TORCH_API std::shared_ptr<Graph> copy();
-  TORCH_API std::unique_ptr<Graph> copyUnique();
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
+  Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
+      : next_unique_(0),
+        current_scope_(std::move(scope_root)),
+        block_(new Block(this, nullptr)),
+        insert_before_(return_node()) {}
+
   friend TORCH_API void Lint(const AliasDb* db);
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);

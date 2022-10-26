@@ -86,7 +86,7 @@ std::shared_ptr<Graph> build_lstm() {
       %21 : Tensor = aten::tanh(%20)
       %22 : Tensor = aten::mul(%14, %21)
       return (%22, %20))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -117,7 +117,7 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph() {
       %5 : str = aten::slice(%22, %20, %21, %2)
       return (%3, %4, %5))IR";
 
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
   return g;
@@ -132,7 +132,7 @@ std::shared_ptr<Graph> build_mobile_export_with_out() {
       %7 : Tensor = aten::add(%x.1, %y.1, %6, %y.1)
       return (%8))IR";
 
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
   return g;
@@ -160,7 +160,7 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested() {
         block1():
           -> (%3)
       return (%3, %3))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
   return g;
@@ -176,7 +176,7 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph_with_vararg() {
       %5 : int[] = prim::tolist(%1, %2, %3)
       return (%4, %5))IR";
 
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
   return g;
@@ -193,7 +193,7 @@ std::shared_ptr<Graph> build_mobile_export_analysis_graph_non_const() {
         %12 : Tensor = aten::conv2d(%input.1, %input.1, %input.1, %8, %10, %11, %7)
         return (%12))IR";
 
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
   return g;

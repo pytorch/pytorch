@@ -7,7 +7,7 @@ namespace torch {
 namespace jit {
 
 TEST(MemoryDAGTest, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   const Value* aValue = graph->addInput();
   const Value* bValue = graph->addInput();
   const Value* cValue = graph->addInput();

@@ -17,7 +17,7 @@ namespace jit {
  * used with care. Nevertheless, it helps to keep tests more compact.
  */
 static void checkRoundtrip(const std::string& s) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(s, &*graph);
   std::ostringstream ss;
   ss << *graph;
@@ -40,7 +40,7 @@ static void checkRoundtrip(const std::string& s) {
 }
 
 TEST(IRParserTest, Basic) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -139,7 +139,7 @@ graph(%0 : Tensor,
 }
 
 TEST(IRParserTest, InferredTypeIsTensor) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%a):
@@ -150,7 +150,7 @@ graph(%a):
 
 TEST(IRParserTest, ValueReuse) {
   // Check that parser correctly handles values reusing the same name.
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%x):
@@ -252,7 +252,7 @@ graph(%0 : Tensor,
 }
 
 TEST(IRParserTest, FileCheck) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   const std::string& text =
       R"IR(
     graph(%a):
@@ -265,7 +265,7 @@ TEST(IRParserTest, FileCheck) {
 }
 
 TEST(IRParserTest, Strides) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   parseIR(
       R"IR(
@@ -299,7 +299,7 @@ graph(%a : Float(4, 5),
 }
 
 TEST(IRParserTest, MalformedStrides) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(parseIR(
@@ -339,7 +339,7 @@ graph(%a : Float(*, *, device=cpu),
 }
 
 TEST(IRParserTest, ListConstant) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph():

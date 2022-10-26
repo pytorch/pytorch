@@ -18,7 +18,7 @@ TEST(AddIfThenElseOpTest, AddIfThenElseOpSimple) {
             return (%result)
     )IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(src, graph.get());
   EXPECT_TRUE(AddIfThenElseOp(graph));
 
@@ -39,7 +39,7 @@ TEST(AddIfThenElseOpTest, NoIfThenElseOpMultipleOutputs) {
             return (%result1, %result2)
     )IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(src, graph.get());
   EXPECT_FALSE(AddIfThenElseOp(graph));
 

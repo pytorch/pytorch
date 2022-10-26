@@ -265,7 +265,7 @@ TEST(SerializationTest, CalculateNecessaryArgsTest) {
       "sync_stream(int stream_id = -1) -> ()",
       c10::AliasAnalysisKind::CONSERVATIVE);
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   auto one_val = graph->insertConstant(-1);
   auto necessary = CalculateNecessaryArgs(schema.arguments(), {one_val}, true);
   EXPECT_EQ(0, necessary.first);

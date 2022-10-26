@@ -818,7 +818,7 @@ struct SymbolicShapeGraphAnalyzer {
     std::unordered_map<Node*, std::shared_ptr<Graph>> partial_evaluated_graphs =
         propagateShapesAndGatherPartialEvalShapeGraphs(db);
 
-    auto stitched_shape_compute_graph = std::make_shared<Graph>();
+    auto stitched_shape_compute_graph = Graph::create();
     // We want to build up a computational graph which computes all shapes
     // we dont know statically - that is, all symbolic shapes within
     // the region [beg, end). it must be executable before beg.

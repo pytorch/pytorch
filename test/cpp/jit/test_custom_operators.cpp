@@ -157,7 +157,7 @@ TEST(CustomOperatorTest, Aliasing) {
   getAllOperatorsFor(Symbol::fromQualString("foo::aliasing"));
 
   {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     parseIR(
         R"IR(
 graph(%x: Tensor, %y: Tensor):
@@ -178,7 +178,7 @@ graph(%x: Tensor, %y: Tensor):
   }
   {
     // DCE should not remove a custom op
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     const auto text = R"IR(
 graph(%x: Tensor, %y: Tensor):
   # CHECK: foo::aliasing

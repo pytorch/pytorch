@@ -37,12 +37,12 @@ class KernelBench : public benchmark::Fixture {
 
   void GraphWithStaticShapes(benchmark::State& state) {
     auto dim = state.range(0);
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     at::jit::TemplateEnv env;
     env.d("dim", dim);
     const auto kernel_static_shapes =
         format(kernel_static_shapes_template, env);
-    parseIR(kernel_static_shapes, &*graph);
+    parseIR(kernel_static_shapes, graph);
     TensorExprKernel k(graph);
 
     auto a = at::rand({dim}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -57,8 +57,8 @@ class KernelBench : public benchmark::Fixture {
 
   void GraphWithSymbolicShapes(benchmark::State& state) {
     auto dim = state.range(0);
-    auto graph = std::make_shared<Graph>();
-    parseIR(kernel_symbolic_shapes, &*graph);
+    auto graph = Graph::create();
+    parseIR(kernel_symbolic_shapes, graph);
 
     std::vector<torch::jit::StrideInput> input_desc = {
         torch::jit::StrideInput::TENSOR_CONT};

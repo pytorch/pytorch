@@ -766,13 +766,7 @@ void Graph::cloneFrom(Graph& src) {
 }
 
 std::shared_ptr<Graph> Graph::copy() {
-  auto new_g = std::make_shared<Graph>();
-  new_g->cloneFrom(*this);
-  return new_g;
-}
-
-std::unique_ptr<Graph> Graph::copyUnique() {
-  auto new_g = std::make_unique<Graph>();
+  auto new_g = Graph::create();
   new_g->cloneFrom(*this);
   return new_g;
 }
@@ -1727,7 +1721,7 @@ Node* Graph::createUninitialized(TypePtr typ) {
 
 Node* Graph::createWithSubgraph(Symbol kind) {
   auto n = create(kind, 0);
-  n->g_(attr::Subgraph, std::make_shared<Graph>(current_scope()));
+  n->g_(attr::Subgraph, Graph::create(current_scope()));
   return n;
 }
 

@@ -22,7 +22,7 @@ using namespace torch::jit::tensorexpr;
 
 TEST(DynamicShapes, SimpleGraph) {
 #ifdef TORCH_ENABLE_LLVM
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   const auto graph_string = R"IR(
       graph(%x : Tensor,
             %SS_2 : int,
@@ -98,7 +98,7 @@ TEST(DynamicShapes, SimpleGraph) {
 TEST(DynamicShapes, GraphWith2InputsSameDims) {
 #ifdef TORCH_ENABLE_LLVM
   // The two inputs in this graph must have the same dims.
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   const auto graph_string = R"IR(
       graph(%x : Tensor,
             %y : Tensor,
@@ -186,7 +186,7 @@ TEST(DynamicShapes, GraphWith2InputsAndBroadcast) {
 #ifdef TORCH_ENABLE_LLVM
   // The second input to the graph has a dim of size 1 which should be
   // broadcasted in the at::mul op.
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   const auto graph_string = R"IR(
       graph(%x : Float(10, 5, requires_grad=0, device=cpu),
             %y : Float(1, 5, requires_grad=0, device=cpu),
@@ -277,7 +277,7 @@ TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
 #ifdef TORCH_ENABLE_LLVM
   // The second input to the graph has a dim of size 1 which should be
   // broadcasted in the at::mul op.
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   const auto graph_string = R"IR(
       graph(%x : Float(1, 5, requires_grad=0, device=cpu),
             %y : Float(1, 5, requires_grad=0, device=cpu),
@@ -355,7 +355,7 @@ TEST(DynamicShapes, GraphWithPartiallySymbolicOutput) {
 
 TEST(DynamicShapes, GraphWithSymbolicStrides) {
 #ifdef TORCH_ENABLE_LLVM
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   const auto graph_string = R"IR(
     graph(%0 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
           %1 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
@@ -416,7 +416,7 @@ TEST(DynamicShapes, GraphWithSymbolicStrides) {
 
 TEST(DynamicShapes, GraphWithCatAndBroadcast) {
 #ifdef TORCH_ENABLE_LLVM
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   const auto graph_string = R"IR(
       graph(%x : Float(10, 5, requires_grad=0, device=cpu),
             %y : Float(4, 5, requires_grad=0, device=cpu),
@@ -528,7 +528,7 @@ TEST(DynamicShapes, GraphWithCatAndBroadcast) {
 
 TEST(DynamicShapes, GraphFromModel) {
 #ifdef TORCH_ENABLE_LLVM
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   const auto graph_string = R"IR(
     graph(%0 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
           %1 : Float(SS(-2), SS(-4), requires_grad=0, device=cpu),
@@ -648,7 +648,7 @@ TEST(DynamicShapes, MultiThreadedExecution) {
     at::jit::TemplateEnv env;
     env.s("device", use_cuda ? "cuda:0" : "cpu");
     const auto graph_string = format(graph_template, env);
-    std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+    std::shared_ptr<Graph> graph = Graph::create();
     torch::jit::parseIR(graph_string, graph.get());
 
     std::vector<int64_t> symbolic_shape_inputs = {-2, -3};

@@ -210,7 +210,7 @@ TEST_F(FuserTest, FusionAliasing) {
       %4 : Tensor = aten::mul(%2, %1)
       %5 : Tensor = aten::add(%2, %4, %12)
       return (%5))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
 
   g->lint();
@@ -236,7 +236,7 @@ TEST_F(FuserTest, KernelCaching) {
       %c0 : Float(2, 3, 4) = aten::mul(%0, %1)
       %d0 : Float(2, 3, 4) = aten::mul(%c0, %0)
       return (%d0))IR";
-  auto g0 = std::make_shared<Graph>();
+  auto g0 = Graph::create();
   torch::jit::parseIR(graph0_string, g0.get());
 
   const auto graph1_string = R"IR(
@@ -245,7 +245,7 @@ TEST_F(FuserTest, KernelCaching) {
       %c1 : Float(2, 3, 4) = aten::mul(%0, %1)
       %d1 : Float(2, 3, 4) = aten::mul(%c1, %0)
       return (%d1))IR";
-  auto g1 = std::make_shared<Graph>();
+  auto g1 = Graph::create();
   torch::jit::parseIR(graph1_string, g1.get());
 
   auto getFusionGroup = [](const std::shared_ptr<Graph>& graph) {

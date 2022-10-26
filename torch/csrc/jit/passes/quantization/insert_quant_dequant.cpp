@@ -983,7 +983,7 @@ void SubGraphCloneHelper::buildObserverSubgraph(
 std::unique_ptr<GraphFunction> SubGraphCloneHelper::buildGraphFromNodes(
     const std::vector<Node*>& nodes,
     const std::string& name) {
-  auto observer_subgraph = std::make_shared<Graph>();
+  auto observer_subgraph = Graph::create();
   auto build_observer_graph = [&](GraphFunction& func) {
     buildObserverSubgraph(nodes, func.graph());
   };

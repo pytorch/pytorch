@@ -16,7 +16,7 @@ using scope_list = std::vector<ScopePtr>;
 // consumers to determine whether or not to replace the function with a
 // particular fused kernel.
 static std::unordered_map<ScopePtr, Node*> scope_attr_map_;
-static std::shared_ptr<Graph> scope_attr_graph_ = std::make_shared<Graph>();
+static std::shared_ptr<Graph> scope_attr_graph_ = Graph::create();
 
 static bool HasSameAttribute(
     const Node* a,
@@ -420,7 +420,7 @@ std::shared_ptr<Graph> FunctionExtractor::ConstructFuncGraph(
   const auto& scope = ctx.scope_;
   auto& env = ctx.env_to_subgraph_;
 
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   GRAPH_DEBUG("Constructing graph for ", scope->namesFromRoot());
 
   // TODO: Update input names of function to match those in Module source code
@@ -1143,7 +1143,7 @@ Node* ONNXGetPreviousScope(std::shared_ptr<Graph>& graph) {
 
 void ONNXClearScopeRecords() {
   scope_attr_map_.clear();
-  scope_attr_graph_ = std::make_shared<Graph>();
+  scope_attr_graph_ = Graph::create();
 }
 
 void ONNXTrackScopeAttributes(

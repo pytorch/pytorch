@@ -13,7 +13,7 @@ namespace torch {
 namespace jit {
 
 TEST(ConstantPoolingTest, Int) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph():
@@ -29,7 +29,7 @@ graph():
 }
 
 TEST(ConstantPoolingTest, PoolingAcrossBlocks) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%cond : Tensor):
@@ -54,7 +54,7 @@ graph(%cond : Tensor):
 }
 
 TEST(ConstantPoolingTest, PoolingDifferentDevices) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph():
@@ -90,7 +90,7 @@ graph():
 }
 
 TEST(ConstantPoolingTest, DictConstantPooling) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph():

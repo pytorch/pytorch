@@ -9,12 +9,11 @@ import onnx_test_common
 import parameterized
 import PIL
 import test_models
-
-import torch
 import torchvision
-from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch import nn
-from torch.testing._internal import common_utils
+from pytorch_test_common import (
+    skipIfUnsupportedMinOpsetVersion,
+    skipScriptTest,
+)
 from torchvision import ops
 from torchvision.models.detection import (
     faster_rcnn,
@@ -25,6 +24,10 @@ from torchvision.models.detection import (
     rpn,
     transform,
 )
+
+import torch
+from torch import nn
+from torch.testing._internal import common_utils
 
 
 def exportTest(
@@ -301,20 +304,20 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
-    @unittest.skip("Failing, see https://github.com/pytorch/pytorch/issues/66528")
+    # @unittest.skip("Failing, see https://github.com/pytorch/pytorch/issues/66528")
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_keypoint_rcnn(self):
         model = keypoint_rcnn.keypointrcnn_resnet50_fpn(
-            pretrained=False, pretrained_backbone=False, min_size=200, max_size=300
+            pretrained=False, pretrained_backbone=False, min_size=100, max_size=320
         )
         images, test_images = _get_test_images()
-        self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
+        self.run_test(model, (images,), rtol=1e-3, atol=1e-5, verbose=True)
         self.run_test(
             model,
             (images,),
             input_names=["images_tensors"],
-            output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
+            # output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
             dynamic_axes={"images_tensors": [0, 1, 2]},
             rtol=1e-3,
             atol=1e-5,
@@ -325,7 +328,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
             (images,),
             additional_test_inputs=[(images,), (test_images,), (dummy_images,)],
             input_names=["images_tensors"],
-            output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
+            # output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
             dynamic_axes={"images_tensors": [0, 1, 2]},
             rtol=5e-3,
             atol=1e-5,
@@ -335,7 +338,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
             (dummy_images,),
             additional_test_inputs=[(dummy_images,), (test_images,)],
             input_names=["images_tensors"],
-            output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
+            # output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
             dynamic_axes={"images_tensors": [0, 1, 2]},
             rtol=5e-3,
             atol=1e-5,

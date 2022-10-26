@@ -114,7 +114,7 @@ std::vector<std::unique_ptr<GraphFunction>> inlineFunctions(
     }
     visited.insert(tup);
     const auto& f = toGraphFunction(cur.function());
-    auto graph = f.graph()->copyUnique();
+    auto graph = f.graph()->copy();
     Inline(*graph);
     c10::QualifiedName qn(*cur.owner()._ivalue()->type()->name(), f.name());
 

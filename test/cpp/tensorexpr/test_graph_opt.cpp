@@ -43,7 +43,7 @@ TEST_F(GraphOpt, OptimizeCat) {
       %cat : Float(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
       %5 : Float(60, strides=[1], device=cpu) = aten::log(%cat)
       return (%5))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -85,7 +85,7 @@ TEST_F(GraphOpt, OptimizeCat2) {
       %5 : Float(60, strides=[1], device=cpu) = aten::log(%cat)
       %6 : Float(60, strides=[1], device=cpu) = aten::tanh(%5)
       return (%6))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -133,7 +133,7 @@ TEST_F(GraphOpt, OptimizeCat3) {
       %5 : Float(60, strides=[1], device=cpu) = aten::tanh(%cat)
       %6 : Float(60, strides=[1], device=cpu) = aten::mul(%a, %5)
       return (%6))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -178,7 +178,7 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInUser) {
       %cat : Int(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
       %5 : Float(60, strides=[1], device=cpu) = aten::tanh(%cat)
       return (%5))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -221,7 +221,7 @@ TEST_F(GraphOpt, OptimizeCatWithTypePromotionInCat) {
       %cat : Double(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
       %5 : Double(60, strides=[1], device=cpu) = aten::log(%cat)
       return (%5))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -250,7 +250,7 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp) {
       %cat : Float(60, strides=[1], device=cpu) = aten::cat(%xyz_list, %dim)
       %5 : Float(60, strides=[1], device=cpu) = aten::mul(%0, %cat)
       return (%5))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -282,7 +282,7 @@ TEST_F(GraphOpt, OptimizeCatNoSingleTensorElementwiseOp2) {
       %5 : Float(60, strides=[1], device=cpu) = aten::mul(%0, %cat)
       %6 : Float(60, strides=[1], device=cpu) = aten::add(%5, %1, %one)
       return (%6))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
   g->lint();
 
@@ -306,7 +306,7 @@ TEST_F(GraphOpt, AOTGraphPrepPasses) {
     graph(%x, %y, %z, %i : int):
       %xyz_list : Tensor[] = prim::ListConstruct(%x, %y, %z)
       return (%xyz_list, %i))IR";
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   torch::jit::parseIR(graph_string, g.get());
 
   removeGraphOutput(g, 1);

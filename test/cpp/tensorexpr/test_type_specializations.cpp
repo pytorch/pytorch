@@ -45,7 +45,7 @@ void detectTTSpecializationPass(std::shared_ptr<Graph>& graph) {
 TEST(SpecializationsInCustomPasses, Basic) {
   RegisterPass p(detectTTSpecializationPass);
   hasSpecializations = false;
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> graph = Graph::create();
   parseIR(
       R"IR(
 graph(%a.1 : Tensor,

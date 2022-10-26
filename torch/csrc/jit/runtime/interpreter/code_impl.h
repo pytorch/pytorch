@@ -500,7 +500,7 @@ struct CodeImpl {
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
-    auto empty_graph = std::make_shared<Graph>();
+    auto empty_graph = Graph::create();
     auto func = torch::make_unique<GraphFunction>(
         "bailout", empty_graph, build_bailout_graph);
     function_table_.emplace_back(func.get());

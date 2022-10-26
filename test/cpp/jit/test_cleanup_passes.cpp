@@ -11,7 +11,7 @@ namespace jit {
 TEST(CleanupPassTest, Basic) {
   // Tests stability of clean up passes when dealing with constant pooling
   // and constant propagation.
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%cond.1 : Tensor,

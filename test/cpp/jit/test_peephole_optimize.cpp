@@ -12,7 +12,7 @@ namespace jit {
 TEST(PeepholeOptimizeTest, IsAndIsNot)
 // test is / is not none optimization
 {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%0 : int):
@@ -30,7 +30,7 @@ graph(%0 : int):
 }
 
 TEST(PeepholeOptimizeTest, IsAndIsNot2) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%0: int?):
@@ -48,7 +48,7 @@ graph(%0: int?):
 }
 
 TEST(PeepholeOptimizeTest, IsAndIsNot3) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%0: int?):
@@ -69,7 +69,7 @@ graph(%0: int?):
 TEST(PeepholeOptimizeTest, UnwrapOptional)
 // test unwrap optional
 {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph():
@@ -84,7 +84,7 @@ graph():
 }
 
 TEST(PeepholeOptimizeTest, UnwrapOptional2) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
 graph(%1 : Float(*, *, *)?):
@@ -98,7 +98,7 @@ graph(%1 : Float(*, *, *)?):
 }
 
 TEST(PeepholeOptimizeTest, AddMMFusion) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   parseIR(
       R"IR(
       graph(

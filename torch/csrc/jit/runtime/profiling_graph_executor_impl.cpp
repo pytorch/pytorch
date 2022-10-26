@@ -725,7 +725,7 @@ GraphFunction* createFallbackPathFunction(
     Block* b,
     const std::string& function_name) {
   auto value_map = [](Value* v) { return v; };
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   graph->block()->cloneFrom(b, value_map);
 
   auto otypes = c10::fmap(

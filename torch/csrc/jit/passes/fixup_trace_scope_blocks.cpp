@@ -362,7 +362,7 @@ void lambdaLiftBlocksAndConvertToGraph(Block* b) {
     if (isEligibleNode(n)) {
       lambdaLiftBlocksAndConvertToGraph(n->blocks()[0]);
 
-      auto graph = std::make_shared<Graph>();
+      auto graph = Graph::create();
       std::unordered_map<Value*, Value*> remaps;
       graph->block()->cloneFrom(n->blocks()[0], [&](Value* v) {
         if (!remaps.count(v)) {
@@ -445,7 +445,7 @@ void inlineScopeBlocks(Block* b) {
     }
     if (n->kind() == prim::TracedModuleForward) {
       // Convert the block to a graph so we can inline it
-      auto graph = std::make_shared<Graph>();
+      auto graph = Graph::create();
       std::unordered_map<Value*, Value*> remaps;
       graph->block()->cloneFrom(n->blocks()[0], [&](Value* v) {
         remaps[v] = graph->block()->addInput()->copyMetadata(v);

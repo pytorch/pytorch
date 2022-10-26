@@ -7,12 +7,12 @@ namespace torch {
 namespace jit {
 
 TEST(IRTest, Attributes) {
-  Graph g;
+  auto g = Graph::create();
   auto one = attr::alpha;
   auto two = attr::device;
   auto three = attr::end;
   auto four = attr::perm;
-  Node* n = g.create(Symbol::fromQualString("foo::bar"));
+  Node* n = g->create(Symbol::fromQualString("foo::bar"));
   Node& attr = *n;
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
@@ -25,7 +25,7 @@ TEST(IRTest, Attributes) {
   attr.ss_(two, {"hi", "now"});
   ASSERT_EQ(attr.ss(two).at(1), "now");
 
-  Node* n2 = g.create(Symbol::fromQualString("foo::baz"));
+  Node* n2 = g->create(Symbol::fromQualString("foo::baz"));
   Node& attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
@@ -35,7 +35,7 @@ TEST(IRTest, Attributes) {
 }
 
 TEST(IRTest, Blocks) {
-  auto g = std::make_shared<Graph>();
+  auto g = Graph::create();
   const auto graph_string = R"IR(
     graph(%a : Tensor,
           %b : Tensor,

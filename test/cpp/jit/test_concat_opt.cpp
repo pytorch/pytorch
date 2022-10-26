@@ -11,7 +11,7 @@ namespace torch {
 namespace jit {
 
 TEST(ConcatOptTest, SimpleCommonInputsEliminationPrefix) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -56,7 +56,7 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationPrefix) {
 }
 
 TEST(ConcatOptTest, SimpleCommonInputsEliminationSuffix) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -101,7 +101,7 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationSuffix) {
 }
 
 TEST(ConcatOptTest, CommonInputsEliminationWithDifferentOrderInputs) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -139,7 +139,7 @@ TEST(ConcatOptTest, CommonInputsEliminationWithDifferentOrderInputs) {
 }
 
 TEST(ConcatOptTest, MoreCommonInputsElimination) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -180,7 +180,7 @@ TEST(ConcatOptTest, MoreCommonInputsElimination) {
 }
 
 TEST(ConcatOptTest, ExpandConcat) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -232,7 +232,7 @@ TEST(ConcatOptTest, ExpandConcat) {
 }
 
 TEST(ConcatOptTest, ConcatWithoutResultShape) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -267,7 +267,7 @@ TEST(ConcatOptTest, ConcatWithoutResultShape) {
 }
 
 TEST(ConcatOptTest, ConcatWithoutInputShape) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -302,7 +302,7 @@ TEST(ConcatOptTest, ConcatWithoutInputShape) {
 }
 
 TEST(ConcatOptTest, UseVariadicCat) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -349,7 +349,7 @@ TEST(ConcatOptTest, UseVariadicCat) {
 }
 
 TEST(OptimizeConcatTest, UseVariadicCatReplaceMultiple) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -396,7 +396,7 @@ TEST(OptimizeConcatTest, UseVariadicCatReplaceMultiple) {
 }
 
 TEST(ConcatOptTest, UseVariadicCatWithMultipleListUses) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -435,7 +435,7 @@ TEST(ConcatOptTest, UseVariadicCatWithMultipleListUses) {
 }
 
 TEST(ConcatOptTest, UseVariadicCatWithListMutationAfterCat) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -480,7 +480,7 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationAfterCat) {
 }
 
 TEST(ConcatOptTest, UseVariadicCatWithListMutationBeforeCat) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -540,7 +540,7 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationBeforeCat) {
 }
 
 TEST(ConcatOptTest, UseVariadicCatWithMultipleListMutations) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -599,7 +599,7 @@ TEST(ConcatOptTest, UseVariadicCatWithMultipleListMutations) {
 TEST(
     ConcatOptTest,
     RemoveListMutationUseVariadicCatAndCommonInputsElimination) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
 
   const std::string input =
       R"IR(
@@ -655,7 +655,7 @@ TEST(
 }
 
 TEST(ConcatOpt, CombineConcatsSimpleCase) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   const std::string input =
       R"IR(
         graph(%0: Tensor):
@@ -688,7 +688,7 @@ TEST(ConcatOpt, CombineConcatsSimpleCase) {
 }
 
 TEST(ConcatOpt, CombineConcatsLongChain) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   const std::string input =
       R"IR(
         graph(%0: Tensor, %1 : Tensor):
@@ -723,7 +723,7 @@ TEST(ConcatOpt, CombineConcatsLongChain) {
 }
 
 TEST(ConcatOpt, CombineConcatsMutation) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   const std::string input =
       R"IR(
         graph(%0: Tensor, %1 : Tensor):

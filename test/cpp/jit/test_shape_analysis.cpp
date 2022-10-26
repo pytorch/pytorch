@@ -38,7 +38,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
   // Test Generalizing shapes to symbolic dimensions, guarding those symbolic
   // dimensions and passing in runtime computed symbolic dimensions via inlined
   // shape functions
-  std::shared_ptr<Graph> subgraph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> subgraph = Graph::create();
   const auto graph_string = R"IR(
       graph(%x.1 : Tensor, %y.1 : Tensor, %z: Tensor):
         %11 : int = prim::Constant[value=0]()
@@ -56,7 +56,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
   set up fused TensorExprGroup
   */
 
-  std::shared_ptr<Graph> g = std::make_shared<Graph>();
+  std::shared_ptr<Graph> g = Graph::create();
   auto x_inp = g->addInput("x_inp");
   auto y_inp = g->addInput("y_inp");
   auto z_inp = g->addInput("z_inp");
@@ -252,7 +252,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
 }
 
 TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
-  std::shared_ptr<Graph> subgraph = std::make_shared<Graph>();
+  std::shared_ptr<Graph> subgraph = Graph::create();
   const auto graph_string = R"IR(
       graph(%x.1 : Tensor):
         %none : NoneType = prim::Constant()
@@ -267,7 +267,7 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
   torch::jit::parseIR(graph_string, subgraph.get());
   ConstantPropagation(subgraph);
 
-  std::shared_ptr<Graph> g = std::make_shared<Graph>();
+  std::shared_ptr<Graph> g = Graph::create();
   auto x_inp = g->addInput("x_inp");
   auto x_type = TensorType::create(at::rand({10, 5}));
   x_inp->setType(x_type);

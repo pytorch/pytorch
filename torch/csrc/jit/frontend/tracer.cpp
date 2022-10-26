@@ -928,7 +928,7 @@ void setTracingState(std::shared_ptr<TracingState> state) {
   detail::tracing_state = std::move(state);
 }
 
-TracingState::TracingState() : graph(new Graph()), env_stack{Frame()} {}
+TracingState::TracingState() : graph(Graph::create()), env_stack{Frame()} {}
 
 TracingState::~TracingState() = default;
 

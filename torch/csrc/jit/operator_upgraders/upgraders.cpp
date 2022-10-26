@@ -43,7 +43,7 @@ void UpgradersMap::test_only_set_content(
     const std::unordered_map<std::string, std::string>& content) {
   std::lock_guard<std::mutex> _(lock);
   for (const auto& entry : content) {
-    auto graph = std::make_shared<Graph>();
+    auto graph = Graph::create();
     torch::jit::parseIR(entry.second, graph.get());
     content_.insert(std::make_pair(entry.first, graph));
   }

@@ -34,7 +34,7 @@ std::unordered_map<V, K> invert_map(std::unordered_map<K, V>& map) {
 std::vector<std::string> traverse_depth_first(
     std::string graph_string,
     int max_count = 100) {
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   torch::jit::parseIR(graph_string, graph.get(), vmap);
   auto get_name = invert_map(vmap);
@@ -74,7 +74,7 @@ TEST(GraphIteratorTest, ConstantReturnGraph) {
       graph():
         %1 : int = prim::Constant[value=0]()
         return (%1))IR";
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   torch::jit::parseIR(graph_string, graph.get());
   DepthFirstGraphNodeIterator graph_it(graph);
   ASSERT_EQ(graph_it.next()->kind(), prim::Constant);

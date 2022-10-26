@@ -128,7 +128,10 @@ TEST(StaticRuntime, Max) {
   testStaticRuntime(src_max_dim_keepdim, {input, 0});
   testStaticRuntime(src_max_dim_keepdim, {input, 0}, {large_input, 2});
   testStaticRuntime(src_max_pointwise, {input, input_other});
-  testStaticRuntime(src_max_pointwise, {input, input_other}, {large_input, large_input_other});
+  testStaticRuntime(
+      src_max_pointwise,
+      {input, input_other},
+      {large_input, large_input_other});
 }
 
 TEST(StaticRuntime, Mean) {
@@ -160,7 +163,8 @@ TEST(StaticRuntime, Mean) {
   std::vector<IValue> args_dtype = {input, torch::kFloat};
   std::vector<IValue> args_dim = {input, c10::List<int64_t>{0, 2}};
   std::vector<IValue> args_dim_keepdim = {input, c10::List<int64_t>{1, 2}};
-  std::vector<IValue> args_dim_dtype = {input, c10::List<int64_t>{0, 1}, torch::kBFloat16};
+  std::vector<IValue> args_dim_dtype = {
+      input, c10::List<int64_t>{0, 1}, torch::kBFloat16};
 
   testStaticRuntime(src_default, args_default);
   testStaticRuntime(src_dtype, args_dtype);
@@ -169,8 +173,10 @@ TEST(StaticRuntime, Mean) {
   testStaticRuntime(src_dim_dtype, args_dim_dtype);
 
   std::vector<IValue> large_args_dim = {large_input, c10::List<int64_t>{0, 3}};
-  std::vector<IValue> large_args_dim_keepdim = {large_input, c10::List<int64_t>{1, 2}};
-  std::vector<IValue> large_args_dim_dtype = {large_input, c10::List<int64_t>{1, 3}, torch::kBFloat16};
+  std::vector<IValue> large_args_dim_keepdim = {
+      large_input, c10::List<int64_t>{1, 2}};
+  std::vector<IValue> large_args_dim_dtype = {
+      large_input, c10::List<int64_t>{1, 3}, torch::kBFloat16};
 
   testStaticRuntime(src_dim, args_dim, large_args_dim);
   testStaticRuntime(src_dim_keepdim, args_dim_keepdim, large_args_dim_keepdim);
@@ -248,8 +254,8 @@ TEST(StaticRuntime, Clone) {
   std::vector<IValue> args_1{b_larger, c10::MemoryFormat::Preserve};
   std::vector<IValue> args_2{c, c10::MemoryFormat::ChannelsLast};
   std::vector<IValue> args_3{d, c10::MemoryFormat::ChannelsLast};
-  std::vector<IValue> args_4{e,a};
-  std::vector<IValue> args_5{e,f};
+  std::vector<IValue> args_4{e, a};
+  std::vector<IValue> args_5{e, f};
 
   testStaticRuntime(clone_script_0, {a});
   testStaticRuntime(clone_script_0, {a}, {b_larger});
@@ -2579,10 +2585,10 @@ TEST(StaticRuntime, JIT_Aten_Cpu) {
         return (%ret)
   )IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   vmap.reserve(0);
-  parseIR(script, graph.get(), vmap);
+  parseIR(script, graph, vmap);
   torch::jit::StaticModule smodule(graph);
 
   auto a = at::randn({2, 4});
@@ -2600,10 +2606,10 @@ TEST(StaticRuntime, JIT_Aten_Numel) {
         return (%ret)
   )IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   vmap.reserve(0);
-  parseIR(script, graph.get(), vmap);
+  parseIR(script, graph, vmap);
   torch::jit::StaticModule smodule(graph);
 
   auto a = at::randn({2, 4});
@@ -2645,10 +2651,10 @@ TEST(StaticRuntime, JIT_Aten_Range_Length) {
         return (%ret)
   )IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
   vmap.reserve(0);
-  parseIR(script, graph.get(), vmap);
+  parseIR(script, graph, vmap);
   torch::jit::StaticModule smodule(graph);
 
   std::vector<IValue> args0{0, 10, 2};
@@ -2668,9 +2674,9 @@ TEST(StaticRuntime, Cat) {
         return (%ret)
   )IR";
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   std::unordered_map<std::string, Value*> vmap;
-  parseIR(cat_script, graph.get(), vmap);
+  parseIR(cat_script, graph, vmap);
   torch::jit::StaticModule smodule(graph);
   ASSERT_TRUE(getNodeWithKind(smodule, "aten::cat"));
 
@@ -3178,8 +3184,8 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
 
   at::Tensor a = at::tensor({1.1, 2.2, 3.3, 4.0}, at::ScalarType::Float);
   std::vector<IValue> args{a};
-  auto g = std::make_shared<torch::jit::Graph>();
-  torch::jit::parseIR(to, g.get());
+  auto g = torch::jit::Graph::create();
+  torch::jit::parseIR(to, g);
 
   // Jit Interpreter.
   Stack stack(args);
@@ -3651,29 +3657,45 @@ TEST(StaticRuntime, ClampNaNToNum) {
         return torch.clamp(a, min=1.0, max=-1.0).nan_to_num().clone()
   )JIT";
 
-  auto a = at::tensor({
-      std::numeric_limits<float>::quiet_NaN(),
-      std::numeric_limits<float>::infinity(),
-      -std::numeric_limits<float>::infinity(),
-      0.0f,
-      3.0f
-    });
+  auto a = at::tensor(
+      {std::numeric_limits<float>::quiet_NaN(),
+       std::numeric_limits<float>::infinity(),
+       -std::numeric_limits<float>::infinity(),
+       0.0f,
+       3.0f});
   auto b = a.repeat({10, 5});
 
-  // Have to use_allclose even though all NaNs will be replaced - testStaticRuntime
-  // also checks inputs at the end to make sure they're not changed
-  testStaticRuntime(src1, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
-  testStaticRuntime(src1, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  // Have to use_allclose even though all NaNs will be replaced -
+  // testStaticRuntime also checks inputs at the end to make sure they're not
+  // changed
+  testStaticRuntime(
+      src1, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(
+      src1, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
 
-  testStaticRuntime(src2, {a, 42.0}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
-  testStaticRuntime(src2, {a, 2.0}, {b, 1.0}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(
+      src2, {a, 42.0}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(
+      src2, {a, 2.0}, {b, 1.0}, /*use_allclose=*/true, /*use_equalnan=*/true);
 
-  testStaticRuntime(src3, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
-  testStaticRuntime(src3, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(
+      src3, {a}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(
+      src3, {a}, {b}, /*use_allclose=*/true, /*use_equalnan=*/true);
 
   // Non-NNC path
-  testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
-  testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
+  testStaticRuntime(
+      src1,
+      {a.to(at::kDouble)},
+      {},
+      /*use_allclose=*/true,
+      /*use_equalnan=*/true);
+  testStaticRuntime(
+      src1,
+      {a.to(at::kDouble)},
+      {b.to(at::kDouble)},
+      /*use_allclose=*/true,
+      /*use_equalnan=*/true);
 }
 
 TEST(StaticRuntime, PrepackWeights) {
@@ -3698,7 +3720,8 @@ TEST(StaticRuntime, PrepackWeights) {
       at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
   auto input =
       at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
-  auto args1 = std::vector<IValue>{input, weight, c10::nullopt, scale, zero_point};
+  auto args1 =
+      std::vector<IValue>{input, weight, c10::nullopt, scale, zero_point};
 
   auto weight_2 =
       at::quantize_per_tensor(torch::randn({8, 3}), 2, 3, torch::kQInt8);

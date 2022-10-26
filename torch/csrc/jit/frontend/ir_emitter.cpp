@@ -5341,7 +5341,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     }
   }
 
-  auto graph = std::make_shared<Graph>();
+  auto graph = Graph::create();
   graph->set_op_version(operator_set_version);
 
   auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);

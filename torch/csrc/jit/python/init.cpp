@@ -2020,8 +2020,8 @@ void initJITBindings(PyObject* module) {
   m.def(
       "parse_ir",
       [](const std::string& input, bool parse_tensor_constants) {
-        auto graph = std::make_shared<Graph>();
-        parseIR(input, &*graph, parse_tensor_constants);
+        auto graph = Graph::create();
+        parseIR(input, graph, parse_tensor_constants);
         return graph;
       },
       py::arg("input"),
