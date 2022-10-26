@@ -34,6 +34,7 @@ from torch.profiler import (
     record_function,
     supported_activities,
 )
+from torch._C._profiler import _TensorMetadata
 from torch.profiler._pattern_matcher import (
     Conv2dBiasFollowedByBatchNorm2dPattern,
     ExtraCUDACopyPattern,
@@ -1306,7 +1307,8 @@ class TestTorchTidyProfiler(TestCase):
         self.assertIsInstance(
             node.extra_fields,
             torch._C._profiler._ExtraFields_TorchOp)
-        tensor_info = node.extra_fields.inputs.tensor_metadata[index]
+        tensor_info = node.extra_fields.inputs[index]
+        self.assertIsInstance(tensor_info, _TensorMetadata)
         self.assertIsNotNone(tensor_info.impl_ptr)
         self.assertIsNotNone(tensor_info.storage_data_ptr)
         self.assertIsNotNone(tensor_info.id)
@@ -1633,7 +1635,7 @@ class TestTorchTidyProfiler(TestCase):
             # Use linear op to identify weight ground truth.
             linear_op_node = find_node_with_name(nodes, "aten::linear")
             self.assertIsNotNone(linear_op_node)
-            x_metadata, weight_metadata, _ = linear_op_node.extra_fields.inputs.tensor_metadata
+            x_metadata, weight_metadata, _ = linear_op_node.extra_fields.inputs
             self.assertEqual(x_id, x_metadata.id)
 
             # Module
@@ -1746,7 +1748,7 @@ class TestTorchTidyProfiler(TestCase):
 
         roots = p.profiler.kineto_results.experimental_event_tree()
         tensor_impls = tuple(
-            e.extra_fields.inputs.tensor_metadata[0].impl_ptr
+            e.extra_fields.inputs[0].impl_ptr
             for e in _utils.traverse_dfs(roots)
             if e.name == "aten::fill_"
         )
@@ -1766,7 +1768,7 @@ class TestTorchTidyProfiler(TestCase):
         for e in _utils.traverse_dfs(roots):
             fields = e.extra_fields
             if isinstance(fields, torch._C._profiler._ExtraFields_TorchOp):
-                id_set |= {t.allocation_id for t in fields.inputs.tensor_metadata if t is not None}
+                id_set |= {t.allocation_id for t in fields.inputs if isinstance(t, _TensorMetadata)}
 
             elif isinstance(fields, torch._C._profiler._ExtraFields_Allocation):
                 id_set.add(fields.allocation_id)
@@ -1812,18 +1814,14 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._profiler._ExtraFields_TorchOp)
 
-        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
-        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
+        def getattr_inputs(name, default):
+            return [getattr(i, name, default) for i in node.extra_fields.inputs]
 
-        input_info = node.extra_fields.inputs
-        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
-
-        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
-        self.assertEqual(layout_info, [torch.strided, torch.strided, None])
-        device_info = [x.device if x else None for x in input_info.tensor_metadata]
-        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
-        tensor_dtypes = [x.dtype if x else None for x in input_info.tensor_metadata]
-        self.assertEqual(tensor_dtypes, [torch.float32, torch.float32, None])
+        self.assertEqual(getattr_inputs("sizes", []), [[4, 4], [4, 1], []])
+        self.assertEqual(getattr_inputs("strides", []), [[12, 3], [1, 1], []])
+        self.assertEqual(getattr_inputs("layout", None), [torch.strided, torch.strided, None])
+        self.assertEqual(getattr_inputs("device", None), [torch.device("cpu"), torch.device("cpu"), None])
+        self.assertEqual(getattr_inputs("dtype", None), [torch.float32, torch.float32, None])
         self.assertEqual(node.extra_fields.scope, torch.profiler.RecordScope.FUNCTION)
 
         mul_node = find_node_with_name(nodes, "aten::mul")
@@ -1848,19 +1846,13 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._profiler._ExtraFields_TorchOp)
 
-        self.assertEqual(node.extra_fields.inputs.shapes, [[2, 3], [2, 3], []])
-        self.assertEqual(node.extra_fields.inputs.strides, [[], [], []])
+        def getattr_inputs(name, default):
+            return [getattr(i, name, default) for i in node.extra_fields.inputs]
 
-        input_info = node.extra_fields.inputs
-
-        # FIXME: Different systems have different names for int64_t
-        # below are example names I have found. This is not guaranteed to be exhaustive.
-        # self.assertIn(input_info.dtypes[0], ["long long", "long int", "long", "__int64"])
-
-        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
-        self.assertEqual(layout_info, [torch.sparse_coo, torch.sparse_coo, None])
-        device_info = [x.device if x else None for x in input_info.tensor_metadata]
-        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+        self.assertEqual(getattr_inputs("sizes", []), [[2, 3], [2, 3], []])
+        self.assertEqual(getattr_inputs("strides", []), [[], [], []])
+        self.assertEqual(getattr_inputs("layout", None), [torch.sparse_coo, torch.sparse_coo, None])
+        self.assertEqual(getattr_inputs("device", None), [torch.device("cpu"), torch.device("cpu"), None])
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_mkldnn_tensors(self):
@@ -1877,16 +1869,13 @@ class TestTorchTidyProfiler(TestCase):
             node.extra_fields,
             torch._C._profiler._ExtraFields_TorchOp)
 
-        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 3], [4, 3], []])
-        self.assertEqual(node.extra_fields.inputs.strides, [[], [], []])
+        def getattr_inputs(name, default):
+            return [getattr(i, name, default) for i in node.extra_fields.inputs]
 
-        input_info = node.extra_fields.inputs
-        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
-
-        layout_info = [x.layout if x else None for x in input_info.tensor_metadata]
-        self.assertEqual(layout_info, [torch._mkldnn, torch._mkldnn, None])
-        device_info = [x.device if x else None for x in input_info.tensor_metadata]
-        self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+        self.assertEqual(getattr_inputs("sizes", []), [[4, 3], [4, 3], []])
+        self.assertEqual(getattr_inputs("strides", []), [[], [], []])
+        self.assertEqual(getattr_inputs("layout", None), [torch._mkldnn, torch._mkldnn, None])
+        self.assertEqual(getattr_inputs("device", None), [torch.device("cpu"), torch.device("cpu"), None])
 
     def test_scalar_ins(self):
         x = torch.ones(5, 5)
@@ -1899,11 +1888,29 @@ class TestTorchTidyProfiler(TestCase):
         node = find_node_with_name(nodes, "aten::add")
         self.assertIsNotNone(node)
 
+        def getattr_inputs(name, default):
+            return [getattr(i, name, default) for i in node.extra_fields.inputs]
+
         # The second argument to the add gets promotoed to a zerodim Tensor
-        input_info = node.extra_fields.inputs
-        self.assertEqual(input_info.dtypes, ['float', 'double', 'Scalar'])
-        self.assertEqual(input_info.shapes, [[5, 5], [], []])
-        self.assertEqual(input_info.ivalues, [None, None, alpha])
+        self.assertEqual(getattr_inputs("dtype", None), [torch.float32, torch.float64, None])
+        self.assertEqual(getattr_inputs("sizes", []), [[5, 5], [], []])
+        self.assertEqual(node.extra_fields.inputs[2], alpha)
+
+    def test_tensor_lists(self):
+        x = torch.ones((1,))
+        y = torch.ones((1,))
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = torch.stack((x, y))
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::stack")
+        inputs = node.extra_fields.inputs
+        self.assertEqual(len(inputs), 2)
+        self.assertIsInstance(inputs[0], list)
+        self.assertEqual(len(inputs[0]), 2)
+        self.assertEqual(x.storage().data_ptr(), inputs[0][0].storage_data_ptr)
+        self.assertEqual(y.storage().data_ptr(), inputs[0][1].storage_data_ptr)
+
 
     def test_nnmodule_params(self):
 
