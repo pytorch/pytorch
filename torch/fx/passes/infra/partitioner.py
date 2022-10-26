@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable
+from typing import Dict, List, Set, Iterable, Optional
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
@@ -44,12 +44,6 @@ class CapabilityBasedPartitioner:
     def __is_node_supported(self, node: Node) -> bool:
         return (
             self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
-            and
-            # reject 'getitem' node since they are special cased in partitioning.
-            (
-                node.op != "call_function" or
-                _get_qualified_name(node.target) != "_operator.getitem"    # type: ignore[arg-type]
-            )
         )
 
     def propose_partitions(self) -> List[Partition]:
@@ -110,13 +104,17 @@ class CapabilityBasedPartitioner:
 
             return True
 
-        def merge_single_node(node: Node, id: int):
-            assert node not in assignment
+        def merge_single_node(node: Node, id: Optional[int]):
+            if node in assignment:
+                partitions_by_id[assignment[node]].remove_node(node)
 
-            assignment[node] = id
-            if id not in partitions_by_id:
+            if id is None:
+                assignment.pop(node)
+            elif id not in partitions_by_id:
+                assignment[node] = id
                 partitions_by_id[id] = Partition(id=id, nodes=[node])
             else:
+                assignment[node] = id
                 partitions_by_id[id].add_node(node)
 
         logger.debug("Proposing partitions...")
