@@ -4527,8 +4527,6 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: "Expected `value` to be on same device as `a`",
         )
         value_type = utils.dtype_to_type(value.dtype)
-        if utils.is_cpu_scalar_tensor(value):
-            value = value.item()
 
     if value_type is complex:
         # only downcasting from complex to lower type is not allowed.
@@ -4537,7 +4535,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # Ref: https://github.com/pytorch/pytorch/issues/79195
         check(
             utils.is_weakly_lesser_type(value_type, python_type),
-            lambda: f"could not convert to type {python_type} without overflow",
+            lambda: f"value cannot be converted to type {python_type} without overflow",
         )
 
     # Since `where` allows type-promotion,

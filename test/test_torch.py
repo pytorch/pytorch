@@ -3703,6 +3703,25 @@ else:
         dst = dst.masked_fill(mask, False)
         self.assertEqual(dst, torch.tensor([True, False, True], device=device))
 
+    # masked_fill() ref used to use item(), make sure the reported repro works.
+    # Not an OpInfo test because it breaks TestMathBitsCUDA::test_conj_view.
+    # https://github.com/pytorch/pytorch/issues/81018 (repro)
+    # https://github.com/pytorch/pytorch/pull/82737 (context)
+    @skipIfRocm
+    @onlyCUDA  # we specifically need device='cuda' for this one
+    def test_masked_fill_device_promotion(self, device):
+        val = torch.randn(5, device=device)
+        mask = torch.ones(5, dtype=torch.bool, device=device)
+        inf = float('inf')
+        s = torch.tensor(inf, device='cpu')  # different device
+
+        torch_res = torch.masked_fill(val, mask, s)
+        ref_res = torch._refs.masked_fill(val, mask, s)
+        expected = torch.tensor([inf, inf, inf, inf, inf], device=device)
+
+        self.assertEqual(torch_res, expected)
+        self.assertEqual(ref_res, expected)
+
     def test_tensor_shape_empty(self, device):
         x = torch.randn((0, 1, 3, 0), device=device)
         # flatten
