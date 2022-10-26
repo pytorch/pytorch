@@ -34,6 +34,7 @@ import functools
 import warnings
 
 import torch
+from torch._C import _onnx as _C_onnx
 from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._internal import jit_utils, registration
 
@@ -166,11 +167,10 @@ def _try_cast_integer_to_float(g: jit_utils.GraphContext, *args):
     if arg0_type is not None:
         old_type = arg0_type
         if old_type not in floating_scalar_types:
-            # TODO(justinchuby): Remove the type ignore hint once _cast_Float is
-            # properly defined.
-            # NOTE: _cast_Float is generated programmatically so we need to make the
-            # type checker happy with ignore[attr-defined].
-            args = tuple(opset9._cast_Float(g, arg, False) for arg in args)  # type: ignore[attr-defined]
+            args = tuple(
+                g.op("Cast", arg, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+                for arg in args
+            )
         else:
             return (None,) + args
     else:

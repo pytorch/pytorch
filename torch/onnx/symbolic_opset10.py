@@ -601,7 +601,7 @@ def fake_quantize_per_tensor_affine(
 @_onnx_symbolic("aten::isinf")
 @_beartype.beartype
 def isinf(g: jit_utils.GraphContext, input):
-    return g.op("IsInf", opset9._cast_Double(g, input, False))  # type: ignore[attr-defined]
+    return g.op("IsInf", g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE))
 
 
 @_onnx_symbolic("aten::isfinite")
