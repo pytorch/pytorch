@@ -308,6 +308,7 @@ def _rebuild_qtensor(
     return tensor
 
 
+# Should not be used, this is kept only for BC of loading old serialized parameters
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
     # NB: This line exists only for backwards compatibility; the
