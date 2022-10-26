@@ -3,6 +3,7 @@
 import contextlib
 from copy import deepcopy
 from functools import partial
+import sys
 
 import torch
 import torch.distributed as dist
@@ -23,11 +24,26 @@ from torch.testing._internal.common_fsdp import (
     _maybe_wrap_fsdp,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     run_tests,
     parametrize,
     instantiate_parametrized_tests,
 )
 from torch.utils.checkpoint import checkpoint
+
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+
 
 _save_on_cpu_called = False
 def get_patched_save_on_cpu():
@@ -111,16 +127,23 @@ class TestFSDPCheckpoint(FSDPTest):
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     @parametrize("offload_activations", [True, False])
-    def test_checkpoint_fsdp_wrapping(self, cpu_offload, offload_activations):
+    @parametrize("use_orig_params", [False, True])
+    def test_checkpoint_fsdp_wrapping(
+        self,
+        cpu_offload: CPUOffload,
+        offload_activations: bool,
+        use_orig_params: bool,
+    ):
         # Test checkpoint(FSDP(layer1), FSDP(layer2), ....)
         if offload_activations:
             wrapper_to_use = offload_wrapper
         else:
             wrapper_to_use = checkpoint_wrapper
 
+        fsdp_kwargs = {"cpu_offload": cpu_offload, "use_orig_params": use_orig_params}
         ckpt_sequential_wrapped_fsdp = wrapper_to_use(
             TestFSDPCheckpoint.SequentialModule(
-                wrap_fsdp=True, cpu_offload=cpu_offload
+                wrap_fsdp=True, **fsdp_kwargs,
             ),
         )
         # Test FSDP(checkpoint(layer1)), FSDP(checkpoint(layer2)), ....
@@ -128,11 +151,11 @@ class TestFSDPCheckpoint(FSDPTest):
             checkpoint_layer=True,
             offload_activations=offload_activations,
             wrap_fsdp=True,
-            cpu_offload=cpu_offload,
+            **fsdp_kwargs,
         )
 
         baseline = TestFSDPCheckpoint.SequentialModule(
-            wrap_fsdp=True, cpu_offload=cpu_offload
+            wrap_fsdp=True, **fsdp_kwargs,
         )
 
         # note that reentrant-based checkpointing requires inputs to have grad
@@ -168,12 +191,19 @@ class TestFSDPCheckpoint(FSDPTest):
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     @parametrize("offload_activations", [True, False])
-    def test_basic_checkpoint_end_to_end(self, cpu_offload, offload_activations):
+    @parametrize("use_orig_params", [False, True])
+    def test_basic_checkpoint_end_to_end(
+        self,
+        cpu_offload: CPUOffload,
+        offload_activations: bool,
+        use_orig_params: bool,
+    ):
+        fsdp_kwargs = {"cpu_offload": cpu_offload, "use_orig_params": use_orig_params}
         global _save_on_cpu_called
         with patch_save_on_cpu(get_patched_save_on_cpu()):
             seq = TestFSDPCheckpoint.SequentialModule().to(torch.cuda.current_device())
             # Runs FSDP with no checkpointing
-            fsdp_only_seq = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
+            fsdp_only_seq = FSDP(deepcopy(seq), **fsdp_kwargs)
             # Runs checkpoint-wrapped FSDP
             if offload_activations:
                 wrapper_to_use = offload_wrapper
@@ -181,15 +211,15 @@ class TestFSDPCheckpoint(FSDPTest):
                 wrapper_to_use = checkpoint_wrapper
 
             checkpointed_fsdp = wrapper_to_use(
-                FSDP(deepcopy(seq), cpu_offload=cpu_offload),
+                FSDP(deepcopy(seq), **fsdp_kwargs),
             )
             # Runs FSDP-wrapped checkpointed module
             fsdp_wrapped_checkpoint = FSDP(
                 wrapper_to_use(deepcopy(seq)),
-                cpu_offload=cpu_offload,
+                **fsdp_kwargs,
             )
             # Runs FSDP with manual calls to checkpoint.
-            fsdp_call_checkpoint = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
+            fsdp_call_checkpoint = FSDP(deepcopy(seq), **fsdp_kwargs)
             # note that reentrant-based checkpointing requires inputs to have grad
             # flag set.
 
