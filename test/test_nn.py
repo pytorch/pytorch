@@ -6721,7 +6721,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                          F.poisson_nll_loss(input, target, reduction='sum'))
         self.assertEqual(torch.mean(component_wise_loss),
                          F.poisson_nll_loss(input, target, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
+        with self.assertRaisesRegex(ValueError, 'total is not a valid value for reduction'):
             F.poisson_nll_loss(input, target, reduction='total')
 
     def test_gaussian_nll_loss_reduction_modes(self):

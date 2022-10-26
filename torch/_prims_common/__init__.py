@@ -711,12 +711,14 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
     if dim is not None:
+        # Convert to list to produce a compatible error message with core
+        # PyTorch, which prints sequences in square brackets.
+        shape = list(shape)
         check(
             newsize != 0,
-            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
-            f"unspecified dimension size -1 can be any value and is ambiguous",
+            lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                     f"unspecified dimension size -1 can be any value and is ambiguous"),
         )
-        shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
 
