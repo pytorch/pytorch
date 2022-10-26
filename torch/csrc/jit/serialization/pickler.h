@@ -5,9 +5,9 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/Utils.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/Utils.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/Export.h>
 
