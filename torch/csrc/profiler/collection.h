@@ -238,29 +238,34 @@ using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
 using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
 
-struct ParameterInfo {
-  std::string param_name_;
-  TensorMetadata param_;
-  c10::optional<TensorMetadata> grad_;
-};
-
 struct NNModuleInfo {
+  struct ParameterInfo {
+    std::string name_;
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+  };
+
   PyModuleSelf self_;
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<ParameterInfo> params_;
+  std::vector<ParameterInfo> parameters_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };
 
 struct OptimizerInfo {
-  PyOptimizerSelf self_;
-  PyOptimizerCls opt_;
-  at::StringView opt_name_;
+  struct ParameterInfo {
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+    std::vector<std::pair<std::string, TensorMetadata>> state_;
+  };
 
-  std::vector<TensorMetadata> params_addr_;
-  std::vector<std::pair<std::string, TensorMetadata>> opt_state_;
+  PyOptimizerSelf self_;
+  PyOptimizerCls cls_;
+  at::StringView cls_name_;
+
+  std::vector<ParameterInfo> parameters_;
 };
 
 struct PyExtraFieldsBase {

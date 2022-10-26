@@ -1,14 +1,56 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/RNN.h>
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/Context.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_lstm_mps.h>
+#include <ATen/ops/_thnn_differentiable_gru_cell_backward_native.h>
+#include <ATen/ops/_thnn_differentiable_lstm_cell_backward_native.h>
+#include <ATen/ops/_thnn_fused_gru_cell.h>
+#include <ATen/ops/_thnn_fused_lstm_cell.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward_impl.h>
+#include <ATen/ops/_use_cudnn_rnn_flatten_weight_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/cudnn_is_acceptable.h>
+#include <ATen/ops/dropout.h>
+#include <ATen/ops/fbgemm_linear_int8_weight_fp32_activation.h>
+#include <ATen/ops/fbgemm_linear_quantize_weight_native.h>
+#include <ATen/ops/fbgemm_pack_quantized_matrix_native.h>
+#include <ATen/ops/gru_cell_native.h>
+#include <ATen/ops/gru_native.h>
+#include <ATen/ops/linear.h>
+#include <ATen/ops/lstm_cell_native.h>
+#include <ATen/ops/lstm_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/quantized_gru_cell_native.h>
+#include <ATen/ops/quantized_lstm_cell_native.h>
+#include <ATen/ops/quantized_rnn_relu_cell_native.h>
+#include <ATen/ops/quantized_rnn_tanh_cell_native.h>
+#include <ATen/ops/relu.h>
+#include <ATen/ops/rnn_relu_cell_native.h>
+#include <ATen/ops/rnn_relu_native.h>
+#include <ATen/ops/rnn_tanh_cell_native.h>
+#include <ATen/ops/rnn_tanh_native.h>
+#include <ATen/ops/sigmoid_backward.h>
+#include <ATen/ops/stack.h>
+#include <ATen/ops/tanh.h>
+#include <ATen/ops/tanh_backward.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
 
 int register_linear_params();
 

@@ -1,7 +1,23 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_upsample_bicubic2d_aa.h>
+#include <ATen/ops/_upsample_bicubic2d_aa_backward.h>
+#include <ATen/ops/_upsample_bicubic2d_aa_backward_native.h>
+#include <ATen/ops/_upsample_bicubic2d_aa_native.h>
+#include <ATen/ops/upsample_bicubic2d.h>
+#include <ATen/ops/upsample_bicubic2d_backward.h>
+#include <ATen/ops/upsample_bicubic2d_backward_native.h>
+#include <ATen/ops/upsample_bicubic2d_native.h>
+#endif
 
 namespace at {
 namespace meta {
