@@ -260,6 +260,33 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
             pass
         self.assertEqual(res, 1)
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_failing_backend_compiler(self):
+        """
+        Ensure error handling works as expected
+        """
+        m, inputs, _ = self.get_model()
+        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+
+        class MyException(Exception):
+            def __init__(self, msg):
+                super().__init__(msg)
+
+        def excepting_compiler(gm, inputs):
+            raise MyException("Failure!")
+
+        exc_m = torch._dynamo.optimize(excepting_compiler)(ddp_m)
+        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+            _ = exc_m(inputs)
+
+        def null_compiler(gm, inputs):
+            return
+
+        torch._dynamo.reset()
+        null_m = torch._dynamo.optimize(null_compiler)(ddp_m)
+        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+            _ = null_m(inputs)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
