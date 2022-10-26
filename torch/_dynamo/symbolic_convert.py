@@ -17,24 +17,26 @@ from unittest.mock import patch
 
 import torch
 
-from . import allowed_functions, config, exc
-from . import logging as torchdynamo_logging
-from . import side_effects, skipfiles, variables
-from .allowed_functions import (
-    is_allowed,
-    is_builtin_callable,
-    is_builtin_constant,
+from . import (
+    allowed_functions,
+    config,
+    exc,
+    logging as torchdynamo_logging,
+    side_effects,
+    skipfiles,
+    variables,
 )
+from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import (
-    Instruction,
     cleaned_instructions,
     create_instruction,
+    Instruction,
     is_generator,
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed, Unsupported, unimplemented
+from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
@@ -52,7 +54,7 @@ from .utils import (
     graph_break_dup_warning_checker,
     istype,
 )
-from .variables.base import MutableLocal, VariableTracker, typestr
+from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
@@ -318,6 +320,7 @@ class InstructionTranslatorBase(object):
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
             getattr(self, inst.opname)(inst)
+
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
             raise

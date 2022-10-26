@@ -12,10 +12,8 @@ import torch.nn
 from torch import fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-from . import config
-from . import logging as torchdynamo_logging
-from . import variables
-from .bytecode_transformation import Instruction, create_instruction, unique_id
+from . import config, logging as torchdynamo_logging, variables
+from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
@@ -328,6 +326,7 @@ class OutputGraph(fx.Tracer):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)

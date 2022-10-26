@@ -9,26 +9,24 @@ import weakref
 from typing import Callable
 
 import torch
-from torch.fx.graph_module import (
-    _forward_from_src as original_forward_from_src,
-)
+from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
 from .eval_frame import (
-    TorchPatcher,
-    WrapperBackend,
     always_optimize_code_objects,
     skip_code,
+    TorchPatcher,
+    WrapperBackend,
 )
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
     TorchRuntimeError,
-    Unsupported,
     unimplemented,
+    Unsupported,
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .replay_record import ExecutionRecord
@@ -227,10 +225,7 @@ def augment_exc_message(exc, msg="\n"):
     if hasattr(exc, "real_stack") and len(exc.real_stack) > 0 and not config.verbose:
         msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
 
-    if (
-        config.replay_record_enabled
-        and hasattr(exc, "record_filename")
-    ):
+    if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  {config.dynamo_import}.replay('{exc.record_filename}').\n"
 
