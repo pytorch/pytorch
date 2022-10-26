@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <string>
 
@@ -9,7 +10,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class HeuristicParams {
+class HeuristicParams : public PolymorphicBase {
  public:
   std::string tag = "";
 

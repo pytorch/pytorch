@@ -137,7 +137,7 @@ void ReplayTransformations::handle(Swizzle2D* swizzle_2d) {
   auto id_in_y = swizzle_2d->inY();
 
   // Make sure we have a corresponding entry in our map pointing to the ID we're
-  // going to replay the split on
+  // going to replay the swizzle on
   auto it_x = id_map_.find(id_in_x);
   auto it_y = id_map_.find(id_in_y);
 
@@ -162,7 +162,7 @@ void ReplayTransformations::handle(Swizzle2D* swizzle_2d) {
   auto outs = std::make_pair(mapped_x, mapped_y);
 
   if (replay_swizzle_) {
-    // Replay the split onto mapped
+    // Replay the swizzle onto mapped
     outs = IterDomain::swizzle(swizzle_2d->swizzleType(), mapped_x, mapped_y);
 
     // Remove mapped from the leaf IDs
@@ -224,7 +224,7 @@ void ReplayTransformations::runReplay() {
   // Switch outDomain to a vector to start the traversal
   std::vector<Val*> traversal_vals(
       target_domain_.begin(), target_domain_.end());
-  traverseFrom(traversal_vals[0]->fusion(), traversal_vals);
+  traverseTo(traversal_vals[0]->fusion(), traversal_vals);
 
   if (error_on_failure_)
     TORCH_INTERNAL_ASSERT(
@@ -762,14 +762,6 @@ struct ProducerForwardingInfo {
           (outer->isTrivialReduction() && !inner->isReduction())) {
         auto compliment_id = inner->isTrivialReduction() ? inner : outer;
         auto forwarded_id = inner->isTrivialReduction() ? outer : inner;
-        // Only allow forwarding when the trivial reduction domain is
-        // an root domain
-        if (std::find(
-                producer->getMaybeRFactorDomain().begin(),
-                producer->getMaybeRFactorDomain().end(),
-                compliment_id) == producer->getMaybeRFactorDomain().end()) {
-          continue;
-        }
         forwarding_map.emplace(std::make_pair(forwarded_id, merge->out()));
         compliment_map.emplace(std::make_pair(
             forwarded_id, std::vector<IterDomain*>{compliment_id}));

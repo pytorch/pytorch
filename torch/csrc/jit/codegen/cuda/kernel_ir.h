@@ -94,7 +94,7 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
     return expr_;
   }
 
-  Bool* thread_pred() {
+  Bool* thread_pred() const {
     TORCH_INTERNAL_ASSERT(
         ptype_ == PredicateType::Inline ||
         ptype_ == PredicateType::Misaligned || ptype_ == PredicateType::Shift ||
@@ -199,6 +199,8 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
       Val* size,
       bool zero_init = false);
 
+  Expr* shallowCopy() const override;
+
   Val* buffer() const {
     return buffer_;
   }
@@ -251,6 +253,8 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
  public:
   explicit BlockSync(IrBuilderPasskey passkey, bool war_sync = false);
 
+  Expr* shallowCopy() const override;
+
   bool isWarHazardSync() const {
     return war_sync_;
   }
@@ -264,6 +268,8 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
 class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
  public:
   explicit CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages = 0);
+
+  Expr* shallowCopy() const override;
 
   //! Returns the remaining number of stages that are not synchronized
   //!  after this op.
@@ -282,6 +288,8 @@ class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
 class TORCH_CUDA_CU_API CpAsyncCommit final : public Expr {
  public:
   explicit CpAsyncCommit(IrBuilderPasskey passkey);
+
+  Expr* shallowCopy() const override;
 };
 
 // Synchronize all blocks in device, implies cooperative group launch is
@@ -292,6 +300,8 @@ class TORCH_CUDA_CU_API GridSync final : public Expr {
       IrBuilderPasskey passkey,
       ParallelTypeBitmap sync_dims,
       Val* sync_buffer);
+
+  Expr* shallowCopy() const override;
 
   ParallelTypeBitmap syncDims() const {
     return sync_dims_;
@@ -311,6 +321,8 @@ class TORCH_CUDA_CU_API GridSync final : public Expr {
 class TORCH_CUDA_CU_API InitMagicZero final : public Expr {
  public:
   explicit InitMagicZero(IrBuilderPasskey passkey);
+
+  Expr* shallowCopy() const override;
 };
 
 // Simply prints "UPDATE_MAGIC_ZERO" in the code in accordance with magic_zero
@@ -318,6 +330,8 @@ class TORCH_CUDA_CU_API InitMagicZero final : public Expr {
 class TORCH_CUDA_CU_API UpdateMagicZero final : public Expr {
  public:
   explicit UpdateMagicZero(IrBuilderPasskey passkey);
+
+  Expr* shallowCopy() const override;
 };
 
 // TODO(kir): promote to IR node
@@ -418,6 +432,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
 
   ForLoop(IrBuilderPasskey passkey, const ForLoop* other);
 
+  Expr* shallowCopy() const override;
+
   Val* index() const {
     return index_;
   }
@@ -512,6 +528,8 @@ class TORCH_CUDA_CU_API IfThenElse final : public Expr {
  public:
   explicit IfThenElse(IrBuilderPasskey passkey, Predicate* cond);
 
+  Expr* shallowCopy() const override;
+
   Scope& thenBody() {
     return then_body_;
   }
@@ -557,6 +575,8 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
       Val* entrances,
       bool is_allreduce = false);
 
+  Expr* shallowCopy() const override;
+
   Allocate* reduction_buffer() const {
     return reduction_buffer_;
   }
@@ -579,8 +599,11 @@ class TORCH_CUDA_CU_API GridReduction final : public ReductionOp {
     return thread_predicate_;
   }
 
-  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
-    thread_predicate_ = thread_predicate;
+  GridReduction* withThreadPredicate(
+      const ParallelTypeBitmap& thread_predicate) {
+    auto result = shallowCopy()->as<GridReduction>();
+    result->thread_predicate_ = thread_predicate;
+    return result;
   }
 
  private:
@@ -608,6 +631,8 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
       Val* entrances,
       Val* buffer_stride,
       bool is_allreduce = false);
+
+  Expr* shallowCopy() const override;
 
   const std::vector<Allocate*>& reduction_buffers() const {
     return reduction_buffers_;
@@ -639,8 +664,11 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
     return thread_predicate_;
   }
 
-  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
-    thread_predicate_ = thread_predicate;
+  GroupedGridReduction* withThreadPredicate(
+      const ParallelTypeBitmap& thread_predicate) {
+    auto result = shallowCopy()->as<GroupedGridReduction>();
+    result->thread_predicate_ = thread_predicate;
+    return result;
   }
 
  private:
@@ -670,6 +698,8 @@ class TORCH_CUDA_CU_API GridBroadcast final : public Expr {
       BroadcastOp* broadcast_op,
       Allocate* broadcast_buffer,
       Allocate* sync_buffer);
+
+  Expr* shallowCopy() const override;
 
   BroadcastOp* broadcast_op() const {
     return broadcast_op_;
@@ -710,6 +740,8 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
       Val* entrance_index,
       Val* entrances);
 
+  Expr* shallowCopy() const override;
+
   WelfordOp* welford_op() const {
     return welford_op_;
   }
@@ -744,8 +776,10 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
     return thread_predicate_;
   }
 
-  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
-    thread_predicate_ = thread_predicate;
+  GridWelford* withThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    auto result = shallowCopy()->as<GridWelford>();
+    result->thread_predicate_ = thread_predicate;
+    return result;
   }
 
  private:
@@ -777,6 +811,8 @@ class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
       Val* buffer_stride,
       bool is_allreduce = false);
 
+  Expr* shallowCopy() const override;
+
   const std::array<std::vector<Allocate*>, 3>& reduction_buffers() const {
     return reduction_buffers_;
   }
@@ -803,8 +839,11 @@ class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
     return thread_predicate_;
   }
 
-  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
-    thread_predicate_ = thread_predicate;
+  GroupedGridWelford* withThreadPredicate(
+      const ParallelTypeBitmap& thread_predicate) {
+    auto result = shallowCopy()->as<GroupedGridWelford>();
+    result->thread_predicate_ = thread_predicate;
+    return result;
   }
 
  private:
@@ -838,6 +877,8 @@ class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
   explicit AllocateFusedReduction(
       IrBuilderPasskey passkey,
       GroupedGridWelford* grouped_grid_welford);
+
+  Expr* shallowCopy() const override;
 
   Expr* gridExpr() const {
     return grid_expr_;
@@ -879,6 +920,8 @@ class TORCH_CUDA_CU_API PairSelect : public Expr {
 
   PairSelect(IrBuilderPasskey, Val* out, IntPair* in, Selection selection);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -913,6 +956,8 @@ class TORCH_CUDA_CU_API Swizzle2DInt : public Expr {
       Val* extent_x,
       Val* extent_y,
       Swizzle2DType swizzle_type);
+
+  Expr* shallowCopy() const override;
 
   IntPair* out() const {
     return out_;

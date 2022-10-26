@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -50,12 +50,6 @@ class DomainMap : public pointwise_utils::DomainMap {
       }
     }
     return result;
-  }
-
-  static bool hasReferenceTensorView(Fusion* fusion) {
-    FusionGuard fg(fusion);
-    DomainMap domain_map(fusion);
-    return domain_map.findReferenceTensorView() != nullptr;
   }
 
  private:
@@ -141,13 +135,11 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
     });
     vectorizable_inputs_outputs_entry.get();
 
-    auto broadcast_byte_multiples_entry =
-        HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
-            data_cache, []() {
-              return std::make_unique<
-                  std::vector<scheduler_utils::BroadcastMultiple>>();
-            });
-    broadcast_byte_multiples_entry.get();
+    auto broadcast_info = HeuristicSummaryEntry<
+        HeuristicCompileTime::BroadcastMultiples>(data_cache, []() {
+      return std::make_unique<scheduler_utils::BroadcastMultipleInformation>();
+    });
+    broadcast_info.get();
     return std::make_shared<PointwiseParams>("Pointwise heuristics");
   }
 
@@ -183,25 +175,7 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
 
   auto params = std::make_shared<PointwiseParams>("Pointwise heuristics");
 
-  /*
-   * 2D pointwise scheduling logic. What is expected is there's some
-   * broadcasting pattern which would make scheduling as a 2D problem more
-   * efficient than scheduling simply as a 1D problem.
-   *
-   * Mapping count holds how many bytes are in each dimension for both inputs
-   * and outputs relative to the reference tensor. What we're looking for is a
-   * break point in reference_tvs dimensions which separates the outer dimension
-   * and inner dimension of the problem mapped to 2D.
-   *
-   * break_point is computed assuming no reuse, ignoring parallelization
-   * limitations, and simply figures out which point best separates broadcasted
-   * dimensions. In other words, where's the point where we isolate the most
-   * broadcasted elements to one side.
-   *
-   * Once a break point is found, simply schedule the pointwise op as 2D
-   * balancing parallelization as best as possible.
-   */
-
+  // See pointwise.h to understand what we're doing for this 2D analysis.
   // Ideal break point location
   int break_point = 0;
 
@@ -230,16 +204,15 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
   // break point.
   int64_t gdim_right = 1;
 
-  auto broadcast_byte_multiples_entry =
-      HeuristicSummaryEntry<HeuristicCompileTime::BroadcastMultiples>(
-          data_cache, [&largest_out, &index_type]() {
-            return std::make_unique<
-                std::vector<scheduler_utils::BroadcastMultiple>>(
-                scheduler_utils::getBroadcastMultiples(
-                    largest_out, index_type));
-          });
+  auto broadcast_info = HeuristicSummaryEntry<
+      HeuristicCompileTime::BroadcastMultiples>(
+      data_cache, [&largest_out, &index_type]() {
+        return std::make_unique<scheduler_utils::BroadcastMultipleInformation>(
+            scheduler_utils::getBroadcastMultiples(largest_out, index_type));
+      });
 
-  auto& broadcast_byte_multiples = broadcast_byte_multiples_entry.get();
+  auto& view_disjoint_sets = broadcast_info.get().view_disjoint_set_ids;
+  auto& broadcast_byte_multiples = broadcast_info.get().broadcast_multiples;
 
   TORCH_INTERNAL_ASSERT(broadcast_byte_multiples.size() == ref_root.size());
 
@@ -266,6 +239,12 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
       int64_t min_total_transfer = std::numeric_limits<int64_t>::max();
 
       for (const auto break_point_i : c10::irange(ref_root.size())) {
+        // If break point is incoherent with view, don't consider breaking here.
+        if (!scheduler_utils::breakIsDisjoint(
+                view_disjoint_sets, break_point_i)) {
+          continue;
+        }
+
         // Number of elements in the right side of reference tv with
         // break_point_i
         int64_t cur_right_elem_count = 1;
@@ -362,8 +341,10 @@ std::shared_ptr<PointwiseParams> getPointwiseHeuristics(
   }
 
   // Try expanding vectorization to contig merged domains
+  // TODO: This is an expensive function that shouldn't be in heuristics without
+  // caching.
   auto expanded_vector_word_size =
-      scheduler_utils::expandVectorizationToContigMergedDomains(
+      vectorize_helper::expandVectorizationToContigMergedDomains(
           fusion,
           runtime_info,
           vectorizable_inputs_outputs,
@@ -435,8 +416,15 @@ LaunchParams schedulePointwise(
   return params->lparams;
 }
 
+TensorView* getReferenceTensorView(Fusion* fusion) {
+  FusionGuard fg(fusion);
+  DomainMap domain_map(fusion);
+  auto reference_tv = domain_map.findReferenceTensorView();
+  return reference_tv;
+}
+
 bool hasReferenceTensorView(Fusion* fusion) {
-  return DomainMap::hasReferenceTensorView(fusion);
+  return getReferenceTensorView(fusion) != nullptr;
 }
 
 // TODO: Inline intermediate operations (avoid inlining unrolled/vectorized
@@ -487,41 +475,142 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     return;
   }
 
-  DomainMap domain_map(fusion);
-  TensorView* reference_tv =
-      domain_map.findReferenceTensorView(params.break_point);
+  TensorView* reference_tv = getReferenceTensorView(fusion);
 
   TORCH_INTERNAL_ASSERT(
       reference_tv != nullptr,
       "Could not find a fully broadcasted output to reference schedule on.");
 
-  auto all_tvs = ir_utils::allTvs(fusion);
-
-  // Merge right side of break point
+  // Positions of rhs and lhs after merging all dimensions.
   int rhs_i = -1;
-  for (int i = (int)reference_tv->nDims(); i > (int)params.break_point; i--) {
-    auto axis_i = i - 1;
-    if (rhs_i == -1) {
-      rhs_i = axis_i;
-    } else {
-      reference_tv->merge(axis_i, rhs_i);
-      rhs_i = axis_i;
-    }
-  }
-  if (rhs_i >= 0) {
-    // If there's an rhs
-    reference_tv->reorder({{rhs_i, -1}});
-  }
-
-  // Merge left side of break point
   int lhs_i = -1;
-  for (int i = (int)params.break_point; i > 0; i--) {
-    auto axis_i = i - 1;
-    if (lhs_i == -1) {
-      lhs_i = axis_i;
-    } else {
-      reference_tv->merge(axis_i, lhs_i);
-      lhs_i = axis_i;
+
+  auto view_ops = ir_utils::getViewOps(fusion);
+
+  /*
+   * If there's no path from reference through producer paths only to a view,
+   * e.g.: input
+   *      /  \
+   *   view reference
+   *    /
+   * output
+   *
+   * we need to propagate the view transformations to the reference tv before
+   * scheduling the reference tv. Since view ops have to be identical, if any
+   * path from reference tv through producers goes through a view, all paths
+   * from reference tv's to views should be through producers.
+   */
+  bool needs_view_prop =
+      view_ops.size() > 0 &&
+      !std::any_of(
+          view_ops.begin(), view_ops.end(), [&reference_tv](ViewOp* view) {
+            return DependencyCheck::isDependencyOf(view->out(), reference_tv) ||
+                view->out()->sameAs(reference_tv);
+          });
+
+  if (needs_view_prop) {
+    auto first_view_op = *view_ops.begin();
+
+    // Propagate the view transformations
+    TransformPropagator propagator(first_view_op->out());
+    MaxRootDomainInfoSpanningTree spanning_tree(first_view_op->out());
+    spanning_tree.traverse(&propagator);
+
+    // Reorder reference_tv after propagating the view operation. This will
+    // reorder for better merging.
+    reference_tv->reorder(
+        scheduler_utils::domainReorderAsRfactorMap(reference_tv));
+
+    // Break point is relative to rfactor domain, find the leaf domain ID's in
+    // the left/right side, we really need the values in domain, but easiest way
+    // to do this is with Dependency check which will grab all intermediate
+    // values too.
+    auto lhs_all_vals = DependencyCheck::getAllValsBetween(
+        {reference_tv->getMaybeRFactorDomain().begin(),
+         reference_tv->getMaybeRFactorDomain().begin() + params.break_point},
+        {reference_tv->domain()->domain().begin(),
+         reference_tv->domain()->domain().end()});
+
+    std::unordered_set<Val*> lhs_all_vals_set(
+        lhs_all_vals.begin(), lhs_all_vals.end());
+
+    auto rhs_all_vals = DependencyCheck::getAllValsBetween(
+        {reference_tv->getMaybeRFactorDomain().begin() + params.break_point,
+         reference_tv->getMaybeRFactorDomain().end()},
+        {reference_tv->domain()->domain().begin(),
+         reference_tv->domain()->domain().end()});
+
+    std::unordered_set<Val*> rhs_all_vals_set(
+        rhs_all_vals.begin(), rhs_all_vals.end());
+
+    // Make sure lhs and rhs groups are disjoint.
+    for (auto lhs_val : lhs_all_vals) {
+      TORCH_INTERNAL_ASSERT(
+          rhs_all_vals_set.count(lhs_val) == 0,
+          "Error in pointwise scheduler. LHS and RHS of the 2D scheduler are not disjoint.");
+    }
+
+    // Merge rhs, then lhs.
+    IterDomain* rhs_id = nullptr;
+    IterDomain* lhs_id = nullptr;
+    auto ndims = reference_tv->nDims();
+    for (auto i : c10::irange(ndims)) {
+      // Merge from right to left
+      auto pos = ndims - 1 - i;
+      auto id = reference_tv->axis(pos);
+      if (lhs_all_vals_set.count(id) > 0) {
+        if (lhs_id == nullptr) {
+          lhs_id = id;
+          lhs_i = pos;
+        } else {
+          reference_tv->merge(pos, lhs_i);
+          lhs_i = pos;
+          if (rhs_i > lhs_i) {
+            rhs_i--;
+          }
+        }
+      } else if (rhs_all_vals_set.count(id) > 0) {
+        if (rhs_id == nullptr) {
+          rhs_id = id;
+          rhs_i = pos;
+        } else {
+          reference_tv->merge(pos, rhs_i);
+          rhs_i = pos;
+          if (lhs_i > rhs_i) {
+            lhs_i--;
+          }
+        }
+      }
+    }
+    // Find the iter domains that should be in the lhs, and rhs.
+  } else {
+    // Don't need to worry about view transformations, just merge reference tv
+    // as we normally would.
+
+    // Merge right side of break point
+    for (int i = (int)reference_tv->nDims(); i > (int)params.break_point; i--) {
+      auto axis_i = i - 1;
+      if (rhs_i == -1) {
+        rhs_i = axis_i;
+      } else {
+        reference_tv->merge(axis_i, rhs_i);
+        rhs_i = axis_i;
+      }
+    }
+    if (rhs_i >= 0) {
+      // If there's an rhs
+      reference_tv->reorder({{rhs_i, -1}});
+    }
+
+    // Merge left side of break point
+    for (int i = (int)params.break_point; i > 0; i--) {
+      auto axis_i = i - 1;
+      if (lhs_i == -1) {
+        lhs_i = axis_i;
+      } else {
+        reference_tv->merge(axis_i, lhs_i);
+        lhs_i = axis_i;
+      }
     }
   }
 
@@ -716,9 +805,9 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // get a higher position in later inline propagation. We need this separate
   // step because we were not using ParallelType::Unroll, so we have to do
   // unrolling manually.
-  InlinePropagator inline_unswitch(
-      reference_tv, unswitch_pos, ComputeAtMode::BestEffort);
-  spanning_tree.traverse(&inline_unswitch);
+  inlineAllAt(reference_tv, unswitch_pos, true);
+
+  auto all_tvs = ir_utils::allTvs(fusion);
 
   // Inline at the inner most position. The CA position of all tensors except
   // inputs, cached inputs and outputs will be updated.
@@ -731,9 +820,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     auto output = entry.second;
     inner_most_tensors.erase(output);
   }
-  InlinePropagator inline_inner_most(
-      reference_tv, -1, ComputeAtMode::BestEffort, inner_most_tensors);
-  spanning_tree.traverse(&inline_inner_most);
+  inlineMost(inner_most_tensors);
 }
 
 } // namespace cuda

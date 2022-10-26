@@ -303,12 +303,12 @@ class PredicateChcker : public IterVisitor {
 
   // Shift is not supported yet.
   bool predicateShift(Expr* expr) const {
-    auto& halo_info = GpuLower::current()->haloInfo();
+    auto halo_info = GpuLower::current()->haloInfo();
     auto input_tvs = ir_utils::filterByType<TensorView>(expr->inputs());
-    return halo_info.needsShiftPredicate(expr) ||
+    return halo_info->needsShiftPredicate(expr) ||
         std::any_of(input_tvs.begin(), input_tvs.end(), [&](auto input_tv) {
              return input_tv->definition() != nullptr &&
-                 halo_info.needsShiftPredicate(input_tv->definition());
+                 halo_info->needsShiftPredicate(input_tv->definition());
            });
   }
 
@@ -991,7 +991,7 @@ Val* PredicateElimination::getInitValue(TensorView* tv) const {
 }
 
 void PredicateElimination::build(Fusion* fusion) {
-  traverseFrom(fusion, fusion->outputs());
+  traverseTo(fusion, fusion->outputs());
 }
 
 std::string PredicateElimination::toString() const {

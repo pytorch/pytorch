@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
@@ -336,14 +336,7 @@ void multiReductionInliner(
       scheduler_utils::getTrivialReductionMap(fusion);
 
   // Inline the schedule
-  InlinePropagator inline_propagator(
-      reference_tv,
-      -1,
-      ComputeAtMode::MostInlined,
-      {},
-      mapped_to_trivial_reduction);
-
-  MaxRootDomainInfoSpanningTree(reference_tv).traverse(&inline_propagator);
+  inlineMost(mapped_to_trivial_reduction);
 }
 
 namespace {

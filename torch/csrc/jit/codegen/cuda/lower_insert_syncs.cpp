@@ -293,7 +293,7 @@ class WarSyncInserter : private kir::ExprMutator {
     auto maybe_aliased_tv = alloc_map_.getRealBuffer(tv);
     auto alloc_it = smem_allocations_.find(maybe_aliased_tv);
     auto ca_loop =
-        loop_utils::getAllocInformation(tv, for_loops_).init_for_loop;
+        lower_utils::getAllocInformation(tv, for_loops_).init_for_loop;
     if (alloc_it == smem_allocations_.end()) {
       WarMemoryInfo mem_info;
       mem_info.ca_loop = ca_loop;
@@ -486,7 +486,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
       Expr* sync_expr = nullptr;
       kir::Allocate* maybe_alloc = nullptr;
       if (sync_bitmap.hasBID()) {
-        maybe_alloc = ir_utils::allocGlobalBufferForGridComm(
+        maybe_alloc = lower_utils::allocGlobalBufferForGridComm(
             getGridSyncBufferSize(sync_bitmap), DataType::Int, true);
         sync_expr = IrBuilder::create<kir::GridSync>(
             sync_bitmap, maybe_alloc->buffer());

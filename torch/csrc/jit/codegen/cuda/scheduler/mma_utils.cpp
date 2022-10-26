@@ -274,10 +274,10 @@ std::unordered_set<IterDomain*> getMmaDomainSet(
 //  optimizations.
 //
 // A concrete example:
-//  T0 [I0, I1, I2, I3, I4, I5] = mma(T1[I01, B11, B21, I31, I41, B51], T2[B02,
+//  T0 [I0, I1, I2, R3, I4, I5] = mma(T1[I01, B11, B21, I31, I41, B51], T2[B02,
 //  I12, B22, I32, I42, I52], {3};
 // In this case some example querries:
-//  K dimension of T0 = {I3}
+//  K dimension of T0 = {R3}
 //  M dimension of T1 = {I01}
 //  N dimension of T2 = {I52}
 //  etc.

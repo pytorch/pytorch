@@ -41,9 +41,10 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::PythonDefinition, false},
       {DebugDumpOption::PythonFrontendDebug, false},
       {DebugDumpOption::TransformPropagator, false},
-      {DebugDumpOption::InlinePropagator, false},
       {DebugDumpOption::Cubin, false},
-      {DebugDumpOption::Ptx, false}};
+      {DebugDumpOption::Ptx, false},
+      {DebugDumpOption::BankConflictInfo, false},
+      {DebugDumpOption::SyncMap, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -100,12 +101,14 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::PythonFrontendDebug] = true;
       } else if (token == "transform_propagator") {
         options_map[DebugDumpOption::TransformPropagator] = true;
-      } else if (token == "inline_propagator") {
-        options_map[DebugDumpOption::InlinePropagator] = true;
       } else if (token == "cubin") {
         options_map[DebugDumpOption::Cubin] = true;
       } else if (token == "ptx") {
         options_map[DebugDumpOption::Ptx] = true;
+      } else if (token == "bank_conflict") {
+        options_map[DebugDumpOption::BankConflictInfo] = true;
+      } else if (token == "sync_map") {
+        options_map[DebugDumpOption::SyncMap] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -118,7 +121,7 @@ auto parseDebugDumpOptions() {
             "\tdraw_segmented_fusion, scheduler_params, parallel_dimensions,\n",
             "\tbuffer_reuse_verbose, ptxas_verbose, halo, segmenter_logging,\n",
             "\tperf_debug_verbose, python_definition, python_frontend_debug,\n",
-            "\ttransform_propagator, inline_propagator, cubin, ptx\n");
+            "\ttransform_propagator, cubin, ptx, bank_conflict, sync_map\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -132,6 +135,7 @@ auto parseDebugDumpOptions() {
 auto parseDisableOptions() {
   std::unordered_map<DisableOption, bool> options_map = {
       {DisableOption::ArchCheck, false},
+      {DisableOption::CompileToSass, false},
       {DisableOption::Fallback, false},
       {DisableOption::Fma, false},
       {DisableOption::IndexHoist, false},
@@ -145,6 +149,8 @@ auto parseDisableOptions() {
       const auto token = options_view.substr(0, end_pos);
       if (token == "arch_check") {
         options_map[DisableOption::ArchCheck] = true;
+      } else if (token == "compile_to_sass") {
+        options_map[DisableOption::CompileToSass] = true;
       } else if (token == "fallback") {
         options_map[DisableOption::Fallback] = true;
       } else if (token == "fma") {
@@ -179,8 +185,7 @@ auto parseEnableOptions() {
       {EnableOption::Complex, false},
       {EnableOption::KernelProfile, false},
       {EnableOption::LinearDecomposition, false},
-      {EnableOption::ConvDecomposition, false},
-      {EnableOption::TransposeScheduler, false}};
+      {EnableOption::ConvDecomposition, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
     c10::string_view options_view(dump_options);
@@ -195,8 +200,6 @@ auto parseEnableOptions() {
         options_map[EnableOption::LinearDecomposition] = true;
       } else if (token == "conv_decomposition") {
         options_map[EnableOption::ConvDecomposition] = true;
-      } else if (token == "transpose_scheduler") {
-        options_map[EnableOption::TransposeScheduler] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -204,7 +207,7 @@ auto parseEnableOptions() {
             token,
             "'\nAvailable options:\n",
             "\tcomplex, kernel_profile, linear_decomposition,",
-            "conv_decomposition, transpose_scheduler");
+            "conv_decomposition");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

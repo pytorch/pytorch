@@ -20,10 +20,6 @@ class DomainMap {
   }
   virtual ~DomainMap() = default;
 
-  bool areExactMapped(IterDomain* id1, IterDomain* id2) const {
-    return ca_map_.areMapped(id1, id2, IdMappingMode::EXACT);
-  }
-
   const ComputeAtMap& getComputeAtMap() const {
     return ca_map_;
   }

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
@@ -5,43 +7,16 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <torch/torch.h>
 
 #include <unordered_map>
 
+// Tests go in torch::jit
 namespace torch {
 namespace jit {
-namespace fuser {
-namespace cuda {
 
-inline bool deviceMajorMinorCheck(int major, int minor = 0) {
-  auto dev_prop = at::cuda::getCurrentDeviceProperties();
-  if (dev_prop->major < major ||
-      (dev_prop->major == major && dev_prop->minor < minor)) {
-    return false;
-  }
-  return true;
-}
+using namespace torch::jit::fuser::cuda;
 
-inline int deviceSMCount() {
-  int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  return sm_count;
-}
-
-class NVFuserTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    // requires PASCAL or newer
-    if (!deviceMajorMinorCheck(6)) {
-      GTEST_SKIP() << "skipping tests on pre-PASCAL GPUs";
-    }
-  }
-
-  void TearDown() override {
-    c10::cuda::CUDACachingAllocator::emptyCache();
-  }
-};
+namespace {
 
 struct ValidationConstants {
   // Tolerances generated from randn + add + sum fusion
@@ -71,8 +46,6 @@ struct ValidationConstants {
   double base_float_abs_tol = -1;
   double base_float_rel_tol = -1;
 };
-
-namespace {
 
 // Returns abs and relative values to use for validation
 std::pair<double, double> getTolerance(
@@ -336,15 +309,13 @@ ExpressionEvaluator bindInputsAndLaunchParams(
   return expr_eval;
 }
 
-} // namespace
-
 // Validation will look through the fusion and figure out how many elements were
 // reduced to create each output. It will then compute a tolernace to use for
 // allclose based on experimental results. The experimental results were based
 // on adding two tensors then summing them. This of course has an assumption
 // that we're always summing values between -2 and 2. If we start summing values
 // larger than that this approach might not hold.
-inline void testValidate(
+void testValidate(
     Fusion* fusion,
     const std::vector<at::Tensor>& fusion_outputs,
     const at::ArrayRef<IValue>& aten_inputs,
@@ -464,18 +435,6 @@ inline void testValidate(
   }
 }
 
-inline void clearL2Cache() {
-  torch::NoGradGuard no_grad;
-  auto l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
-  auto options =
-      torch::TensorOptions().dtype(torch::kFloat32).device(at::kCUDA, 0);
-
-  auto l2_elems = l2_cache_size / 4;
-  torch::Tensor t0 = torch::empty(l2_elems, options);
-  torch::Tensor t1 = torch::clone(t0);
-};
-
-} // namespace cuda
-} // namespace fuser
+} // namespace
 } // namespace jit
 } // namespace torch

@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 #include <stdexcept>
 #include <unordered_map>
 
@@ -160,6 +162,17 @@ DataType getTypeFromComplexType(DataType dtype) {
   }
 }
 
+bool isSupportedTypeByDevice(DataType dtype) {
+  auto prop = at::cuda::getCurrentDeviceProperties();
+  auto major_ver = prop->major;
+  switch (dtype) {
+    case DataType::BFloat16:
+      return major_ver >= 8;
+    default:
+      return true;
+  }
+}
+
 bool isIntegerOp(const BinaryOpType bopt) {
   return bopt >= BinaryOpType::Mod && bopt <= BinaryOpType::Rshift;
 }
@@ -290,8 +303,12 @@ static const char* predicate_type2string(PredicateType t) {
 
 static const char* expr_type2string(ExprType t) {
   switch (t) {
+    case ExprType::FullOp:
+      return "FullOp";
     case ExprType::ARangeOp:
       return "ARangeOp";
+    case ExprType::EyeOp:
+      return "EyeOp";
     case ExprType::UnaryOp:
       return "UnaryOp";
     case ExprType::BinaryOp:
@@ -656,6 +673,8 @@ static const char* rng_op_type_inline_op2string(RNGOpType t) {
   switch (t) {
     case RNGOpType::Uniform:
       return "rng_uniform";
+    case RNGOpType::UniformRange:
+      return "rng_uniform_range";
     default:
       break;
   }
@@ -694,6 +713,8 @@ static const char* rng_op_type2string(RNGOpType t) {
   switch (t) {
     case RNGOpType::Uniform:
       return "rng_uniform";
+    case RNGOpType::UniformRange:
+      return "rng_uniform_range";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected RNGOpType");
   }
