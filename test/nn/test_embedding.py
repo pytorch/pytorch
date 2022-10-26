@@ -79,8 +79,9 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
-    def test_embedding_from_pretrained(self):
-        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+    @parametrize_test("dtype", (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double))
+    def test_embedding_from_pretrained(self, dtype):
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.]], dtype=dtype)
         embedding = nn.Embedding.from_pretrained(a)
         self.assertEqual(a, embedding.weight.data)
 
