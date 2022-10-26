@@ -52,8 +52,6 @@ from torch.distributed.utils import (
     _sync_params_and_buffers,
     _to_kwargs,
 )
-from torch.nn.parameter import Parameter
-
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -1551,6 +1549,8 @@ class FullyShardedDataParallel(nn.Module):
     def _unshard(
         self,
         handles: List[FlatParamHandle],
+        unshard_stream: torch.cuda.Stream,
+        pre_unshard_stream: torch.cuda.Stream,
     ) -> None:
         """
         Unshards the handles in ``handles``. If the handles are in
@@ -1567,13 +1567,13 @@ class FullyShardedDataParallel(nn.Module):
             if event:
                 event.synchronize()
         any_ran_pre_unshard = False
-        with torch.cuda.stream(self._streams["pre_all_gather"]):
+        with torch.cuda.stream(pre_unshard_stream):
             for handle in handles:
                 ran_pre_unshard = handle.pre_unshard()
                 any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
         if any_ran_pre_unshard:
-            self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
-        with torch.cuda.stream(self._streams["all_gather"]):
+            unshard_stream.wait_stream(pre_unshard_stream)
+        with torch.cuda.stream(unshard_stream):
             for handle in handles:
                 handle.unshard()
                 handle.post_unshard()
@@ -2006,12 +2006,15 @@ class FullyShardedDataParallel(nn.Module):
         computation. This should only be called on the root FSDP instance."""
         assert self._is_root
         assert torch.cuda.is_available()
-        # Stream for all-gathering parameters.
-        self._streams["all_gather"] = torch.cuda.Stream()
-        # Stream for overlapping grad reduction with the backward pass.
+        # Stream for unshard logic, including allocating the all-gather
+        # destination tensors and the all-gathers themselves.
+        self._streams["unshard"] = torch.cuda.Stream()
+        # Stream for overlapping gradient reduction with the backward pass
+        # gradient computation.
         self._streams["post_backward"] = torch.cuda.Stream()
-        # Stream for pre-all-gather copies (e.g. H2D or precision cast).
-        self._streams["pre_all_gather"] = torch.cuda.Stream()
+        # Stream for pre-unshard logic, namely allocations and writes for
+        # CPU offloading (H2D copy) and mixed precision (low precision cast).
+        self._streams["pre_unshard"] = torch.cuda.Stream()
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -2022,11 +2025,11 @@ class FullyShardedDataParallel(nn.Module):
         if not self._is_root:
             return
         current_stream = torch.cuda.current_stream()
-        self._streams["all_gather"].wait_stream(current_stream)
+        self._streams["unshard"].wait_stream(current_stream)
         # Having the pre-all-gather stream wait for the current stream even if
         # we do not leverage the pre-all-gather stream is tolerable since this
         # only runs once per iteration
-        self._streams["pre_all_gather"].wait_stream(current_stream)
+        self._streams["pre_unshard"].wait_stream(current_stream)
 
     def _prefetch_handles(
         self,
@@ -2042,7 +2045,7 @@ class FullyShardedDataParallel(nn.Module):
         for handles_key in handles_to_prefetch:
             # Prefetch the next set of handles without synchronizing to allow
             # the sync to happen as late as possible to maximize overlap
-            self._unshard(handles_key)
+            self._unshard(handles_key, self._streams["unshard"], self._streams["pre_unshard"])
             self._handles_prefetched[handles_key] = True
 
     def _get_handles_to_prefetch(
@@ -2495,8 +2498,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> local_dict.keys()
             >>> odict_keys(['flat_param', 'inner.flat_param'])
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives may be used.
+        .. warning:: This needs to be called on all ranks since it uses
+            collective communications.
         """
         # TODO (rohan-varma): separate these out once a state_dict pre-hook
         # is available.
@@ -2792,8 +2795,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> local_dict.keys()
             >>> odict_keys(['flat_param', 'inner.flat_param'])
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives may be used.
+        .. warning:: This needs to be called on all ranks since it uses
+            collective communications.
         """
         return super().load_state_dict(state_dict, *args)
 
@@ -2890,10 +2893,10 @@ class FullyShardedDataParallel(nn.Module):
     ) -> None:
         """Unshards parameters in the pre-forward."""
         if handles:
-            self._unshard(handles)
+            self._unshard(handles, self._streams["unshard"], self._streams["pre_unshard"])
             handles_key = tuple(handles)
             self._needs_pre_forward_unshard[handles_key] = False
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+            torch.cuda.current_stream().wait_stream(self._streams["unshard"])
             self._prefetch_handles(handles_key)
 
     def _post_forward(
@@ -3136,8 +3139,10 @@ class FullyShardedDataParallel(nn.Module):
 
         self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
-        self._unshard(self._handles)
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+        # No need to call `wait_stream()` since we unshard in the computation
+        # stream directly
+        computation_stream = torch.cuda.current_stream()
+        self._unshard(self._handles, computation_stream, computation_stream)
         if with_grads:
             self._unshard_grads(self._handles)
 
@@ -3443,8 +3448,8 @@ class FullyShardedDataParallel(nn.Module):
 
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
-                self._unshard(_handles)
-                torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+                self._unshard(_handles, self._streams["unshard"], self._streams["pre_unshard"])
+                torch.cuda.current_stream().wait_stream(self._streams["unshard"])
 
                 # Set this to `False` to ensure that a mistargeted prefetch
                 # does not actually unshard these handles
@@ -3910,21 +3915,14 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 m._sync_gradients = old_flag
 
-    @property
-    def params_with_grad(self) -> List[Parameter]:
-        """
-        Recursively returns a list of all module parameters that have a gradient.
-        """
-        return [p for p in self.parameters() if p.grad is not None]
-
     @torch.no_grad()
     def clip_grad_norm_(
         self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0
-    ) -> None:
+    ) -> torch.Tensor:
         """
-        Clip all gradients at this point in time. The norm is computed over all
-        gradients together, as if they were concatenated into a single vector.
-        Gradients are modified in-place.
+        Clips the gradient norm of all parameters. The norm is computed over
+        all parameters' gradients as viewed as a single vector, and the
+        gradients are modified in-place.
 
         Args:
             max_norm (float or int): max norm of the gradients
@@ -3941,18 +3939,23 @@ class FullyShardedDataParallel(nn.Module):
             calling it for FSDP models would lead to different scaling being
             applied per subset of model parameters.
 
-        .. warning:: This needs to be called on all ranks, since synchronization
-            primitives will be used.
+        .. warning:: This needs to be called on all ranks since it uses
+            collective communications.
         """
         self._lazy_init()
         self._wait_for_previous_optim_step()
-        assert self._is_root, "clip_grad_norm should only be called on the root (parent) instance"
+        if not self._is_root:
+            raise RuntimeError(
+                "`clip_grad_norm_()` should only be called on the root FSDP instance"
+            )
         self._assert_state(TrainingState_.IDLE)
 
         max_norm = float(max_norm)
         norm_type = float(norm_type)
-        # Computes the max norm for this shard's gradients and sync's across workers
-        local_norm = _calc_grad_norm(self.params_with_grad, norm_type).cuda()  # type: ignore[arg-type]
+        # Compute the local gradient norm (only including this rank's shard
+        # of the gradients)
+        local_norm = _get_grad_norm(self.parameters(), norm_type).to(self.compute_device)
+        # Reconstruct the total gradient norm depending on the norm type
         if norm_type == math.inf:
             total_norm = local_norm
             dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group)
@@ -3960,16 +3963,21 @@ class FullyShardedDataParallel(nn.Module):
             total_norm = local_norm ** norm_type
             dist.all_reduce(total_norm, group=self.process_group)
             total_norm = total_norm ** (1.0 / norm_type)
-
         if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
 
-        clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)
-        if clip_coef < 1:
-            # multiply by clip_coef, aka, (max_norm/total_norm).
-            for p in self.params_with_grad:
-                assert p.grad is not None
-                p.grad.detach().mul_(clip_coef.to(p.grad.device))
+        clip_coef = (
+            torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device)
+            / (total_norm + 1e-6)
+        )
+        # Multiplying by the clamped coefficient is meaningless when it is
+        # equal to 1, but it avoids the host-device sync that would result from
+        # `if clip_coef < 1`
+        clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+        grads = [param.grad for param in self.parameters() if param.grad is not None]
+        for grad in grads:
+            grad.detach().mul_(clip_coef_clamped.to(grad.device))
+        return total_norm
 
     @staticmethod
     def _warn_optim_input(optim_input):
@@ -4017,10 +4025,10 @@ class FullyShardedDataParallel(nn.Module):
         and ``"param_groups"``. The flattened parameters in ``FSDP`` modules
         contained in ``model`` are mapped back to their unflattened parameters.
 
-        .. warning:: This needs to be called on all ranks since synchronization
-            primitives are used. However, if ``rank0_only=True``, then the
-            state dict is only populated on rank 0, and all other ranks return
-            an empty :class:`dict`.
+        .. warning:: This needs to be called on all ranks since it uses
+            collective communications. However, if ``rank0_only=True``, then
+            the state dict is only populated on rank 0, and all other ranks
+            return an empty :class:`dict`.
 
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
@@ -4622,30 +4630,35 @@ class FullyShardedDataParallel(nn.Module):
         return is_prep_stage
 
 
-def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
-    r"""Calculate gradient norm of an iterable of parameters.
-    Returns:
-        Total norm of the parameters (viewed as a single vector).
+def _get_grad_norm(
+    params: List[nn.Parameter],
+    norm_type: float,
+) -> torch.Tensor:
     """
-    parameters = [p for p in parameters if p.grad is not None]
-
-    if len(parameters) == 0:
+    Returns the gradient norm of parameters ``param`` s, where the gradients
+    are viewed as a single vector.
+    """
+    params_with_grad = [param for param in params if param.grad is not None]
+    if len(params_with_grad) == 0:
         return torch.tensor(0.0)
-    if p == math.inf:
-        local_norm = torch.tensor(max(par.grad.detach().abs().max() for par in parameters))
-    else:
-        # Compute the norm in full precision no matter what
-        local_norm = torch.linalg.vector_norm(
-            torch.stack(
-                [
-                    torch.linalg.vector_norm(par.grad.detach(), p, dtype=torch.float32)
-                    for par in parameters
-                ]
-            ),
-            p,
-        )
-    local_norm.to(dtype=parameters[0].dtype)
-    return local_norm
+    grads = [param.grad for param in params_with_grad]
+    grad_dtypes = set(grad.dtype for grad in grads)
+    if len(grad_dtypes) != 1:
+        raise ValueError(f"Requires uniform dtype across all gradients but got {grad_dtypes}")
+    # Compute the gradient norm in FP32, where we treat the gradients as a
+    # single vector
+    grad_norm = torch.linalg.vector_norm(
+        torch.stack(
+            [
+                torch.linalg.vector_norm(grad.detach(), norm_type, dtype=torch.float32)
+                for grad in grads
+            ],
+        ),
+        norm_type,
+        dtype=torch.float32,
+    )
+    grad_norm = grad_norm.to(grads[0].dtype)
+    return grad_norm
 
 
 def _get_param_to_unflat_param_names(
