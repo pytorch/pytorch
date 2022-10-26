@@ -199,6 +199,7 @@ class default_args:
     shape_inference_hdr: str = "torch/csrc/lazy/core/shape_inference.h"
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
+    shape_class: str = "torch::lazy::Shape"
     lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
     backend_name: str = "TorchScript"
 
@@ -254,6 +255,12 @@ def main() -> None:
         help="Path to header file defining custom Lazy Tensor class",
     )
     parser.add_argument(
+        "--shape_class",
+        type=str,
+        default=default_args.shape_class,
+        help="Name of backend specific customer Shape class",
+    )
+    parser.add_argument(
         "--backend_name",
         type=str,
         default=default_args.backend_name,
@@ -278,6 +285,7 @@ def main() -> None:
         options.node_base_hdr,
         options.tensor_class,
         options.tensor_class_hdr,
+        options.shape_class,
         options.shape_inference_hdr,
         lazy_ir_generator,
         options.backend_name,
@@ -295,6 +303,7 @@ def run_gen_lazy_tensor(
     tensor_class: str = default_args.tensor_class,
     tensor_class_hdr: str = default_args.tensor_class_hdr,
     shape_inference_hdr: str = default_args.shape_inference_hdr,
+    shape_class: str = default_args.shape_class,
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
     # build_in_tree is true for TS backend and affects include paths
     build_in_tree: bool = False,
@@ -318,6 +327,8 @@ def run_gen_lazy_tensor(
     lazy_tensor_ptr: str = "LazyTensorPtr",
     get_device_fn: str = "torch::lazy::GetBackendDevice",
 ) -> None:
+    print("WONJOO: at gen_lazy_tensor.py")
+
     lv_tokens = lazy_value_class.split("::")
     lv_class = lv_tokens[-1]
     lv_ns = "::".join(lv_tokens[:-1])
@@ -523,7 +534,7 @@ def run_gen_lazy_tensor(
     )
     # Generate IR node classes
     lazy_ir_obj = lazy_ir_generator(
-        backend_indices[backend_key], backend_name, node_base
+        backend_indices[backend_key], backend_name, node_base, shape_class
     )
 
     fm.write_with_template(
