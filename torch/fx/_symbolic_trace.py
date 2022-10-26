@@ -355,9 +355,9 @@ class Tracer(TracerBase):
         mod = self.module_call_stack[-1] if self.module_call_stack else ""
 
         return super().create_proxy(kind, target, args, kwargs, name,
-                             type_expr=type_expr,
-                             proxy_factory_fn=proxy_factory_fn,
-                             parent_module=mod)
+                                    type_expr=type_expr,
+                                    proxy_factory_fn=proxy_factory_fn,
+                                    parent_module=mod)
 
     @compatibility(is_backward_compatible=True)
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
@@ -450,7 +450,7 @@ class Tracer(TracerBase):
         self.module_call_stack.append(module_qualified_name)
         print(f"Calling fwd for mod {module_qualified_name} args {args}")
         if not self.is_leaf_module(m, module_qualified_name):
-            ret_val =  forward(*args, **kwargs)
+            ret_val = forward(*args, **kwargs)
         else:
             ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
         self.module_call_stack.pop()
@@ -831,10 +831,9 @@ def _create_wrapped_func(orig_fn):
         this function call, as this function is not being traced.
         """
         proxy = _find_proxy(args, kwargs)
-        mod = self.module_call_stack[-1] if self.module_call_stack else ""
         if proxy is not None:
             return_proxy = proxy.tracer.create_proxy(
-                "call_function", orig_fn, args, kwargs, parent_module=mod
+                "call_function", orig_fn, args, kwargs
             )
             return_proxy.node.meta["is_wrapped"] = True
             return return_proxy
@@ -855,10 +854,9 @@ def _create_wrapped_method(cls, name):
         call, as this function is not being traced.
         """
         proxy = _find_proxy(args, kwargs)
-        mod = self.module_call_stack[-1] if self.module_call_stack else ""
         if proxy is not None:
             return proxy.tracer.create_proxy(
-                    "call_method", name, args, kwargs, parent_module=mod)
+                "call_method", name, args, kwargs)
         return orig_fn(*args, **kwargs)
 
     return wrapped
