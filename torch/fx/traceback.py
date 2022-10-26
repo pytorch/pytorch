@@ -54,7 +54,7 @@ def format_stack() -> List[str]:
         return current_stack.copy()
     else:
         # fallback to traceback.format_stack()
-        return traceback.format_stack()
+        return traceback.format_list(traceback.extract_stack()[:-1])
 
 
 @compatibility(is_backward_compatible=False)
