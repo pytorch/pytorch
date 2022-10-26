@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -28,8 +28,10 @@ class SymFloat;
 // functions.
 //
 // SymInt will be extenteded to represent a union structure Union[int64_t,
-// SymIntNodeImpl*] which will be implemented as a single packed int64_t field
+// SymNodeImpl*] which will be implemented as a single packed int64_t field
 // named data_.
+//
+// Invariant: the referenced SymNodeImpl is guaranteed to be an int SymNode
 
 class C10_API SymInt {
  public:
@@ -44,6 +46,7 @@ class C10_API SymInt {
     TORCH_CHECK(!is_symbolic());
   };
   SymInt() : data_(0) {}
+  SymInt(SymNode n);
 
   // unchecked c-tor accepting raw `data_`
   // One appropriate use for this is when you are constructing a symint
@@ -55,7 +58,7 @@ class C10_API SymInt {
   // temporary and then use the move constructor/assignment
   SymInt(const SymInt& s) : data_(0) {
     if (s.is_symbolic()) {
-      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+      *this = SymInt(s.toSymNodeImpl());
     } else {
       data_ = s.data_;
     }
@@ -67,7 +70,7 @@ class C10_API SymInt {
   SymInt& operator=(const SymInt& s) {
     if (this != &s) {
       if (s.is_symbolic()) {
-        *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+        *this = SymInt(s.toSymNodeImpl());
       } else {
         data_ = s.data_;
       }
@@ -76,7 +79,7 @@ class C10_API SymInt {
   }
   SymInt& operator=(SymInt&& s) {
     if (this != &s) {
-      release_(); // release the current SymIntNode if any
+      release_(); // release the current SymNode if any
       data_ = s.data_;
       if (s.is_symbolic())
         s.data_ = 0;
@@ -86,31 +89,31 @@ class C10_API SymInt {
 
   SymInt clone() const {
     if (is_symbolic()) {
-      return toSymIntNodeImplUnowned()->clone()->toSymInt();
+      return SymInt(toSymNodeImplUnowned()->clone());
     }
     return *this;
   }
 
-  SymIntNodeImpl* toSymIntNodeImplUnowned() const {
+  SymNodeImpl* toSymNodeImplUnowned() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_symbolic());
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
-    return static_cast<SymIntNodeImpl*>(
+    return static_cast<SymNodeImpl*>(
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
   void release_() {
     if (is_symbolic()) {
-      SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
+      SymNode::reclaim(toSymNodeImplUnowned()); // steal
     }
   }
 
-  SymIntNodeImpl* release() && {
+  SymNodeImpl* release() && {
 #ifndef C10_MOBILE
     TORCH_INTERNAL_ASSERT(is_symbolic());
-    auto* r = toSymIntNodeImplUnowned();
+    auto* r = toSymNodeImplUnowned();
     data_ = 0; // transfer ownership
     return r;
 #else
@@ -118,8 +121,7 @@ class C10_API SymInt {
 #endif
   }
 
-  SymIntNode toSymIntNodeImpl() const;
-  static c10::SymInt toSymInt(SymIntNode sin);
+  SymNode toSymNodeImpl() const;
 
   ~SymInt() {
     release_();

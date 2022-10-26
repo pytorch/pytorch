@@ -62,6 +62,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/six.h>
+#include <torch/csrc/utils/python_symnode.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/core/Tensor.h>
@@ -69,7 +70,7 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/SymFloat.h>
-#include <c10/core/SymIntNodeImpl.h>
+#include <c10/core/SymNodeImpl.h>
 
 #include <array>
 #include <cstddef>
@@ -78,30 +79,6 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-
-inline bool is_symint_node(py::handle obj) {
-  auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
-  if (py::isinstance(obj, tp_symn)) {
-    TORCH_CHECK(
-        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
-    return true;
-  }
-  return false;
-}
-
-inline bool is_symfloat_node(py::handle obj) {
-  auto static tp_symn = py::type::of<c10::SymFloatNodeImpl>();
-  if (py::isinstance(obj, tp_symn)) {
-    TORCH_CHECK(
-        !jit::tracer::isTracing(), "JIT tracing of SymFloats isn't supported!");
-    return true;
-  }
-  return false;
-}
-
-} // namespace torch
-
 namespace pybind11 {
 namespace detail {
 template <>
@@ -109,8 +86,8 @@ struct type_caster<c10::SymInt> {
  public:
   PYBIND11_TYPE_CASTER(c10::SymInt, _("SymInt"));
   bool load(py::handle src, bool) {
-    if (torch::is_symint_node(src)) {
-      value = src.cast<c10::SymIntNodeImpl*>()->toSymInt();
+    if (torch::is_symint(src)) {
+      value = c10::SymInt(static_cast<c10::SymNode>(c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
       return true;
     }
 
@@ -126,8 +103,14 @@ struct type_caster<c10::SymInt> {
       c10::SymInt si,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl()).release()
-                            : py::cast(si.expect_int()).release();
+    if (si.is_symbolic()) {
+      // TODO: generalize this to work with C++ backed class
+      auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
+      TORCH_INTERNAL_ASSERT(py_node);
+      return torch::get_symint_class()(py_node->getPyObj()).release();
+    } else {
+      return py::cast(si.as_int_unchecked()).release();
+    }
   }
 };
 
@@ -136,8 +119,8 @@ struct type_caster<c10::SymFloat> {
  public:
   PYBIND11_TYPE_CASTER(c10::SymFloat, _("SymFloat"));
   bool load(py::handle src, bool) {
-    if (torch::is_symfloat_node(src)) {
-      value = src.cast<c10::SymFloatNodeImpl*>()->toSymFloat();
+    if (torch::is_symfloat(src)) {
+      value = c10::SymFloat(static_cast<c10::SymNode>(c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
       return true;
     }
 
@@ -153,8 +136,14 @@ struct type_caster<c10::SymFloat> {
       c10::SymFloat si,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return si.is_symbolic() ? py::cast(si.toSymFloatNodeImpl()).release()
-                            : py::cast(si.expect_float()).release();
+    if (si.is_symbolic()) {
+      // TODO: generalize this to work with C++ backed class
+      auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
+      TORCH_INTERNAL_ASSERT(py_node);
+      return torch::get_symfloat_class()(py_node->getPyObj()).release();
+    } else {
+      return py::cast(si.as_float_unchecked()).release();
+    }
   }
 };
 } // namespace detail
@@ -167,8 +156,8 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
   }
 #endif
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
-      torch::is_symint_node(py::handle(obj)) ||
-      torch::is_symfloat_node(py::handle(obj));
+      torch::is_symint(py::handle(obj)) ||
+      torch::is_symfloat(py::handle(obj));
 }
 
 namespace torch {
@@ -574,7 +563,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 
 inline PyObject* toPyObject(c10::SymInt symint) {
   if (symint.is_symbolic()) {
-    auto r = py::cast(symint.toSymIntNodeImpl()).release().ptr();
+    auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
     return r;
   } else {
@@ -609,8 +598,8 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         size1, c10::SymInt(THPUtils_unpackIndex(args[i])));
   }
 
-  if (size1 > 0 && torch::is_symint_node(py::handle(args[i]))) {
-    auto si = py::handle(args[i]).cast<c10::SymIntNodeImpl*>()->toSymInt();
+  if (size1 > 0 && torch::is_symint(py::handle(args[i]))) {
+    auto si = py::handle(args[i]).cast<c10::SymInt>();
     return std::vector<c10::SymInt>(size1, si);
   }
 
@@ -652,9 +641,9 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         res.push_back(var.item<int64_t>());
       } else {
         try {
-          if (is_symint_node(py::handle(obj))) {
+          if (is_symint(py::handle(obj))) {
             res.push_back(
-                py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
+                py::handle(obj).cast<c10::SymInt>());
           } else {
             res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
           }

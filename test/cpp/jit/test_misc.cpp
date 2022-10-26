@@ -1448,12 +1448,12 @@ TEST(TestSymInt, AddSymbolicInt) {
 
 #ifndef C10_MOBILE
 TEST(TestSymInt, TestIntrusive) {
-  auto a = c10::make_intrusive<c10::SymIntNodeImpl>();
-  auto b = c10::make_intrusive<c10::SymIntNodeImpl>();
+  auto a = c10::make_intrusive<c10::SymNodeImpl>();
+  auto b = c10::make_intrusive<c10::SymNodeImpl>();
   ASSERT_EQ(a.use_count(), 1);
   ASSERT_EQ(b.use_count(), 1);
-  auto as = a->toSymInt();
-  auto bs = b->toSymInt();
+  auto as = c10::SymInt(a);
+  auto bs = c10::SymInt(b);
   ASSERT_EQ(a.use_count(), 2);
   ASSERT_EQ(b.use_count(), 2);
   as = bs;
@@ -1461,21 +1461,21 @@ TEST(TestSymInt, TestIntrusive) {
   ASSERT_EQ(b.use_count(), 3);
 }
 
-class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
+class TestSymNodeImpl : public c10::SymNodeImpl {
  public:
-  TestSymIntNodeImpl(int64_t i) : i_(i) {}
+  explicit TestSymNodeImpl(int64_t i) : i_(i) {}
 
   bool bool_() override {
     return static_cast<bool>(i_);
   };
 
 #define OPDEF3(NAME, OP, RET)                                            \
-  RET NAME(const c10::SymIntNode& other) override {                      \
-    return make_intrusive<TestSymIntNodeImpl>(                           \
-        this->i_ OP dynamic_cast<TestSymIntNodeImpl*>(other.get())->i_); \
+  RET NAME(const c10::SymNode& other) override {                      \
+    return make_intrusive<TestSymNodeImpl>(                           \
+        this->i_ OP dynamic_cast<TestSymNodeImpl*>(other.get())->i_); \
   }
 
-#define OPDEF2(NAME, OP) OPDEF3(NAME, OP, c10::SymIntNode)
+#define OPDEF2(NAME, OP) OPDEF3(NAME, OP, c10::SymNode)
   OPDEF2(add, +)
   OPDEF2(sub, -)
   OPDEF2(mul, *)
@@ -1494,17 +1494,17 @@ class TestSymIntNodeImpl : public c10::SymIntNodeImpl {
   int64_t i_;
 };
 
-TEST(TestSymInt, TestSymIntToSymIntNodeDispatch) {
+TEST(TestSymInt, TestSymIntToSymNodeDispatch) {
   auto get = [](c10::SymInt si) {
-    auto node = si.toSymIntNodeImpl();
-    return dynamic_cast<TestSymIntNodeImpl*>(node.get())->i_;
+    auto node = si.toSymNodeImpl();
+    return dynamic_cast<TestSymNodeImpl*>(node.get())->i_;
   };
 
   std::vector<int64_t> inputs{0, 1, -1, 4, -4, 777, -777};
   for (auto i : inputs) {
     for (auto j : inputs) {
-      auto a = c10::make_intrusive<TestSymIntNodeImpl>(i)->toSymInt();
-      auto b = c10::make_intrusive<TestSymIntNodeImpl>(j)->toSymInt();
+      auto a = c10::SymInt(static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(i)));
+      auto b = c10::SymInt(static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(j)));
       ASSERT_EQ(get(a + b), i + j);
       ASSERT_EQ(get(a - b), i - j);
       ASSERT_EQ(get(a * b), i * j);
