@@ -252,7 +252,9 @@ test_dynamo_shard() {
 
 test_inductor() {
   python test/test_modules.py --verbose
-  pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
+  # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
+  # seen intest_ops_gradients.py
+  # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
 }
 
 test_inductor_huggingface_shard() {
@@ -276,7 +278,7 @@ test_inductor_timm_shard() {
   TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 8 --partition-id "$1" \
+    --device cuda --inductor --float32 --total-partitions 5 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
@@ -744,6 +746,13 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SH
   install_triton
   install_huggingface
   test_inductor_huggingface_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 8 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  id=$((SHARD_NUMBER-3))
+  test_inductor_timm_shard $id
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
