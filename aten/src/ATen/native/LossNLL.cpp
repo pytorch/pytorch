@@ -1,12 +1,31 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/SmallBuffer.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cross_entropy_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/log_softmax.h>
+#include <ATen/ops/nll_loss.h>
+#include <ATen/ops/nll_loss2d.h>
+#include <ATen/ops/nll_loss_backward_native.h>
+#include <ATen/ops/nll_loss_forward.h>
+#include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/nll_loss_native.h>
+#include <ATen/ops/nll_loss_nd.h>
+#include <ATen/ops/nll_loss_nd_native.h>
+#endif
 
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>

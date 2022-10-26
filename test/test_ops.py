@@ -247,7 +247,11 @@ class TestCommon(TestCase):
         device,
         dtype,
         op,
-        make_test_inputs,  # (ctx, no_ctx)
+        # Default test inputs: directly call each ref (in the context) and test
+        # it against the corresponding op (outside of the context). This test
+        # calls *different* entrypoints. Users are not expected to call the ref
+        # directly, this is only done to check for compatibility issues.
+        make_test_inputs=lambda op: ((op, op.torch_opinfo),),  # (ctx=ref, no_ctx=op)
         skip_zero_numel=False,
         skip_zero_dim=False,
         skip_bfloat=False,
@@ -290,17 +294,27 @@ class TestCommon(TestCase):
                 self.skipTest("Skipped! No matching test inputs found")
 
             for test_input_ctx, test_input_no_ctx in test_inputs:
-                with ctx() as c:
-                    ref_result = test_input_ctx(sample.input, *sample.args, **sample.kwargs)
+                mock_msg = (
+                    "API compatibility check failed: cannot go through the torch to ref dispatch. Make sure that "
+                    "signatures of the ref and torch op have the same types and argument names. The op must also "
+                    "use __torch_function__ (see if skipped in torch.overrides.get_ignored_functions or elsewhere)."
+                )
+                try:
+                    with ctx() as c:
+                        ref_result = test_input_ctx(sample.input, *sample.args, **sample.kwargs)
+                except Exception as e:
                     if hasattr(c, "mock") and c.mock:
-                        # This tests API compatibility by checking whether we
-                        # can call a ref with sample inputs by going through the
-                        # torch to ref dispatch. The mocked ref returns a
-                        # sentinel value, so move to the next sample instead of
-                        # doing any consistency checks against the no_ctx
-                        # result.
-                        self.assertEqual(ref_result, MOCK_REF_RESULT)
-                        continue
+                        # the ctx call can fail before reaching the mock assert
+                        # below, provide a user-friendly message in that case
+                        raise AssertionError(mock_msg) from e
+                    else:
+                        # re-raise exceptions otherwise
+                        raise
+                if hasattr(c, "mock") and c.mock:
+                    # the ctx call succeeded, but it's possible that the
+                    # function was not mocked properly, check the result
+                    self.assertEqual(ref_result, MOCK_REF_RESULT, msg=mock_msg)
+                    continue  # mock result, move to the next sample
                 torch_result = test_input_no_ctx(sample.input, *sample.args, **sample.kwargs)
 
                 for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
@@ -388,14 +402,6 @@ class TestCommon(TestCase):
             msg = "Test passed because the reference was more accurate than the torch operator."
             warnings.warn(msg)
 
-    # Directly call each ref (in the context) and test it against the
-    # corresponding op (outside of the context). This test calls *different*
-    # entrypoints. Users are not expected to call the ref directly, this is only
-    # done to check for compatibility issues.
-    def _make_test_inputs_ref_op(self, op):  # default
-        # (ctx, no_ctx)
-        return ((op, op.torch_opinfo),)  # ref, op
-
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
     # namespace are remapped to the refs namespace (torch.foo becomes refs.foo).
@@ -407,8 +413,7 @@ class TestCommon(TestCase):
         # example, a ref with torch.foo in it will call refs.foo instead.
         # Direct calls to refs and prims are not affected. This test *performs*
         # numerical checking.
-        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
-                              make_test_inputs=self._make_test_inputs_ref_op)
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
@@ -440,7 +445,6 @@ class TestCommon(TestCase):
                               make_test_inputs=_make_test_inputs_ref_op_aliases)
 
     # Only checks API compatibility, so test on one device with any dtype.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @ops(python_ref_db, dtypes=OpDTypes.any_one)
     def test_python_ref_mock_mode_op_op(self, device, dtype, op):
@@ -457,7 +461,6 @@ class TestCommon(TestCase):
                               make_test_inputs=_make_test_inputs_op_op)
 
     # Only checks API compatibility, so test on one device with any dtype.
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @ops(python_ref_db, dtypes=OpDTypes.any_one)
     def test_python_ref_mock_mode_op_aliases(self, device, dtype, op):
@@ -483,8 +486,7 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        self._ref_test_helper(contextlib.nullcontext, device, dtype, op,
-                              make_test_inputs=self._make_test_inputs_ref_op)
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
@@ -530,7 +532,6 @@ class TestCommon(TestCase):
             device,
             dtype,
             op,
-            make_test_inputs=self._make_test_inputs_ref_op,
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
             skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
@@ -1874,14 +1875,17 @@ class TestRefsOpsInfo(TestCase):
 
     # like 'test_refs_are_in_python_ref_db' but check in the other direction,
     # this includes aliases since those are not allowed in 'ref_db_names'
-    @parametrize("op", itertools.chain(ref_db_names, ref_alias_names))
-    def test_python_refs_are_in_ops_names(self, op):
-        # TODO: skip nvfuser refs since those don't have __all__ and it's not
-        # clear at the moment what would be the best way to check those
-        # https://github.com/pytorch/pytorch/issues/85081
-        if op.startswith("ops.nvprims"):
-            raise unittest.SkipTest(f"Skipping nvfuser ref: {op}")
-        self.assertIn(op, self.ref_ops_names)
+    def test_python_refs_are_in_ops_names(self):
+        missing_refs = []
+        for ref in itertools.chain(self.ref_db_names, self.ref_alias_names):
+            # TODO: skip nvfuser refs since those don't have __all__ and it's not
+            # clear at the moment what would be the best way to check those
+            # https://github.com/pytorch/pytorch/issues/85081
+            if ref.startswith("ops.nvprims"):
+                continue
+            if ref not in self.ref_ops_names:
+                missing_refs.append(ref)
+        self.assertTrue(not missing_refs, msg=f"Failed to find these refs in __all__: {missing_refs}")
 
     def test_ref_db_has_no_aliases(self):
         def _strip_ref_prefix(ref):
@@ -1897,7 +1901,7 @@ class TestRefsOpsInfo(TestCase):
             ref_no_prefix = _strip_ref_prefix(ref)
             if ref in self.ref_alias_names or ref_no_prefix in self.op_alias_names:
                 extra_aliases.append(ref)
-        self.assertTrue(extra_aliases == [],
+        self.assertTrue(not extra_aliases,
                         f"Found the following alias entries in python_ref_db, "
                         f"which is not allowed; aliases are tested "
                         f"automatically and must be defined via the 'aliases' "
@@ -1927,15 +1931,15 @@ class TestRefsOpsInfo(TestCase):
                 if op_impl not in torch._decomp.decomposition_table.values():
                     missing_decomps.append(ref)
 
-        self.assertTrue(extra_decomp_skips == [],
+        self.assertTrue(not extra_decomp_skips,
                         f"Unexpectedly found these aliases in not_in_decomp_table, "
                         f"which is not allowed, aliases must never register "
                         f"decomps: {extra_decomp_skips}")
-        self.assertTrue(extra_decomps == [],
+        self.assertTrue(not extra_decomps,
                         f"Unexpectedly found these entries in "
                         f"torch._decomp.decomposition_table.values(): "
                         f"{extra_decomps}")
-        self.assertTrue(missing_decomps == [],
+        self.assertTrue(not missing_decomps,
                         f"Missing these entries in "
                         f"torch._decomp.decomposition_table.values(): "
                         f"{missing_decomps}")
@@ -2051,8 +2055,6 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "svd_lowrank",
     "sgn",
     "cholesky",
-    "linalg.eigh",
-    "symeig",
 }
 
 fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {

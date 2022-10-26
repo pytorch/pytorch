@@ -431,6 +431,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
                 warn("view has ignored kwargs!")
             return torch.ops.nvprims.view(a, shape)
 
+        if orig_func == torch.ops.aten._reshape_alias.default:
+            a, shape, stride = args
+            if len(kwargs) > 0:
+                warn("view has ignored kwargs!")
+            return torch.ops.nvprims.view(a, shape)
+
         if self._is_native_batch_norm(orig_func):
             return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
 
