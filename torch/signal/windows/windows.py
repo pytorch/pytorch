@@ -357,17 +357,17 @@ def kaiser(
 
     _window_function_checks('kaiser', M, dtype, layout)
 
+    if beta < 0:
+        raise ValueError(f'beta must be non-negative, got: {beta} instead.')
+
     if M == 0:
         return torch.empty((0,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
     if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
-    if beta <= 0:
-        raise ValueError(f'beta must be positive, got: {beta} instead.')
-
-    start = -1
-    constant = 2.0 / (M if not sym else M - 1)
+    start = -beta
+    constant = 2.0 * beta / (M if not sym else M - 1)
 
     k = torch.linspace(start=start,
                        end=start + (M - 1) * constant,
@@ -377,4 +377,4 @@ def kaiser(
                        device=device,
                        requires_grad=requires_grad)
 
-    return torch.i0(beta * torch.sqrt(1 - torch.pow(k, 2))) / torch.i0(torch.tensor(beta))
+    return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(torch.tensor(beta))
