@@ -15,7 +15,7 @@ class C10_API SymFloat {
  public:
   /*implicit*/ SymFloat(double d) : data_(d){};
   SymFloat(SymNode ptr)
-      : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)){
+      : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)) {
     TORCH_CHECK(ptr_->is_float());
   };
   SymFloat() : data_(0.0) {}

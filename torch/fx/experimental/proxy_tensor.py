@@ -62,21 +62,21 @@ def is_sym_node(node):
     return "val" in node.meta and isinstance(node.meta['val'], py_sym_types)
 
 def set_proxy_slot(obj, tracer, proxy):
-    assert isinstance(obj, (torch.Tensor, SymNode))
-    d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
+    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
+    d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())  # type: ignore[call-overload]
     assert isinstance(d, weakref.WeakKeyDictionary)
     d[tracer] = proxy
 
 def has_proxy_slot(obj, tracer):
-    assert isinstance(obj, (torch.Tensor, SymNode))
+    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
     return get_proxy_slot(obj, tracer, False, lambda _: True)
 
 # the default argument is what to return if the slot is not set.
 # the transform argument is handy if you need to extract a subfield from
 # the successfully looked up result (but NOT the default.)
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
-    assert isinstance(obj, (torch.Tensor, SymNode))
-    d = obj.__dict__.get(proxy_slot)
+    assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
+    d = obj.__dict__.get(proxy_slot)  # type: ignore[call-overload]
     if not d:
         if default is no_default:
             raise KeyError(f"{obj} is not tracked with proxy for {tracer}")
@@ -476,10 +476,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
         out = proxy_call(self, func, args, kwargs)
         return out
-
-
-SymInt = torch.SymInt
-SymFloat = torch.SymFloat
 
 
 class ProxySymDispatchMode(SymDispatchMode):

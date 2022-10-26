@@ -20,12 +20,6 @@ TEST(SymIntTest, ConcreteInts) {
   check(-4611686018427387904LL);
 }
 
-TEST(SymIntTest, AddNode) {
-  auto n = c10::make_intrusive<SymNodeImpl>();
-  auto i = SymInt(n);
-  EXPECT_TRUE(i.is_symbolic());
-}
-
 TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }

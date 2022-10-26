@@ -1146,12 +1146,13 @@ void initJITBindings(PyObject* module) {
   // NB: This isn't actually used for anything at the moment; this
   // would be how you get from Python to a C++ SymNode implementation
   // but we don't actually have any of these.
-  #define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
-  #define SYMNODE_UNARY2(n2, n) .def(#n2, [](c10::SymNode a) { return a->n(); })
-  #define SYMNODE_BINARY(n) .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
+#define SYMNODE_UNARY(n) .def(#n, [](c10::SymNode a) { return a->n(); })
+#define SYMNODE_UNARY2(n2, n) .def(#n2, [](c10::SymNode a) { return a->n(); })
+#define SYMNODE_BINARY(n) \
+  .def(#n, [](c10::SymNode a, c10::SymNode b) { return a->n(b); })
   auto symnode_class =
       py::class_<c10::SymNodeImpl, c10::SymNode>(m, "_SymNode")
-          // These DO NOT install magic methods; the SymInt/SymFloat wrapper in 
+          // These DO NOT install magic methods; the SymInt/SymFloat wrapper in
           // Python is responsible for this
           SYMNODE_UNARY(clone)
           // Named these for consistency with inner python class, but maybe
@@ -1966,3 +1967,4 @@ void initJITBindings(PyObject* module) {
 }
 } // namespace jit
 } // namespace torch
+ 

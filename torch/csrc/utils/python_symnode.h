@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/core/SymNodeImpl.h>
 #include <c10/core/SafePyObject.h>
+#include <c10/core/SymNodeImpl.h>
 
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/pybind.h>
@@ -79,9 +79,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("str")().cast<std::string>();
   }
 
-  c10::SymNode dispatch_common_(
-      const char* fname,
-      const c10::SymNode& other) {
+  c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
     auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
@@ -180,4 +178,5 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };
 
-}} // namespace torch::impl
+} // namespace impl
+} // namespace torch

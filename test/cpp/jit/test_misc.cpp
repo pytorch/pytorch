@@ -1469,7 +1469,7 @@ class TestSymNodeImpl : public c10::SymNodeImpl {
     return static_cast<bool>(i_);
   };
 
-#define OPDEF3(NAME, OP, RET)                                            \
+#define OPDEF3(NAME, OP, RET)                                         \
   RET NAME(const c10::SymNode& other) override {                      \
     return make_intrusive<TestSymNodeImpl>(                           \
         this->i_ OP dynamic_cast<TestSymNodeImpl*>(other.get())->i_); \
@@ -1503,8 +1503,10 @@ TEST(TestSymInt, TestSymIntToSymNodeDispatch) {
   std::vector<int64_t> inputs{0, 1, -1, 4, -4, 777, -777};
   for (auto i : inputs) {
     for (auto j : inputs) {
-      auto a = c10::SymInt(static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(i)));
-      auto b = c10::SymInt(static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(j)));
+      auto a = c10::SymInt(
+          static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(i)));
+      auto b = c10::SymInt(
+          static_cast<SymNode>(c10::make_intrusive<TestSymNodeImpl>(j)));
       ASSERT_EQ(get(a + b), i + j);
       ASSERT_EQ(get(a - b), i - j);
       ASSERT_EQ(get(a * b), i * j);

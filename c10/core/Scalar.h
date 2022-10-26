@@ -101,9 +101,8 @@ class C10_API Scalar {
 
   SymFloat toSymFloat() const {
     if (Tag::HAS_sd == tag) {
-      return c10::SymFloat(
-          intrusive_ptr<SymNodeImpl>::reclaim_copy(
-              static_cast<SymNodeImpl*>(v.p)));
+      return c10::SymFloat(intrusive_ptr<SymNodeImpl>::reclaim_copy(
+          static_cast<SymNodeImpl*>(v.p)));
     } else {
       return toDouble();
     }
