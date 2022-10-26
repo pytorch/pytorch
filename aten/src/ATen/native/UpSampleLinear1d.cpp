@@ -1,9 +1,21 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorMeta.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/UpSample.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_linear1d.h>
+#include <ATen/ops/upsample_linear1d_backward.h>
+#include <ATen/ops/upsample_linear1d_backward_native.h>
+#include <ATen/ops/upsample_linear1d_native.h>
+#endif
 
 namespace at {
 namespace meta {
