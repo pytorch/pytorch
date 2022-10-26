@@ -160,10 +160,32 @@ class TestPartitionFunctions:
         out = torch.stack([add_1, add_2, add_3])
         return out
 
+    @staticmethod
+    def forward12(a, b, c):
+        b0 = a + 1.0
+        c0 = a + 1.5
+        x0 = b0.relu()
+        x1 = c0.relu()
+        b1 = b0 + x1
+        c1 = c0 + 1.2
+        # c2 has dependency on x0 & b0, when we merge {c0, c1, c2}
+        # this dependency should be updated to the fusion group and reflected
+        # on the decision to not fuse b0 & b1, which forms a cyclic dependency in
+        # the new graph
+        c2 = x0 + c0
+        return b1, c2
+
+    @staticmethod
+    def forward13(a, b, c):
+        a0, a1, a2, a3 = a.split(1, 0)
+        b1 = a0 + b
+        c1 = a1 + c
+        return b1 + c1
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
+        return node.op == "call_function" and node.target in {operator.add, operator.getitem}
 
 
 @instantiate_parametrized_tests
@@ -172,6 +194,10 @@ class TestFXGraphPasses(JitTestCase):
     @parametrize("fn, expected_partition", [
         (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
         (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]]),
+
+        # 1 horizontal fusion with common producer
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
 
         # 2 branches cases
         (TestPartitionFunctions.forward5, [["add_1", "add"]]),
@@ -183,6 +209,12 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']]),
         (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']]),
         (TestPartitionFunctions.forward11, [['add_1'], ['add']]),
+
+        # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
+        (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]]),
+
+        # 5 getitem special case
+        (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]]),
     ])
     def test_partitioner(self, fn, expected_partition):
         traced = symbolic_trace(fn)
@@ -203,24 +235,6 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
-
-
-    @parametrize("fn, expected_partition", [
-        # horizontal fusion without a common downstream node, not supported yet
-        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
-        # horizontal fusion with a common downstream node, not supported yet
-        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
-    ])
-    def test_partitioner_xfail(self, fn, expected_partition):
-        traced = symbolic_trace(fn)
-
-        supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
-        partitions = partitioner.propose_partitions()
-
-        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        with self.assertRaises(Exception):
-            assert len(partitions_name) == len(expected_partition)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],

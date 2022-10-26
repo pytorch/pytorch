@@ -13,17 +13,17 @@ from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
 )
-from torch.distributed.fsdp import CPUOffload, FullStateDictConfig
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
+    CPUOffload,
+    FullStateDictConfig,
     LocalStateDictConfig,
     MixedPrecision,
+    ShardedStateDictConfig,
     StateDictType,
 )
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel,
-)
+from torch.distributed.fsdp.fully_sharded_data_parallel import FLAT_PARAM
 from torch.distributed.fsdp.wrap import (
     enable_wrap,
     transformer_auto_wrap_policy,
@@ -122,10 +122,14 @@ class TestFSDPStateDict(FSDPTest):
         return olist[0]
 
     def _compare_models(self, model, model_new, assert_fn, check_fp16=False):
-        with FullyShardedDataParallel.summon_full_params(model):
-            with FullyShardedDataParallel.summon_full_params(model_new):
+        assert assert_fn in (self.assertEqual, self.assertNotEqual)
+        with FSDP.summon_full_params(model):
+            with FSDP.summon_full_params(model_new):
                 params = list(model.parameters())
                 params_new = list(model_new.parameters())
+                # Regardless of `assert_fn`, the number of parameters should be
+                # the same
+                self.assertEqual(len(params), len(params_new))
                 assert_fn(params, params_new)
                 if check_fp16:
                     for tensor in model_new.parameters():
@@ -186,8 +190,16 @@ class TestFSDPStateDict(FSDPTest):
                 rank0_only=state_dict_rank0_and_offload,
                 offload_to_cpu=state_dict_rank0_and_offload,
             )
+        elif state_dict_type == "local_state_dict":
+            config = LocalStateDictConfig(
+                offload_to_cpu=state_dict_rank0_and_offload,
+            )
+        elif state_dict_type == "sharded_state_dict":
+            config = ShardedStateDictConfig(
+                offload_to_cpu=state_dict_rank0_and_offload,
+            )
         else:
-            config = None
+            raise ValueError("Unsupported state_dict_type")
         return FSDP.state_dict_type(model, _state_dict_type, config)
 
     def _validate_state_dict_contents(
@@ -232,6 +244,32 @@ class TestFSDPStateDict(FSDPTest):
                 # Would fail if checkpoint_wrapper did not correctly implement state_dict pre/post hooks
                 model_new.load_state_dict(state_dict, strict=True)
                 self._compare_models(model, model_new, self.assertEqual)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
+    def test_state_dict_with_shared_parameters(self, state_dict_type):
+        auto_wrap_policy = partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={
+                TransformerEncoderLayer, TransformerDecoderLayer
+            },
+        )
+        model_creator = partial(
+            TransformerWithSharedParams.init,
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            {"auto_wrap_policy": auto_wrap_policy}
+        )
+
+        fsdp_model = model_creator()
+        with self._get_state_dict_mgr(fsdp_model, state_dict_type, False):
+            state_dict = fsdp_model.state_dict()
+
+        new_model = model_creator()
+        _zero_model(new_model, zero_buffers=True)
+        with self._get_state_dict_mgr(new_model, state_dict_type, False):
+            new_model.load_state_dict(state_dict)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_orig_params", [False, True])
@@ -291,8 +329,8 @@ class TestFSDPStateDict(FSDPTest):
                 assert_fn=self.assertEqual,
             )
         # Check FSDP models correctly loaded the checkpoint
-        with FullyShardedDataParallel.summon_full_params(fsdp_model):
-            with FullyShardedDataParallel.summon_full_params(new_fsdp_model):
+        with FSDP.summon_full_params(fsdp_model):
+            with FSDP.summon_full_params(new_fsdp_model):
                 params = list(fsdp_model.parameters())
                 params_new = list(new_fsdp_model.parameters())
                 self.assertEqual(params, params_new)
@@ -534,7 +572,7 @@ class TestFSDPStateDict(FSDPTest):
     def test_fsdp_state_dict_keys(self, state_dict_type):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
-            self.assertEqual(set(["flat_param", "inner.flat_param"]), state_dict.keys())
+            self.assertEqual(set([FLAT_PARAM, f"inner.{FLAT_PARAM}"]), state_dict.keys())
         elif state_dict_type in ("state_dict", "sharded_state_dict"):
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
@@ -570,7 +608,7 @@ class TestFSDPStateDict(FSDPTest):
             optim.step()
             optim.zero_grad()
 
-        with FullyShardedDataParallel.summon_full_params(model):
+        with FSDP.summon_full_params(model):
             fsdp_params = deepcopy(list(model.parameters()))
 
         # get FSDP state_dict. Note that by default we return full_state_dict.
