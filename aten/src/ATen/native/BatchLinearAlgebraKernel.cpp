@@ -451,15 +451,6 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
   return result;
 }
 
-// we use `enum class LapackLstsqDriverType` as keys in an unordered_map.
-// Clang5 and Gcc5 do not support std::hash for enum classes, hence
-// we provide our own hash function.
-struct LapackLstsqDriverTypeHash {
-  std::size_t operator()(const LapackLstsqDriverType& driver_type) const {
-    return static_cast<std::size_t>(driver_type);
-  }
-};
-
 /*
   Solves a least squares problem. That is minimizing ||B - A X||.
 
@@ -490,7 +481,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 
   auto lapack_func = lapackLstsq<driver_t::Gelsd, scalar_t, value_t>;
   static auto driver_type_to_func
-    = std::unordered_map<driver_t, decltype(lapack_func), LapackLstsqDriverTypeHash>({
+    = std::unordered_map<driver_t, decltype(lapack_func)>({
     {driver_t::Gels, lapackLstsq<driver_t::Gels, scalar_t, value_t>},
     {driver_t::Gelsy, lapackLstsq<driver_t::Gelsy, scalar_t, value_t>},
     {driver_t::Gelsd, lapackLstsq<driver_t::Gelsd, scalar_t, value_t>},
