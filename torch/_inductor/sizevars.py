@@ -479,14 +479,16 @@ class SizeVarAllocator(object):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
+                    added.add(shape)
                     code.writeline(f"{shape} = {strideof(name)}[{dim}]")
                 elif isinstance(shape, sympy.Symbol):
                     assert shape in added, f"{shape} is needed but not added"
 
         for name, value in graph_inputs.items():
-            offset = str(value.data.get_layout().offset)
+            offset = value.data.get_layout().offset
             if offset in needed:
                 needed.remove(offset)
+                added.add(shape)
                 code.writeline(f"{offset} = {storageoffsetof(name)}")
             elif isinstance(shape, sympy.Symbol):
                 assert shape in added, f"{shape} is needed but not added"
