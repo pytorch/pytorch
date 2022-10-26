@@ -219,6 +219,7 @@ jobs:
         ]}
 
   linux-bionic-py3_7-clang8-xla-test:
+    if: false
     name: linux-bionic-py3_7-clang8-xla
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-py3_7-clang8-xla-build
