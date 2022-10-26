@@ -821,13 +821,6 @@ trace_ptr_t addKinetoEvents(
   return trace;
 }
 
-template <typename T>
-struct PairHash {
-  size_t operator()(const std::pair<T, T>& i) {
-    return c10::get_hash(i.first, i.second);
-  }
-};
-
 void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // This task is equivilent to https://leetcode.com/problems/number-of-islands/
   // We first cluster events with a greedy index assignment, and then merge
@@ -934,7 +927,7 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // Step 2) Handle the case that the storage of a TensorImpl changed.
   // --------------------------------------------------------------------------
   using storage_id_pair_t = std::pair<storage_id_t, storage_id_t>;
-  ska::flat_hash_set<storage_id_pair_t, PairHash<storage_id_t>> same_group_set;
+  ska::flat_hash_set<storage_id_pair_t, HashCombine> same_group_set;
   {
     ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
     for (const auto& t : tensors) {
