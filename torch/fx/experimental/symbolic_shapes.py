@@ -580,17 +580,21 @@ class ShapeEnv(object):
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
-        if expr.has(sympy.Mod):
-            mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+        zero_expr = lhs - rhs
+        zero_expr = self.simplify(zero_expr)
+        if zero_expr.has(sympy.Mod):
+            mod_expr = tuple(zero_expr.atoms(sympy.Mod))[0]
             try:
-                solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                solutions = sympy.solve(zero_expr, mod_expr, dict=True)
                 if len(solutions) == 1 and solutions[0][mod_expr] == 0:
                     self.divisible.add(mod_expr)
             except NotImplementedError:
                 return
+        elif zero_expr.has(FloorDiv):  # Can't simplify
+            return
         else:
             try:
-                solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+                solutions = sympy.solve(zero_expr, free[0], dict=True)
                 if len(solutions) != 1:
                     return
                 solution = solutions[0][free[0]]
