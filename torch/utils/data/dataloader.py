@@ -106,8 +106,10 @@ def _get_distributed_settings():
 def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
+    assert info is not None
     total_workers = info.num_workers
     datapipe = info.dataset
+    assert isinstance(datapipe, (IterDataPipe, MapDataPipe))
     # To distribute elements across distributed process evenly, we should shard data on distributed
     # processes first then shard on worker processes
     total_workers *= world_size
@@ -1040,10 +1042,14 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
+            if self._pin_memory_device == "xpu":
+                current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
+            else:
+                current_device = torch.cuda.current_device()  # choose cuda for default
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self._worker_result_queue, self._data_queue,
-                      torch.cuda.current_device(),
+                      current_device,
                       self._pin_memory_thread_done_event, self._pin_memory_device))
             pin_memory_thread.daemon = True
             pin_memory_thread.start()

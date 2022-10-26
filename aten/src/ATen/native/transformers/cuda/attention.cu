@@ -9,6 +9,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
@@ -16,16 +17,15 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 
-#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/native/transformers/cuda/sdp_utils.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #endif
-
-#include <ATen/native/transformers/cuda/sdp_utils.h>
 
 namespace at {
 
@@ -368,8 +368,8 @@ __global__ void transform_bias_rescale_qkv_add_padding_kernel(
 }
 
 Tensor collapse_dims_1_and_2(const Tensor& sizes) {
-  auto sizes_dim1 = at::native::narrow(sizes, 1, 0, 1);
-  auto sizes_dim2 = at::native::narrow(sizes, 1, 1, 1);
+  auto sizes_dim1 = at::native::narrow_symint(sizes, 1, 0, 1);
+  auto sizes_dim2 = at::native::narrow_symint(sizes, 1, 1, 1);
 
   return (sizes_dim1 * sizes_dim2).contiguous();
 }
@@ -451,7 +451,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           auto sizes = collapse_dims_1_and_2(nt_qkv->get_nested_size_tensor());
           auto offsets =
               NestedTensor_batch_offsets_from_size_tensor(sizes, sizes.numel());
-          at::native::narrow(offsets, 0, sizes.numel() + 1, sizes.numel())
+          at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
               .copy_(sizes.reshape({-1}));
           auto metadata = offsets.to(at::Device(kCUDA), at::kInt, true, true);
           const auto offsets_ptr = metadata.data_ptr<int>();
@@ -586,7 +586,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
     }
 }
 
-std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
+Tensor flash_scaled_dot_product_attention(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -595,7 +595,6 @@ std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
     const int64_t max_seqlen_batch_q,
     const int64_t max_seqlen_batch_k,
     double dropout_p,
-    bool need_attn_weights,
     bool is_causal) {
 #if defined(USE_FLASH_ATTENTION)
   auto softmax_scale = std::pow(query.size(-1), -0.5);
@@ -611,12 +610,12 @@ std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
       softmax_scale,
       false,
       is_causal,
-      need_attn_weights,
+      false,
       c10::nullopt);
-  return need_attn_weights? std::make_tuple(output[0], output[2]): std::make_tuple(output[0], Tensor{});
+  return output[0];
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor{}, Tensor{});
+  return Tensor();
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
