@@ -13,7 +13,6 @@ from .qconfig_mapping import QConfigMapping
 
 
 __all__ = [
-    "update_qconfig_for_qat",
 ]
 
 
@@ -88,7 +87,7 @@ def _get_flattened_qconfig_dict(qconfig_mapping: QConfigMapping) -> Dict[Union[C
     return flattened
 
 
-def update_qconfig_for_qat(
+def _update_qconfig_for_qat(
         qconfig_mapping: QConfigMapping,
         additional_qat_module_mapping: Dict[Callable, Callable]):
     """
