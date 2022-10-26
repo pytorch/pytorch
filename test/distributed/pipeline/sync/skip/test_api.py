@@ -11,7 +11,7 @@ import copy
 from torch import nn
 
 from torch.distributed.pipeline.sync.skip import Namespace, skippable, stash
-
+from torch.testing._internal.common_utils import run_tests
 
 def test_namespace_difference():
     ns1 = Namespace()
@@ -45,3 +45,7 @@ def test_skippable_repr():
 ))
 """.strip()
     )
+
+
+if __name__ == "__main__":
+    run_tests()

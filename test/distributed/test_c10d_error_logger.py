@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from torch.distributed.c10d_error_logger import _get_or_create_logger
+from torch.testing._internal.common_utils import run_tests
 
 class C10dErrorLoggerTest(unittest.TestCase):
 
@@ -15,3 +16,7 @@ class C10dErrorLoggerTest(unittest.TestCase):
         self.assertIsNotNone(logger)
         self.assertEqual(1, len(logger.handlers))
         self.assertIsInstance(logger.handlers[0], logging.NullHandler)
+
+
+if __name__ == "__main__":
+    run_tests()
