@@ -819,6 +819,27 @@ class TestJitTraceAutocast(JitTestCase):
                 continue
             test_nhwc_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    def test_cat_promote(self):
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+            def forward(self, a, b):
+                return torch.cat([a, b], 0)
+
+        test_model = TestModel().eval()
+        with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16), torch.no_grad():
+            a = torch.rand(24, 128, 128)
+            b = torch.rand(24, 128, 128, dtype=torch.bfloat16)
+            c = test_model(a, b)
+            traced = torch.jit.trace(test_model, (a, b))
+        traced = torch.jit.freeze(traced)
+        for _ in range(3):
+            c2 = traced(a, b)
+        self.assertTrue(c.dtype, torch.float32)
+        self.assertTrue(c2.dtype, torch.float32)
+        traced_graph = traced.graph_for(a, b)
+        self.assertTrue(any(n.kind() == "aten::to" for n in traced_graph.nodes()))
+
     def test_script_autocast_cpu(self):
         def fn(x):
             if torch.is_autocast_cpu_enabled():
