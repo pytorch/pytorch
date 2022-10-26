@@ -435,7 +435,7 @@ class TestAutograd(TestCase):
 
         # .backward(inputs=) is OK
         out = c.sum()
-        torch.autograd.backward(out, inputs=(a,), retain_graph=True)
+        torch.autograd.backward(out, inputs=(a, b), retain_graph=True)
         self.assertEqual(counter[0], 2)
 
         # .backward() is OK
