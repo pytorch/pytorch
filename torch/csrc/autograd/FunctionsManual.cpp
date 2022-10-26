@@ -4070,14 +4070,10 @@ Tensor linalg_det_backward(
 std::tuple<Tensor, Tensor, Tensor> attn_backward(
     const Tensor& grad_o,
     const Tensor& grad_a,
+    const Tensor& a,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v) {
-  if (!grad_o.defined() && !grad_a.defined()) {
-    return {};
-  }
-
-  Tensor a = at::tanh(at::matmul(q, k.transpose(0, 1)));
 
   if (grad_o.defined()) {
     Tensor q_o =

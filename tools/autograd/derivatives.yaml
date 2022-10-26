@@ -519,7 +519,7 @@
   output_differentiability: [True, True, False, False]
 
 - name: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
-  q, k, v: attn_backward(grads[0], grads[1], q, k, v)
+  q, k, v: attn_backward(grads[0], grads[1], result1, q, k, v)
 
 - name: block_diag(Tensor[] tensors) -> Tensor
   tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
