@@ -562,13 +562,15 @@ void Unpickler::readGlobal(
     const std::string& module_name,
     const std::string& class_name) {
   if (this->skip_next_read_global) {
+    // See [NOTE] skip_next_read_global
     this->skip_next_read_global--;
     if (this->skip_next_read_global == 1) {
+      // Pass through to the correct handler
     } else if (this->skip_next_read_global == 0) {
       // Corresponds to the type of `Tensor` being unpickled
       if (module_name != "torch" || class_name != "Tensor") {
         TORCH_WARN(
-            "Trying to load a Subclassed Tensor, it will converted to at::Tensor in C++");
+            "Trying to load a Subclassed Tensor, it will be converted to at::Tensor in C++");
       }
       stack_.emplace_back(int64_t(globals_.size() - 1));
       return;
@@ -871,6 +873,14 @@ void Unpickler::rebuildTensor(bool quantized) {
 }
 
 void Unpickler::rebuildTensorFromTypeV2() {
+  // [NOTE] skip_next_read_global
+  // When rebuilding Tensor with Python Attr or Subclassed Tensor,
+  // we receive `(func, type(self), args, state)` on stack for
+  // `rebuildTensorFromTypeV2`.
+  // Thus next call to readGlobal corresponds to `func` which is
+  // the function to rebuild the base tensor.
+  // The call after `func` to readGlobal corresponds to `type` of the
+  // Tensor where we raise warning if the type is not `torch.Tensor`.
   this->skip_next_read_global = 2;
   auto curr_globals_idx = globals_.size();
   globals_.emplace_back([this, curr_globals_idx] {
@@ -884,7 +894,7 @@ void Unpickler::rebuildTensorFromTypeV2() {
     auto py_state = args_elems.at(tup_idx + 3).toGenericDict();
     if (py_state.size() > 0) {
       TORCH_WARN(
-          "Loading Tensor with Python Attribute will be silently ignored");
+          "Loading Tensor with Python attributes will return at::Tensor with Python attributes being discarded");
     }
     // This calls the function to rebuild the
     // base tensor.

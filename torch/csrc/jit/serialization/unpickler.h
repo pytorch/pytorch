@@ -178,6 +178,7 @@ class TORCH_API Unpickler {
   // See [type tag serialization]
   uint64_t version_;
 
+  // See [NOTE] skip_next_read_global
   uint8_t skip_next_read_global = 0;
 };
 
