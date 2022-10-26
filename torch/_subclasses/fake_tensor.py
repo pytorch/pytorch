@@ -877,9 +877,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Lazily initialized, in case there are no tensor returns
         common_device = None
+        has_scalar_only_inputs = False
 
         def wrap(e, device=None):
             nonlocal common_device
+            nonlocal has_scalar_only_inputs
             if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                 if common_device is None:
                     (
