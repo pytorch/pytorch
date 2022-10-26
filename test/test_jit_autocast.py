@@ -2,7 +2,7 @@
 
 import torch
 from torch.cuda.amp import autocast
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 
 import unittest
 from test_jit import JitTestCase
@@ -826,24 +826,36 @@ class TestJitTraceAutocast(JitTestCase):
 
             def forward(self, a, b):
                 return torch.cat([a, b], 0)
-        texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(False)
-        for jit_freeze_or_not in [False, True]:
-            test_model = TestModel().eval()
-            with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16), torch.no_grad():
-                a = torch.rand(24, 128, 128)
-                b = torch.rand(24, 128, 128, dtype=torch.bfloat16)
-                c = test_model(a, b)
-                traced = torch.jit.trace(test_model, (a, b))
-            if jit_freeze_or_not:
-                traced = torch.jit.freeze(traced)
-            for _ in range(3):
-                c2 = traced(a, b)
-            self.assertTrue(c.dtype, torch.float32)
-            self.assertTrue(c2.dtype, torch.float32)
-            traced_graph = traced.graph_for(a, b)
-            self.assertTrue(any(n.kind() == "aten::to" for n in traced_graph.nodes()))
-        torch._C._jit_set_texpr_fuser_enabled(texpr_fuser_state)
+
+        class disable_nnc_context(object):
+            def __init__(self):
+                super(disable_nnc_context, self).__init__()
+
+            def __enter__(self):
+                self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+                torch._C._jit_set_texpr_fuser_enabled(False)
+
+            def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):
+                torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+
+        with disable_nnc_context():
+            # In this testcase, we will check whether cat has done the promotion in AMP with mixed dtype inputs.
+            # We will check if to operation is in the Jit Graph or not. So we can disable NNC here.
+            for jit_freeze_or_not in [False, True]:
+                test_model = TestModel().eval()
+                with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16), torch.no_grad():
+                    a = torch.rand(24, 128, 128)
+                    b = torch.rand(24, 128, 128, dtype=torch.bfloat16)
+                    c = test_model(a, b)
+                    traced = torch.jit.trace(test_model, (a, b))
+                if jit_freeze_or_not:
+                    traced = torch.jit.freeze(traced)
+                for _ in range(3):
+                    c2 = traced(a, b)
+                self.assertTrue(c.dtype, torch.float32)
+                self.assertTrue(c2.dtype, torch.float32)
+                traced_graph = traced.graph_for(a, b)
+                self.assertTrue(any(n.kind() == "aten::to" for n in traced_graph.nodes()))
 
     def test_script_autocast_cpu(self):
         def fn(x):
