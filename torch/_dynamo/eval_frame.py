@@ -375,7 +375,7 @@ def optimize(
     )
 
 
-@patch("torchdynamo.symbolic_convert.explain", True)
+@patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
     from . import reset

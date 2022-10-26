@@ -6,7 +6,9 @@ from typing import List, Optional
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
-from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_version
+from torch.onnx._internal.diagnostics.infra.sarif import (
+    version as sarif_version,
+)
 
 
 class DiagnosticEngine:
@@ -14,9 +16,7 @@ class DiagnosticEngine:
 
     This class is the main interface for diagnostics. It manages the creation of diagnostic contexts.
     A DiagnosticContext provides the entry point for recording Diagnostics.
-    Each DiagnosticContext is powered by a DiagnosticTool, which can be customized with
-    custom RuleCollection and Diagnostic type.
-    See infra.DiagnosticContext and infra.DiagnosticTool for more details.
+    See infra.DiagnosticContext for more details.
 
     Examples:
         Step 1: Create a set of rules.
@@ -31,23 +31,16 @@ class DiagnosticEngine:
         ...     ],
         ... )
 
-        Step 2: Create a diagnostic tool.
-        >>> tool = infra.DiagnosticTool(
-        ...     name="tool",
-        ...     version="1.0.0",
-        ...     rules=rules,
-        ... )
-
-        Step 3: Create a diagnostic engine.
+        Step 2: Create a diagnostic engine.
         >>> engine = DiagnosticEngine()
 
-        Step 4: Start a new diagnostic context.
-        >>> with engine.start_diagnostic_context(tool) as context:
+        Step 3: Start a new diagnostic context.
+        >>> with engine.start_diagnostic_context("torch.onnx.export", version="1.0") as context:
 
-        Step 5: Add diagnostics in your code.
+        Step 4: Add diagnostics in your code.
         ...     context.diagnose(rules.rule1, infra.Level.ERROR)
 
-        Step 6: Afterwards, get the SARIF log.
+        Step 5: Afterwards, get the SARIF log.
         >>> sarif_log = engine.sarif_log()
     """
 
@@ -79,9 +72,20 @@ class DiagnosticEngine:
 
     def create_diagnostic_context(
         self,
-        tool: infra.DiagnosticTool,
+        name: str,
+        version: str,
         options: Optional[infra.DiagnosticOptions] = None,
     ) -> infra.DiagnosticContext:
-        context = infra.DiagnosticContext(tool, options)
+        """Creates a new diagnostic context.
+
+        Args:
+            name: The subject name for the diagnostic context.
+            version: The subject version for the diagnostic context.
+            options: The options for the diagnostic context.
+
+        Returns:
+            A new diagnostic context.
+        """
+        context = infra.DiagnosticContext(name, version, options)
         self._contexts.append(context)
         return context

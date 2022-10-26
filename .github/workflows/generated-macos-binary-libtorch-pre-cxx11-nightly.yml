@@ -34,9 +34,8 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -74,6 +73,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -118,7 +118,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -149,9 +149,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-shared-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -189,6 +188,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -233,7 +233,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: libtorch-cpu-shared-without-deps-pre-cxx11
@@ -264,9 +264,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -304,6 +303,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -348,7 +348,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
@@ -379,9 +379,8 @@ jobs:
     uses: ./.github/workflows/_binary-upload.yml
   libtorch-cpu-static-without-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: macos-10.15
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
+    runs-on: macos-12-xl
+    timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -419,6 +418,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -463,7 +463,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: libtorch-cpu-static-without-deps-pre-cxx11
