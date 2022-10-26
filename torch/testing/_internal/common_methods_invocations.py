@@ -1818,74 +1818,95 @@ def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     for input_shape1, input_shape2, kwargs in cases:
         yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
 
-def error_inputs_cat(op_info, device, **kwargs):
-
+def error_inputs_cat(op_info, device, is_ref=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
-    # error inputs for more than one element of the written-to tensor refer to a single memory location
-    yield ErrorInput(SampleInput([make_arg((S, S)), make_arg((S, S))],
-                                 kwargs={'out': make_arg((1, S)).expand((2 * S, S))}),
-                     error_regex='unsupported operation')
+    # TODO: primTorch has no checks for overlapping memory.
+    if not is_ref:
+        # error inputs for more than one element of the written-to tensor refer
+        # to a single memory location
+        error_regex = (
+            r'unsupported operation: more than one element of the written-to '
+            r'tensor refers to a single memory location\. Please clone\(\) the '
+            r'tensor before performing the operation\.'
+        )
+        yield ErrorInput(SampleInput([make_arg((S, S)), make_arg((S, S))],
+                                     kwargs={'out': make_arg((1, S)).expand((2 * S, S))}),
+                         error_regex=error_regex)
+
+        # error inputs for same memory locations
+        error_regex = (
+            r'unsupported operation: some elements of the input tensor and the written-to '
+            r'tensor refer to a single memory location\. Please clone\(\) the '
+            r'tensor before performing the operation\.'
+        )
+
+        x = torch.zeros((0), device=device)
+        y = torch.randn((4, 6), device=device)
+
+        yield ErrorInput(SampleInput((x, y), kwargs={'dim': 0, 'out': x}),
+                         error_regex=error_regex)
+        yield ErrorInput(SampleInput((x, y), kwargs={'dim': 0, 'out': y}),
+                         error_regex=error_regex)
+
+        z = torch.zeros((4, 6), device=device)
+        yield ErrorInput(SampleInput((y, z), kwargs={'out': z[:2, :]}),
+                         error_regex=error_regex)
 
     # error inputs for empty tensors
     yield ErrorInput(SampleInput([], kwargs={'dim': 1}),
-                     error_regex='non-empty list of Tensors')
+                     error_regex=r'torch.cat\(\): expected a non-empty list of Tensors')
 
     # error inputs for different sizes
     yield ErrorInput(SampleInput([make_arg((S, S, L, L)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),
-                     error_regex='Sizes of tensors must match except in dimension')
+                     error_regex=('Sizes of tensors must match except in dimension 1. '
+                                  'Expected size 20 but got size 19 for tensor number 1 in the list'))
     yield ErrorInput(SampleInput([make_arg((S, 0, L - 1, L)), make_arg((S, S, L, L))], kwargs={'dim': 1}),
-                     error_regex='Sizes of tensors must match except in dimension')
+                     error_regex=('Sizes of tensors must match except in dimension 1. '
+                                  'Expected size 19 but got size 20 for tensor number 1 in the list'))
 
     # error inputs for different dimensions
     yield ErrorInput(SampleInput([make_arg((S - 1, 0)), make_arg((S, 0, L - 1, L))], kwargs={'dim': 1}),
-                     error_regex='Tensors must have same number of dimensions')
+                     error_regex='Tensors must have same number of dimensions: got 2 and 4')
     yield ErrorInput(SampleInput([make_arg((S, 0, L - 1, L)), make_arg((S - 1, 0))], kwargs={'dim': 1}),
-                     error_regex='Tensors must have same number of dimensions')
-
-    # error inputs for same memory locations
-    x = torch.zeros((0), device=device)
-    y = torch.randn((4, 6), device=device)
-
-    err_msg = "the written-to tensor refer to a single memory location"
-
-    yield ErrorInput(SampleInput((x, y), kwargs={'dim': 0, 'out': x}),
-                     error_regex=err_msg)
-    yield ErrorInput(SampleInput((x, y), kwargs={'dim': 0, 'out': y}),
-                     error_regex=err_msg)
-
-    z = torch.zeros((4, 6), device=device)
-    yield ErrorInput(SampleInput((y, z), kwargs={'out': z[:2, :]}),
-                     error_regex=err_msg)
+                     error_regex='Tensors must have same number of dimensions: got 4 and 2')
 
     # error inputs for different devices
     if torch.device(device).type == 'cuda':
         x_cuda = make_tensor((3, 3), device=device, dtype=torch.float32)
         y_cpu = make_tensor((3, 3), device='cpu', dtype=torch.float32)
-        yield ErrorInput(SampleInput((x_cuda, y_cpu)),
-                         error_regex='Expected all tensors to be on the same device')
+        sample_input = SampleInput((x_cuda, y_cpu))
+        if is_ref:
+            yield ErrorInput(sample_input,
+                             error_regex=('Expected all tensors to be on the same device, '
+                                          'but found at least two devices, cuda:0 and cpu!'))
+        else:
+            yield ErrorInput(sample_input,
+                             error_regex=(r'Expected all tensors to be on the same device, '
+                                          r'but found at least two devices, cuda:0 and cpu! '
+                                          r'\(when checking argument for argument tensors in '
+                                          r'method wrapper_cat\)'))
 
     # error inputs for different input sizes for more than 2 tensors
     yield ErrorInput(SampleInput([make_arg((L, 1)), make_arg((L, 1, 1)), make_arg((L, 1, 1))]),
-                     error_regex='Tensors must have same number of dimensions')
+                     error_regex='Tensors must have same number of dimensions: got 2 and 3')
 
     yield ErrorInput(SampleInput([make_arg((S, 1, M)), make_arg((S, 1, 1)), make_arg((S, M, 1))],
                                  kwargs={'dim': 1}),
-                     error_regex='Sizes of tensors must match')
+                     error_regex=('Sizes of tensors must match except in dimension 1. '
+                                  'Expected size 10 but got size 1 for tensor number 1 in the list'))
 
     # error inputs for None input
+    if is_ref:
+        none_regex = "expected Tensor as element 1 in argument 0, but got <class 'NoneType'>"
+    else:
+        none_regex = 'expected Tensor as element 1 in argument 0, but got NoneType'
     yield ErrorInput(SampleInput((make_arg((S, 1, 1)), None)), error_type=TypeError,
-                     error_regex='got None')
+                     error_regex=none_regex)
 
     # error inputs for zero-dimensional tensors
     yield ErrorInput(SampleInput([make_arg(()), make_arg(())]),
-                     error_regex='zero-dimensional.*cannot be concatenated')
-
-    # error inputs for different dtype of out tensors
-    d = make_tensor((2, 3), device=device, dtype=torch.double)
-    x = make_tensor((2, 3), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(x, kwargs={'out': d}), error_type=TypeError,
-                     error_regex='invalid combination of arguments')
+                     error_regex=r'zero-dimensional tensor \(at position 0\) cannot be concatenated')
 
 def reference_inputs_cat(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_cat_concat(op, device, dtype, requires_grad, **kwargs)
@@ -1953,7 +1974,7 @@ def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **
         tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
         yield SampleInput(tensors)
 
-def error_inputs_hstack_dstack_vstack(op, device):
+def _error_inputs_dstack_hstack_vstack_common(op, device, error_regex):
     make_arg = partial(make_tensor, dtype=torch.int32, device=device, requires_grad=False)
     tensor_shapes = (
         ((S,), (S, S, S, S), (S,)),
@@ -1961,10 +1982,23 @@ def error_inputs_hstack_dstack_vstack(op, device):
     for s1, s2, s3 in tensor_shapes:
         tensors = (make_arg(s1,), make_arg(s2,), make_arg(s3))
         # Different dimension tensor
-        yield ErrorInput(SampleInput(tensors), error_regex="Tensors must have same number of dimensions")
+        yield ErrorInput(SampleInput(tensors), error_regex=error_regex)
 
     # empty tensor list
     yield ErrorInput(SampleInput(()), error_regex="expects a non-empty TensorList")
+
+def error_inputs_dstack(op, device):
+    yield from _error_inputs_dstack_hstack_vstack_common(
+        op=op, device=device, error_regex="Tensors must have same number of dimensions: got 3 and 4")
+
+def error_inputs_hstack(op, device):
+    yield from _error_inputs_dstack_hstack_vstack_common(
+        op=op, device=device, error_regex="Tensors must have same number of dimensions: got 1 and 4")
+
+def error_inputs_vstack(op, device):
+    yield from _error_inputs_dstack_hstack_vstack_common(
+        op=op, device=device, error_regex="Tensors must have same number of dimensions: got 2 and 4")
+
 
 def sample_inputs_unbind(op_info, device, dtype, requires_grad, **kwargs):
     # Note: we don't do any tests where we unbind along 0-length dims
@@ -14479,7 +14513,7 @@ op_db: List[OpInfo] = [
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           error_inputs_func=error_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_hstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            ),
@@ -14596,7 +14630,7 @@ op_db: List[OpInfo] = [
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           error_inputs_func=error_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_vstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -14606,7 +14640,7 @@ op_db: List[OpInfo] = [
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           error_inputs_func=error_inputs_hstack_dstack_vstack,
+           error_inputs_func=error_inputs_dstack,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
@@ -17683,10 +17717,7 @@ python_ref_db = [
         "_refs.cat",
         torch_opinfo_name="cat",
         supports_nvfuser=False,
-        skips=(
-            # FIXME: AssertionError: RuntimeError not raised
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
+        error_inputs_func=partial(error_inputs_cat, is_ref=True),
     ),
     PythonRefInfo(
         "_refs.chunk",
@@ -17742,9 +17773,6 @@ python_ref_db = [
         "_refs.dstack",
         torch_opinfo_name="dstack",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.expand",
@@ -17780,10 +17808,6 @@ python_ref_db = [
         "_refs.hstack",
         torch_opinfo_name="hstack",
         supports_nvfuser=False,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/78613
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.narrow",
@@ -17920,10 +17944,6 @@ python_ref_db = [
         "_refs.vstack",
         torch_opinfo_name="vstack",
         supports_nvfuser=False,
-        skips=(
-            # https://github.com/pytorch/pytorch/issues/78613
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        ),
     ),
     PythonRefInfo(
         "_refs.unflatten",
@@ -18248,9 +18268,6 @@ python_ref_db = [
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
-        ),
     ),
     PythonRefInfo(
         "_refs.index_select",

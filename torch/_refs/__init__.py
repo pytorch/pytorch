@@ -2494,12 +2494,19 @@ def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
-    if len(tensors) == 0:
-        msg = "cat expects at least one tensor, but received zero!"
-        raise ValueError(msg)
+    check(len(tensors) > 0, lambda: "torch.cat(): expected a non-empty list of Tensors")
 
-    for tensor in tensors:
-        assert isinstance(tensor, TensorLike)
+    for i, tensor in enumerate(tensors):
+        # The order of checks here is important. First, make sure it's a tensor.
+        check(
+            isinstance(tensor, TensorLike),
+            lambda: f"expected Tensor as element {i} in argument 0, but got {type(tensor)}",
+            exc_type=TypeError,
+        )
+        check(
+            tensor.ndim > 0,
+            lambda: f"zero-dimensional tensor (at position {i}) cannot be concatenated",
+        )
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 

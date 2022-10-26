@@ -565,15 +565,12 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
             if device is None:
                 device = arg.device
 
-            if device != arg.device:
-                msg = (
-                    "Tensor on device "
-                    + str(arg.device)
-                    + " is not on the expected device "
-                    + str(device)
-                    + "!"
-                )
-                raise RuntimeError(msg)
+            check(
+                device == arg.device,
+                lambda: (
+                    f"Expected all tensors to be on the same device, but "
+                    f"found at least two devices, {device} and {arg.device}!"
+                ))
         else:
             msg = (
                 "Unexpected type when checking for same device, " + str(type(arg)) + "!"
