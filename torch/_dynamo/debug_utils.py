@@ -826,7 +826,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    exc.is_minified = True
+                    exc.minifier_path = os.path.join(
+                        minifier_dir(), "minifier_launcher.py"
+                    )
                     raise
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
