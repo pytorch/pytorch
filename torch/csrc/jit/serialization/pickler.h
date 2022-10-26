@@ -5,11 +5,11 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/Utils.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/disallow_copy.h>
 
 namespace torch {
 namespace jit {
@@ -118,7 +118,7 @@ void setTypeTags(bool state);
 bool getTypeTags();
 
 class TORCH_API Pickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Pickler);
+  AT_DISALLOW_COPY_AND_ASSIGN(Pickler);
 
  public:
   Pickler(std::function<void(const char*, size_t)> writer)
