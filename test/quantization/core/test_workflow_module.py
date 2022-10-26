@@ -17,7 +17,7 @@ from torch.ao.quantization import (
     default_observer,
     default_histogram_observer,
     default_per_channel_weight_observer,
-    get_observer_dict,
+    _get_observer_dict,
     prepare,
     prepare_qat,
     convert,
@@ -566,7 +566,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
                 test_only_eval_fn(model, self.calib_data)
                 test_only_eval_fn(model, self.calib_data)
                 observer_dict = {}
-                get_observer_dict(model, observer_dict)
+                _get_observer_dict(model, observer_dict)
 
                 self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
                                 'observer is not recorded in the dict')

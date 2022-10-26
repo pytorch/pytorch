@@ -49,7 +49,7 @@ Utility functions
     swap_module
     propagate_qconfig_
     default_eval_fn
-    get_observer_dict
+    _get_observer_dict
 
 torch.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

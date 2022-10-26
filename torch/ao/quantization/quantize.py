@@ -33,7 +33,6 @@ __all__ = [
     "get_default_custom_config_dict",
     "propagate_qconfig_",
     "add_observer_",
-    "_get_unique_devices_",
     "add_quant_dequant",
     "prepare",
     "quantize",
@@ -42,7 +41,7 @@ __all__ = [
     "quantize_qat",
     "convert",
     "swap_module",
-    "get_observer_dict",
+    "_get_observer_dict",
 ]
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
@@ -641,7 +640,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                 new_mod.to(device)
     return new_mod
 
-def get_observer_dict(mod, target_dict, prefix=""):
+def _get_observer_dict(mod, target_dict, prefix=""):
     r"""Traverse the modules and save all observers into dict.
     This is mainly used for quantization accuracy debug
     Args:
@@ -656,4 +655,4 @@ def get_observer_dict(mod, target_dict, prefix=""):
         target_dict[get_prefix(prefix) + 'activation_post_process'] = mod.activation_post_process
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
-        get_observer_dict(child, target_dict, module_prefix)
+        _get_observer_dict(child, target_dict, module_prefix)

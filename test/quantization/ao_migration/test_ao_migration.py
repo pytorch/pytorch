@@ -17,7 +17,7 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'add_observer_',
             'add_quant_dequant',
             'convert',
-            'get_observer_dict',
+            '_get_observer_dict',
             '_get_unique_devices_',
             '_is_activation_post_process',
             'prepare',

@@ -109,7 +109,7 @@ __all__ = [
     "get_embedding_static_quant_module_mappings",
     "get_fuser_method",
     "get_fuser_method_new",
-    "get_observer_dict",
+    "_get_observer_dict",
     "get_observer_state_dict",
     "get_quantized_operator",
     "get_static_quant_module_class",
