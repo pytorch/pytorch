@@ -9,12 +9,15 @@ file is kept purely for backward-compatibility.
 """
 
 import torch
-import torch.onnx
+from torch.onnx import _deprecation
 
 
+# 180-day deprecation period
+@_deprecation.deprecated("1.14", "1.16", "use torch._shape_as_tensor")
 def shape_as_tensor(x):
     return torch._shape_as_tensor(x)
 
 
+@_deprecation.deprecated("1.14", "1.16", "use torch._reshape_from_tensor")
 def reshape_from_tensor_shape(x, shape):
     return torch._reshape_from_tensor(x, shape)
