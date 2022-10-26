@@ -720,6 +720,16 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    def test_reduction4(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+        def fn(a):
+            return (a.argmax(-1), a.argmin(-1))
+
+        inputs = (torch.ones(128), torch.ones(4, 4, 1))
+        for i in inputs:
+            self.common(fn, (i,))
+
     @patch.object(config, "dynamic_shapes", False)
     def test_unroll_small_reduction(self):
         def fn(x):

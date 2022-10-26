@@ -685,7 +685,6 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    assert len(index) <= 1
                     return 0
 
             else:
