@@ -163,9 +163,9 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_permute_dupe_and_bypass_dynamic_shapes
 )
-# unittest.expectedFailure(
-#     DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_permute_dynamic_shapes
-# )
+unittest.expectedFailure(
+    DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_permute_dynamic_shapes
+)
 
 
 # DynamicShapesSubGraphTests
