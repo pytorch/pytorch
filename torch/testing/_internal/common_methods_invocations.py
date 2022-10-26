@@ -3163,8 +3163,8 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
-        ((2, 8, 4, 4), (8, 1, 3, 3), None, {'groups': 4}),
-        ((1, 4, 5, 5), (4, 8, 3, 3), None, {})
+        ((2, 4, 4, 4), (4, 1, 3, 3), None, {'groups': 4}),
+        ((1, 2, 5, 5), (2, 4, 3, 3), None, {})
     )
 
     for input_shape, weight, bias, kwargs in cases:
@@ -10679,6 +10679,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose2d,
+           # Runs very slowly on slow-gradcheck for complex.
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
