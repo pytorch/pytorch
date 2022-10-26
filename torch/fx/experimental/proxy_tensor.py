@@ -628,7 +628,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
-        def wrap_fake_concrete(x):
+        def wrap_fake(x):
             if isinstance(x, torch.Tensor):
                 return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
 
@@ -636,16 +636,10 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         sym_mode = proxy_mode.sym_mode
 
-        # todo: Figure out a more informative name for symints
-        def wrap_fake_symbolic(x):
-            if isinstance(x, torch.Tensor):
-                return fake_tensor_mode.from_tensor(x)
-            return x
-
         wrap_fn_map = {
             "real": lambda x: x,
-            "fake": wrap_fake_concrete,
-            "symbolic": wrap_fake_symbolic,
+            "fake": wrap_fake,
+            "symbolic": wrap_fake,
         }
         args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
