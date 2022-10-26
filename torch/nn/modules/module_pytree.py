@@ -1,10 +1,10 @@
+import itertools
+
 import copy
-import functools
-from typing import List, Any
+from typing import List, Any, Dict, Set
 
 import torch
 from ..modules.module import Module
-from torch.utils._pytree import _register_pytree_node, _register_pytree_node_grad
 
 
 def _named_parameters(mod, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
@@ -16,7 +16,7 @@ def _named_parameters(mod, prefix: str = '', recurse: bool = True, remove_duplic
 
 
 def _build_tied_map(name_to_weight_with_repeat):
-    tensor_mapping = {}
+    tensor_mapping: Dict[torch.Tensor, Set[str]] = {}
     for key, tensor in name_to_weight_with_repeat:
         if tensor in tensor_mapping:
             tensor_mapping[tensor].add(key)
@@ -46,12 +46,31 @@ def _module_flatten(module: Module, is_grad):
     functional_module = _make_functional_module(module, is_grad)
     if is_grad:
         param_map = _build_tied_map(_named_parameters(module, remove_duplicate=False))
-        return list(param_map.keys()), (functional_module, list(param_map.values()))
+        return list(param_map.keys()), (functional_module, param_map.values())
     else:
         param_map = _build_tied_map(_named_parameters(module, remove_duplicate=False))
         buffer_map = _build_tied_map(module.named_buffers(remove_duplicate=False))
-        return list(param_map.keys()) + list(buffer_map.keys()),\
-               (functional_module, list(param_map.values()), list(buffer_map.values()))
+        context = (functional_module, param_map.values(), buffer_map.values())
+        return list(param_map.keys()) + list(buffer_map.keys()), context
+
+
+def _permanently_swap(params, buffers):
+    def _swap_parameters(module, tensor_name: str, full_path: str, tensor) -> None:
+        delattr(module, tensor_name)
+        if full_path in params:
+            setattr(module, tensor_name, params[full_path])
+        else:
+            module.register_buffer(tensor_name, buffers[full_path])
+    return _swap_parameters
+
+
+def _replace_parameters(module, params, buffers):
+    iterator = itertools.chain(params.items(), buffers.items()) if buffers is not None else params.items()
+    for name, tensor in iterator:
+        torch.nn.utils.stateless._apply_func_submodules(
+            _permanently_swap(params, buffers),
+            module, name.split("."), name, (tensor,))
+    return module
 
 
 def _module_unflatten(parameters_and_buffers: List[torch.Tensor], module_and_names: Any, is_grad) -> Any:
@@ -65,23 +84,16 @@ def _module_unflatten(parameters_and_buffers: List[torch.Tensor], module_and_nam
         buffers = _build_dict_from_tied_map_values(buffer_names, parameters_and_buffers[len(param_names):])
 
     for param in params:
-        param._is_param = True
+        param._is_param = True  # type: ignore[attr-defined]
     params = _build_dict_from_tied_map_values(param_names, params)
-    return torch.nn.utils.stateless.replace_parameters(module, params, buffers)
+    return _replace_parameters(module, params, buffers)
+
 
 def _module_unflatten_tangent_type(params: List[torch.Tensor], module_and_names: Any) -> Any:
     _, tied_names = module_and_names
-    out = {}
+    out: Dict[str, torch.Tensor] = {}
     for names, weight in zip(tied_names, params):
         for name in names:
             out[name] = weight
             break
     return out
-
-_register_pytree_node(Module,
-                      functools.partial(_module_flatten, is_grad=False),
-                      functools.partial(_module_unflatten, is_grad=False))
-_register_pytree_node_grad(Module,
-                           functools.partial(_module_flatten, is_grad=True),
-                           functools.partial(_module_unflatten, is_grad=True),
-                           _module_unflatten_tangent_type)

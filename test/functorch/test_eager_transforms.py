@@ -1034,7 +1034,8 @@ class TestVmapOfGrad(TestCase):
         # TODO: Check if the rtol is a problem
         self.assertEqual(result, expected, atol=0, rtol=5e-4)
 
-    def _embeddingnet_example(self, device):
+    @parametrize('with_pytree', [True, False])
+    def test_per_sample_grads_embeddingnet(self, device, with_pytree):
         class SampleNet(nn.Module):
             def __init__(self, vocab_size: int):
                 super().__init__()
@@ -1063,46 +1064,39 @@ class TestVmapOfGrad(TestCase):
 
         # Construct our module
         net = SampleNet(vocab_size).to(device=device)
-        return net, data, targets
-
-    def test_per_sample_grads_embeddingnet(self, device):
-        net, data, targets = self._embeddingnet_example(device)
         criterion = nn.CrossEntropyLoss()
 
         net_func, weights = make_functional(net)
 
-        def compute_loss(weights, data, target):
-            output = net_func(weights, data)
+        # net_info is the net itself when using pytrees and just the weights when we aren't
+        def compute_loss(net_info, data, target):
+            if with_pytree:
+                output = net_info(data)
+            else:
+                output = net_func(weights, data)
             result = criterion(output, target)
             return result
 
-        expected = [grad(compute_loss)(weights, data[i], targets[i]) for i in range(64)]
-        expected = zip(*expected)
-        expected = tuple(torch.stack(shards) for shards in expected)
+        if with_pytree:
+            result = vmap(partial(grad(compute_loss), net))(data, targets)
+            expected_in = [grad(compute_loss)(net, data[i], targets[i]) for i in range(64)]
+            expected = {}
+            for key in expected_in[0]:
+                expected[key] = torch.stack([shard[key] for shard in expected_in])
+            iterator = result
+        else:
+            result = vmap(partial(grad(compute_loss), weights))(data, targets)
+            expected = [grad(compute_loss)(weights, data[i], targets[i]) for i in range(64)]
+            expected = zip(*expected)
+            expected = tuple(torch.stack(shards) for shards in expected)
+            iterator = zip(result, expected)
 
-        result = vmap(partial(grad(compute_loss), weights))(data, targets)
-        for r, e in zip(result, expected):
-            # TODO: Check if the rtol is a problem
-            self.assertEqual(r, e, atol=0, rtol=1e-3)
+        for i in iterator:
+            if with_pytree:
+                r, e = result[i], expected[i]
+            else:
+                r, e = i
 
-    def test_per_sample_grads_embeddingnet_module_as_pytree(self, device):
-        net, data, targets = self._embeddingnet_example(device)
-        criterion = nn.CrossEntropyLoss()
-
-        def compute_loss(net, data, target):
-            output = net(data)
-            result = criterion(output, target)
-            return result
-
-        expected_in = [grad(compute_loss)(net, data[i], targets[i]) for i in range(64)]
-        expected = {}
-        for key in expected_in[0]:
-            expected[key] = torch.stack([shard[key] for shard in expected_in])
-
-        result = vmap(partial(grad(compute_loss), net))(data, targets)
-        for key in result:
-            r = result[key]
-            e = expected[key]
             # TODO: Check if the rtol is a problem
             self.assertEqual(r, e, atol=0, rtol=1e-3)
 
@@ -2570,6 +2564,16 @@ class TestMakeFunctional(TestCase):
         for param in params:
             self.assertEqual(param.requires_grad, not disable_autograd_tracking)
 
+    def _check_tied_names_same_weight(self, tied_sets, result, expected):
+        def get_elem(dict, tied_names):
+            # used to get values when the dictionary is going to be one of a set of names (from weight tying)
+            out = tuple(dict[name] for name in tied_names if name in dict)
+            assert len(out) == 1
+            return out
+
+        for tied_names in tied_sets:
+            self.assertEqual(get_elem(result, tied_names), get_elem(expected, tied_names))
+
     def _parameter_tying_grad_model(self, for_pytree):
         class Foo(nn.Module):
             def __init__(self):
@@ -2612,9 +2616,6 @@ class TestMakeFunctional(TestCase):
         self.assertEqual(result, expected)
 
     def test_parameter_tying_grad_module_as_pytree(self):
-        def get_elem(dict, name, tied_name):
-            return dict[name] if name in dict else dict[tied_name]
-
         _, mod2, x, expected = self._parameter_tying_grad_model(True)
 
         def compute_loss(mod, x):
@@ -2622,14 +2623,7 @@ class TestMakeFunctional(TestCase):
 
         result = grad(compute_loss)(mod2, x)
 
-        # we can no longer guarantee which names will be returned from each
-        expected_weight_grad = get_elem(expected, 'weight', 'linear.weight')
-        result_weight_grad = get_elem(result, 'weight', 'linear.weight')
-        self.assertEqual(result_weight_grad, expected_weight_grad)
-
-        expected_bias_grad = get_elem(expected, 'bias', 'linear.bias')
-        result_bias_grad = get_elem(result, 'bias', 'linear.bias')
-        self.assertEqual(result_bias_grad, expected_bias_grad)
+        self._check_tied_names_same_weight(({'weight', 'linear.weight'}, {'bias', 'linear.bias'}), result, expected)
 
     def test_parameter_tying_ensemble(self):
         class Foo(nn.Module):
@@ -2904,6 +2898,7 @@ class TestExamplesCorrectness(TestCase):
                 return criterion(net(x), y)
         else:
             fnet, params, buffers = make_functional_with_buffers(transformed_net)
+
             def compute_loss(x, y, params, buffers):
                 return criterion(fnet(params, buffers, x), y)
 
@@ -3210,6 +3205,7 @@ class TestExamplesCorrectness(TestCase):
 
         model = Foo()
         model_fn, weights, buffers = make_functional_with_buffers(model)
+
         def loss_ish_make_functional(weights, input, buffers):
             return model_fn(weights, buffers, input)
 
@@ -3229,8 +3225,8 @@ class TestExamplesCorrectness(TestCase):
             pytree_tangents = copy.deepcopy(model)
             pytree_tangents.x = nn.Parameter(torch.ones(3, 3))
             # there's no real way to match the structure of the input since it saves a copy of the model
-            with self.assertRaisesRegex(RuntimeError, "Expected primals and tangents to have the same python structure"):
-                value_pytree, grad_pytree = jvp(loss_ish_pytree, (model, input), (pytree_tangents, torch.zeros(3, 3)))
+            with self.assertRaisesRegex(RuntimeError, "jvp does not support modules as inputs"):
+                jvp(loss_ish_pytree, (model, input), (pytree_tangents, torch.zeros(3, 3)))
 
 
 

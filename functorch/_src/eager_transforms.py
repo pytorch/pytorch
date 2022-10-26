@@ -8,7 +8,7 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map, LeafSpec
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
@@ -807,12 +807,21 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     #
     # Returns the same two elements as :func:`jvp` but the returned tuple, ``jvp_out``, only has JVPs with respect to
     # the primals given by argnums
+    def check_primal_has_no_modules(spec):
+        # modules don't work with jvp an in general jvp only works with groups of tensors. This gives a nice error
+        if isinstance(spec, LeafSpec):
+            return
+        if spec.type == torch.nn.Module:
+            raise RuntimeError("jvp does not support modules as inputs. Please use make_functional")
+        [check_primal_has_no_modules(child_spec) for child_spec in spec.children_specs]
+
     if not isinstance(primals, tuple):
         raise RuntimeError(
             f'{jvp_str}: Expected primals to be a tuple. '
             f'E.g. it should be valid to call f(*primals).')
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args, grad_fn=True)
+    check_primal_has_no_modules(primals_spec)
     flat_tangents, tangents_spec = tree_flatten(tangents, grad_fn=True)
     if primals_spec != tangents_spec:
         raise RuntimeError(

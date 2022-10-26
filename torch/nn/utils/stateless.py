@@ -1,7 +1,5 @@
-import itertools
-
 import contextlib
-from typing import Any, Callable, Dict, Iterator, List, Tuple, Optional
+from typing import Any, Callable, Dict, Iterator, List, Tuple
 
 import torch
 from torch import Tensor
@@ -49,33 +47,11 @@ def _create_swap_params(params_and_buffers):
             _change_class(module, params_and_buffers)
     return _swap_parameters
 
-def _permanently_swap(params, buffers):
-    def _swap_parameters(module, tensor_name: str, full_path: str, tensor: Tensor) -> None:
-        delattr(module, tensor_name)
-        if full_path in params:
-            setattr(module, tensor_name, params[full_path])
-        else:
-            module.register_buffer(tensor_name, buffers[full_path])
-    return _swap_parameters
-
 def _remove_swap(module, name: str, full_path: str) -> None:
     if hasattr(module, "_orig_class"):
         module.__class__ = module._orig_class
         delattr(module, "_orig_class")
         delattr(module, "_attr_to_path")
-
-
-def replace_parameters(
-    module: 'torch.nn.Module',
-    params: Dict[str, Tensor],
-    buffers: Dict[str, Tensor]
-):
-    iterator = itertools.chain(params.items(), buffers.items()) if buffers is not None else params.items()
-    for name, tensor in iterator:
-        _apply_func_submodules(
-            _permanently_swap(params, buffers),
-            module, name.split("."), name, (tensor,))
-    return module
 
 @contextlib.contextmanager
 def _reparametrize_module(

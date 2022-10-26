@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 import os
 import warnings
+from ..utils._pytree import _register_pytree_node, leaf_flatten, leaf_unflatten
 
 __all__ = ["reduce_graph_module", "reduce_package_graph_module", "reduce_deploy_graph_module", "GraphModule"]
 
@@ -740,6 +741,10 @@ class {module_name}(torch.nn.Module):
         new_gm = self.__copy__()
         new_gm._is_replica = True
         return new_gm
+
+
+# a hack to make GraphModules leaves so we don't decompose them as modules
+_register_pytree_node(GraphModule, leaf_flatten, leaf_unflatten)
 
 # workarounds for issues in __torch_function__
 
