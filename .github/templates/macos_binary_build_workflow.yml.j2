@@ -58,17 +58,8 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    {%- if config["package_type"] == "libtorch" %}
-    runs-on: macos-10.15
-    {%- else %}
     runs-on: macos-12-xl
-    {%- endif %}
-{%- if config["package_type"] == "libtorch" %}
-    # libtorch builds take a long time on github hosted runners
-    timeout-minutes: 720
-{%- else %}
     timeout-minutes: !{{ common.timeout_minutes }}
-{%- endif %}
     !{{ upload.binary_env(config, true) }}
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
@@ -82,6 +73,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
@@ -105,7 +97,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: !{{ config["build_name"] }}
