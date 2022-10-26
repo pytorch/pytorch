@@ -507,6 +507,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
+        # check if the cache is being hit
+        # print(id(fw_module))
+        # print(fw_module.print_readable())
         return CompiledFunction.apply(*remove_dupe_args(args))
 
     return compiled_function
@@ -710,7 +713,7 @@ def aot_function(
         flat_args, _ = pytree.tree_flatten((args, kwargs))
 
         # Compile the function and save it in the cache
-        if cached_res is None:
+        if True:
             # Save the args_spec for flat_tensor_args to unflatten while tracing
             _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
             out_spec = PytreeThunk()
@@ -749,7 +752,6 @@ def aot_function(
                 aot_config,
             )
             cached_res = (compiled_fn, out_spec)
-
         cached_fn, out_spec = cached_res
         out = cached_fn(flat_args)
         return out_spec.unflatten(out)
@@ -873,7 +875,8 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         @wraps(fn)
         def new_func(*args):
             nonlocal compiled_fn
-            if compiled_fn is None:
+            # Disabling the cache because it causes some models to fail
+            if True:
                 compiled_fn = create_aot_dispatcher_function(
                     fn,
                     args,
@@ -882,7 +885,6 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
             return compiled_fn(args)
 
         return new_func
-
     compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
 
     if top_kwargs:
