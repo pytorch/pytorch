@@ -1,7 +1,7 @@
 import sys
 import copy
 from dataclasses import dataclass
-from typing import Callable, Any, Optional, Type
+from typing import Any, Callable, Optional, Type
 from enum import Enum, auto
 import inspect
 import itertools
