@@ -81,7 +81,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(dsplit, int);
   OP_DECOMPOSE2(dsplit, array);
   OP_DECOMPOSE(det);
-  m.impl("diag_backward", native::diag_backward_symint);
   OP_DECOMPOSE(diff);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
@@ -257,6 +256,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
+  OP_DECOMPOSE(diagonal_copy);
   m.impl("pad", native::pad_symint);
   m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(t_);
