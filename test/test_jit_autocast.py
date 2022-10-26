@@ -823,6 +823,7 @@ class TestJitTraceAutocast(JitTestCase):
         class TestModel(torch.nn.Module):
             def __init__(self):
                 super(TestModel, self).__init__()
+
             def forward(self, a, b):
                 return torch.cat([a, b], 0)
 
