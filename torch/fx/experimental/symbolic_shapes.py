@@ -207,26 +207,6 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
-    class Ceil(sympy.Function):
-        """
-        sympy doesn't have its own ceil(), so rolling one here.
-        We maintain this so that we can simplify a sympy.Rational into a sympy.Float.
-        sympy.Float isn't supported.
-        """
-        nargs = (1,)
-
-        @classmethod
-        def eval(cls, a):
-            if isinstance(a, sympy.Integer):
-                return a
-            elif isinstance(a, sympy.core.symbol.Symbol) and a.is_scalar:
-                # TODO: do we need to simplify expr's first? (e.g. if we have 3/3), is is_scalar() true?
-                return a
-            elif isinstance(a, sympy.Rational):
-                return a.floor() + 1
-            else:
-                raise NotImplementedError("math.ceil() not supported for type: " + str(type(a)))
-
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
@@ -245,7 +225,7 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'ceil': lambda a: Ceil(a),
+    'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
