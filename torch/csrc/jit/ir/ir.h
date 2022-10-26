@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/schema_info.h>
 
@@ -18,6 +17,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/Utils.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
@@ -177,7 +177,7 @@ struct Wrap {
 };
 
 struct Value {
-  TH_DISALLOW_COPY_AND_ASSIGN(Value);
+  AT_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node* node_, size_t offset_);
 
  private:
@@ -310,7 +310,7 @@ struct Value {
 };
 
 struct TORCH_API Node {
-  TH_DISALLOW_COPY_AND_ASSIGN(Node);
+  AT_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
   friend struct Block;
   friend struct Value;
@@ -1015,7 +1015,7 @@ struct Block {
   friend struct Node;
   friend struct Graph;
 
-  TH_DISALLOW_COPY_AND_ASSIGN(Block);
+  AT_DISALLOW_COPY_AND_ASSIGN(Block);
   TORCH_API Block(Graph* graph_, Node* node_);
 
   at::ArrayRef<Value*> inputs() {
@@ -1164,7 +1164,7 @@ struct Block {
 };
 
 struct Graph {
-  TH_DISALLOW_COPY_AND_ASSIGN(Graph);
+  AT_DISALLOW_COPY_AND_ASSIGN(Graph);
   friend struct Node;
   friend struct Value;
   friend struct Block;
