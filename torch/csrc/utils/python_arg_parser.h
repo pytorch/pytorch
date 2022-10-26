@@ -382,7 +382,8 @@ struct FunctionParameter {
   bool check(
       PyObject* obj,
       std::vector<py::handle>& overloaded_args,
-      int argnum);
+      int argnum,
+      int64_t* failed_idx = nullptr);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
