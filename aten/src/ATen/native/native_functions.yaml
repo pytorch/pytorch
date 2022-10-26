@@ -985,6 +985,8 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   tags: nondeterministic_seeded
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: bernoulli
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias=None) -> Tensor
 
@@ -8531,6 +8533,7 @@
   dispatch:
     CPU: signbit_out
     CUDA: signbit_out
+    MPS: signbit_out_mps
     SparseCPU, SparseCUDA: signbit_sparse_out
     SparseCsrCPU, SparseCsrCUDA: signbit_sparse_csr_out
 

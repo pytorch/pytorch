@@ -1,17 +1,36 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <ATen/SmallVector.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <c10/macros/Macros.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
-#include <array>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_trilinear.h>
+#include <ATen/ops/_trilinear_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/bilinear_native.h>
+#include <ATen/ops/bmm.h>
+#include <ATen/ops/einsum_native.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/mkldnn_linear.h>
+#include <ATen/ops/mm.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/tensordot_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <cctype>
-#include <cstddef>
 #include <sstream>
 #include <string>
 #include <vector>
