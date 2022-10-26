@@ -335,7 +335,7 @@ def _elementwise_meta(
 
     args_ = list(args)
     if args_with_fixed_dtypes is not None:
-        args_.extend(args_with_fixed_dtypes)
+        args_ = list(args_with_fixed_dtypes) + args_
 
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)

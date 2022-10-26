@@ -21,7 +21,7 @@ jobs:
       # Used to receive a badge.
       id-token: write
 
-    if: github.repository == 'pytorch/pytorch'  # don't run on forks
+    if: false && github.repository == 'pytorch/pytorch'  # don't run on forks
 
     steps:
       - name: "Checkout code"

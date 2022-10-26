@@ -3615,7 +3615,10 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-    return utils.mask_tensor(cond, t)
+
+    # aten.diag_embed always returns a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return utils.mask_tensor(cond, t).contiguous()
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4541,10 +4544,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     if isinstance(value, Number):
-        return torch.where(mask, python_type(value), a)
+        r = torch.where(mask, python_type(value), a)
+    else:
+        assert isinstance(value, TensorLike)
+        r = torch.where(mask, prims.to_dtype(value, a.dtype), a)
 
-    assert isinstance(value, TensorLike)
-    return torch.where(mask, prims.to_dtype(value, a.dtype), a)
+    # aten.mask_fill always return a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return r.contiguous()
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4646,7 +4653,9 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) >= diagonal
 
-    return utils.mask_tensor(mask, a)
+    # aten.triu always returns a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return utils.mask_tensor(mask, a).contiguous()
 
 
 @register_decomposition(torch.ops.aten.tril)
@@ -4661,7 +4670,9 @@ def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) <= diagonal
 
-    return utils.mask_tensor(mask, a)
+    # aten.tril always returns a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return utils.mask_tensor(mask, a).contiguous()
 
 
 # This is based on get_tril_size in aten/src/ATen/native/TensorFactories.h
