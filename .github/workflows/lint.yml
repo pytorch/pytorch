@@ -325,7 +325,7 @@ jobs:
           check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.github/requirements-gha-cache.txt
+            **/requirements.txt
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
@@ -335,10 +335,11 @@ jobs:
           check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/.github/requirements-gha-cache.txt
+            **/requirements.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
         run: |
+          pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
       - name: Run collect_env.py
