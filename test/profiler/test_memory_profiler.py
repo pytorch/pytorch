@@ -397,6 +397,17 @@ class TestDataFlow(TestCase):
             ),
         )
 
+    def test_match_schemas_tensorlist(self) -> None:
+        x = torch.ones((1,))
+        y = torch.ones((1,))
+        with profile() as prof:
+            torch.cat([x, y], axis=0)
+
+        self.assertEqual(
+            self.formatSchemas(prof),
+            (("aten::cat.", (False, False)),),
+        )
+
     def test_data_flow_graph_with_annotations(self) -> None:
         def f(x, y):
             # torch._C._jit_get_schemas_for_operator will reject any name that

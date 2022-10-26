@@ -130,11 +130,10 @@ def _extract_parameters_and_gradients(
         and children
         and children[0].typed[0] == _EventType.TorchOp
         and children[0].name in ("aten::detach", "aten::add_")
-        and children[0].typed[1].inputs.tensor_metadata
+        and children[0].typed[1].inputs
+        and isinstance(children[0].typed[1].inputs[0], _TensorMetadata)
     ):
-        yield None, TensorKey.from_tensor(
-            children[0].typed[1].inputs.tensor_metadata[0]
-        )
+        yield None, TensorKey.from_tensor(children[0].typed[1].inputs[0])
 
     # We directly instrument `torch.nn.Module` and `torch.optim.Optimizer`
     # NOTE: The values captured by the python tracer are cached; they can be
@@ -175,10 +174,6 @@ def get_scopes(event: Optional[_ProfilerEvent]) -> Tuple[RecordScope, ...]:
     return tuple(scopes)
 
 
-def tensor_inputs(t: _ExtraFields_TorchOp) -> Tuple[Optional[TensorKey], ...]:
-    return tuple(TensorKey.from_tensor(i) for i in t.inputs.tensor_metadata)
-
-
 class SchemaMatcher:
     """Lookup operator schema based on profiled name.
 
@@ -208,11 +203,21 @@ class SchemaMatcher:
             for i, arg in enumerate(schema.arguments):
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
-        return tuple(mutable or (True for _ in t.inputs.tensor_metadata))
+        return tuple(mutable or (True for _ in t.inputs))
 
     @classmethod
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
-        signature = tuple(t or s for t, s in zip(tensor_inputs(t), t.inputs.ivalues))
+        signature = tuple(
+            # Tensor
+            TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
+            #
+            # TensorList
+            else [TensorKey.from_tensor(j) for j in i] if isinstance(i, list)
+            #
+            # Scalar and uncaptured inputs.
+            else i
+            for i in t.inputs
+        )
 
         def matches(schema) -> bool:
             return len(schema.arguments) == len(signature) and all(
@@ -230,6 +235,11 @@ class SchemaMatcher:
 
         if isinstance(schema_type, torch._C.AnyType):
             return True
+
+        if schema_type.isSubtypeOf(torch._C.ListType.ofTensors()):
+            return isinstance(observed, list) and all(
+                isinstance(i, TensorKey) for i in observed
+            )
 
         type_map: Tuple[Tuple[Any, Union[type, Tuple[type, ...]]], ...] = (
             (torch._C.TensorType, TensorKey),
@@ -318,7 +328,12 @@ class DataFlowNode:
         def zip_mutable(
             t: _ExtraFields_TorchOp,
         ) -> Iterator[Tuple[Optional[TensorKey], bool]]:
-            return zip(tensor_inputs(t), SchemaMatcher.inputs_are_mutable(t))
+            for i, mutable in zip(t.inputs, SchemaMatcher.inputs_are_mutable(t)):
+                if isinstance(i, _TensorMetadata):
+                    yield TensorKey.from_tensor(i), mutable
+                elif isinstance(i, list):
+                    for j in i:
+                        yield TensorKey.from_tensor(j), mutable
 
         edges: DefaultDict[Optional[TensorKey], DataFlowEdge]
         edges = collections.defaultdict(DataFlowEdge)
