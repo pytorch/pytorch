@@ -15,6 +15,7 @@ profile = functools.partial(
     torch.profiler.profile, record_shapes=True, profile_memory=True, with_stack=True
 )
 
+
 @skipIfTorchDynamo("TorchDynamo removes profiler altogether.")
 class TestMemoryProfiler(TestCase):
     def test_config_check(self) -> None:
@@ -333,6 +334,17 @@ class TestDataFlow(TestCase):
                 ("aten::detach.", (False,)),
                 ("detach", (True,)),
             ),
+        )
+
+    def test_match_schemas_tensorlist(self) -> None:
+        x = torch.ones((1,))
+        y = torch.ones((1,))
+        with profile() as prof:
+            torch.cat([x, y], axis=0)
+
+        self.assertEqual(
+            self.formatSchemas(prof),
+            (("aten::cat.", (False, False)),),
         )
 
     def test_data_flow_leaf(self) -> None:
