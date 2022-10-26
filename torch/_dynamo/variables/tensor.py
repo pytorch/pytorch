@@ -607,9 +607,6 @@ class DynamicShapeVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
 
-    def as_python_constant(self):
-        return self.dyn_shape
-
     def as_proxy(self):
         return self.proxy
 

@@ -165,13 +165,6 @@ unittest.expectedFailure(
     DynamicShapesExportTests.test_export_with_stack_trace_dynamic_shapes
 )
 
-# NoFakeTensorsMiscTests
-# Here because this test is dynamic shape only
-unittest.expectedFailure(
-    test_no_fake_tensors.NoFakeTensorsMiscTests.test_onnx_shape_as_tensor_no_fake_tensors
-)
-
-
 # DynamicShapesSubGraphTests
 unittest.expectedFailure(
     DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes

@@ -6,7 +6,7 @@ import inspect
 import re
 import types
 from abc import ABCMeta
-from typing import Any, List
+from typing import Any, List, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -187,8 +187,8 @@ class VariableBuilder:
 
     def _wrap(self, value):
         make_guards = self.make_guards
-        if istype(value, torch.SymIntNode):
-            return self.wrap_symint(value)
+        if istype(value, (torch.SymIntNode, torch.SymFloatNode)):
+            return self.wrap_sym(value)
         if istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
@@ -492,11 +492,9 @@ class VariableBuilder:
             )
         )
 
-    def wrap_symint(self, value: torch.SymIntNode):
+    def wrap_sym(self, value: Union[torch.SymIntNode, torch.SymFloatNode]):
         if not is_constant_source(self.get_source()):
-            self.tx.output.graphargs.append(
-                GraphArg(self.get_source(), value, False)
-            )
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
         with torch._C.DisableTorchFunction():
             if is_constant_source(self.get_source()):
                 return self.tx.output.register_attr_or_module(

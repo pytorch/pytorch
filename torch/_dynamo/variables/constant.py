@@ -5,7 +5,7 @@ import torch
 
 from .. import variables
 from ..exc import unimplemented
-from ..utils import istype
+from ..utils import istype, proxy_args_kwargs
 from .base import typestr, VariableTracker
 
 
@@ -71,6 +71,8 @@ class ConstantVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from .tensor import DynamicShapeVariable
+
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if istype(self.value, tuple):
@@ -79,6 +81,19 @@ class ConstantVariable(VariableTracker):
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
+        if any([isinstance(x, DynamicShapeVariable) for x in args]):
+            if isinstance(
+                self.value, int
+            ):  # TODO(voz): support other kinds of symbolics
+                sym = tx.output.shape_env.create_symintnode(
+                    tx.output.shape_env.create_symbol(self.value)
+                )
+                dyn_shape = tx.output.register_attr_or_module(
+                    sym, f"sym_shape_{self.value}", source=self.source
+                )
+                return dyn_shape.call_method(tx, name, args, kwargs)
+            # Unfortunate constant
+            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
         try:
             const_args = [a.as_python_constant() for a in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
@@ -102,8 +117,11 @@ class ConstantVariable(VariableTracker):
             add_target = const_args[0]
             if isinstance(add_target, torch.SymIntNode):
                 from .tensor import DynamicShapeVariable
+
                 # Addition between a non symint and symint makes a symint
-                dyn_shape = tx.output.register_attr_or_module(add_target, f"sym_shape_{add_target}", source=None)
+                dyn_shape = tx.output.register_attr_or_module(
+                    add_target, f"sym_shape_{add_target}", source=None
+                )
                 proxy = tx.output.create_proxy(
                     "call_function", op, (self.value, dyn_shape.proxy), {}
                 )
