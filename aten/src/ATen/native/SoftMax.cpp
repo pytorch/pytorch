@@ -612,7 +612,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             // We only process padding mask in the optimized way if softmax is applied along the last dimesion,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask_.view({input_.sizes()[0], 1, 1, input_.sizes()[2]});
-            mask = at::expand_inplace(input_, mask)->contiguous();
+            mask = mask.expand(input_.sizes()).contiguous();
             mask_type = 2;
       }
   } else if (mask_type == 0) {
@@ -623,7 +623,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             // We only process attention mask in a optimized way if softmax is applied along the last dimesion,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask.view({1, 1, input_.sizes()[2], input_.sizes()[2]});
-            mask = at::expand_inplace(input_, mask)->contiguous();
+            mask = mask.expand(input_.sizes()).contiguous();
             mask_type = 2;
       }
   };
