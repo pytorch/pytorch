@@ -18,6 +18,23 @@ namespace jit {
 
 namespace {
 
+void insertPrePackedBatchNormOp(std::shared_ptr<Graph>& graph) {
+  std::string batchnorm_pattern = R"(
+    graph(%input, %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable):
+        %r = aten::batch_norm(%input, %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable)
+        return (%r))";
+  std::string prepacked_ops_pattern = R"(
+    graph(%input, %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable):
+        %op_context : __torch__.torch.classes.vulkan.BatchNormPackedContext = vulkan_prepack::create_batchnorm_context(
+            %weight, %bias, %mean, %var, %training, %momentum, %eps, %cudnn_enable)
+        %res = vulkan_prepack::run_batchnorm_context(%input, %op_context)
+        return (%res))";
+
+  SubgraphRewriter batchnorm_rewriter;
+  batchnorm_rewriter.RegisterRewritePattern(batchnorm_pattern, prepacked_ops_pattern);
+  batchnorm_rewriter.runOnGraph(graph);
+}
+
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
@@ -219,6 +236,7 @@ void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedConv2dOp(graph);
   insertPrePackedGruOp(graph);
   insertPrePackedLstmOp(graph);
+  insertPrePackedBatchNormOp(graph);
 }
 
 void vulkanInsertPrePackedOps(script::Module& module) {
@@ -249,7 +267,9 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_gru_context")) ||
         (n->kind() ==
-         Symbol::fromQualString("vulkan_prepack::create_lstm_context")));
+         Symbol::fromQualString("vulkan_prepack::create_lstm_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_batchnorm_context")));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
