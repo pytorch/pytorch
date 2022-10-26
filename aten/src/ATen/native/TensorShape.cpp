@@ -3,7 +3,6 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/IListRef.h>
-#include <ATen/ATen.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>

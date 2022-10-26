@@ -150,7 +150,7 @@ def forward(self, a_1):
     _reshape_alias_copy_1 = torch.ops.aten._reshape_alias_copy.default(as_strided_scatter_1, [16, 64, 128, 128], [1048576, 16384, 128, 1]);  as_strided_scatter_1 = None
     detach_copy_1 = torch.ops.aten.detach_copy.default(_reshape_alias_copy_1);  _reshape_alias_copy_1 = None
     return detach_copy_1
-    """)
+    """)  # noqa: B950
 
     def test_simple(self):
         def f(x):
