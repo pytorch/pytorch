@@ -977,6 +977,37 @@ class CppKernelProxy(CppKernel):
                 self.simd_vec_kernel.call_ranges[reduction_depth:], threads
             )
 
+        # If the most inner loop of the reduction will be vectorized, the vectorization
+        # will add a vec variable for reduction. Take the code snippet as an example:
+        #     float tmp1 = 0;
+        #     for(long i1=0; i1<8; i1+=1) {
+        #        auto tmp0 = in_ptr0[i1];
+        #        tmp1 += tmp0;
+        #     }
+        # The vectorization will add tmp1_vec for reduction and then the loop will be transformed
+        # as follows.
+        #     float tmp1 = 0;
+        #     auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+        #     for(long i1=0; i1<1; i1+=1) {
+        #        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i1));
+        #        tmp1_vec += tmp0;
+        #     }
+        #     tmp1 = at::vec::vec_reduce_all<float>([]
+        #       (at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;},
+        #       tmp1_vec);
+        #     for(long i1=8; i1<8; i1+=1) {
+        #        auto tmp0 = in_ptr0[i1];
+        #        tmp1 += tmp0;
+        #     }
+        # It means that the vectorization introduce another reduction variable(tmp1_vec).
+        # If the most inner loop of the reduction is not a parallelized but its parent reduction
+        # loop is parallized, the new added reduction variable(tmp1_vec) could not be added
+        # to the parallelized loop reduction. So we skip this case and does not vectorize it.
+        if reduction_par_depth > 0 and reduction_par_depth != len(
+            loops_nest_reduce.loops
+        ):
+            return self.simd_omp_kernel.codegen_loops(code, worksharing)
+
         with contextlib.ExitStack() as stack:
             if par_depth:
                 worksharing.parallel(threads)
@@ -1108,29 +1139,52 @@ class CppScheduling:
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())
         ).group
-        in_suffix = False
 
-        with kernel_group.new_kernel(is_simd_vec) as kernel:
-            vars, reduction_vars = kernel.set_ranges(group, reduction_group)
+        def create_kernel(_is_simd_vec):
+            in_suffix = False
 
-            for node in nodes:
-                if node.group[1] in [
-                    (group, reduction_group),
-                    (group + reduction_group, ()),
-                ]:
-                    assert not in_suffix
-                    node.run(vars, reduction_vars)
-                else:
-                    in_suffix = True
-                    assert node.group[1] == (
-                        group,
-                        (),
-                    ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
-                    # we can fuse in some extra pointwise into the suffix
-                    with kernel.write_to_suffix():
-                        node.run(vars, ())
+            with kernel_group.new_kernel(_is_simd_vec) as kernel:
+                vars, reduction_vars = kernel.set_ranges(group, reduction_group)
 
-        return kernel
+                for node in nodes:
+                    if node.group[1] in [
+                        (group, reduction_group),
+                        (group + reduction_group, ()),
+                    ]:
+                        assert not in_suffix
+                        node.run(vars, reduction_vars)
+                    else:
+                        in_suffix = True
+                        assert node.group[1] == (
+                            group,
+                            (),
+                        ), f"unexpected group: {node.group[1]} != {group}, {reduction_group}"
+                        # we can fuse in some extra pointwise into the suffix
+                        with kernel.write_to_suffix():
+                            node.run(vars, ())
+                return kernel
+
+        org_inplace_buffers_flag = config.inplace_buffers
+        if is_simd_vec:
+            # Create vectorization kernel
+            cpp_vec_kernel = create_kernel(True)
+
+            # Since a kernel is divided into two parts - vectorization and non-vectorization.
+            # And the two parts share the same global contexts like V.graph.wrapper_code,
+            # V.kernel.args. But the vectorization kernel generation has updated these global
+            # contexts. Hence, the non-vectorization kernel should not do this again to avoid
+            # conext conflict. By now, we only control the config.inplace_buffers. In the future,
+            # we could maintain more contexts.
+            config.inplace_buffers = False
+
+            # Create non-vectorization kernel
+            cpp_kernel = create_kernel(False)
+
+            # Restore the inplace_buffers flag
+            config.inplace_buffers = org_inplace_buffers_flag
+            return (cpp_vec_kernel, cpp_kernel)
+        else:
+            return (None, create_kernel(False))
 
     def codegen_nodes(self, nodes):
         """
@@ -1139,12 +1193,9 @@ class CppScheduling:
         kernel_group = self.kernel_group
 
         can_be_simd_vec = self.can_vec(nodes)
-        simd_vec_kernel = (
-            self._codegen_nodes_impl(nodes, can_be_simd_vec)
-            if can_be_simd_vec
-            else None
+        simd_vec_kernel, simd_omp_kernel = self._codegen_nodes_impl(
+            nodes, can_be_simd_vec
         )
-        simd_omp_kernel = self._codegen_nodes_impl(nodes)
 
         assert simd_omp_kernel
         metrics.generated_kernel_count -= 1
