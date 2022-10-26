@@ -597,7 +597,7 @@ def gen_pyi(
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int]: ...",
+                "def stride(self) -> Tuple[_int, ...]: ...",
                 "def stride(self, _int) -> _int: ...",
             ],
             "new_ones": [

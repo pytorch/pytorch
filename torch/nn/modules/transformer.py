@@ -203,6 +203,11 @@ class TransformerEncoder(Module):
         Shape:
             see the docs in Transformer class.
         """
+        if src_key_padding_mask is not None:
+            _skpm_dtype = src_key_padding_mask.dtype
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
@@ -442,6 +447,11 @@ class TransformerEncoderLayer(Module):
             see the docs in Transformer class.
         """
 
+        if src_key_padding_mask is not None:
+            _skpm_dtype = src_key_padding_mask.dtype
+            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
         if not src.dim() == 3:
