@@ -1409,8 +1409,11 @@ bool FunctionSignature::parse(
               param.name.c_str(),
               static_cast<long>(arg_pos + 1),
               param.type_name().c_str(),
-              Py_TYPE(PySequence_GetItem(obj, failed_idx))->tp_name,
-              failed_idx);
+              Py_TYPE(py::reinterpret_steal<py::object>(
+                          PySequence_GetItem(obj, failed_idx))
+                          .ptr())
+                  ->tp_name,
+              static_cast<long>(failed_idx));
         }
         throw TypeError(
             "%s(): argument '%s' (position %ld) must be %s, not %s",

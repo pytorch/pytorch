@@ -200,7 +200,7 @@
 #     preferable since it would be less efficient.
 #
 # NB: The parameter names here MUST be consistent with the parameter names
-# in Decalarations.yaml
+# in native_functions.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sgn()
   result: handle_r_to_c(result.scalar_type(), self_t.conj() * self_p.sgn())
@@ -524,10 +524,6 @@
 
 - name: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   self: grad.diagonal(offset, dim1, dim2)
-  result: auto_linear
-
-- name: diag(Tensor self, int diagonal=0) -> Tensor
-  self: diag_backward_symint(grad, self.sym_sizes(), diagonal)
   result: auto_linear
 
 - name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)

@@ -417,13 +417,13 @@ class ShapeEnv(object):
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
-                val, i = sorted(
+                val, i = min(
                     [
                         (ex.stride()[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
                     ]
-                )[0]
+                )
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]

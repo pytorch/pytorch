@@ -153,7 +153,7 @@ class TestNativeFunctions(TestCase):
         self.do_test_optional_intlist_with_module(fake_module)
 
     def test_optional_intlist_invalid(self):
-        with self.assertRaisesRegex(TypeError, "must be .* not"):
+        with self.assertRaisesRegex(TypeError, "must be .* but found"):
             IntListWrapperModule()(torch.zeros(1), [0.5])
 
         with self.assertRaisesRegex(RuntimeError, "value of type .* instead found type"):
