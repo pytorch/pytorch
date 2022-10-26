@@ -302,7 +302,7 @@ class Loops(IRNode):
             with V.set_ops_handler(V.MockHandler()), patch.object(
                 FlexibleLayout, "allow_indexing", True
             ):
-                return self.inner_fn(self._index(self.ranges))
+                return str(self.inner_fn(self._index(self.ranges)))
         except Exception as e:
             return f"inner_fn(): {e}"
 
@@ -419,8 +419,11 @@ class Reduction(Loops):
             with V.set_ops_handler(V.MockHandler()), patch.object(
                 FlexibleLayout, "allow_indexing", True
             ):
-                return self.inner_fn(
-                    self._index(self.ranges), self._index(self.reduction_ranges, "r")
+                return str(
+                    self.inner_fn(
+                        self._index(self.ranges),
+                        self._index(self.reduction_ranges, "r"),
+                    )
                 )
         except Exception as e:
             return f"inner_fn(): {e}"
@@ -685,7 +688,6 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    assert len(index) <= 1
                     return 0
 
             else:
@@ -947,6 +949,9 @@ class BaseView(IRNode):
 
     def mark_reuse(self, users):
         return self.data.mark_reuse(users)
+
+    def has_exceeded_max_reads(self):
+        return self.data.has_exceeded_max_reads()
 
     def realize(self):
         return self.data.realize()
@@ -1421,6 +1426,9 @@ class BaseConstant(IRNode):
 
     def mark_reuse(self, users):
         pass
+
+    def has_exceeded_max_reads(self):
+        return False
 
     def get_reads(self):
         return ()
@@ -3097,7 +3105,7 @@ class Convolution(ExternKernelAlloc):
         # for conv2d or conv3d, prefer channels last format
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
-        elif config.tune_layout:
+        elif config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
             output_layout_str = tuned_conv_layout(
@@ -3121,13 +3129,24 @@ class Convolution(ExternKernelAlloc):
 
             # CUDA channels_last path depend on cudnn version, see
             # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/ConvUtils.h.
-            valid_device = True
+            valid_cudnn = False
             if (
-                x.get_device() == "cuda"
-                and torch.backends.cudnn.is_available()
-                and torch.backends.cudnn.version() < 8302
+                torch.backends.cudnn.is_available()
+                and torch.backends.cudnn.version() >= 7603
             ):
-                valid_device = False
+                valid_cudnn = True
+
+            # TODO - We cannot use strides to identify if a tensor is
+            # channels-last for 1x1 kernels. Incorrectly identifying the
+            # channels last configuration leads to a dramatic increase in
+            # compilation time. Unfortuantely, this breaks the channels last
+            # support.
+            # valid_device = x.get_device().type == "cpu" or (
+            #     x.get_device().type == "cuda" and valid_cudnn
+            # )
+
+            valid_device = x.get_device().type == "cpu"
+
             if (
                 valid_device
                 and len(x.get_size()) == 4
@@ -3346,6 +3365,12 @@ class StorageBox(MutableBox):
         """
         if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
             self.realize()
+
+    def has_exceeded_max_reads(self):
+        return isinstance(self.data, Pointwise) and (
+            self.num_reads() > config.realize_acc_reads_threshold
+            or len(self.inner_fn_str()) > config.realize_bytes_threshold
+        )
 
     def mark_reuse(self, users):
         """
