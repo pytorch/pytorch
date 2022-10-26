@@ -7,6 +7,7 @@ import itertools
 import os
 import random
 import sys
+import typing
 import unittest
 import weakref
 from unittest.mock import patch
@@ -1324,11 +1325,11 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    # For gpu path, there has a accurcy issue,
+    # see https://github.com/pytorch/pytorch/issues/87745.
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_unary(self):
-        test_memory_format = [torch.contiguous_format]
-        # TODO: GPU path doesn't support channels_last now.
-        if not HAS_CUDA:
-            test_memory_format.append(torch.channels_last)
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
             unary_list,
             [True, False],
@@ -1370,6 +1371,9 @@ class CommonTemplate:
                 (v,),
             )
 
+    # For gpu path, there has a accurcy issue,
+    # see https://github.com/pytorch/pytorch/issues/87745.
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d binary test")
     def test_conv2d_binary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -1406,10 +1410,7 @@ class CommonTemplate:
                 x2 = self.conv2(x)
                 return self.binary_fn(x1, x2)
 
-        test_memory_format = [torch.contiguous_format]
-        # TODO: GPU path doesn't support channels_last now.
-        if not HAS_CUDA:
-            test_memory_format.append(torch.channels_last)
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
             binary_list,
             [True, False],
@@ -1652,6 +1653,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -4579,6 +4581,87 @@ if HAS_CUDA:
             ]
             result = forward(*args)
             assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
+
+    class TritonCodeGenTests(TestCase):
+        from torch._inductor.triton_ops.autotune import CachingAutotuner
+
+        class NoOpCompilerBackend:
+            def __init__(self):
+                self.example_args = None
+                self.model = None
+
+            def noop_backend(
+                self,
+                model_: torch.fx.GraphModule,
+                example_inputs_: typing.List[torch.Tensor],
+            ):
+                """
+                The Noop backend does not compile the fx graph it is given.
+                Instead, it transforms the fx graph so that its functions are
+                aten operations. It then saves this graph.
+                """
+                from functorch._src.aot_autograd import Interpreter
+                from torch._inductor.decomposition import select_decomp_table
+                from torch._subclasses import FakeTensorMode
+
+                fake_mode = FakeTensorMode()
+
+                def interpret(*args, **kwargs):
+                    return Interpreter(model_).run(*args[0:], **kwargs)
+
+                fake_flat_tensor_args = [
+                    fake_mode.from_tensor(x) for x in example_inputs_
+                ]
+                fw_module = make_fx(interpret, select_decomp_table())(
+                    *fake_flat_tensor_args
+                )
+                self.model = fw_module
+                self.example_args = fake_flat_tensor_args
+                return lambda x: example_inputs_
+
+        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
+            from torch._inductor.debug import DebugContext
+            from torch._inductor.graph import GraphLowering
+            from torch._inductor.virtualized import V
+
+            cxt = TritonCodeGenTests.NoOpCompilerBackend()
+            torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
+            graph = GraphLowering(cxt.model)
+            graph.num_static_inputs = 0
+            kernels = []
+            with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
+                graph.run(*(cxt.example_args))
+                mod = graph.compile_to_module()
+                i = 0
+                while True:
+                    attribute = f"kernel{i}"
+                    if not hasattr(mod, attribute):
+                        break
+                    else:
+                        kernels.append(getattr(mod, attribute))
+                        i = i + 1
+            return kernels
+
+        def test_divisibile_by_16_covers_numel_args(self):
+            def fn(a: torch.Tensor) -> torch.Tensor:
+                return torch.sum(a)
+
+            kernels = self.get_kernels(fn, [torch.randn([256, 256], device="cuda")])
+            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+
+            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+            # at slot 3 should be in the divisible by 16 descriptor
+            arguments_that_are_divisible_by_16_in_kernel0 = (
+                kernels[0].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+
+            # kernel1 reduces from 8 elements to a single scalar.
+            arguments_that_are_divisible_by_16_in_kernel1 = (
+                kernels[1].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
 
 
 if __name__ == "__main__":
