@@ -2857,7 +2857,7 @@ class FallbackKernel(ExternKernelAlloc):
                 else:
                     new_args.append(next(it_non_tensors))
             return pytree.tree_unflatten(new_args, args_spec)
-        
+
         tensor_args = [cls.realize_input(x) for x in tensor_args]
 
         # We don't have generic shape formulas, so just burn in the
@@ -3125,9 +3125,17 @@ class Convolution(ExternKernelAlloc):
             ):
                 valid_cudnn = True
 
-            valid_device = x.get_device().type == "cpu" or (
-                x.get_device().type == "cuda" and valid_cudnn
-            )
+            # TODO - We cannot use strides to identify if a tensor is
+            # channels-last for 1x1 kernels. Incorrectly identifying the
+            # channels last configuration leads to a dramatic increase in
+            # compilation time. Unfortuantely, this breaks the channels last
+            # support.
+            # valid_device = x.get_device().type == "cpu" or (
+            #     x.get_device().type == "cuda" and valid_cudnn
+            # )
+
+            valid_device = x.get_device().type == "cpu"
+
             if (
                 valid_device
                 and len(x.get_size()) == 4
