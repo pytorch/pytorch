@@ -43,7 +43,7 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
           newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* castTensor = newCachedGraph->inputTensor_;
           // Integer input must be cast to float if output is float
-          if (isIntegralType(self.scalar_type()) && isFloatingType(output.scalar_type())) {
+          if (isIntegralType(self.scalar_type(), true) && isFloatingType(output.scalar_type())) {
             castTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor_, output.scalar_type());
           }
           newCachedGraph->outputTensor_ = unaryBlock(mpsGraph, castTensor);
@@ -131,7 +131,7 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& output) {          
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor)   \
                   { return [mpsGraph func_stub##WithTensor:inputTensor name:nil]; },  \
                   [](const Tensor& t) -> bool {                                       \
-                  return t.numel() == 0 || isIntegralType(t.scalar_type());           \
+                  return t.numel() == 0 || isIntegralType(t.scalar_type(), true);     \
                 });                                                                   \
 }
 CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(ceil_out_mps, ceil)
