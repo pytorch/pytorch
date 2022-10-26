@@ -868,19 +868,19 @@ def meta_index_Tensor(self, indices):
 
 
 # TODO: this shouldn't be necessary
-@register_meta([aten.add.Tensor], register_dispatcher=False)
-def meta_add(self, other, *, alpha=1):
-    check(
-        torch.is_tensor(self),
-        lambda: f"expected self to be tensor but got {type(self)}",
-    )
-    out_shape = self.shape
-    if torch.is_tensor(other):
-        out_shape = _broadcast_shapes(self.shape, other.shape)
-    _, out_dtype = elementwise_dtypes(
-        self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    )
-    return self.new_empty(out_shape, dtype=out_dtype)
+# @register_meta([aten.add.Tensor], register_dispatcher=False)
+# def meta_add(self, other, *, alpha=1):
+#     check(
+#         torch.is_tensor(self),
+#         lambda: f"expected self to be tensor but got {type(self)}",
+#     )
+#     out_shape = self.shape
+#     if torch.is_tensor(other):
+#         out_shape = _broadcast_shapes(self.shape, other.shape)
+#     _, out_dtype = elementwise_dtypes(
+#         self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+#     )
+#     return self.new_empty(out_shape, dtype=out_dtype)
 
 
 @register_meta([aten.convolution_backward.default])
