@@ -140,12 +140,14 @@ def forward(self, a_1):
     view_copy_4 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128])
     view_copy_5 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128])
     clone_1 = torch.ops.aten.clone.default(view_copy_5, memory_format = torch.contiguous_format);  view_copy_5 = None
-    threshold_backward = torch.ops.aten.threshold_backward.default(clone_1, relu, 0);  clone_1 = relu = None
-    view_copy_6 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128]);  view_copy_3 = None
-    detach_copy = torch.ops.aten.detach_copy.default(view_copy_6);  view_copy_6 = None
-    view_copy_7 = torch.ops.aten.view_copy.default(threshold_backward, [1, 1024, 128, 128]);  threshold_backward = None
-    view_copy_8 = torch.ops.aten.view_copy.default(view_copy_7, [16, 64, 128, 128]);  view_copy_7 = None
-    detach_copy_1 = torch.ops.aten.detach_copy.default(view_copy_8);  view_copy_8 = None
+    view_copy_6 = torch.ops.aten.view_copy.default(relu, [1, 1024, 128, 128]);  relu = None
+    view_copy_7 = torch.ops.aten.view_copy.default(view_copy_6, [16, 64, 128, 128]);  view_copy_6 = None
+    threshold_backward = torch.ops.aten.threshold_backward.default(clone_1, view_copy_7, 0);  clone_1 = view_copy_7 = None
+    view_copy_8 = torch.ops.aten.view_copy.default(view_copy_3, [16, 64, 128, 128]);  view_copy_3 = None
+    detach_copy = torch.ops.aten.detach_copy.default(view_copy_8);  view_copy_8 = None
+    view_copy_9 = torch.ops.aten.view_copy.default(threshold_backward, [1, 1024, 128, 128]);  threshold_backward = None
+    view_copy_10 = torch.ops.aten.view_copy.default(view_copy_9, [16, 64, 128, 128]);  view_copy_9 = None
+    detach_copy_1 = torch.ops.aten.detach_copy.default(view_copy_10);  view_copy_10 = None
     return detach_copy_1
     """)
 
