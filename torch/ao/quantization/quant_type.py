@@ -21,7 +21,7 @@ _quant_type_to_str = {
 
 # TODO: make this private
 def _get_quant_type_to_str(quant_type: QuantType) -> str:
-    return __get_quant_type_to_str[quant_type]
+    return _quant_type_to_str[quant_type]
 
 def _quant_type_from_str(name: str) -> QuantType:
     for quant_type, s in _quant_type_to_str.items():

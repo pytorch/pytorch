@@ -31,7 +31,7 @@ from ..qconfig_mapping import (
 )
 from ..qconfig_mapping_utils import (
     _get_flattened_qconfig_dict,
-    update_qconfig_for_qat,
+    _update_qconfig_for_qat,
 )
 from .qconfig_mapping_utils import (
     generate_node_name_to_qconfig,
@@ -1588,7 +1588,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         qat_swap_modules(model, module_to_qat_module)
-        update_qconfig_for_qat(qconfig_mapping, {})
+        _update_qconfig_for_qat(qconfig_mapping, {})
 
     # mapping from fully qualified module name to module instance
     # for example,
