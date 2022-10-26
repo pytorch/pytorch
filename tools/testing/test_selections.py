@@ -49,7 +49,7 @@ def calculate_shards(
         min_sharded_job.test_jobs.append(test_job)
 
     # Round robin the unknown jobs starting with the smallest shard
-    index = sorted(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())[0]
+    index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
     for test in unknown_tests:
         sharded_jobs[index].test_jobs.append((test, 0, 1, 0.0))
         index = (index + 1) % num_shards

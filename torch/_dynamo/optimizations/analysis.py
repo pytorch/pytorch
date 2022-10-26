@@ -10,7 +10,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._pytree import tree_map
 
 from .. import config
-from ..utils import fake_tensors_available
+from ..utils import clone_inputs, fake_tensors_available
 
 if fake_tensors_available:
     from torch._subclasses import FakeTensorMode  # noqa: F401
@@ -52,6 +52,14 @@ class ShapeAliasingAndMutationProp(ShapeProp):
         n.meta["alias_groups"] = {
             self.tensor_alias_group(obj) for obj in self.extract_tensors(result)
         }
+
+        if (
+            not n.meta["alias_groups"]
+            and n.op == "call_function"
+            and n.target == operator.setitem
+        ):
+            n.meta["alias_groups"] = {self.tensor_alias_group(tensor_args[0])}
+
         n.meta["mutates_alias_groups"] = {
             self.tensor_alias_group(tensor)
             for tensor, v1, v2 in zip(tensor_args, input_versions1, input_versions2)
@@ -113,6 +121,10 @@ def has_mutation(gm, example_inputs, inputs_only=False):
     true, we only check for mutation of inputs"""
     # TODO - moco gives bad accuracy with Aliasing. gm is getting mutated in a bad way.
 
+    # Clone the inputs such that intermediate tensors (not leaf tensors) with
+    # requires_grad to True are now converted to False to avoid Runtime Error
+    # like "leaf variable that requires grad is inplace modified"
+    example_inputs = clone_inputs(example_inputs)
     if fake_tensors_available and config.fake_tensor_propagation:
         with FakeTensorMode() as fake_mode:
             pass

@@ -17,7 +17,15 @@ from unittest.mock import patch
 
 import torch
 
-from . import config, exc, side_effects, skipfiles, variables
+from . import (
+    allowed_functions,
+    config,
+    exc,
+    logging as torchdynamo_logging,
+    side_effects,
+    skipfiles,
+    variables,
+)
 from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
 from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import (
@@ -78,6 +86,11 @@ from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
+
+
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
 
 
 @dataclasses.dataclass
@@ -167,7 +180,11 @@ def break_graph_if_unsupported(*, push):
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torchdynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
-                if not explain and graph_break_dup_warning_checker.add(frame_loc):
+                if (
+                    config.print_graph_breaks
+                    and not explain
+                    and graph_break_dup_warning_checker.add(frame_loc)
+                ):
                     log.warning(
                         f"Graph break: {exc} from user code at {user_stack_formatted}"
                     )
@@ -290,7 +307,7 @@ class InstructionTranslatorBase(object):
         else:
             self.instruction_pointer = None
             self.next_instruction = None
-        if inst.starts_line:
+        if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
             log.debug(f"TRACE starts_line {self.f_code.co_filename}:{self.lineno}")
 
@@ -880,7 +897,7 @@ class InstructionTranslatorBase(object):
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, ConstantVariable) or (
-                isinstance(k, TensorVariable) and k.parameter_value is not None
+                isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
             result[ConstDictVariable.get_key(k)] = v
@@ -1323,7 +1340,8 @@ class InstructionTranslatorBase(object):
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True
+                throw_on_data_dependent_ops=True,
+                shape_env=output.shape_env,
             ) as fake_mode:
                 pass
             self._fake_mode = fake_mode
@@ -1425,6 +1443,10 @@ class InstructionTranslator(InstructionTranslatorBase):
             if name in f_locals:
                 self._freevars_ids[name] = id(f_locals[name])
 
+    def run(self):
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
+        super().run()
+
     def match_nested_cell(self, name, cell):
         """Match a cell in this method to one in a function we are inlining"""
         value = cell.cell_contents
@@ -1484,6 +1506,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame()
         self.instruction_pointer = None
+        _step_logger()(logging.INFO, f"torchdynamo done tracing {self.f_code.co_name}")
         self.output.compile_subgraph(self)
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
@@ -1507,6 +1530,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if func.get_name() == "patched_init":
             unimplemented("Patched init cannot be inlined.")
+
+        try:
+            if id(func.get_function()) in allowed_functions._disallowed_function_ids:
+                unimplemented(f"inlining disallowed: {func.get_function()}")
+        except NotImplementedError:
+            pass  # closures
 
         if skipfiles.check(
             func.get_filename()
