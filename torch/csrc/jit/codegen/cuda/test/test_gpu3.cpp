@@ -6291,8 +6291,32 @@ TEST_F(NVFuserTest, FusionTrivialInputForwarding_CUDA) {
   testValidate(fusion, cg_outputs, {t0, t1}, {t0}, __LINE__, __FILE__);
 
   // Second run to ensure cache hit handles trivial forwarding properly
+  TORCH_CHECK(fec.isCompiled({t0, t1}));
   auto cg_outputs2 = fec.runFusionWithInputs({t0, t1});
   testValidate(fusion, cg_outputs2, {t0, t1}, {t0}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionTrivialInputForwarding2_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(0);
+  fusion->addInput(tv0);
+  fusion->addOutput(tv0);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({}, options);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({t0});
+
+  testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
+
+  // Second run to ensure cache hit handles trivial forwarding properly
+  TORCH_CHECK(fec.isCompiled({t0}));
+  auto cg_outputs2 = fec.runFusionWithInputs({t0});
+  testValidate(fusion, cg_outputs2, {t0}, {t0}, __LINE__, __FILE__);
 }
 
 // Simplified repro of issue #2008
