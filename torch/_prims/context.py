@@ -65,6 +65,11 @@ def torch_to_refs_map():
     for s in dir(torch.Tensor):
         if s in torch._refs.__all__:
             r[getattr(torch.Tensor, s)] = torch._refs.__dict__.get(s)
+
+    # Support conversions
+    for s in torch._refs._conversions.__all__:
+        r[getattr(torch.Tensor, s)] = torch._refs._conversions.__dict__.get(s)
+
     return r
 
 
@@ -396,6 +401,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             shape = torch._prims_common.extract_shape_from_varargs(
                 shape, validate=False
             )  # type: ignore[assignment]
+            if len(kwargs) > 0:
+                warn("view has ignored kwargs!")
+            return torch.ops.nvprims.view(a, shape)
+
+        if orig_func == torch.ops.aten._reshape_alias.default:
+            a, shape, stride = args
             if len(kwargs) > 0:
                 warn("view has ignored kwargs!")
             return torch.ops.nvprims.view(a, shape)

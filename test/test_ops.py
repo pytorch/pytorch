@@ -1629,7 +1629,7 @@ class TestTags(TestCase):
 @skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
-    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft"]
+    import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs._conversions"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
     ref_ops_names = tuple(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
@@ -1673,6 +1673,19 @@ class TestRefsOpsInfo(TestCase):
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
         # these are not aten ops?
+        '_refs._conversions.bfloat16',
+        '_refs._conversions.bool',
+        '_refs._conversions.byte',
+        '_refs._conversions.char',
+        '_refs._conversions.double',
+        '_refs._conversions.float',
+        '_refs._conversions.half',
+        '_refs._conversions.int',
+        '_refs._conversions.long',
+        '_refs._conversions.short',
+        '_refs._conversions.chalf',
+        '_refs._conversions.cfloat',
+        '_refs._conversions.cdouble',
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
@@ -1701,15 +1714,23 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isclose',
         '_refs.isfinite',
         '_refs.isreal',
+        '_refs.log_softmax',
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.log_softmax',
         '_refs.nn.functional.poisson_nll_loss',
+        '_refs.nn.functional.softmax',
+        '_refs.nn.functional.softmin',
         '_refs.positive',
         '_refs.ravel',
         '_refs.reshape',
+        '_refs.softmax',
         '_refs.special.expit',
+        '_refs.special.log_softmax',
+        '_refs.special.softmax',
         '_refs.square',
+        '_refs.T',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
@@ -1870,8 +1891,6 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "svd_lowrank",
     "sgn",
     "cholesky",
-    "linalg.eigh",
-    "symeig",
 }
 
 fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
