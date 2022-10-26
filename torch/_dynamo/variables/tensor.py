@@ -536,15 +536,6 @@ class TensorVariable(VariableTracker):
                     example_value=example_value,
                     **options,
                 )
-                # else:
-                #     return DynamicShapeVariable.create(
-                #     tx,
-                #     tx.output.create_proxy(
-                #         "call_method", "item", (self.as_proxy(),), {}, current_tx=tx
-                #     ),
-                #     dyn_shape=self.get_real_value().item(),
-                #     **options,
-                # )
             else:
                 unimplemented(f"Tensor.{name}")
         elif name == "__len__":
