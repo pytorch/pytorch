@@ -95,9 +95,10 @@ def extract_gradients(
         and children
         and children[0].typed[0] == _EventType.TorchOp
         and children[0].name in ("aten::detach", "aten::add_")
-        and children[0].typed[1].inputs.tensor_metadata
+        and children[0].typed[1].inputs
+        and isinstance(children[0].typed[1].inputs[0], _TensorMetadata)
     ):
-        key = TensorKey.from_tensor(children[0].typed[1].inputs.tensor_metadata[0])
+        key = TensorKey.from_tensor(children[0].typed[1].inputs[0])
         if key:
             yield None, key
 
@@ -150,12 +151,21 @@ class SchemaMatcher:
             for i, arg in enumerate(schema.arguments):
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
-        return tuple(mutable or (True for _ in t.inputs.tensor_metadata))
+        return tuple(mutable or (True for _ in t.inputs))
 
     @classmethod
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
-        tensors = tuple(TensorKey.from_tensor(t) for t in t.inputs.tensor_metadata)
-        signature = tuple(t or s for t, s in zip(tensors, t.inputs.ivalues))
+        signature = tuple(
+            # Tensor
+            TensorKey.from_tensor(i) if isinstance(i, _TensorMetadata)
+            #
+            # TensorList
+            else [TensorKey.from_tensor(j) for j in i] if isinstance(i, list)
+            #
+            # Scalar and uncaptured inputs.
+            else i
+            for i in t.inputs
+        )
 
         def matches(schema) -> bool:
             return len(schema.arguments) == len(signature) and all(
@@ -173,6 +183,11 @@ class SchemaMatcher:
 
         if isinstance(schema_type, torch._C.AnyType):
             return True
+
+        if schema_type.isSubtypeOf(torch._C.ListType.ofTensors()):
+            return isinstance(observed, list) and all(
+                isinstance(i, TensorKey) for i in observed
+            )
 
         type_map: Tuple[Tuple[Any, Union[type, Tuple[type, ...]]], ...] = (
             (torch._C.TensorType, TensorKey),
