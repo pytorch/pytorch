@@ -396,7 +396,9 @@ def _elementwise_meta(
     seen_float = False
     if isinstance(number, (torch.SymIntNode, torch.SymFloatNode)):
         for a in args:
-            assert isinstance(a, (int, float, torch.SymIntNode, torch.SymFloatNode)), "NYI"
+            assert isinstance(
+                a, (int, float, torch.SymIntNode, torch.SymFloatNode)
+            ), "NYI"
             seen_float = seen_float or isinstance(a, (float, torch.SymFloatNode))
         if seen_float:
             number = sym_float(number)

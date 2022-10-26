@@ -103,7 +103,7 @@ def meta_copy_(self, src, non_blocking=False):
     return self
 
 
-@register_meta(aten.unsqueeze_.default, register_dispatcher=False)
+@register_meta(aten.unsqueeze_.default)
 def meta_unsqueeze_(self, dim):
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
     # new strides
@@ -137,7 +137,7 @@ def meta_max(self):
     return self.new_empty(())
 
 
-@register_meta([aten.max.dim], register_dispatcher=False)
+@register_meta([aten.max.dim])
 def meta_max_dim(self, dim, keepdim=False):
     result_size = list(self.size())
     if self.dim() > 0:
@@ -267,7 +267,7 @@ def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
 
-@register_meta(aten.bernoulli.p, register_dispatcher=False)
+@register_meta(aten.bernoulli.p)
 def meta_bernoulli(self, p=0.5, generator=None):
     return torch.empty_like(self)
 
@@ -861,7 +861,7 @@ def meta_index_Tensor(self, indices):
 
 
 # TODO: this shouldn't be necessary
-# @register_meta([aten.add.Tensor], register_dispatcher=False)
+# @register_meta([aten.add.Tensor])
 # def meta_add(self, other, *, alpha=1):
 #     check(
 #         torch.is_tensor(self),
@@ -1481,7 +1481,7 @@ def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
 
 
-@register_meta(aten.scatter.value, register_dispatcher=False)
+@register_meta(aten.scatter.value)
 def scatter_value(self, dim, index, value):
     scatter_meta_impl(self, dim, index)
     return self.new_empty(self.shape)
@@ -1834,7 +1834,7 @@ def check_argmax_argmin(name, self, dim):
         )
 
 
-@register_meta(aten.argmax.default, register_dispatcher=False)
+@register_meta(aten.argmax.default)
 def argmax_meta(self, dim=None, keepdim=False):
     check_argmax_argmin("argmax", self, dim)
     dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
@@ -1892,7 +1892,7 @@ def infer_dense_strides(tensor_sizes, tensor_strides):
     return out_strides
 
 
-@register_meta(aten.sort.default, register_dispatcher=False)
+@register_meta(aten.sort.default)
 def sort_meta(self, dim=-1, descending=False):
     if utils.is_non_overlapping_and_dense(self):
         strides = self.stride()
@@ -1903,7 +1903,7 @@ def sort_meta(self, dim=-1, descending=False):
     return (values, indices)
 
 
-@register_meta(aten.grid_sampler_2d_backward.default, register_dispatcher=False)
+@register_meta(aten.grid_sampler_2d_backward.default)
 def grid_sample_2d_backward_meta(
     grad_output,
     input,
@@ -1922,7 +1922,7 @@ def grid_sample_2d_backward_meta(
     return (grad_input, grad_grid)
 
 
-@register_meta(aten.upsample_bilinear2d_backward.vec, register_dispatcher=False)
+@register_meta(aten.upsample_bilinear2d_backward.vec)
 def upsample_bilinear2d_backward_vec_meta(
     grad_output, output_size, input_size, align_corners, scale_factors
 ):
@@ -1930,7 +1930,7 @@ def upsample_bilinear2d_backward_vec_meta(
     return grad_output.new_empty(input_size).to(memory_format=mem_format)
 
 
-@register_meta(aten.topk.default, register_dispatcher=False)
+@register_meta(aten.topk.default)
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     check(
@@ -1946,7 +1946,7 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
 
-@register_meta(aten.scalar_tensor.default, register_dispatcher=False)
+@register_meta(aten.scalar_tensor.default)
 def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     return torch.empty(
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory

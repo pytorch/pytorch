@@ -756,10 +756,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return r
 
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if (
-            has_symbolic_sizes
-            and not self.cpp_meta_supports_symint(func)
-        ):
+        if has_symbolic_sizes and not self.cpp_meta_supports_symint(func):
             from torch._decomp import meta_table as meta_table
 
             with no_dispatch():

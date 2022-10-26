@@ -1,5 +1,5 @@
-from typing import Callable, List, Optional, Tuple, Union
 from dataclasses import dataclass
+from typing import Callable, List, Optional, Tuple, Union
 
 from torchgen.api import cpp, dispatcher
 from torchgen.api.translate import translate
@@ -17,10 +17,10 @@ from torchgen.api.types import (
     ViewInverseSignature,
 )
 from torchgen.context import (
+    method_with_native_function,
     native_function_manager,
     with_native_function,
     with_native_function_and,
-    method_with_native_function,
 )
 from torchgen.model import (
     Argument,
