@@ -673,7 +673,7 @@ def count_pytest_test_cases(argv: List[str]) -> List[str]:
 
     test_collector_plugin = TestCollectorPlugin()
     import pytest
-    pytest.main([file, '--collect-only'] + [arg for arg in argv if arg != '-vv'], plugins=[test_collector_plugin])
+    pytest.main([arg for arg in argv if arg != '-vv'] + ['--collect-only', '-qq'], plugins=[test_collector_plugin])
     return test_collector_plugin.tests
 
 def run_tests(argv=UNITTEST_ARGS):
