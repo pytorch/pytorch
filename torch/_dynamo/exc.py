@@ -1,7 +1,6 @@
 import os
 import textwrap
 
-from . import config
 from .utils import counters
 
 
