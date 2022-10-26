@@ -93,9 +93,10 @@ def extract_gradients(
         and children
         and children[0].typed[0] == _EventType.TorchOp
         and children[0].name in ("aten::detach", "aten::add_")
-        and children[0].typed[1].inputs.tensor_metadata
+        and children[0].typed[1].inputs
+        and isinstance(children[0].typed[1].inputs[0], _TensorMetadata)
     ):
-        key = TensorKey.from_tensor(children[0].typed[1].inputs.tensor_metadata[0])
+        key = TensorKey.from_tensor(children[0].typed[1].inputs[0])
         if key:
             yield None, key
 
