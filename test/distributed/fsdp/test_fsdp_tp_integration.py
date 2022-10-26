@@ -11,22 +11,25 @@ from torch.distributed._shard import shard_module
 from torch.distributed._shard.sharded_tensor.api import Shard, ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions, FSDPExtensions
+from torch.distributed.fsdp._fsdp_extensions import (
+    FSDPExtensions,
+    _set_fsdp_extensions,
+)
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.fsdp._utils import _set_fsdp_flattened
+from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    CPUOffload,
     FullyShardedDataParallel as FSDP,
-    StateDictType,
 )
+from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.remote_device import _remote_device
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
