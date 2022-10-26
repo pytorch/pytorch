@@ -7,6 +7,7 @@ static methods.
 import torch
 import random
 import os
+import pickle
 import queue
 from dataclasses import dataclass
 from torch._utils import ExceptionWrapper
@@ -210,7 +211,8 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  num_workers, persistent_workers, shared_seed):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
-
+    if type(dataset) is bytes:
+        dataset = pickle.loads(dataset)
     try:
         # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
         # module's handlers are executed after Python returns from C low-level

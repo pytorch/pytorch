@@ -9,6 +9,7 @@ import functools
 import itertools
 import logging
 import os
+import pickle
 import queue
 import threading
 import warnings
@@ -1013,7 +1014,16 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         self._index_queues = []
         self._workers = []
-        for i in range(self._num_workers):
+        pickled_dataset = None
+        try:
+            pickled_dataset = pickle.dumps(self._dataset)
+        except Exception as e:
+            print(e)
+            print("WARNING: could not pickle this dataset; "
+                  "DataLoader initialization performance may be impacted")
+        should_thread = (self._num_workers >= 4)
+
+        def launch(i):
             # No certainty which module multiprocessing_context is
             index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
             # Need to `cancel_join_thread` here!
@@ -1021,7 +1031,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             index_queue.cancel_join_thread()
             w = multiprocessing_context.Process(
                 target=_utils.worker._worker_loop,
-                args=(self._dataset_kind, self._dataset, index_queue,
+                args=(self._dataset_kind, pickled_dataset or self._dataset, index_queue,
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
                       self._base_seed, self._worker_init_fn, i, self._num_workers,
@@ -1034,8 +1044,24 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             #     before it starts, and __del__ tries to join but will get:
             #     AssertionError: can only join a started process.
             w.start()
-            self._index_queues.append(index_queue)
-            self._workers.append(w)
+            return index_queue, w
+        if should_thread:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self._num_workers) as executor:
+                futures = [executor.submit(launch, i) for i in range(self._num_workers)]
+                for i in range(self._num_workers):
+                    try:
+                        index_queue, w = futures[i].result()
+                        self._index_queues.append(index_queue)
+                        self._workers.append(w)
+                    except Exception:
+                        print(f"Caught an exception trying to launch worker {i}")
+                        raise
+        else:
+            for i in range(self._num_workers):
+                index_queue, w = launch(i)
+                self._index_queues.append(index_queue)
+                self._workers.append(w)
 
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
