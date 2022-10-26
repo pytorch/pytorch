@@ -723,6 +723,7 @@ class CommonTemplate:
     def test_reduction4(self):
         if self.device == "cpu":
             raise unittest.SkipTest("Non-deterministic CPU results")
+
         def fn(a):
             return (a.argmax(-1), a.argmin(-1))
 
