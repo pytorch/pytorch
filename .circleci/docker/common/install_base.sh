@@ -129,7 +129,6 @@ install_centos() {
     opencv-devel \
     sudo \
     wget \
-    unzip \
     vim \
     unzip \
     gdb
