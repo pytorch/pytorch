@@ -16,6 +16,7 @@
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
+#include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
@@ -237,29 +238,34 @@ using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
 using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
 using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
 
-struct ParameterInfo {
-  std::string param_name_;
-  TensorMetadata param_;
-  c10::optional<TensorMetadata> grad_;
-};
-
 struct NNModuleInfo {
+  struct ParameterInfo {
+    std::string name_;
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+  };
+
   PyModuleSelf self_;
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<ParameterInfo> params_;
+  std::vector<ParameterInfo> parameters_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };
 
 struct OptimizerInfo {
-  PyOptimizerSelf self_;
-  PyOptimizerCls opt_;
-  at::StringView opt_name_;
+  struct ParameterInfo {
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+    std::vector<std::pair<std::string, TensorMetadata>> state_;
+  };
 
-  std::vector<TensorMetadata> params_addr_;
-  std::vector<std::pair<std::string, TensorMetadata>> opt_state_;
+  PyOptimizerSelf self_;
+  PyOptimizerCls cls_;
+  at::StringView cls_name_;
+
+  std::vector<ParameterInfo> parameters_;
 };
 
 struct PyExtraFieldsBase {
@@ -276,10 +282,10 @@ struct PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
-  using args_t = struct {
+  struct args_t {
     PyFrameState frame_state_;
     c10::optional<NNModuleInfo> module_info_;
-    c10::optional<OptimizerInfo> opt_info_;
+    c10::optional<OptimizerInfo> optimizer_info_;
   };
 
   ExtraFields(
@@ -290,11 +296,11 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
         callsite_{args.frame_state_},
         module_{args.module_info_},
-        opt_{args.opt_info_} {}
+        optimizer_{args.optimizer_info_} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
-  c10::optional<OptimizerInfo> opt_;
+  c10::optional<OptimizerInfo> optimizer_;
 };
 
 template <>

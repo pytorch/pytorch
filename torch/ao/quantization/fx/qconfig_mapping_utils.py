@@ -38,7 +38,7 @@ from ..qconfig_mapping_utils import (
 __all__ = [
     "check_is_valid_config_dict",
     "compare_prepare_convert_qconfig_mappings",
-    "generate_qconfig_map",
+    "generate_node_name_to_qconfig",
     "is_qconfig_supported_by_dtype_configs",
     "maybe_adjust_qconfig_for_module_name_object_type_order",
     "update_qconfig_for_fusion",
@@ -100,14 +100,14 @@ def update_qconfig_for_fusion(model: GraphModule, qconfig_mapping: QConfigMappin
             if fused_qconfig is not None:
                 object_type_dict[type(maybe_fused_module)] = fused_qconfig
 
-def generate_qconfig_map(
+def generate_node_name_to_qconfig(
         root: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
         input_graph: Graph,
         qconfig_mapping: QConfigMapping,
         node_name_to_scope: Dict[str, Tuple[str, type]]) -> Dict[str, QConfigAny]:
     global_qconfig = qconfig_mapping.global_qconfig
-    qconfig_map = {}
+    node_name_to_qconfig = {}
 
     # example:
     #
@@ -183,8 +183,8 @@ def generate_qconfig_map(
         else:
             qconfig_with_device_check = None
 
-        qconfig_map[node.name] = qconfig_with_device_check
-    return qconfig_map
+        node_name_to_qconfig[node.name] = qconfig_with_device_check
+    return node_name_to_qconfig
 
 
 def check_is_valid_config_dict(config_dict: Any, allowed_keys: Set[str], dict_name: str) -> None:
