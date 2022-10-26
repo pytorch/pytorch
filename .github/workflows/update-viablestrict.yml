@@ -24,7 +24,6 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
-          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.circleci/docker/requirements-ci.txt
