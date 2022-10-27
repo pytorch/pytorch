@@ -253,6 +253,16 @@ class BuiltinVariable(VariableTracker):
             tensor_args = False
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
 
+        # if (
+        #     self.can_insert_in_graph()
+        #     and tensor_args
+        #     and not (
+        #         self.fn is operator.getitem
+        #         and isinstance(args[0], ConstDictVariable)
+        #         and isinstance(args[1], variables.TupleVariable)
+        #     )
+        # ):
+
         if (
             self.can_insert_in_graph()
             and tensor_args
@@ -465,7 +475,7 @@ class BuiltinVariable(VariableTracker):
             )
 
     def call_slice(self, tx, *args):
-        return variables.SliceVariable(args)
+        return variables.SliceVariable(tx, args)
 
     def _call_iter_tuple_list(self, tx, obj=None):
         cls = variables.BaseListVariable.cls_for(self.fn)
