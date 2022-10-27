@@ -33,20 +33,20 @@ QOP_TO_ARG_NAMES_TO_SKIP = {
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
 
-def _is_node_in_list(node, modules, func_list, method_list, module_type_list):
-    is_call_function = node.op == "call_function" and node.target in func_list
-    is_call_method = node.op == "call_method" and node.target in method_list
-    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
+def _is_node_in_list(node, modules, _func_list, _method_list, _module_type_list):
+    is_call_function = node.op == "call_function" and node.target in _func_list
+    is_call_method = node.op == "call_method" and node.target in _method_list
+    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in _module_type_list
     return is_call_function, is_call_method, is_call_module
 
 def is_fixed_qparams_node(node, modules):
-    func_list = [
+    _func_list = [
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.sigmoid,
         torch.sigmoid,
         torch.tanh,
     ]
-    method_list = [
+    _method_list = [
         "hardsigmoid",
         "hardsigmoid_",
         "sigmoid",
@@ -54,16 +54,16 @@ def is_fixed_qparams_node(node, modules):
         "tanh",
         "tanh_",
     ]
-    module_type_list = [
+    _module_type_list = [
         torch.nn.Hardsigmoid,
         torch.nn.Sigmoid,
         torch.nn.Tanh,
         torch.nn.Softmax,
     ]
-    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, _func_list, _method_list, _module_type_list)
 
 def is_default_node(node, modules):
-    func_list = [
+    _func_list = [
         torch.nn.functional.elu,
         torch.nn.functional.hardswish,
         torch.nn.functional.instance_norm,
@@ -71,8 +71,8 @@ def is_default_node(node, modules):
         torch.nn.functional.leaky_relu,
         torch.nn.functional.dropout,
     ]
-    method_list: List[Any] = []
-    module_type_list = [
+    _method_list: List[Any] = []
+    _module_type_list = [
         nnqr.ConvTranspose1d,
         nnqr.ConvTranspose2d,
         torch.nn.ELU,
@@ -89,10 +89,10 @@ def is_default_node(node, modules):
         torch.nn.intrinsic.BNReLU2d,
         torch.nn.intrinsic.BNReLU3d,
     ]
-    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, _func_list, _method_list, _module_type_list)
 
 def is_copy_node(node, modules):
-    func_list = [
+    _func_list = [
         torch.adaptive_avg_pool1d,
         torch.nn.functional.adaptive_avg_pool2d,
         torch.nn.functional.adaptive_avg_pool3d,
@@ -112,13 +112,13 @@ def is_copy_node(node, modules):
         torch.mean,
         operator.floordiv,
     ]
-    method_list = [
+    _method_list = [
         "clamp",
         "mean",
         "relu",
         "relu_",
     ]
-    module_type_list = [
+    _module_type_list = [
         torch.nn.AdaptiveAvgPool1d,
         torch.nn.AdaptiveAvgPool2d,
         torch.nn.AdaptiveAvgPool3d,
@@ -132,17 +132,17 @@ def is_copy_node(node, modules):
         torch.nn.ReLU,
         torch.nn.ReLU6,
     ]
-    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, _func_list, _method_list, _module_type_list)
 
 def is_general_tensor_shape_node(node, modules):
-    func_list = [
+    _func_list = [
         torch.transpose,
         torch.repeat_interleave,
         torch.squeeze,
         torch.stack,
         torch.unsqueeze,
     ]
-    method_list = [
+    _method_list = [
         "contiguous",
         "detach",
         "detach_",
@@ -160,18 +160,18 @@ def is_general_tensor_shape_node(node, modules):
         "unsqueeze_",
         "view",
     ]
-    module_type_list = [
+    _module_type_list = [
         torch.nn.Identity,
     ]
-    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+    return _is_node_in_list(node, modules, _func_list, _method_list, _module_type_list)
 
 def is_other_node(node, modules):
-    func_list = [
+    _func_list = [
         torch.cat,
     ]
-    method_list: List[Any] = []
-    module_type_list: List[Any] = []
-    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+    _method_list: List[Any] = []
+    _module_type_list: List[Any] = []
+    return _is_node_in_list(node, modules, _func_list, _method_list, _module_type_list)
 
 def is_special_pattern_node(node, modules):
     res_function, res_method, res_module = False, False, False

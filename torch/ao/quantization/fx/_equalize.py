@@ -13,7 +13,7 @@ from torch.fx.graph import Node
 from torch.ao.quantization.backend_config import get_native_backend_config
 
 from ..observer import _with_args, ObserverBase, PerChannelMinMaxObserver
-from ..utils import _parent_name, check_min_max_valid
+from ..utils import _parent_name, _check_min_max_valid
 
 from .utils import (
     get_new_attr_name_with_prefix,
@@ -186,7 +186,7 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
     (min_inputs, max_inputs) = input_obs.get_input_minmax()
     (min_weights, max_weights) = weight_obs.get_weight_col_minmax()
 
-    if not (check_min_max_valid(min_inputs, max_inputs) and check_min_max_valid(min_weights, max_weights)):
+    if not (_check_min_max_valid(min_inputs, max_inputs) and _check_min_max_valid(min_weights, max_weights)):
         warnings.warn(
             "Must run observer before calling calculate_equalization_scale. " +
             "Returning default equalization scale torch.tensor(1)."

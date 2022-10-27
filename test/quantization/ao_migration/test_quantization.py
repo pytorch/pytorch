@@ -235,21 +235,21 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
 
     def test_function_import_utils(self):
         function_list = [
-            'activation_dtype',
-            'activation_is_int8_quantized',
-            'activation_is_statically_quantized',
-            'calculate_qmin_qmax',
-            'check_min_max_valid',
+            '_activation_dtype',
+            '_activation_is_int8_quantized',
+            '_activation_is_statically_quantized',
+            '_calculate_qmin_qmax',
+            '_check_min_max_valid',
             'get_combined_dict',
-            'get_qconfig_dtypes',
+            '_get_qconfig_dtypes',
             'get_qparam_dict',
-            'get_quant_type',
+            '_get_quant_type',
             'get_swapped_custom_module_class',
             'getattr_from_fqn',
             'is_per_channel',
             'is_per_tensor',
-            'weight_dtype',
-            'weight_is_quantized',
-            'weight_is_statically_quantized',
+            '_weight_dtype',
+            '_weight_is_quantized',
+            '_weight_is_statically_quantized',
         ]
         self._test_function_import('utils', function_list)

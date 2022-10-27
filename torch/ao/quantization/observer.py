@@ -13,7 +13,7 @@ from typing import Any, List, Tuple, Optional, Dict
 import torch
 import torch.nn as nn
 from torch.ao.quantization.utils import (
-    check_min_max_valid, calculate_qmin_qmax, is_per_tensor, is_per_channel)
+    _check_min_max_valid, _calculate_qmin_qmax, is_per_tensor, is_per_channel)
 
 __all__ = [
     "default_affine_fixed_qparams_observer",
@@ -238,7 +238,7 @@ class UniformQuantizationObserverBase(ObserverBase):
         if self.has_customized_qrange:
             self._validate_qmin_qmax(quant_min, quant_max)
         self.quant_min, self.quant_max = \
-            calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
+            _calculate_qmin_qmax(quant_min, quant_max, self.has_customized_qrange, self.dtype, self.reduce_range)
 
     def _load_from_state_dict(
         self,
@@ -307,7 +307,7 @@ class UniformQuantizationObserverBase(ObserverBase):
             scales: Scales tensor of shape (#channels,)
             zero_points: Zero points tensor of shape (#channels,)
         """
-        if not check_min_max_valid(min_val, max_val):
+        if not _check_min_max_valid(min_val, max_val):
             return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
 
         quant_min, quant_max = self.quant_min, self.quant_max

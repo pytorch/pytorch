@@ -89,10 +89,10 @@ from torch.ao.quantization.quantize import (
 )
 
 from ..utils import (
-    get_qconfig_dtypes,
+    _get_qconfig_dtypes,
     get_swapped_custom_module_class,
-    activation_is_statically_quantized,
-    activation_is_int8_quantized,
+    _activation_is_statically_quantized,
+    _activation_is_int8_quantized,
 )
 
 from ..backend_config.utils import (
@@ -415,7 +415,7 @@ def get_target_activation_dtype_for_node(
         if qconfig is not None:
             if qhandler is not None and qhandler.input_output_observed():
                 act_dtype, weight_dtype, act_compute_dtype = \
-                    get_qconfig_dtypes(qconfig)
+                    _get_qconfig_dtypes(qconfig)
                 input_act_is_dynamic = act_compute_dtype is not None
 
                 # Currently `QConfig` only has one `activation` field.
@@ -818,7 +818,7 @@ def maybe_insert_output_observer_for_node(
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
-        activation_is_statically_quantized(qconfig)
+        _activation_is_statically_quantized(qconfig)
 
     # we never insert observers to output of standalone module, we assume
     # if needed, they are inserted inside the standalone module
@@ -827,7 +827,7 @@ def maybe_insert_output_observer_for_node(
 
     if should_insert_observer:
         act_post_process_ctr = qconfig.activation
-        if activation_is_int8_quantized(qconfig):
+        if _activation_is_int8_quantized(qconfig):
             act_post_process_ctr = qhandler.get_activation_ctr(
                 qconfig,
                 matched_pattern,

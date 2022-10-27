@@ -14,7 +14,7 @@ from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
-    activation_is_statically_quantized,
+    _activation_is_statically_quantized,
     is_per_tensor,
     is_per_channel,
 )
@@ -669,7 +669,7 @@ def _is_custom_module_lstm(
     if qconfig is not None and qhandler is not None:
         assert isinstance(qhandler, torch.ao.quantization.fx.quantization_patterns.QuantizeHandler)  # type: ignore[attr-defined]
         return isinstance(mod, torch.nn.LSTM) and \
-            activation_is_statically_quantized(qconfig) and \
+            _activation_is_statically_quantized(qconfig) and \
             qhandler.is_custom_module()
     else:
         return isinstance(mod, torch.ao.nn.quantizable.LSTM)

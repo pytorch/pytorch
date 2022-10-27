@@ -5,7 +5,7 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
 )
 from torch.ao.quantization.utils import (
-    activation_dtype,
+    _activation_dtype,
     get_combined_dict,
     Pattern,
     NodePattern,
@@ -60,7 +60,7 @@ def get_quantize_handler_cls(
             used for the pattern matched to this handler. Some handlers override
             this to a different value than what is specified in the qconfig.
             """
-            act_dtype = activation_dtype(qconfig)
+            act_dtype = _activation_dtype(qconfig)
             # TODO: change to is_qat
             if is_training:
                 if act_dtype == torch.quint8 and self.overwrite_output_fake_quantizer is not None:

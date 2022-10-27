@@ -12,8 +12,8 @@ from torch.fx.graph import (
     Argument,
 )
 from ..utils import (
-    activation_is_statically_quantized,
-    weight_is_quantized,
+    _activation_is_statically_quantized,
+    _weight_is_quantized,
     get_qparam_dict,
     _parent_name,
     get_swapped_custom_module_class,
@@ -328,8 +328,8 @@ def convert_weighted_module(
     if not is_qconfig_supported_by_dtype_configs(qconfig, dtype_configs):
         return
 
-    # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
-    is_weight_quantized = weight_is_quantized(qconfig)
+    # TODO: rename _weight_is_statically_quantized to weight_is_int8_quantized
+    is_weight_quantized = _weight_is_quantized(qconfig)
 
     # the condition for swapping the module to reference quantized module is:
     # weights need to be quantized
@@ -444,7 +444,7 @@ def convert_custom_module(
     observed_custom_module = modules[str(node.target)]
     maybe_obs = maybe_get_observer_for_node(node, modules)
     qconfig = observed_custom_module.qconfig
-    if activation_is_statically_quantized(qconfig):
+    if _activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)
         if _is_custom_module_lstm(node, modules):
             # The inputs are tuples in the form (input, (hidden0, hidden1))
