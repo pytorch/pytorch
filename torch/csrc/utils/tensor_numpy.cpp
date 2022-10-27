@@ -219,7 +219,7 @@ at::Tensor tensor_from_numpy(
     throw std::runtime_error("Numpy is not available");
   }
   if (!PyArray_Check(obj)) {
-    throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
+    C10_THROW_ERROR(TypeError, c10::str("expected np.ndarray (got ",  Py_TYPE(obj)->tp_name, ")"));
   }
   auto array = (PyArrayObject*)obj;
 
@@ -236,7 +236,7 @@ at::Tensor tensor_from_numpy(
   auto element_size_in_bytes = PyArray_ITEMSIZE(array);
   for (auto& stride : strides) {
     if (stride % element_size_in_bytes != 0) {
-      throw ValueError(
+      C10_THROW_ERROR(ValueError,
           "given numpy array strides not a multiple of the element byte size. "
           "Copy the numpy array to reallocate the memory.");
     }
@@ -245,7 +245,7 @@ at::Tensor tensor_from_numpy(
 
   for (const auto i : c10::irange(ndim)) {
     if (strides[i] < 0) {
-      throw ValueError(
+      C10_THROW_ERROR(ValueError,
           "At least one stride in the given numpy array is negative, "
           "and tensors with negative strides are not currently supported. "
           "(You can probably work around this by making a copy of your array "
@@ -255,7 +255,7 @@ at::Tensor tensor_from_numpy(
 
   void* data_ptr = PyArray_DATA(array);
   if (!PyArray_EquivByteorders(PyArray_DESCR(array)->byteorder, NPY_NATIVE)) {
-    throw ValueError(
+    C10_THROW_ERROR(ValueError,
         "given numpy array has byte order different from the native byte order. "
         "Conversion between byte orders is currently not supported.");
   }
@@ -399,7 +399,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyArray_Descr* descr;
     if (!PyArray_DescrConverter(py_typestr, &descr)) {
-      throw ValueError("cannot parse `typestr`");
+      C10_THROW_ERROR(ValueError,"cannot parse `typestr`");
     }
     dtype = numpy_dtype_to_aten(descr->type_num);
     dtype_size_in_bytes = descr->elsize;
@@ -449,7 +449,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       // counts.
       for (auto& stride : strides) {
         if (stride % dtype_size_in_bytes != 0) {
-          throw ValueError(
+          C10_THROW_ERROR(ValueError,
               "given array strides not a multiple of the element byte size. "
               "Make a copy of the array to reallocate the memory.");
         }

@@ -54,7 +54,7 @@ static PyObject* THPVariable_pynew(
   }
 
   if (is_volatile && requires_grad) {
-    throw ValueError(
+    C10_THROW_ERROR(ValueError,
         "Variable can't be volatile and require_grad at the same time!");
   }
   if (grad_fn && !THPFunction_Check(grad_fn)) {

@@ -340,10 +340,16 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
   if (N < max_args) {
-    throw ValueError(
-        "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
-        (int)max_args,
-        N);
+    C10_THROW_ERROR(
+        ValueError,
+        c10::str(
+            "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+            // TODO(shikanime): maybe need to fix the %d format specifier
+            (int)max_args,
+            " (got ",
+            // TODO(shikanime): maybe need to fix the %d format specifier
+            N,
+            ")"));
   }
   return raw_parse(self, args, kwargs, dst.args);
 }
