@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <stack>
 
 #include <torch/csrc/profiler/events.h>
 
@@ -92,10 +93,11 @@ class PerfProfiler {
 
  private:
   uint64_t CalcDelta(uint64_t start, uint64_t end) const;
+  void StartCounting() const;
+  void StopCounting() const;
 
-  bool is_enabled_{false};
   std::vector<PerfEvent> events_;
-  perf_counters_t start_values_;
+  std::stack<perf_counters_t> start_values_;
 };
 } // namespace linux_perf
 } // namespace impl
