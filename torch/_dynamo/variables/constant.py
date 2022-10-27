@@ -14,6 +14,7 @@ class ConstantVariable(VariableTracker):
         super(ConstantVariable, self).__init__(**kwargs)
         assert not isinstance(value, torch.Tensor)
         assert not isinstance(value, torch.SymInt)
+        assert not isinstance(value, torch.SymFloat)
         self.value = value
 
     def as_proxy(self):
@@ -105,10 +106,10 @@ class ConstantVariable(VariableTracker):
         elif has_arith_binop(int) or has_arith_binop(float):
             op = getattr(operator, name)
             add_target = const_args[0]
-            if isinstance(add_target, torch.SymInt):
+            if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
                 from .tensor import DynamicShapeVariable
 
-                # Addition between a non symint and symint makes a symint
+                # Addition between a non sym and sym makes a sym
                 dyn_shape = tx.output.register_attr_or_module(
                     add_target, f"sym_shape_{add_target}", source=None
                 )

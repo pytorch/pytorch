@@ -224,7 +224,7 @@ class OutputGraph(fx.Tracer):
             def wrap_name(module_key):
                 return NNModuleVariable(type(target), module_key, **options)
 
-        elif isinstance(target, torch.SymInt):
+        elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             self.intermediary_symbols.update({target.get_pyobj().expr: ""})
 
             def wrap_name(module_key):
