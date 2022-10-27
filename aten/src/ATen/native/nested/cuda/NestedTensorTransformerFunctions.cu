@@ -802,7 +802,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   }
   Tensor out_buffer = self_buffer.new_empty(out_numel);
   Tensor output = wrap_buffer(out_buffer, out_sizemat);
-  at::Device device = output.device();
 
 #ifndef USE_ROCM
 #ifndef _WIN32

@@ -143,7 +143,9 @@ def main():
     batch_size = 64
     pad_percentage = 0.5
 
-    for (enable_math, enable_flash) in [(False, True), (True, False), (True, True)]:
+    for (enable_math, enable_flash) in [(True, False),
+                                        (False, True),
+                                        (True, True)]:
         for num_heads, max_seq_len in itertools.product([2, 4, 8, 16, 32], [64, 128, 256]):
             run_timing(iters, batch_size, 1024, num_heads, max_seq_len,
                        pad_percentage, enable_math, enable_flash, writer)

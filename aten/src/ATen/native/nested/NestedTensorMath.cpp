@@ -951,7 +951,9 @@ matmul_nested_helper(
 }
 }
 
-Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
+Tensor matmul_with_bmm_nested(const Tensor& self_, const Tensor& mat2_) {
+  Tensor self = self_.contiguous();
+  Tensor mat2 = mat2_.contiguous();
   // self [N, n_heads, *, head_dim]
   // mat2 [N, n_heads, head_dim, *]
   const auto self_ptr = get_nested_tensor_impl(self);
@@ -959,13 +961,13 @@ Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   // metadata for self
   std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
   std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
-  std::vector<int64_t> self_offsets = self_ptr->get_offsets();
+  std::vector<int64_t> self_offsets = self_ptr->get_storage_offsets();
   auto opt = self_ptr->get_nested_size_tensor().options();
 
   // metadata for mat2
   std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
   std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  std::vector<int64_t> mat2_offsets = mat2_ptr->get_offsets();
+  std::vector<int64_t> mat2_offsets = mat2_ptr->get_storage_offsets();
   auto opt2 = mat2_ptr->get_nested_size_tensor().options();
 
   int64_t N = self_sizes.size();
