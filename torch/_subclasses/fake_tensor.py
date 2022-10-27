@@ -238,7 +238,9 @@ class FakeTensorConverter(object):
         self.set_tensor_memo(t, out)
         return out
 
+    # If you specify the device, it MUST be a meta tensor.
     def from_meta_and_device(self, fake_mode, t, device):
+        assert t.device.type == "meta"
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -246,27 +248,19 @@ class FakeTensorConverter(object):
         self.set_tensor_memo(t, out)
         return out
 
-    # There are two ways to call this.  First, you can have manually constructed
-    # a meta tensor and you need to turn it into a fake tensor.  In that case,
-    # pass a meta tensor and a device argument.  Alternately, you can have a
-    # real tensor that you need to convert into a fake tensor; in that case,
-    # omit the device.
+    # You can have a real tensor that you need to convert into a fake tensor.
+    # If you have a meta tensor already, call from_meta_and_device.
     #
-    # The disallowed case: if you specify the device, it MUST be a meta tensor.
-    # However, you're allowed to pass a meta tensor to be turned into a fake
+    # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
-    # cross ref testing and the inner test is already operating on meta tensors
+    # cross ref testing and the inner test is already operating on meta tensors.
+    # You must have created the FakeTensorMode with allow_meta == True
     def __call__(
-        self, fake_mode, t, device=None, *, make_constant=False, shape_env=None
+        self, fake_mode, t, *, make_constant=False, shape_env=None
     ):
-        if device is None:
-            return self.from_real_tensor(
-                fake_mode, t, make_constant, shape_env=shape_env
-            )
-        else:
-            assert make_constant is False
-            assert t.device.type == "meta"
-            return self.from_meta_and_device(fake_mode, t, device)
+        return self.from_real_tensor(
+            fake_mode, t, make_constant, shape_env=shape_env
+        )
 
 
 op_implementations = []
@@ -318,7 +312,8 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     new_kwargs["device"] = torch.device("meta")
     inp = new_kwargs.pop("input")
     r = func(inp, **new_kwargs)
-    return fake_mode.fake_tensor_converter(fake_mode, r, out_device)
+    # TODO: I think this does the wrong thing if r is inp
+    return fake_mode.fake_tensor_converter.from_meta_and_device(fake_mode, r, out_device)
 
 
 # Dont default to default device handling,
@@ -876,7 +871,7 @@ class FakeTensorMode(TorchDispatchMode):
             if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                 if common_device is None:
                     common_device = FakeTensor._find_common_device(func, args, kwargs)
-                return converter(self, e, device or common_device)
+                return converter.from_meta_and_device(self, e, device or common_device)
             else:
                 return e
 
