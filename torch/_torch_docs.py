@@ -12408,7 +12408,8 @@ The operation is defined as:
         \text{x}_i & \text{if } \text{condition}_i \\
         \text{y}_i & \text{otherwise} \\
     \end{cases}
-
+"""
+    + r"""
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
