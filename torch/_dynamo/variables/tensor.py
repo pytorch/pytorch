@@ -116,10 +116,7 @@ def _get_fake_value(node, tx):
             nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
     def context():
-        if hasattr(py_dispatch, "enable_torch_dispatch_mode"):
-            return py_dispatch.enable_torch_dispatch_mode(tx.fake_mode)
-        else:
-            return tx.fake_mode
+        return tx.fake_mode
 
     if op == "call_module" and is_lazy_module(nnmodule):
         assert nnmodule is not None
