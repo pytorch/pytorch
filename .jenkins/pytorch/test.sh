@@ -250,7 +250,7 @@ test_dynamo_shard() {
 }
 
 test_inductor_distributed() {
-  python run_test.py --include distributed/test_dynamo_distributed
+  python test/run_test.py --include distributed/test_dynamo_distributed
   assert_git_not_dirty
 }
 
