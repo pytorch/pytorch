@@ -11,8 +11,8 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import NumberType, TensorLike, TensorSequenceType
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
+from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -363,7 +363,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss_backward)
+@register_decomposition(aten.huber_loss_backward.default)
 @pw_cast_for_opmath
 def huber_loss_backward(
     grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, delta: float
@@ -375,6 +375,22 @@ def huber_loss_backward(
         -norm * grad_output * delta,
         torch.where(x > delta, norm * grad_output * delta, norm * x * grad_output),
     )
+
+
+# We cannot use @out_wrapper() here, because the output tensor is not named 'out', it's 'grad_input'
+@register_decomposition(aten.huber_loss_backward.out)
+@pw_cast_for_opmath
+def huber_loss_backward_out(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int,
+    delta: float,
+    grad_input: Tensor,
+):
+    result = huber_loss_backward(grad_output, self, target, reduction, delta)
+    _maybe_resize_out(grad_input, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
 
 
 def _nll_loss_backward(
@@ -990,17 +1006,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return result
 
 
-# Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
-@register_decomposition(aten.addcmul)
-@out_wrapper()
-@pw_cast_for_opmath
-def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
-    if self.is_floating_point() or self.is_complex():
-        return self + value * tensor1 * tensor2
-    else:
-        return self + int(value) * tensor1 * tensor2
-
-
 @register_decomposition(aten.rsub.Tensor)
 def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
     return torch.sub(other, self, alpha=alpha)
@@ -1068,7 +1073,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten.split_with_sizes, disable_meta=True)
+@register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -1082,7 +1087,7 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.split.Tensor, disable_meta=True)
+@register_decomposition(aten.split.Tensor)
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -1126,7 +1131,7 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_group_norm.default, disable_meta=True)
+@register_decomposition(aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
     weight: Optional[Tensor],
@@ -1428,7 +1433,6 @@ def _to_copy(
     return x
 
 
-@register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
     return aten.where(
@@ -1496,7 +1500,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
+@register_decomposition([aten.detach, aten.lift, aten.lift_fresh])
 def nop_decomposition(x):
     return aten.alias(x)
 
@@ -1662,7 +1666,7 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten._adaptive_avg_pool2d, disable_meta=True)
+@register_decomposition(aten._adaptive_avg_pool2d)
 @pw_cast_for_opmath
 def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     # Preconditions
@@ -1735,7 +1739,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.mean(vals, dim=(-3, -1))
 
     def maybe_mask(vals, length, range_max, adaptive, dim):
-        if isinstance(length, int):
+        if isinstance(length, IntLike):
             return vals, length
         else:
             # zero-out the things we didn't really want to select
@@ -1847,6 +1851,7 @@ def norm(
 
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
+@register_decomposition(torch.ops.aten.upsample_bilinear2d.vec, type="pre_autograd")
 @pw_cast_for_opmath
 def upsample_bilinear2d_vec(
     input: Tensor,
@@ -1923,7 +1928,7 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
 
 
-@register_decomposition([aten._reshape_alias, aten._unsafe_view], disable_meta=True)
+@register_decomposition([aten._reshape_alias, aten._unsafe_view])
 def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
@@ -2189,7 +2194,7 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot, disable_meta=True)
+@register_decomposition(aten.dot)
 @out_wrapper()
 @pw_cast_for_opmath
 def dot(self, other):
@@ -2374,7 +2379,6 @@ def matmul(tensor1, tensor2):
 
 
 @register_decomposition(aten.upsample_bicubic2d.default)
-@out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     a: Tensor,

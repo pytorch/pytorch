@@ -2,7 +2,6 @@
 import click
 import numpy as np
 import torch
-import triton
 from operator_inp_utils import OperatorInputsLoader
 
 from torch._dynamo.optimizations.backends import cudagraphs_inner
@@ -17,7 +16,7 @@ aten = torch.ops.aten
 
 
 def compute_speedups(
-    operator, models, example_inputs, repeats, accuracy_checking=False
+    operator, models, example_inputs, repeats, accuracy_checking=False, device="cuda"
 ):
     expected = models[0](*example_inputs)
     if accuracy_checking:
@@ -35,10 +34,19 @@ def compute_speedups(
     for rep in range(repeats):
         # interleave the runs to handle frequency scaling and load changes
         for m, model in enumerate(models):
-            # do_bench() clears L2 cache to hide the latency of CPU launch time
-            # along with cuda synchronization
-            median_ms, _, _ = triton.testing.do_bench(lambda: model(*example_inputs))
-            timings[rep, m] = median_ms
+            if device == "cuda":
+                import triton
+
+                # do_bench() clears L2 cache to hide the latency of CPU launch time
+                # along with cuda synchronization
+                median_ms, _, _ = triton.testing.do_bench(
+                    lambda: model(*example_inputs)
+                )
+                timings[rep, m] = median_ms
+            else:
+                from torch._inductor.utils import timed
+
+                timings[rep, m] = timed(model, example_inputs)
     return np.median(timings, axis=0)
 
 
@@ -64,15 +72,19 @@ def convert_to_jit(gm, gm_args):
 
 
 def microbenchmark(
-    operator, args, kwargs, dtype, accuracy_checking, repeats, measure_nvfuser
+    operator, args, kwargs, dtype, accuracy_checking, repeats, measure_nvfuser, device
 ):
     gm, gm_args = gen_gm_and_inputs(operator, args, kwargs)
     torch.jit._builtins._register_builtin(
         torch.ops.aten.convolution_backward.default, "aten::convolution_backward"
     )
-    cudagraphs_eager = cudagraphs_inner(gm, gm_args, copy_outputs=False)
-    compiled_fn = compile_fx(gm, gm_args)
-    compiled = [cudagraphs_eager, compiled_fn]
+    if device == "cuda":
+        cudagraphs_eager = cudagraphs_inner(gm, gm_args, copy_outputs=False)
+        compiled_fn = compile_fx(gm, gm_args)
+        compiled = [cudagraphs_eager, compiled_fn]
+    else:
+        compiled_fn = compile_fx(gm, gm_args)
+        compiled = [gm, compiled_fn]
     if measure_nvfuser:
         g = convert_to_jit(gm, gm_args)
         cudagraphs_jit = cudagraphs_inner(g, gm_args, copy_outputs=False)
@@ -80,7 +92,9 @@ def microbenchmark(
     if accuracy_checking:
         repeats = 1
 
-    medians = compute_speedups(operator, compiled, gm_args, repeats, accuracy_checking)
+    medians = compute_speedups(
+        operator, compiled, gm_args, repeats, accuracy_checking, device
+    )
     return medians
 
 
@@ -147,8 +161,9 @@ def skip_operator(operator):
 @click.option(
     "--measure-nvfuser", help="default we only measure inductor", default=False
 )
+@click.option("--device", help="cpu or cuda", default="cuda")
 def benchmark(
-    suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser
+    suite, op, dtype, max_samples, accuracy_checking, repeats, measure_nvfuser, device
 ):
     assert suite in ("timm", "huggingface", "torchbench"), f"got {suite}"
     if suite == "timm":
@@ -176,7 +191,7 @@ def benchmark(
             continue
 
         print(f"Running {operator}")
-        inp_gen = loader.get_inputs_for_operator(operator, dtype=dtype)
+        inp_gen = loader.get_inputs_for_operator(operator, dtype=dtype, device=device)
         timings = []
 
         for i in range(min(max_samples, 1000000)):
@@ -199,6 +214,7 @@ def benchmark(
                         accuracy_checking,
                         repeats,
                         measure_nvfuser,
+                        device,
                     )
                 )
             except Exception as e:
