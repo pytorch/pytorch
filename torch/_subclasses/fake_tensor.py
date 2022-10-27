@@ -9,7 +9,6 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
-from torch._decomp import meta_table as meta_table
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -228,13 +227,6 @@ class FakeTensorConverter(object):
             out.requires_grad_(t.requires_grad)
             if make_constant:
                 self.add_constant_storage_mapping(out)
-
-        # We need `is_leaf` metadata to be consistent
-        # See Note [Fake up some autograd history]
-        if t.requires_grad and not t.is_leaf:
-            with torch.enable_grad():
-                out = out.clone()
-
         if type(t) is torch.nn.Parameter:
             assert not make_constant
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
@@ -242,7 +234,7 @@ class FakeTensorConverter(object):
             warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
             grad_not_none = t.grad is not None
         if grad_not_none:
-            out.grad = self.from_real_tensor(fake_mode, t.grad)
+            out.grad = self.from_real_tensor(fake_mode, t.grad, shape_env=shape_env)
         self.set_tensor_memo(t, out)
         return out
 
@@ -755,7 +747,7 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        from torch._decomp import _disabled_meta_decomps, decomposition_table
+        from torch._decomp import decomposition_table
 
         with self:
             # Decomposes CompositeImplicitAutograd ops
@@ -768,6 +760,8 @@ class FakeTensorMode(TorchDispatchMode):
             has_symbolic_sizes
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
+            from torch._decomp import meta_table as meta_table
+
             with no_dispatch():
                 if func == aten.size.default:
                     sys.stderr.write(
@@ -787,7 +781,6 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func in decomposition_table
             and torch_decomp_decompositions(func)
-            and func not in _disabled_meta_decomps
             and all(not e.is_sparse for e in flat_arg_fake_tensors)
         ):
             with self:
