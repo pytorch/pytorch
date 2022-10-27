@@ -44,7 +44,7 @@ class BackendCompilerFailed(TorchDynamoException):
             f"{self.backend_name} raised {type(inner_exception).__name__}: {inner_exception}"
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
-            "    torchdynamo.config.raise_on_backend_error = False"
+            "    torchdynamo.config.suppress_errors = True"
         )
 
 
