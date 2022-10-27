@@ -188,7 +188,7 @@ class MetaConverter:
                     # directly from storage is WRONG because this won't cause
                     # version counters to get shared.
                     assert t._is_view()
-                    base = self.meta_tensor(t._base)
+                    base = self.meta_tensor(t._base, shape_env)
 
                     def is_c_of_r(complex_dtype, real_dtype):
                         return (
