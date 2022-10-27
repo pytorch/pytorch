@@ -58,6 +58,19 @@ jobs:
           python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}"
           python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
+        - name: Upload test artifacts
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+            WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+            WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          run: |
+            echo "${WORKFLOW_ARTIFACTS_URL}"
+
+            if [[ -f "tools/stats/upload_artifacts.py" ]]; then
+              python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
+            fi
+
   check-api-rate:
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]
