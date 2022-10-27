@@ -214,7 +214,7 @@ inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
   // 2. Mem Efficient Attention
   // 3. Math fallback
   auto& ctx = at::globalContext();
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()) {
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return SDPBackend::error;
   }
   // Because TORCHCHECK checks if condition is true we negate debug so that

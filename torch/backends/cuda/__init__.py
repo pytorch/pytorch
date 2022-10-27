@@ -220,7 +220,7 @@ def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_e
     r"""
     .. warning:: This flag is experimental and subject to change.
 
-    This context manager can be used to temporarily enable or disable flash sdp and math sdp.
+    This context manager can be used to temporarily enable or disable flash/memory efficient sdp and math sdp.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
     previous_flash: bool = flash_sdp_enabled()
