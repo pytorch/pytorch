@@ -30,14 +30,18 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
-    : /*impl_=*/impl_(t.unsafeGetTensorImpl()),
-      /*data_=*/data_(t.has_storage() ? t.storage().data() : nullptr),
-      /*device_type_*/ device_type_(t.device().type()),
-      /*device_index_*/ device_index_(t.device().index()),
-      /*dtype_=*/dtype_(t.scalar_type()),
-      /*layout_=*/layout_(t.layout()),
-      /*dim_=*/dim_(t.sizes().size()){};
+RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
+    : data_{t.has_storage() ? t.storage().data() : nullptr},
+      device_type_{t.device().type()},
+      device_index_{t.device().index()},
+      dtype_{t.scalar_type()},
+      layout_{t.layout()},
+      dim_{static_cast<uint32_t>(t.sizes().size())} {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
+      "Cannot profile Tensors of size > uint32 max. Got dim: ",
+      t.sizes().size());
+}
 
 // ============================================================================
 // == PyTorch Ops =============================================================
@@ -71,18 +75,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
-    const auto& sizes = t.sizes();
-    const auto dim = sizes.size();
-    const auto layout = t.layout();
-    TORCH_CHECK(
-        dim <= std::numeric_limits<uint32_t>::max(),
-        "Cannot profile Tensors of size > uint32 max. Got dim: ",
-        dim);
-
     tensor_metadata_.emplace_back(t);
-
-    tensor_sizes_strides_.copy(sizes);
-    if (layout == at::kStrided) {
+    tensor_sizes_strides_.copy(t.sizes());
+    if (t.layout() == at::kStrided) {
       // Only Strided layout tensors have strides
       tensor_sizes_strides_.copy(t.strides());
     }
@@ -300,6 +295,19 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
+  // `AccumulateGrad` is an important marker for profile analysis; however the
+  // annotation relies on `c10::demangle` which is platform dependent. In
+  // particular, Windows will add a "struct " prefix.
+  const std::string accumulate_grad = "torch::autograd::AccumulateGrad";
+  const std::string windows_pattern = std::string("struct ") + accumulate_grad;
+  for (auto& event : op_events_) {
+    auto& name = event.basic_fields_.name_;
+    auto position = name.find(windows_pattern);
+    if (position != std::string::npos) {
+      name.replace(position, windows_pattern.size(), accumulate_grad);
+    }
+  }
+
   auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
 
   // TODO: CTAD will take care of template args when we move to C++17
@@ -513,7 +521,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
-static constexpr const char* indexKey = "Profiler Event Index";
+static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
@@ -854,14 +862,20 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
     };
 
     ska::flat_hash_set<storage_id_t> tensor_set;
+    auto insert_tensor = [&lookup, &tensors, &tensor_set](TensorMetadata& m) {
+      if (m.impl() && m.data_) {
+        const auto id = lookup(m.data_);
+        tensor_set.insert(id);
+        tensors.emplace_back(TensorStoragePair{m.impl(), id, m.id_});
+      }
+    };
+
     for (auto& result : sorted_results) {
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
             for (auto& m : torch_op.inputs_.tensor_metadata_) {
-              if (m.has_value() && m->impl_ && m->data_) {
-                auto id = lookup(m->data_);
-                tensor_set.insert(id);
-                tensors.emplace_back(TensorStoragePair{m->impl_, id, m->id_});
+              if (m.has_value()) {
+                insert_tensor(*m);
               }
             }
           },
@@ -876,6 +890,30 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
             // Handle deallocation
             if (alloc_op.alloc_size_ < 0) {
               live_storage.erase(StorageImplData(alloc_op.ptr_));
+            }
+          },
+          [&](ExtraFields<EventType::PyCall>& py_call) {
+            // torch.nn.Module
+            if (py_call.module_.has_value()) {
+              for (auto& p : py_call.module_->parameters_) {
+                insert_tensor(p.metadata_);
+                if (p.grad_metadata_.has_value()) {
+                  insert_tensor(*p.grad_metadata_);
+                }
+              }
+            }
+
+            // torch.optim.Optimizer
+            if (py_call.optimizer_.has_value()) {
+              for (auto& p : py_call.optimizer_->parameters_) {
+                insert_tensor(p.metadata_);
+                if (p.grad_metadata_.has_value()) {
+                  insert_tensor(*p.grad_metadata_);
+                }
+                for (auto& state_i : p.state_) {
+                  insert_tensor(state_i.second);
+                }
+              }
             }
           },
           [](const auto&) {}));

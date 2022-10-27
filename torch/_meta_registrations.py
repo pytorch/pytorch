@@ -4,12 +4,16 @@ from typing import List, Optional, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
+from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
+from torch._ops import OpOverload
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    FloatLike,
+    IntLike,
 )
 
 from torch._prims_common.wrappers import out_wrapper
@@ -18,29 +22,19 @@ from torch._refs import _broadcast_shapes
 from torch._subclasses.fake_tensor import check_no_bool_index_tensors
 from torch.utils._pytree import tree_map
 
+
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
 
-meta_table = {}
 
+def register_meta(op):
+    def wrapper(fn):
+        def register(op):
+            _add_op_to_registry(meta_table, op, fn)
 
-def register_meta(op, register_dispatcher=True):
-    def wrapper(f):
-        def add_func(op):
-            meta_table[op] = f
-            if register_dispatcher:
-                name = (
-                    op.__name__
-                    if op._overloadname != "default"
-                    else op.overloadpacket.__name__
-                )
-                _meta_lib_dont_use_me_use_register_meta.impl(name, f)
-
-            op.py_impl(torch._C.DispatchKey.Meta)(f)
-
-        tree_map(add_func, op)
-        return f
+        tree_map(register, op)
+        return fn
 
     return wrapper
 
@@ -100,7 +94,7 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
-@register_meta(aten.copy_.default, register_dispatcher=False)
+@register_meta(aten.copy_.default)
 def meta_copy_(self, src, non_blocking=False):
     return self
 
@@ -240,7 +234,7 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
-@register_meta(aten.bernoulli_.float, register_dispatcher=False)
+@register_meta(aten.bernoulli_.float)
 def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
@@ -282,7 +276,7 @@ def meta_dot(self, tensor):
     return self.new_empty(())
 
 
-@register_meta([aten.mm.default], register_dispatcher=False)
+@register_meta([aten.mm.default])
 def meta_mm(a, b):
     check(a.dim() == 2, lambda: "a must be 2D")
     check(b.dim() == 2, lambda: "b must be 2D")
@@ -362,24 +356,24 @@ def meta_conv(
         output_padding: Optional[Union[List[int], int]] = None,
     ):
         ret_shape = []
-        if isinstance(stride, int):
+        if isinstance(stride, IntLike):
             stride = [stride] * len(dims)
         elif len(stride) == 1:
             stride = [stride[0]] * len(dims)
 
-        if isinstance(padding, int):
+        if isinstance(padding, IntLike):
             padding = [padding] * len(dims)
         elif len(padding) == 1:
             padding = [padding[0]] * len(dims)
 
-        if isinstance(dilation, int):
+        if isinstance(dilation, IntLike):
             dilation = [dilation] * len(dims)
         elif len(dilation) == 1:
             dilation = [dilation[0]] * len(dims)
 
         output_padding_list: Optional[List[int]] = None
         if output_padding:
-            if isinstance(output_padding, int):
+            if isinstance(output_padding, IntLike):
                 output_padding_list = [output_padding] * len(dims)
             elif len(output_padding) == 1:
                 output_padding_list = [output_padding[0]] * len(dims)
@@ -466,7 +460,7 @@ def check_dim_size(tensor, dim, dim_size, size):
     )
 
 
-@register_meta(aten.avg_pool2d.default, register_dispatcher=False)
+@register_meta(aten.avg_pool2d.default)
 def meta_avg_pool2d(
     input,
     kernel_size,
@@ -585,7 +579,7 @@ def avg_pool2d_backward_shape_check(
 
 
 # Don't override the C++ registration.
-@register_meta(aten.avg_pool2d_backward.default, register_dispatcher=False)
+@register_meta(aten.avg_pool2d_backward.default)
 def meta_avg_pool2d_backward(
     gradOutput_,
     input,
@@ -730,7 +724,7 @@ def vdot(self, other):
 # of indexing shape inference is useful,
 # but not registering it to the dispatcher because we already
 # get shape inference through structured kernels
-@register_meta(aten.index.Tensor, register_dispatcher=False)
+@register_meta(aten.index.Tensor)
 def meta_index_Tensor(self, indices):
     check_no_bool_index_tensors(aten.index.Tensor, self, indices)
     check(indices, lambda: "at least one index must be provided")
@@ -1018,22 +1012,6 @@ def meta_embedding_bag(
     return output, offset2bag, bag_size, max_indices
 
 
-@register_meta([aten.diag.default, aten.diag.out])
-@out_wrapper()
-def meta_diag(self, dim=0):
-    check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
-    if self.dim() == 1:
-        sz = self.size(0) + abs(dim)
-        return self.new_empty((sz, sz))
-
-    # case: dim is 2
-    if dim >= 0:
-        sz = min(self.size(0), self.size(1) - dim)
-    else:
-        sz = min(self.size(0) + dim, self.size(1))
-    return self.new_empty((sz,))
-
-
 @register_meta(aten._embedding_bag_forward_only.default)
 def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     output, offset2bag, bag_size, max_indices = meta_embedding_bag(
@@ -1105,40 +1083,42 @@ def meta_repeat(self, repeats):
     return self.new_empty(target_size)
 
 
-@register_meta(aten.zero_.default, register_dispatcher=False)
+@register_meta(aten.zero_.default)
 def meta_zero_(self):
     return self
 
 
-@register_meta(
-    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar],
-    register_dispatcher=False,
-)
+@register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
     return self
 
 
-@register_meta(aten.relu_.default, register_dispatcher=False)
+@register_meta([aten.fill.Tensor, aten.fill.Scalar])
+def meta_fill(self, val):
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.relu_.default)
 def meta_relu_(self):
     return self
 
 
-@register_meta(aten.index_put.default, register_dispatcher=False)
+@register_meta(aten.index_put.default)
 def meta_index_put(self, indices, values, accumulate=False):
-    return self.new_empty(self.size())
+    return torch.empty_like(self)
 
 
-@register_meta(aten.masked_fill_.Scalar, register_dispatcher=False)
+@register_meta(aten.masked_fill_.Scalar)
 def meta_masked_fill_(self, mask, value):
     return self
 
 
-@register_meta(aten.index_put_.default, register_dispatcher=False)
+@register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     return self
 
 
-@register_meta(aten.alias.default, register_dispatcher=False)
+@register_meta(aten.alias.default)
 def meta_alias(self):
     return self.view(self.shape)
 
@@ -1176,7 +1156,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
     return output
 
 
-@register_meta(aten.bmm.default, register_dispatcher=False)
+@register_meta(aten.bmm.default)
 def meta_bmm(self, mat2):
     return common_meta_baddbmm_bmm(self, mat2, True)
 
@@ -1286,7 +1266,7 @@ def pool2d_shape_check(
     )
 
 
-@register_meta(aten.max_pool2d_with_indices.default, register_dispatcher=False)
+@register_meta(aten.max_pool2d_with_indices.default)
 def meta_max_pool2d_with_indices(
     input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
 ):
@@ -1394,11 +1374,11 @@ def meta_like(self, *args, **kwargs):
 # hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)
 def arange(end, **kwargs):
-    if isinstance(end, float):
-        end = math.ceil(end)
+    if isinstance(end, FloatLike):
+        end = math.ceil(end)  # type: ignore[arg-type]
 
     def is_integral(x):
-        return isinstance(x, int) or isinstance(x, bool)
+        return isinstance(x, IntLike) or isinstance(x, bool)
 
     set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
     if set_to_integral_dtype:
@@ -1484,7 +1464,7 @@ def gather_shape_check(self, dim, index):
             )
 
 
-@register_meta(aten.gather.default, register_dispatcher=False)
+@register_meta(aten.gather.default)
 def meta_gather(self, dim, index, sparse_grad=False):
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
     is_index_empty = index.numel() == 0
@@ -1600,7 +1580,7 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
         get_operator_enum(reduce_, use_new_options)
 
 
-@register_meta(aten.scatter_add.default, register_dispatcher=False)
+@register_meta(aten.scatter_add.default)
 def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
@@ -1637,3 +1617,59 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
 import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
+
+
+def activate_meta():
+
+    activate_meta_table = {}
+
+    # For a given op, we pick the most specific decomp function from
+    # global_decomp_table in the precedence order of meta > post_autograd > pre_autograd
+    for type in ["meta", "post_autograd", "pre_autograd"]:
+        registry = global_decomposition_table[type]
+
+        for opo in registry:
+            if opo not in activate_meta_table:
+                activate_meta_table[opo] = registry[opo]
+
+    for op_overload, fn in activate_meta_table.items():
+        assert isinstance(op_overload, OpOverload)
+
+        op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
+
+        if torch._C._dispatch_has_kernel_for_dispatch_key(
+            op_overload.name(), "CompositeImplicitAutograd"
+        ):
+            # Internally, we shouldn't be registering meta kernels for any operators that
+            # have CompositeImplicitAutograd kernels.
+            # Instead, we should be letting those decompositions run, and writing meta kernels
+            # only for the base operators.
+            pass
+        elif any(
+            a.alias_info is not None and not a.alias_info.is_write
+            for a in op_overload._schema.arguments
+        ):
+            # Attempting to register a python meta kernel for a view operator.
+            # We shouldn't do this, because the output will report as not having aliased storages.
+            # All view ops have meta kernels in C++ today, so we should use those instead.
+            pass
+        elif op_overload.name() in {
+            "aten::empty_strided",  # causing infinite recursion, test_meta.py
+            "aten::clone",  # causing infinite recursion
+            "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
+            "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
+            "aten::add.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
+            "aten::sub.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
+            "aten::mul.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
+            "aten::div.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test_fake_tensor.py -k test_scalar_inputs  # noqa: B950
+            "aten::div.Tensor_mode",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_div8_cpu  # noqa: B950
+            "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
+            "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
+            "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
+        }:
+            pass
+        else:
+            _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
+
+
+activate_meta()
