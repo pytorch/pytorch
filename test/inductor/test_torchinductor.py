@@ -56,15 +56,12 @@ except (ImportError, AssertionError) as e:
 
 HAS_CPU = False
 try:
-    if IS_FBCODE:
-        raise torch._inductor.exc.CppCompileError
-
     from subprocess import CalledProcessError
 
     from torch._inductor.codecache import CppCodeCache
 
     CppCodeCache.load("")
-    HAS_CPU = True
+    HAS_CPU = not IS_FBCODE
 except (
     CalledProcessError,
     OSError,
