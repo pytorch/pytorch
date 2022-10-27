@@ -322,7 +322,7 @@ Args:
     {M}
 
 Keyword args:
-    beta (float, optional): shape parameter for the window. Default: 12.0
+    beta (float, optional): shape parameter for the window. Must be non-negative. Default: 12.0
     {sym}
     {dtype}
     {layout}
