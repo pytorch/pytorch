@@ -749,7 +749,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
             print("GUARDS", code)
         set_guard_fail_hook(guard_fail_hook)
         out = dict()
-        # print("RUNNING PY CODE", py_code)
+        # print("RUNNING PY CODE", code)
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
