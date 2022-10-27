@@ -2880,7 +2880,8 @@ class FullyShardedDataParallel(nn.Module):
         attribute but dynamically change whether it is visible to ``nn.Module``
         methods.
         """
-        self.module._parameters.pop(FLAT_PARAM, None)
+        if self._has_params:
+            self.module._parameters.pop(FLAT_PARAM, None)
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
