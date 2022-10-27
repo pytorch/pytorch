@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast
 import operator
 import builtins
 import math
@@ -464,7 +464,7 @@ class ShapeEnv(object):
         assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int]):
+    def create_symintnode(self, expr: "sympy.Expr"):
         return SymInt(SymNode(expr, self, int))
 
     def create_symbol(self, val: int) -> "sympy.Expr":
