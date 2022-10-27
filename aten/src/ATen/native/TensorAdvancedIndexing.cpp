@@ -223,7 +223,13 @@ void scatter_meta_impl(
     }
   }
 
-  meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
+  // If the tensor is non-overlapping and dense, we respect the striding pattern
+  // of the input tensor.
+  if (self.is_non_overlapping_and_dense()) {
+      meta.set_output_raw_strided(0, self.sizes(), self.strides(), self.options());
+  } else {
+      meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
+  }
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
     get_operator_enum(reduce.value(), use_new_options);
