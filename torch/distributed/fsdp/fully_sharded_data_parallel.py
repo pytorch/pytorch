@@ -48,8 +48,10 @@ from torch.distributed.fsdp._init_utils import (
     _init_streams,
 )
 from torch.distributed.fsdp._runtime_utils import (
+    _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
     _fsdp_root_pre_forward,
+    _get_buffers_and_dtypes_for_computation,
     _post_forward,
     _pre_forward,
     _pre_forward_unshard,
@@ -761,7 +763,8 @@ class FullyShardedDataParallel(nn.Module):
         self._is_root = True
         self._assert_state(TrainingState.IDLE)
         _init_streams(self)
-        self._cast_buffers(recurse=True)
+        buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(self, self)
+        _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, self.compute_device)
         for handle in self._handles:
             self._init_param_attributes(handle)
         self._exec_order_data.init(self, self.process_group)

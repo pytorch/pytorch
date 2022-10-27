@@ -1,5 +1,5 @@
 import functools
-from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
+from typing import Any, Callable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -866,3 +866,58 @@ def _clear_grads_if_needed(
     for handle in handles:
         if handle._use_orig_params:
             handle._clear_grads_if_needed()
+
+
+@no_type_check
+def _get_buffers_and_dtypes_for_computation(
+    state: _State,
+    root_module: nn.Module,
+) -> Tuple[List[torch.Tensor], List[Optional[torch.dtype]]]:
+    """
+    Returns all buffers in the module tree rooted at ``root_module`` and a
+    corresponding list of the buffer dtypes for computation. Each buffer dtype
+    is either ``None`` if buffer mixed precision is not enabled or the buffer
+    low precision dtype otherwise.
+    """
+    buffers: List[torch.Tensor] = []
+    buffer_dtypes: List[Optional[torch.dtype]] = []
+    if _is_composable(state):
+        buffers = [
+            buffer for module in root_module.modules() for buffer in module.buffers()
+        ]
+        buffer_dtypes = [
+            state.mixed_precision.buffer_dtype for _ in range(len(buffers))
+        ]
+    else:
+        for fsdp_module in state.fsdp_modules(root_module):
+            fsdp_module_buffers = list(fsdp_module.module.buffers(recurse=False))
+            buffers.extend(fsdp_module_buffers)
+            buffer_dtypes.extend(
+                fsdp_module.mixed_precision.buffer_dtype
+                for _ in range(len(fsdp_module_buffers))
+            )
+    assert len(buffers) == len(buffer_dtypes), f"{len(buffers)} {len(buffer_dtypes)}"
+    return buffers, buffer_dtypes
+
+
+def _cast_buffers_to_dtype_and_device(
+    buffers: List[torch.Tensor],
+    buffer_dtypes: List[Optional[torch.dtype]],
+    device: torch.device,
+) -> None:
+    """
+    Casts ``buffers`` to the dtypes given by ``buffer_dtypes`` and moves them
+    to ``device``. If an element in ``buffer_dtypes`` is ``None``, then the
+    corresponding buffer is only moved to ``device``.
+    """
+    p_assert(
+        buffer_dtypes is None or len(buffers) == len(buffer_dtypes),
+        f"Expects `buffers` and `buffer_dtypes` to have the same length if "
+        f"`buffer_dtypes` is specified but got {len(buffers)} and "
+        f"{len(buffer_dtypes)}",
+    )
+    for buffer, buffer_dtype in zip(buffers, buffer_dtypes):
+        if not torch.is_floating_point(buffer) or buffer_dtype is None:
+            buffer.data = buffer.to(device=device)
+        else:
+            buffer.data = buffer.to(device=device, dtype=buffer_dtype)
