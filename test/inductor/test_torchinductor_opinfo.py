@@ -60,7 +60,7 @@ TestExpect = Enum("TestExpect", ("SUCCESS", "XFAILURE", "SKIP"))
 
 COLLECT_EXPECT = os.getenv("PYTORCH_COLLECT_EXPECT", "0") == "1"
 FAIL_ON_SUCCESS = os.getenv("PYTORCH_FAIL_ON_SUCCESS", "1") == "1"
-ALL_SAMPLES = os.getenv("PYTORCH_ALL_SAMPLES", "0") == "1"
+ALL_SAMPLES = True
 START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
@@ -177,6 +177,7 @@ inductor_skips["cuda"] = {
     "max.reduction_with_dim": {i32, i64},
     "min.reduction_with_dim": {i32, i64},
     "linalg.lu": {f32, f64},
+    "linalg.lu_solve": {f32, f64},
     "lu_unpack": {f32, f64},
     "native_batch_norm": {f16, f32, f64},
     "native_layer_norm": {f16, f32, f64},

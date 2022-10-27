@@ -16,7 +16,6 @@ BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
 export VALGRIND=ON
-export PYTORCH_ALL_SAMPLES=1 # TorchInductor opinfo tests will run with all samples, taking longer, but covering ops with much greater depths.
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
@@ -220,6 +219,8 @@ test_python() {
 
 
 test_dynamo_shard() {
+  install_filelock
+  
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
