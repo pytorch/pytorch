@@ -17201,6 +17201,20 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.selu",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.softsign",
+        torch_opinfo_name="nn.functional.softsign",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref', dtypes=(torch.int8,)),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback', dtypes=(torch.int8,)),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.int8,), device_type='cuda'),
+        )
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softplus",
         torch_opinfo_name="nn.functional.softplus",
     ),

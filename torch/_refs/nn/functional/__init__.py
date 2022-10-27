@@ -42,6 +42,7 @@ __all__ = [
     "relu",
     "relu6",
     "selu",
+    "softsign",
     "softplus",
     "softshrink",
     "tanhshrink",
@@ -234,6 +235,17 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     rhs = alpha * torch.expm1(a)
 
     return scale * torch.where(a > 0, a, rhs)
+
+
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def softsign(a: TensorLikeType) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.softsign
+    """
+    return a / (1 + torch.abs(a))
 
 
 # softplus is implemented specially because it has beta and threshold arguments
