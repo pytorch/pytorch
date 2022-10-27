@@ -139,15 +139,14 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
 # structure. Like `MetaConverter`, it uses `WeakTensorRefKey` to
 # hold a weak reference for all memoized tensors.
 class FakeTensorConverter(object):
-    tensor_memo: weakref.WeakValueDictionary
+    @property
+    def tensor_memo(self):
+        return self.meta_converter.tensor_memo
+
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
 
     def __init__(self):
-        # FakeTensors store the FakeTensorMode which in turn stores a
-        # FakeTensor, so we need to hold a weak reference to the FakeTensor
-        # otherwise we would induce a circular reference
-        self.tensor_memo = weakref.WeakValueDictionary()
         self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
@@ -214,22 +213,25 @@ class FakeTensorConverter(object):
         # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
-        with no_dispatch():
-            meta_t = self.meta_converter(t, shape_env=shape_env)
-            if meta_t.device.type != "meta":
-                raise UnsupportedFakeTensorException("meta converter nyi")
-            out = FakeTensor(
-                fake_mode,
-                meta_t,
-                existing_device,
-                constant=t if make_constant else None,
-            )
-            out.requires_grad_(t.requires_grad)
-            if make_constant:
-                self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
             assert not make_constant
-            out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
+
+        def mk_fake_tensor(make_meta_t):
+            with no_dispatch():
+                return FakeTensor(
+                    fake_mode,
+                    make_meta_t(),
+                    existing_device,
+                    constant=t if make_constant else None,
+                )
+
+        out = self.meta_converter(
+            t, shape_env=shape_env, strict=True, callback=mk_fake_tensor
+        )
+        if out is NotImplemented:
+            raise UnsupportedFakeTensorException("meta converter nyi")
+        if make_constant:
+            self.add_constant_storage_mapping(out)
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
             grad_not_none = t.grad is not None
@@ -255,12 +257,8 @@ class FakeTensorConverter(object):
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
     # You must have created the FakeTensorMode with allow_meta == True
-    def __call__(
-        self, fake_mode, t, *, make_constant=False, shape_env=None
-    ):
-        return self.from_real_tensor(
-            fake_mode, t, make_constant, shape_env=shape_env
-        )
+    def __call__(self, fake_mode, t, *, make_constant=False, shape_env=None):
+        return self.from_real_tensor(fake_mode, t, make_constant, shape_env=shape_env)
 
 
 op_implementations = []
@@ -313,7 +311,9 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     r = func(inp, **new_kwargs)
     # TODO: I think this does the wrong thing if r is inp
-    return fake_mode.fake_tensor_converter.from_meta_and_device(fake_mode, r, out_device)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, r, out_device
+    )
 
 
 # Dont default to default device handling,
