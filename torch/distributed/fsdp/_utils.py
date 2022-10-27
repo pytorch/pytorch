@@ -10,11 +10,14 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
 )
 from torch.nn.utils.rnn import PackedSequence
 
+
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
 def _contains_batchnorm(module):
-    return any(isinstance(mod, _BatchNorm) for mod in module.modules())
+    return any(
+        isinstance(mod, _BatchNorm) for mod in module.modules()
+    )
 
 
 def _override_batchnorm_mixed_precision(module):
@@ -24,14 +27,11 @@ def _override_batchnorm_mixed_precision(module):
 
 
 def _apply_to_tensors(
-    fn: Callable,
-    container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence],
+    fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
 ) -> Any:
     """Recursively apply to all tensor in different kinds of container types."""
 
-    def apply(
-        x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
-    ) -> Any:
+    def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]) -> Any:
         if torch.is_tensor(x):
             return fn(x)
         elif hasattr(x, "__dataclass_fields__"):
@@ -75,7 +75,6 @@ def _apply_to_modules(
     module prefix name (e.g. "module.submodule." just like in model state dict)
     and makes that available to ``module_fn``.
     """
-
     def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
         module_fn(module, prefix, *args, **kwargs)

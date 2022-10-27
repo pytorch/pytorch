@@ -249,19 +249,5 @@ TORCH_IMPL_FUNC(frac_out_mps) (const Tensor& self, const Tensor& output) {
                 });
 }
 
-TORCH_IMPL_FUNC(expm1_out_mps) (const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "expm1_out_mps",
-                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-                  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
-                                                       shape:@[@1]
-                                                       dataType:inputTensor.dataType];
-                  MPSGraphTensor* ePowTensor = [mpsGraph exponentWithTensor:inputTensor
-                                                                         name:nil];
-                  return [mpsGraph subtractionWithPrimaryTensor:ePowTensor
-                                               secondaryTensor:oneTensor
-                                                   name: nil];
-                });
-}
-
 } // namespace native
 } // namespace at

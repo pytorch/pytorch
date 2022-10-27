@@ -18,16 +18,14 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         self.seq = nn.Sequential(
-            nn.Linear(37, 39)
+            nn.Linear(16, 16)
         )
-        self.linear = nn.Linear(39, 33)
-        self.head = nn.Linear(33, 13)
+        self.linear = nn.Linear(16, 16)
+        self.head = nn.Linear(16, 4)
 
     def forward(self, x):
         x = self.seq(x)
-        x = torch.relu(x)
         x = self.linear(x)
-        x = torch.relu(x)
         x = self.head(x)
         return x
 

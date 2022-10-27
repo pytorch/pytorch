@@ -59,13 +59,13 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     if (type->kind() == TypeKind::OptionalType) {
       type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
       // recursive optional type is not supported
-      TORCH_INTERNAL_ASSERT(type->kind() != TypeKind::OptionalType);
+      AT_ASSERT(type->kind() != TypeKind::OptionalType);
     }
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type =
           reinterpret_cast<ListType*>(type.get())->getElementType();
       if (elem_type->isSubtypeOf(*TensorType::get())) {
-        TORCH_INTERNAL_ASSERT(
+        AT_ASSERTM(
             !has_tensor_list,
             "ONNX export supports at most one TensorList as input.");
         has_tensor_list = true;
@@ -92,7 +92,7 @@ void preprocessCaffe2Ops(Block* block) {
       size_t origin_inputs_index = 0;
       for (const auto& arg : args) {
         auto type = arg.type();
-        TORCH_INTERNAL_ASSERT(origin_inputs_index < origin_inputs.size());
+        AT_ASSERT(origin_inputs_index < origin_inputs.size());
         const auto& origin_input = origin_inputs[origin_inputs_index++];
         if (type->kind() == TypeKind::OptionalType &&
             origin_input->mustBeNone()) {
@@ -104,24 +104,24 @@ void preprocessCaffe2Ops(Block* block) {
             type->kind() == TypeKind::BoolType ||
             type->kind() == TypeKind::IntType) {
           const auto* constant_node = origin_input->node();
-          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
+          AT_ASSERT(constant_node->kind() == prim::Constant);
           it->i_(Symbol::attr(arg.name()), constant_node->i(attr::value));
         } else if (type->kind() == TypeKind::FloatType) {
           const auto* constant_node = origin_input->node();
-          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
+          AT_ASSERT(constant_node->kind() == prim::Constant);
           it->f_(Symbol::attr(arg.name()), constant_node->f(attr::value));
         } else if (type->kind() == TypeKind::StringType) {
           const auto* constant_node = origin_input->node();
-          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
+          AT_ASSERT(constant_node->kind() == prim::Constant);
           it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
           const auto& elem_type = type->castRaw<ListType>()->getElementType();
-          TORCH_INTERNAL_ASSERT(
+          AT_ASSERT(
               list_node->kind() == prim::ListConstruct ||
               list_node->kind() == prim::Constant);
           if (elem_type->isSubtypeOf(*TensorType::get())) {
-            TORCH_INTERNAL_ASSERT(list_node->kind(), prim::ListConstruct);
+            AT_ASSERT(list_node->kind(), prim::ListConstruct);
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
               it->addInput(t);
@@ -131,7 +131,7 @@ void preprocessCaffe2Ops(Block* block) {
             if (list_node->kind() == prim::ListConstruct) {
               for (const auto* elem_input : list_node->inputs()) {
                 const auto* constant_node = elem_input->node();
-                TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
+                AT_ASSERT(constant_node->kind() == prim::Constant);
                 values.push_back(constant_node->f(attr::value));
               }
             } else { // is a constant list

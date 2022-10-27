@@ -11,8 +11,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, skipIfMps, skipIfTorchInductor)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck, skipIfMps)
 from unittest.mock import patch, call
 
 
@@ -327,7 +326,6 @@ class TestModule(TestCase):
 
     @skipIfMps
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
         # Check modules work with non-contiguous tensors
 
@@ -491,7 +489,6 @@ class TestModule(TestCase):
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
@@ -582,7 +579,6 @@ class TestModule(TestCase):
 
     @skipIfMps
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_memory_format(self, device, dtype, module_info, training):
         is_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
         # TODO tighten it to a specific module

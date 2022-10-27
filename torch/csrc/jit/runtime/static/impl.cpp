@@ -56,9 +56,9 @@ namespace jit {
 
 namespace {
 
-bool allArgsAreTensors(const Node* node) {
+bool allArgsAreTensors(Node* node) {
   const auto& inputs = node->inputs();
-  return std::all_of(inputs.begin(), inputs.end(), [](const Value* value) {
+  return std::all_of(inputs.begin(), inputs.end(), [](Value* value) {
     return value->type()->kind() == TypeKind::TensorType;
   });
 }
@@ -69,7 +69,7 @@ bool allArgsAreTensors(const Node* node) {
 // These are rarely-used ops. Disallowing them typically eliminates
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
-bool isUnsupportedOp(const Node* node) {
+bool isUnsupportedOp(Node* node) {
   auto kind = node->kind();
   if (kind != aten::__is__ && kind != aten::__isnot__) {
     return false;
@@ -87,21 +87,12 @@ bool isUnsupportedOp(const Node* node) {
   return allArgsAreTensors(node);
 }
 
-namespace {
-
-bool canEnableStaticRuntimeImpl(const Block* block) {
-  if (block == nullptr) {
-    return false;
-  }
-
+// graph must be frozen or canEnableStaticRuntime would return false
+// if there's any prim::CallMethod op left in the graph
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
+  // check for sub-blocks
   bool can_support = true;
-  for (auto* node : block->nodes()) {
-    for (auto* subblock : node->blocks()) {
-      // The ordering prevents && from short circuiting, which we want -
-      // it's useful to see *all* the unsupported ops.
-      can_support = canEnableStaticRuntimeImpl(subblock) && can_support;
-    }
-
+  for (auto* node : graph->block()->nodes()) {
     const auto kind = node->kind();
     if (kind == prim::Constant) {
       continue;
@@ -114,14 +105,6 @@ bool canEnableStaticRuntimeImpl(const Block* block) {
     }
   }
   return can_support;
-}
-
-} // namespace
-
-// Graph must be frozen. canEnableStaticRuntime will return false
-// if there's any prim::CallMethod ops left in the graph.
-bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
-  return canEnableStaticRuntimeImpl(graph->block());
 }
 
 namespace {

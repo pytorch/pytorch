@@ -30,8 +30,9 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
-    : data_{t.has_storage() ? t.storage().data() : nullptr},
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
+    : impl_{t.unsafeGetTensorImpl()},
+      data_{t.has_storage() ? t.storage().data() : nullptr},
       device_type_{t.device().type()},
       device_index_{t.device().index()},
       dtype_{t.scalar_type()},
@@ -863,10 +864,10 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
 
     ska::flat_hash_set<storage_id_t> tensor_set;
     auto insert_tensor = [&lookup, &tensors, &tensor_set](TensorMetadata& m) {
-      if (m.impl() && m.data_) {
+      if (m.impl_ && m.data_) {
         const auto id = lookup(m.data_);
         tensor_set.insert(id);
-        tensors.emplace_back(TensorStoragePair{m.impl(), id, m.id_});
+        tensors.emplace_back(TensorStoragePair{m.impl_, id, m.id_});
       }
     };
 

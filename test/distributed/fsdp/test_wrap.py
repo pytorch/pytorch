@@ -4,7 +4,7 @@ import functools
 import os
 import tempfile
 import unittest
-from enum import auto, Enum
+from enum import Enum, auto
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,8 @@ import torch.nn.functional as F
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     CPUOffload,
+)
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp.wrap import (
@@ -26,20 +28,20 @@ from torch.distributed.fsdp.wrap import (
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    _maybe_cuda,
     CUDAInitMode,
     DummyProcessGroup,
     FSDPInitMode,
     FSDPTest,
     TransformerWithSharedParams,
+    _maybe_cuda,
 )
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
+    TestCase,
     find_free_port,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TestCase,
 )
 
 
@@ -52,12 +54,13 @@ class BatchNormNet(nn.Module):
         self.bn3 = nn.BatchNorm3d(10)
         self.sync_bn = nn.SyncBatchNorm(10)
 
-
 class WrapMethod(Enum):
     FSDP_CTOR = auto()
     # FSDP_CTOR is the supported way forward, but keep WRAP_API in case we miss
     # any use cases and fix them to work with FSDP_CTOR over time.
     WRAP_API = auto()
+
+
 
 
 class TestFSDPWrap(FSDPTest):
@@ -141,9 +144,7 @@ class TestFSDPWrap(FSDPTest):
         Test that an error is raised if we attempt to wrap when submodules are
         already FSDP.
         """
-        wrapped_fsdp = self._get_already_wrapped_fsdp(
-            nested=nested, cuda_init_mode=cuda_init_mode
-        )
+        wrapped_fsdp = self._get_already_wrapped_fsdp(nested=nested, cuda_init_mode=cuda_init_mode)
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             wrapped_fsdp = wrapped_fsdp.cuda()
 
@@ -158,10 +159,9 @@ class TestFSDPWrap(FSDPTest):
 
         policy = (
             functools.partial(
-                _or_policy, policies=[never_wrap_policy, _wrap_batchnorm_individually]
-            )
-            if use_or_policy
-            else _wrap_batchnorm_individually
+                _or_policy,
+                policies=[never_wrap_policy, _wrap_batchnorm_individually]
+            ) if use_or_policy else _wrap_batchnorm_individually
         )
         model = BatchNormNet()
         fsdp = FSDP(model, auto_wrap_policy=policy)
@@ -178,7 +178,6 @@ class TestFSDPWrap(FSDPTest):
         if the other policy results in a module containing a BN unit being
         wrapped, the contained BN unit will still be individually wrapped.
         """
-
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -190,7 +189,8 @@ class TestFSDPWrap(FSDPTest):
             return isinstance(module, BatchNormNet)
 
         my_policy = functools.partial(
-            _or_policy, policies=[wrap_bn_container, _wrap_batchnorm_individually]
+            _or_policy,
+            policies=[wrap_bn_container, _wrap_batchnorm_individually]
         )
         mod = MyModule()
         fsdp = FSDP(mod, auto_wrap_policy=my_policy)
@@ -203,7 +203,7 @@ class TestFSDPWrap(FSDPTest):
             fsdp.bn_container.bn1,
             fsdp.bn_container.bn2,
             fsdp.bn_container.bn3,
-            fsdp.bn_container.sync_bn,
+            fsdp.bn_container.sync_bn
         ]:
             self.assertTrue(isinstance(bn, FSDP))
 
@@ -216,21 +216,24 @@ class TestFSDPWrap(FSDPTest):
             fsdp.bn_container.bn1,
             fsdp.bn_container.bn2,
             fsdp.bn_container.bn3,
-            fsdp.bn_container.sync_bn,
+            fsdp.bn_container.sync_bn
         ]:
             self.assertFalse(isinstance(bn, FSDP))
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
+        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE],
+        [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE]
     )
     @parametrize("forward_prefetch", [False, True])
-    @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE])
+    @parametrize(
+        "cuda_init_mode",
+        [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE]
+    )
     def test_main_wrap_api(
         self,
         cpu_offload: CPUOffload,
@@ -283,7 +286,7 @@ class TestFSDPWrap(FSDPTest):
             wrapped_model.module.lin3,
             wrapped_model.module.lin4.module.nested_lin,
             wrapped_model.module.lin4,
-            wrapped_model,
+            wrapped_model
         ]
 
         for module in modules_in_fsdp_graph_order:
@@ -319,9 +322,7 @@ class TestAutoWrap(TestCase):
             layer = FSDP(
                 nn.Linear(5, 5),
                 process_group=self.process_group,
-                auto_wrap_policy=functools.partial(
-                    size_based_auto_wrap_policy, min_num_params=1
-                ),
+                auto_wrap_policy=functools.partial(size_based_auto_wrap_policy, min_num_params=1)
             )
         self.assertTrue(isinstance(layer, FSDP))
         self.assertEqual(layer.rank, self.process_group.rank())
@@ -361,9 +362,7 @@ class TestAutoWrap(TestCase):
         passed into FSDP, all submodules are wrapped.
         """
         seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
-        model = FSDP(
-            seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy
-        )
+        model = FSDP(seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy)
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
@@ -384,11 +383,7 @@ class TestAutoWrap(TestCase):
         encoder_layers = set(fsdp_model.module.transformer.encoder.layers)
         decoder_layers = set(fsdp_model.module.transformer.decoder.layers)
         for module in modules:
-            if (
-                module is fsdp_model
-                or module in encoder_layers
-                or module in decoder_layers
-            ):
+            if module is fsdp_model or module in encoder_layers or module in decoder_layers:
                 self.assertTrue(isinstance(module, FSDP))
             else:
                 self.assertFalse(isinstance(module, FSDP))
@@ -406,7 +401,7 @@ class TestAutoWrap(TestCase):
         model = FSDP(
             sequential,
             process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy,
+            auto_wrap_policy=my_auto_wrap_policy
         )
 
         TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
@@ -425,7 +420,7 @@ class TestAutoWrap(TestCase):
         model = FSDP(
             sequential,
             process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy,
+            auto_wrap_policy=my_auto_wrap_policy
         )
 
         self.assertTrue(isinstance(model, FSDP))
@@ -442,11 +437,7 @@ class TestAutoWrap(TestCase):
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy, min_num_params=40
         )
-        model = FSDP(
-            sequential,
-            process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy,
-        )
+        model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
 
         self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model[0], FSDP))
@@ -461,11 +452,7 @@ class TestAutoWrap(TestCase):
         my_auto_wrap_policy = functools.partial(
             size_based_auto_wrap_policy, min_num_params=40
         )
-        model = FSDP(
-            sequential,
-            process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy,
-        )
+        model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
         self.assertTrue(isinstance(model.module[0], FSDP))
         # Assert children of multihead attention are not wrapped
         self.assertTrue(isinstance(model.module[1], nn.MultiheadAttention))
@@ -486,11 +473,7 @@ class TestAutoWrap(TestCase):
         sequential = nn.Sequential(
             nn.Linear(10, 10), nn.ModuleList([nn.Linear(10, 10)])
         )
-        model = FSDP(
-            sequential,
-            process_group=self.process_group,
-            auto_wrap_policy=my_auto_wrap_policy,
-        )
+        model = FSDP(sequential, process_group=self.process_group, auto_wrap_policy=my_auto_wrap_policy)
         # Model was wrapped in FSDP as no inner modules were wrapped.
         self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model.module[0], nn.Linear))
@@ -500,12 +483,14 @@ class TestAutoWrap(TestCase):
     @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_BEFORE, CUDAInitMode.CUDA_AFTER])
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
+        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
     )
     @parametrize("use_device_id", [True, False])
     def test_auto_wrap_smoke_test(self, cuda_init_mode, cpu_offload, use_device_id):
         # CPU offload and CUDA after don't work together as expected.
-        if cpu_offload.offload_params and cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+        if (
+            cpu_offload.offload_params and cuda_init_mode == CUDAInitMode.CUDA_AFTER
+        ):
             return
 
         device = torch.device("cuda")
@@ -530,17 +515,12 @@ class TestAutoWrap(TestCase):
         # cases where full model cannot be loaded onto GPU, but their shards can.
         cuda_after_init = cuda_init_mode == CUDAInitMode.CUDA_AFTER
         try:
-            sequential = TestFSDPWrap.NestedSequentialModel.get_model(
-                cuda=(not cuda_after_init)
-            )
+            sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=(not cuda_after_init))
             my_auto_wrap_policy = functools.partial(
                 size_based_auto_wrap_policy, min_num_params=40
             )
             model = FSDP(
-                sequential,
-                cpu_offload=cpu_offload,
-                auto_wrap_policy=my_auto_wrap_policy,
-                device_id=device_id,
+                sequential, cpu_offload=cpu_offload, auto_wrap_policy=my_auto_wrap_policy, device_id=device_id
             )
             TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
             if cuda_after_init:
@@ -588,8 +568,7 @@ class TestAutoWrap(TestCase):
         sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
         ignored_modules = [sequential[1], sequential[2][0]]
         my_auto_wrap_policy = functools.partial(
-            size_based_auto_wrap_policy,
-            min_num_params=40,
+            size_based_auto_wrap_policy, min_num_params=40,
         )
         fsdp_kwargs = {
             "process_group": self.process_group,

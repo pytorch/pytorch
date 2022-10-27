@@ -18,7 +18,6 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
