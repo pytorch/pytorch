@@ -91,7 +91,7 @@ def benchmark_torch_function(iters, f, *args, **kwargs):
 
 
 def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, pad_percentage, writer):
-    with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True):
+    with torch.backends.cuda.sdp_kernel(enable_math=True, enable_flash=False):
         with torch.inference_mode():
             dropout_p = 0.0
             mask = None

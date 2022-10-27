@@ -500,10 +500,11 @@ get_elementwise_nested_tensor_impl(
       op_name,
       " does not support broadcasting when given a NestedTensor");
   TORCH_CHECK(
-      nested_tensor_impl_is_contiguous(self_ptr) &&
-          nested_tensor_impl_is_contiguous(other_ptr),
+      at::equal(
+          self_ptr->get_nested_stride_tensor(),
+          other_ptr->get_nested_stride_tensor()),
       op_name,
-      " does not support non-contiguous NestedTensor inputs");
+      " requires strides to match when given NestedTensors");
   return std::make_pair(self_ptr, other_ptr);
 }
 
@@ -517,16 +518,20 @@ Tensor NestedTensor_elementwise_Tensor(
   if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
     auto other_impl = get_nested_tensor_impl(other);
     return wrap_buffer(
-      f(self, other_impl->get_buffer()),
-      other_impl->get_nested_size_tensor().clone()
+      f(self, other_impl->get_unsafe_storage_as_tensor()),
+      other_impl->get_nested_size_tensor().clone(),
+      other_impl->get_nested_stride_tensor().clone(),
+      other_impl->get_storage_offsets()
     );
   }
   // other is a scalar
   if (!other.is_nested() && other.dim() == 0 && other.numel() == 1) {
     auto self_impl = get_nested_tensor_impl(self);
     return wrap_buffer(
-      f(self_impl->get_buffer(), other),
-      self_impl->get_nested_size_tensor().clone()
+      f(self_impl->get_unsafe_storage_as_tensor(), other),
+      self_impl->get_nested_size_tensor().clone(),
+      self_impl->get_nested_stride_tensor().clone(),
+      self_impl->get_storage_offsets()
     );
   }
   NestedTensorImpl* self_impl = nullptr;
@@ -538,10 +543,13 @@ Tensor NestedTensor_elementwise_Tensor(
   const auto& nt_self = *self_impl;
   const auto& nt_other = *other_impl;
   const auto& self_sizes = nt_self.get_nested_size_tensor();
+  const auto& self_sizes = nt_self.get_nested_size_tensor();
   return wrap_buffer(
-      f(nt_self.get_buffer().reshape({-1}),
-        nt_other.get_buffer().reshape({-1})),
-      self_sizes);
+      f(nt_self.get_unsafe_storage_as_tensor(),
+        nt_other.get_unsafe_storage_as_tensor()),
+      self_impl->get_nested_size_tensor(),
+      self_impl->get_nested_stride_tensor(),
+      self_impl->get_storage_offsets());
 }
 
 Tensor NestedTensor_add_Tensor(
@@ -564,6 +572,18 @@ Tensor NestedTensor_mul_Tensor(const Tensor& self, const Tensor& other) {
 // Only usable on the C++ side; scalars are converted to tensors coming from Python.
 Tensor NestedTensor_mul_Scalar(const Tensor& self, const Scalar& other) {
   return NestedTensor_mul_Tensor(self, wrapped_scalar_tensor(other));
+}
+
+Tensor NestedTensor_div_Tensor(const Tensor& self, const Tensor& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, other, "div", [](const Tensor& b1, const Tensor& b2) {
+        return at::div(b1, b2);
+      });
+}
+
+// Only usable on the C++ side; scalars are converted to tensors coming from Python.
+Tensor NestedTensor_div_Scalar(const Tensor& self, const Scalar& other) {
+  return NestedTensor_div_Tensor(self, wrapped_scalar_tensor(other));
 }
 
 template <typename Func>
