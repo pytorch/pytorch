@@ -44,7 +44,10 @@ def signature_of(arg):
         if V.graph.is_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
-            return new_tye
+            if new_tye in ["fp16", "bf16"]:
+                return "fp32"
+            else:
+                return new_tye
         else:
             return tye
     if isinstance(arg, SizeArg):
