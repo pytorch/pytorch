@@ -3283,6 +3283,152 @@ class Convolution(ExternKernelAlloc):
         )
 
 
+def _prepare_convolution_fusion_create(
+    cls,
+    x: "TensorBox",
+    weight: "TensorBox",
+    bias: "TensorBox",
+    padding_: List[int],
+    stride_: List[int],
+    dilation_: List[int],
+    groups: int,
+):
+    """
+    This function is a helper function to prepare inputs, layout and constant args
+    for convolution post-op fusion's create function, including deciding the output
+    layout (channels first or channels last), realizing inputs and make them etc. The
+    function only supports the CPU device since conv post-op fusion kernel is only
+    supported on CPU right now.
+    """
+
+    x = cls.require_stride1(cls.realize_input(x))
+    weight = cls.require_stride1(cls.realize_input(weight))
+    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    inputs = [x, weight]
+    stride = tuple(stride_)
+    padding = tuple(padding_)
+    dilation = tuple(dilation_)
+    assert isinstance(groups, int)
+
+    weight_shape = [
+        sympy.Integer(V.graph.sizevars.guard_static_shape(s)) for s in weight.get_size()
+    ]
+
+    out_channels, in_channels1, *kernel_size = weight_shape
+    in_channels1 = in_channels1 * groups
+    assert len(x.get_size()) == 2 + len(kernel_size)
+    batch, in_channels2, *input_size = x.get_size()
+    output_size = [batch]
+    V.graph.sizevars.guard_equals(in_channels1, in_channels2)
+
+    output_size.append(out_channels)
+    assert (
+        len(stride)
+        == len(padding)
+        == len(dilation)
+        == len(kernel_size)
+        == len(input_size)
+    )
+    for i in range(len(stride)):
+        output_size.append(
+            IndexingDiv(
+                input_size[i]
+                + 2 * padding[i]
+                - dilation[i] * (kernel_size[i] - 1)
+                - 1
+                + stride[i],
+                stride[i],
+            )
+        )
+        output_size[-1] = sympy.Integer(
+            V.graph.sizevars.guard_static_shape(output_size[-1])
+        )
+
+    output_layout_str = "torch.contiguous_format"
+    # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
+    # which align with aten.convolutuion path(cpu only support 2d case now).
+    # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
+    if len(x.get_size()) == 4 and (
+        x.get_layout().is_channels_last_stride_ordered()
+        or weight.get_layout().is_channels_last_stride_ordered()
+    ):
+        output_layout_str = "torch.channels_last"
+
+    if output_layout_str == "torch.channels_last":
+        stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
+        if len(stride_order) < len(output_size):
+            # add batch dim if it exists
+            stride_order = [len(stride_order)] + stride_order
+    else:
+        stride_order = list(reversed(range(len(output_size))))
+
+    kernel_layout = FlexibleLayout(
+        device=inputs[0].get_device(),
+        dtype=inputs[0].get_dtype(),
+        size=output_size,
+        stride_order=stride_order,
+    )
+    constant_args = [padding, stride, dilation, groups]
+
+    if bias is not None:
+        inputs.append(bias)
+    else:
+        constant_args.insert(0, bias)
+    return inputs, constant_args, kernel_layout
+
+
+class ConvolutionUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._convolution_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._convolution_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups: int,
+        attr,
+        scalars,
+        algorithm,
+    ):
+        kernel = "torch.ops.mkldnn._convolution_pointwise"
+        (inputs, constant_args, kernel_layout,) = _prepare_convolution_fusion_create(
+            cls, x, weight, bias, padding_, stride_, dilation_, groups
+        )
+        constant_args = constant_args + [attr, scalars, algorithm]
+        return ConvolutionUnary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        x = self.inputs[0]
+        # FixedLayout of input
+        x = self.require_stride_order(x, self.layout.preferred_stride_order)
+        self.inputs[0] = x
+        self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
+
+
 @dataclasses.dataclass
 class MutableBox(IRNode):
     """
