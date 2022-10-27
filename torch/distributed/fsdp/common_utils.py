@@ -2,7 +2,7 @@
 Public common utilities for FSDP.
 """
 
-from enum import Enum, auto
+from enum import auto, Enum
 
 
 class BackwardPrefetch(Enum):
