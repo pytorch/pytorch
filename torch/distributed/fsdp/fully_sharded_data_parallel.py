@@ -43,6 +43,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _prepare_forward_inputs,
     _wait_for_computation_stream,
 )
+from torch.distributed.fsdp.common_utils import BackwardPrefetch, ShardingStrategy
 from torch.distributed.utils import _sync_params_and_buffers
 
 from ._optim_utils import (
@@ -123,43 +124,6 @@ FLAT_PARAM = "_flat_param"
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 
 
-class ShardingStrategy(Enum):
-    """
-    This specifies the sharding strategy to be used for distributed training by
-    :class:`FullyShardedDataParallel`.
-    FULL_SHARD: Parameters, gradients, and optimizer states are sharded. For
-                the parameters, this algorithm all-gathers before the forward,
-                reshards after the forward, all-gathers before the backward
-                computation, and reshards after the backward computation. The
-                gradients are synchronized and sharded via reduce-scatter after
-                the backward computation. The sharded optimizer states are
-                updated locally.
-    SHARD_GRAD_OP: Gradients and optimizer states are sharded during
-                   computation, and additionally parameters are sharded outside
-                   computation. For the parameters, this algorithm all-gathers
-                   before the forward, does not reshard after the forward, and
-                   only reshards after the backward computation. The gradients
-                   are synchronized and sharded via reduce-scatter after the
-                   backward computation. The sharded optimizer states are
-                   updated locally. Inside ``no_sync()``, the parameters are
-                   not resharded after the backward computation.
-    NO_SHARD: Parameters, gradients, and optimizer states are not sharded but
-              instead replicated across ranks, similar to PyTorch's
-              ``DistributedDataParallel`` API. The gradients are synchronized
-              via all-reduce after the backward computation. The unsharded
-              optimizer states are updated locally.
-    HYBRID_SHARD(future support): Apply ``FULL_SHARD`` intra-node and
-                                  ``NO_SHARD`` inter-node.
-
-    """
-
-    FULL_SHARD = auto()
-    SHARD_GRAD_OP = auto()
-    NO_SHARD = auto()
-    # TODO
-    # HYBRID_SHARD = auto()
-
-
 @dataclass
 class MixedPrecision:
     """
@@ -228,7 +192,6 @@ class CPUOffload:
     """
 
     offload_params: bool = False
-
 
 
 class StateDictType(Enum):
