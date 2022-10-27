@@ -56,7 +56,8 @@ def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: Unfla
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
 
 def _register_pytree_node_grad(typ: Any, flatten_fn: FlattenFunc,
-                               unflatten_fn: UnflattenFunc, tangenttype_fn: UnflattenFunc) -> None:
+                               unflatten_fn: UnflattenFunc, tangenttype_fn: Optional[UnflattenFunc] = None) -> None:
+    tangenttype_fn = unflatten_fn if not tangenttype_fn else tangenttype_fn
     GRAD_NODES[typ] = GradNodeDef(flatten_fn, unflatten_fn, tangenttype_fn)
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -108,11 +109,13 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
         return False
     return all(type(entry) == str for entry in fields)
 
-def _get_node_type(pytree: Any) -> Any:
+def _get_node_type(pytree: Any) -> Optional[Any]:
     if _is_namedtuple_instance(pytree):
         return namedtuple
-    options = [i for i in type(pytree).mro() if i in SUPPORTED_NODES.keys() or i in LEAF_NODES]
-    return options[0] if len(options) > 0 else None
+    if isinstance(pytree, type):
+        return None
+    supported_types = [i for i in type(pytree).mro() if i in SUPPORTED_NODES or i in LEAF_NODES]
+    return supported_types[0] if len(supported_types) > 0 else None
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
@@ -149,13 +152,11 @@ class LeafSpec(TreeSpec):
     def __repr__(self, indent: int = 0) -> str:
         return '*'
 
-
 def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
     node_type = _get_node_type(pytree)
-
     if not node_type or node_type in LEAF_NODES:
         return [pytree], LeafSpec()
 
@@ -163,10 +164,7 @@ def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], Tree
         flatten_fn = GRAD_NODES[node_type].flatten_fn
     else:
         flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-
     child_pytrees, context = flatten_fn(pytree)
-    if isinstance(context, LeafSpec):
-        return child_pytrees, context
 
     # Recursively flatten the children
     result : List[Any] = []
@@ -196,7 +194,8 @@ def tree_unflatten(values: List[Any], spec: TreeSpec, grad_fn: bool = False, out
         return values[0]
 
     if grad_fn and spec.type in GRAD_NODES:
-        unflatten_fn = GRAD_NODES[spec.type].unflatten_fn if not output else GRAD_NODES[spec.type].tangenttype_fn
+        node_info = GRAD_NODES[spec.type]
+        unflatten_fn = node_info.tangenttype_fn if output else node_info.unflatten_fn
     else:
         unflatten_fn = SUPPORTED_NODES[spec.type].unflatten_fn
 

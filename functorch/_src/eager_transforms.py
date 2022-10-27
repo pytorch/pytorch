@@ -760,11 +760,9 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
         evaluated at ``primals`` and the Jacobian-vector product.
         If ``has_aux is True``, then instead returns a ``(output, jvp_out, aux)`` tuple.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
 
     jvp is useful when you wish to compute gradients of a function R^1 -> R^N
 
@@ -910,11 +908,10 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
         is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use :func:`jacrev`, which has better operator coverage.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
@@ -1059,11 +1056,11 @@ def hessian(func, argnums=0):
         returns the Hessian of :attr:`func` with respect to the arg(s) at
         :attr:`argnums`.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use ``jacrev(jacrev(func))``, which has better
+        operator coverage.
 
     A basic usage with a R^N -> R^1 function gives a N x N Hessian:
 
@@ -1118,7 +1115,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
                 args = _wrap_all_tensors(args, level)
                 kwargs = _wrap_all_tensors(kwargs, level)
                 diff_args = _slice_argnums(args, argnums, as_tuple=False)
-                tree_map_(partial(_create_differentiable, level=level), diff_args)
+                tree_map_(partial(_create_differentiable, level=level), diff_args, grad_fn=True)
 
                 output = func(*args, **kwargs)
                 if has_aux:

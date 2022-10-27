@@ -8,7 +8,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 def tree_map_(fn_, pytree, grad_fn=False):
-    flat_args, _ = tree_flatten(pytree, grad_fn=grad_fn)
+    flat_args, _ = tree_flatten(pytree, grad_fn)
     [fn_(arg) for arg in flat_args]
     return pytree
 
