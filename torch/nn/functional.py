@@ -1965,7 +1965,6 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
-    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
 
