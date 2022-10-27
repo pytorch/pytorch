@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version)
+    _get_torch_cuda_version, _get_torch_rocm_version)
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
@@ -2170,10 +2170,10 @@ def error_inputs_ormqr(op_info, device, **kwargs):
 def error_inputs_diag(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
     yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
-                     error_regex="matrix or a vector expected")
+                     error_regex="1D or 2D")
     zero_d = torch.randn(1, 1, 1, device=device)
     yield ErrorInput(SampleInput(zero_d, args=(0,)), error_type=RuntimeError,
-                     error_regex="matrix or a vector expected")
+                     error_regex="1D or 2D")
 
 def error_inputs_embedding(op_info, device, **kwargs):
     indices = torch.rand(2, 2, device=device).long()
@@ -3079,8 +3079,12 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
 
     assert fn is not None
 
-    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input}
-    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3}
+    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input,
+                   torch.nn.functional.conv_transpose2d: torch.nn.grad.conv2d_input,
+                   torch.nn.functional.conv_transpose3d: torch.nn.grad.conv3d_input}
+    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3,
+                       torch.nn.functional.conv_transpose2d: 4,
+                       torch.nn.functional.conv_transpose3d: 5}
 
     # Input for `ref` is ndarray.
     input, weight = torch.from_numpy(input), torch.from_numpy(weight)
@@ -3090,7 +3094,10 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
         input = input.unsqueeze(0)
 
     if bias is not None:
-        bias = torch.from_numpy(bias).unsqueeze(1)
+        bias = torch.from_numpy(bias)
+        unsqueeze_dims = input.ndim - 2
+        for _ in range(unsqueeze_dims):
+            bias = bias.unsqueeze(1)
 
     grad_output = input
     # Get the input shape for grad_fn.
@@ -3156,9 +3163,8 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
-        ((2, 8, 4, 4), (8, 1, 3, 3), None, {'groups': 4}),
-        ((1, 4, 5, 5), (4, 8, 3, 3), None,
-         {})
+        ((2, 4, 4, 4), (4, 1, 3, 3), None, {'groups': 4}),
+        ((1, 2, 5, 5), (2, 4, 3, 3), None, {})
     )
 
     for input_shape, weight, bias, kwargs in cases:
@@ -5138,7 +5144,7 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
     samples3d = product(shapes3d, kwargs3d)
 
     for shape, kwargs in chain(samples1d, samples2d, samples3d):
-        if op_info.name in ('diagonal', '_refs.diagonal'):
+        if 'diagonal' in op_info.name:
             # these are error inputs for diagonal
             if shape in ((0,), (1,)):
                 continue
@@ -5174,7 +5180,7 @@ def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
         dim1 = kwargs.get('dim1')
         dim2 = kwargs.get('dim2')
 
-        if op_info.name in ('diagonal', '_refs.diagonal'):
+        if 'diagonal' in op_info.name:
             num_dim = arg.dim()
         elif op_info.name in ('diag_embed', '_refs.diag_embed'):
             # these are valid inputs for diag_embed
@@ -9157,10 +9163,12 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),),
            ),
     OpInfo('diag',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+           ref=np.diag,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_diag,
            error_inputs_func=error_inputs_diag),
     OpInfo('diag_embed',
@@ -9180,6 +9188,13 @@ op_db: List[OpInfo] = [
            aten_backward_name='diagonal_backward',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_diagonal_diag_embed,
+           reference_inputs_func=reference_inputs_diagonal_diag_embed,
+           error_inputs_func=error_inputs_diagonal_diag_embed),
+    OpInfo('diagonal_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed,
@@ -9383,7 +9398,9 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"),
+               skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
+                               or (_get_torch_rocm_version() >= (5, 2))),
+                          "cusparseSDDMM was added in 11.2.1"),
                skipCPUIfNoMklSparse, ],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
@@ -10657,10 +10674,15 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv_transpose2d',
            aten_name='conv_transpose2d',
            aliases=('conv_transpose2d',),
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16,
-                                           *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           # `ref` for this function is backward of
+           # corresponding `conv*d`
+           ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
+           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose2d,
+           # Runs very slowly on slow-gradcheck for complex.
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -10668,7 +10690,16 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-05, rtol=5e-05), }),
+                   'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.complex32: tol(atol=5e-2, rtol=5e-2)}),
+                   "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
+                   'TestCommon', 'test_complex_half_reference_testing')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -16263,7 +16294,7 @@ op_db: List[OpInfo] = [
         "diagflat",
         ref=lambda input, offset=0: np.diagflat(input, k=offset),
         sample_inputs_func=sample_inputs_diagflat,
-        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
@@ -16559,6 +16590,9 @@ python_ref_db = [
         aliases=('moveaxis',),
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.bucketize",
@@ -16754,6 +16788,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
@@ -16966,10 +17003,16 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.poisson_nll_loss",
         torch_opinfo_name="nn.functional.poisson_nll_loss",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
@@ -17688,10 +17731,23 @@ python_ref_db = [
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.diag",
+        torch_opinfo_name="diag",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.diagonal",
         torch_opinfo_name="diagonal",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.diagonal_copy",
+        torch_opinfo_name="diagonal_copy",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -17703,6 +17759,9 @@ python_ref_db = [
         "_refs.dstack",
         torch_opinfo_name="dstack",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.expand",
@@ -17787,6 +17846,9 @@ python_ref_db = [
         "_refs.reshape",
         torch_opinfo_name="reshape",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.reshape_as",
@@ -17835,6 +17897,9 @@ python_ref_db = [
         "_refs.vsplit",
         torch_opinfo_name="vsplit",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.transpose",
@@ -17868,6 +17933,9 @@ python_ref_db = [
         "_refs.view",
         torch_opinfo_name="view",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.view_as",
@@ -17892,6 +17960,9 @@ python_ref_db = [
         "_refs.unbind",
         torch_opinfo_name="unbind",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     #
     # Reduction Reference OpInfos
@@ -17903,10 +17974,16 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.any",
@@ -17916,6 +17993,9 @@ python_ref_db = [
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.std",
@@ -18011,12 +18091,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.trace",
         torch_opinfo_name="trace",
-        decorators=(
-            # TODO: torch.diag is currently not supported by either refs, meta funcs, or NVFuser
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
-            DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.norm",
@@ -18199,12 +18274,18 @@ python_ref_db = [
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
+        ),
     ),
     PythonRefInfo(
         "_refs.index_select",
