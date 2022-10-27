@@ -1,12 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/ATen.h>
-#include <ATen/Tensor.h>
-#include <ATen/Utils.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
-#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -184,6 +179,15 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output)
   auto bool_self = self.to(ScalarType::Bool);
   mps::unary_op(bool_self, output, "logical_not_out_mps", [](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor){ return [mpsGraph notWithTensor:inputTensor name:nil];});
   return output;
+}
+
+TORCH_IMPL_FUNC(sigmoid_out_mps) (const Tensor& self, const Tensor& output)
+{
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support sigmoid op with int64 input");
+  mps::unary_op(self, output, "sigmoid_out_mps",
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+                  return [mpsGraph sigmoidWithTensor:inputTensor name:nil];
+                });
 }
 
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
