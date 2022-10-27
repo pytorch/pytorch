@@ -12804,6 +12804,7 @@ op_db: List[OpInfo] = [
                     supports_out=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
+                    supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
@@ -12838,6 +12839,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_out=False,
+                    supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
