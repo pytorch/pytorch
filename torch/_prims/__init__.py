@@ -2322,8 +2322,8 @@ def _arange_meta(
         lambda: "step must be nonzero",
     )
     # SymInts can't represent inf
-    if not isinstance(start, torch.SymIntNode) and not isinstance(
-        end, torch.SymIntNode
+    if not isinstance(start, torch.SymInt) and not isinstance(
+        end, torch.SymInt
     ):
         utils.check(
             math.isfinite(start) and math.isfinite(end),

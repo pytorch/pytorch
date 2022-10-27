@@ -187,7 +187,7 @@ class VariableBuilder:
 
     def _wrap(self, value):
         make_guards = self.make_guards
-        if istype(value, (torch.SymIntNode, torch.SymFloatNode)):
+        if istype(value, (torch.SymInt, torch.SymFloat)):
             return self.wrap_sym(value)
         if istensor(value):
             return self.wrap_tensor(value)
@@ -492,7 +492,7 @@ class VariableBuilder:
             )
         )
 
-    def wrap_sym(self, value: Union[torch.SymIntNode, torch.SymFloatNode]):
+    def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
             self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
         if is_constant_source(self.get_source()):

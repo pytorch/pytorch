@@ -124,10 +124,10 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
 }
 
 ScalarType infer_scalar_type(PyObject* obj) {
-  if (torch::is_symint_node(obj)) {
+  if (torch::is_symint(obj)) {
     return ScalarType::Long;
   }
-  if (torch::is_symfloat_node(obj)) {
+  if (torch::is_symfloat(obj)) {
     return ScalarType::Double;
   }
 #ifdef USE_NUMPY
@@ -210,18 +210,18 @@ void recursive_store(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(data != nullptr);
 
   int64_t ndim = sizes.size();
-  bool is_symfloat = torch::is_symfloat_node(obj);
-  bool is_symint = torch::is_symint_node(obj);
+  bool is_symfloat = torch::is_symfloat(obj);
+  bool is_symint = torch::is_symint(obj);
   if (dim == ndim) {
     if (is_symfloat) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
-      auto val = new_obj.cast<c10::SymFloatNode>()->toSymFloat();
+      auto val = new_obj.cast<c10::SymFloat>();
       *(double*)data = val.guard_float(__FILE__, __LINE__);
       return;
     }
     if (is_symint) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
-      auto val = new_obj.cast<c10::SymIntNode>()->toSymInt();
+      auto val = new_obj.cast<c10::SymInt>();
       *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
       return;
     }
