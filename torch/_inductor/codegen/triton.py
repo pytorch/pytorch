@@ -15,11 +15,11 @@ import torch
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
-    dynamo_logging,
     free_symbol_startswith,
     instance_descriptor,
     sympy_product,
     sympy_subs,
+    sympy_symbol,
 )
 from ..virtualized import ops, V
 from .common import (
@@ -40,7 +40,16 @@ def signature_of(arg):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
-        return JITFunction._type_of(arg.dtype)
+        tye = JITFunction._type_of(arg.dtype)
+        if V.graph.is_unspec_arg(arg.buffer):
+            # had unwrapped 0d tensor as scalar
+            new_tye = tye.lstrip("*")
+            if new_tye in ["fp16", "bf16"]:
+                return "fp32"
+            else:
+                return new_tye
+        else:
+            return tye
     if isinstance(arg, SizeArg):
         return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
@@ -114,15 +123,27 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def abs(x):
-        return f"tl.libdevice.abs({x}) if ({x}).dtype is tl.float64 else tl.abs({x})"
+        return f"tl.abs({x})"
+
+    @staticmethod
+    def libdevice_abs(x):
+        return f"tl.libdevice.abs({x})"
 
     @staticmethod
     def exp(x):
-        return f"tl.libdevice.exp({x}) if ({x}).dtype is tl.float64 else tl.exp({x})"
+        return f"tl.exp({x})"
+
+    @staticmethod
+    def libdevice_exp(x):
+        return f"tl.libdevice.exp({x})"
 
     @staticmethod
     def sqrt(x):
-        return f"tl.libdevice.sqrt({x}) if ({x}).dtype is tl.float64 else tl.sqrt({x})"
+        return f"tl.sqrt({x})"
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return f"tl.libdevice.sqrt({x})"
 
     @staticmethod
     def relu(x):
@@ -154,11 +175,19 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def cos(x):
-        return f"tl.libdevice.cos({x}) if ({x}).dtype is tl.float64 else tl.cos({x})"
+        return f"tl.cos({x})"
+
+    @staticmethod
+    def libdevice_cos(x):
+        return f"tl.libdevice.cos({x})"
 
     @staticmethod
     def sin(x):
-        return f"tl.libdevice.sin({x}) if ({x}).dtype is tl.float64 else tl.sin({x})"
+        return f"tl.sin({x})"
+
+    @staticmethod
+    def libdevice_sin(x):
+        return f"tl.libdevice.sin({x})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -197,6 +226,14 @@ class TritonOverrides(OpOverrides):
         return f"tl.libdevice.rsqrt({x})"
 
     @staticmethod
+    def sigmoid(x):
+        return f"tl.sigmoid({x})"
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        return f"1/(1 + tl.libdevice.exp(-({x})))"
+
+    @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
         return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
@@ -211,7 +248,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        return f"tl.libdevice.log({x}) if ({x}).dtype is tl.float64 else tl.log({x})"
+        return f"tl.log({x})"
+
+    @staticmethod
+    def libdevice_log(x):
+        return f"tl.libdevice.log({x})"
 
     @staticmethod
     def isinf(x):
@@ -328,10 +369,10 @@ class IterationRangesRoot(IterationRanges):
         Lookup a given RangeTreeEntry, creating it if needed
         """
         if V.graph.sizevars.maybe_guard_equals(divisor * length, self.numel):
-            expr = ir.IndexingDiv(sympy.Symbol(f"{self.prefix}index"), divisor)
+            expr = ir.IndexingDiv(sympy_symbol(f"{self.prefix}index"), divisor)
         else:
             expr = ir.ModularIndexing(
-                sympy.Symbol(f"{self.prefix}index"), divisor, length
+                sympy_symbol(f"{self.prefix}index"), divisor, length
             )
 
         if expr not in self.nodes:
@@ -444,7 +485,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name
 
     def symbol(self):
-        return sympy.Symbol(self.name)
+        return sympy_symbol(self.name)
 
     def __hash__(self):
         return hash(self.name)
@@ -687,11 +728,9 @@ class TritonKernel(Kernel):
                 mask.append(f"{tree.prefix}mask")
             dense_mask.append(f"{tree.prefix}mask")
 
-        if (need_dense and not have_dense) or isinstance(
-            index, sympy.core.numbers.Integer
-        ):
+        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-            if isinstance(index, sympy.core.numbers.Integer):
+            if isinstance(index, sympy.Integer):
                 return index_str, "None"
             else:
                 mask = dense_mask
@@ -760,9 +799,13 @@ class TritonKernel(Kernel):
             other = ", other=0"
         else:
             other = ""
-        line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-        if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
-            line += ".to(tl.float32)"
+
+        if V.graph.is_unspec_arg(name):
+            line = var
+        else:
+            line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
+            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+                line += ".to(tl.float32)"
 
         if (
             self.inside_reduction
@@ -947,15 +990,14 @@ class TritonKernel(Kernel):
         triton_meta = {
             "signature": dict(enumerate(map(signature_of, signature))),
             "device": V.graph.scheduler.current_device.index,
-            "configs": [config_of(signature)],
             "constants": {},
         }
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                triton_meta["signature"][len(argdefs)] = signature_of(
-                    SizeArg(f"{tree.prefix}numel", tree.numel)
-                )
+                sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
+                signature.append(sizearg)
+                triton_meta["signature"][len(argdefs)] = signature_of(sizearg)
                 argdefs.append(f"{tree.prefix}numel")
                 # constexpr version causes issues, see
                 # https://github.com/pytorch/torchdynamo/pull/1362
@@ -963,6 +1005,7 @@ class TritonKernel(Kernel):
                 #     tree.numel
                 # )
                 # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
+        triton_meta["configs"] = [config_of(signature)]
 
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
@@ -986,7 +1029,8 @@ class TritonKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
         with code.indent():
-            self.codegen_static_numels(code)
+            if not config.dynamic_shapes:
+                self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
@@ -1032,6 +1076,10 @@ class TritonKernel(Kernel):
 
     def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
+        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
+        for i in range(len(call_args)):
+            if V.graph.is_unspec_arg(call_args[i]):
+                call_args[i] = call_args[i] + ".item()"
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
@@ -1177,7 +1225,7 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        log.log(dynamo_logging.CODE, "schedule: %s", node_schedule)
+        log.log(logging.CODE, "schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod

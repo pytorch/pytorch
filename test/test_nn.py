@@ -646,44 +646,53 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, expected_grad)
 
     def test_hook_buffer_registration(self):
-        def buffer_registration_hook(module, name, buffer):
-            buffer.registered = True
-        handle = torch.nn.modules.module.register_module_buffer_registration_hook(
-            buffer_registration_hook
-        )
-        try:
-            l, n, s = self._create_basic_net()
-            for b in s.buffers():
-                self.assertTrue(getattr(b, "registered", False))
-        finally:
-            handle.remove()
+        for return_buffer in (True, False):
+            def buffer_registration_hook(module, name, buffer):
+                buffer.registered = True
+                if return_buffer:
+                    return buffer
+            handle = torch.nn.modules.module.register_module_buffer_registration_hook(
+                buffer_registration_hook
+            )
+            try:
+                l, n, s = self._create_basic_net()
+                for b in s.buffers():
+                    self.assertTrue(getattr(b, "registered", False))
+            finally:
+                handle.remove()
 
     def test_hook_submodule_registration(self):
-        def module_registration_hook(module, name, submodule):
-            module.registered = True
-            submodule.registered = True
-        handle = torch.nn.modules.module.register_module_module_registration_hook(
-            module_registration_hook
-        )
-        try:
-            l, n, s = self._create_basic_net()
-            for m in s.modules():
-                self.assertTrue(getattr(m, "registered", False))
-        finally:
-            handle.remove()
+        for return_submodule in (True, False):
+            def module_registration_hook(module, name, submodule):
+                module.registered = True
+                submodule.registered = True
+                if return_submodule:
+                    return submodule
+            handle = torch.nn.modules.module.register_module_module_registration_hook(
+                module_registration_hook
+            )
+            try:
+                l, n, s = self._create_basic_net()
+                for m in s.modules():
+                    self.assertTrue(getattr(m, "registered", False))
+            finally:
+                handle.remove()
 
     def test_hook_parameter_registration(self):
-        def parameter_registration_hook(module, name, parameter):
-            parameter.registered = True
-        handle = torch.nn.modules.module.register_module_parameter_registration_hook(
-            parameter_registration_hook
-        )
-        try:
-            l, n, s = self._create_basic_net()
-            for p in s.parameters():
-                self.assertTrue(getattr(p, "registered", False))
-        finally:
-            handle.remove()
+        for return_parameter in (True, False):
+            def parameter_registration_hook(module, name, parameter):
+                parameter.registered = True
+                if return_parameter:
+                    return parameter
+            handle = torch.nn.modules.module.register_module_parameter_registration_hook(
+                parameter_registration_hook
+            )
+            try:
+                l, n, s = self._create_basic_net()
+                for p in s.parameters():
+                    self.assertTrue(getattr(p, "registered", False))
+            finally:
+                handle.remove()
 
     def test_to(self):
         m = nn.Linear(3, 5)
@@ -5399,7 +5408,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
-                                        saved_kv=False, same_embed_dim=False, byte_mask=False,
+                                        saved_kv=False, same_embed_dim=False,
                                         average_attn_weights=average_attn_weights):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
@@ -5428,20 +5437,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     seq_mask = np.random.randint(0, 2, (1, seq_len))
                     key_padding_mask = (np.repeat(seq_mask, batch_sz, axis=0) == 1)
                     key_padding_mask_tensor = torch.from_numpy(key_padding_mask)
-                    if byte_mask:
-                        key_padding_mask_tensor = key_padding_mask_tensor.byte()
                 decoder_state = np.random.rand(batch_sz, d_model)
                 K = np.random.rand(*dims)
                 V = K
                 Q = np.expand_dims(decoder_state, 1)
                 attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
-                if byte_mask:
-                    attn_mask_tensor = (attn_mask_tensor == 0).byte()
-                else:
-                    attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
-                    attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
-                    attn_mask_tensor = attn_mask_tensor.double()
+                attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
+                attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
+                attn_mask_tensor = attn_mask_tensor.double()
 
                 decoder_state_tensor = torch.from_numpy(decoder_state).to(torch.get_default_dtype())
                 source_hid_tensor = torch.from_numpy(K).to(torch.get_default_dtype()).transpose(0, 1)
@@ -5588,10 +5592,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
                                         saved_kv=True, same_embed_dim=True)
 
-        def test_multihead_attn_all_arguments4():
-            _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
-                                        saved_kv=True, same_embed_dim=True, byte_mask=True)
-
         test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
         test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
         test_multihead_attn_no_masking()   # Test MultiheadAttention without masking
@@ -5602,7 +5602,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(AssertionError, "bias cannot be added to static key."):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
         test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
-        test_multihead_attn_all_arguments4()  # Test MultiheadAttention with all the argument.
 
     def test_multihead_attn_3d_attn_mask(self):
         embed_dim = 8
@@ -15130,6 +15129,16 @@ class TestNNDeviceType(NNTestCase):
         conv2 = torch.nn.Conv2d(1, 1024, 1, 1).to(device).to(dtype)
         input_large = torch.randn(1, 1, 2048, 1024 , dtype=dtype, device=device)
         conv2(input_large)
+
+    @onlyCUDA
+    @largeTensorTest('40GB')
+    @largeTensorTest('24GB', 'cpu')
+    def test_conv3d_64bit_indexing(self, device):
+        x = torch.rand(1, 32, 512, 512, 256)
+        m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
+        yref = m(x)
+        y = m.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y)
 
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):

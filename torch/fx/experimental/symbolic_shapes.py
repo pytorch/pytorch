@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast
 import operator
 import builtins
 import math
@@ -13,6 +13,7 @@ from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
+    from sympy.printing.precedence import precedence  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -94,6 +95,13 @@ def sym_float(a):
         return a
     return float(a)
 
+def sym_int(a):
+    if hasattr(a, '__sym_int__'):
+        return a.__sym_int__()
+    elif isinstance(a, torch._C.SymIntNode):
+        return a
+    return int(a)
+
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
 # 2. Specialize on 0/1 when we do subtraction
@@ -104,15 +112,23 @@ class PySymInt(object):
     implementation of symbolic shapes.
     """
     def __init__(self, expr, shape_env, constant=None):
-        self.expr = expr
+        self._expr = expr
         self.shape_env = shape_env
         self.constant = constant
+
+    @property
+    def expr(self):
+        self._update_expr()
+        return self._expr
 
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def clone(self):
         return PySymInt(self.expr, self.shape_env, constant=self.constant)
+
+    def _update_expr(self):
+        self._expr = self.shape_env.replace(self._expr)
 
     def __str__(self):
         return f"{self.expr}"
@@ -162,6 +178,18 @@ if HAS_SYMPY:
         """
         nargs = (2,)
 
+        def _sympystr(self, printer):
+            lhs = self.args[0]
+            rhs = self.args[1]
+            lhs_str = printer._print(lhs)
+            rhs_str = printer._print(rhs)
+            if precedence(lhs) < precedence(sympy.div):
+                lhs_str = f"({lhs_str})"
+            if precedence(rhs) < precedence(sympy.div):
+                rhs_str = f"({rhs_str})"
+
+            return f"{lhs_str}//{rhs_str}"
+
         @classmethod
         def eval(cls, base, divisor):
             if base == 0:
@@ -178,26 +206,6 @@ if HAS_SYMPY:
                 return FloorDiv(
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
-
-    class Ceil(sympy.Function):
-        """
-        sympy doesn't have its own ceil(), so rolling one here.
-        We maintain this so that we can simplify a sympy.Rational into a sympy.Float.
-        sympy.Float isn't supported.
-        """
-        nargs = (1,)
-
-        @classmethod
-        def eval(cls, a):
-            if isinstance(a, sympy.Integer):
-                return a
-            elif isinstance(a, sympy.core.symbol.Symbol) and a.is_scalar:
-                # TODO: do we need to simplify expr's first? (e.g. if we have 3/3), is is_scalar() true?
-                return a
-            elif isinstance(a, sympy.Rational):
-                return a.floor() + 1
-            else:
-                raise NotImplementedError("math.ceil() not supported for type: " + str(type(a)))
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -217,13 +225,15 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'ceil': lambda a: Ceil(a),
+    'ceil': lambda a: sympy.ceiling(a),
+    'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
 }
 
 unary_magic_methods = {
-    'ceil'
+    'ceil',
+    'neg'
 }
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
@@ -368,18 +378,18 @@ class ShapeEnv(object):
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
-                val, i = sorted(
+                val, i = min(
                     [
                         (ex.stride()[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
                     ]
-                )[0]
+                )
                 stride[i] = self.create_symbol(val)
         assert all(x is not None for x in stride)
         return [self.create_symintnode(i) for i in size], [self.create_symintnode(i) for i in stride]  # type: ignore[arg-type]
 
-    def create_symintnode(self, expr: Union["sympy.Expr", int]):
+    def create_symintnode(self, expr: "sympy.Expr"):
         py_sym_int = PySymInt(expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         return cpp_sym_int
@@ -409,26 +419,26 @@ class ShapeEnv(object):
         # and wrap_fake_symbolic
         meta_converter = MetaConverter()
         pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
-        return all(guard.xreplace(new_env.var_to_val) == value for guard, value, _ in self.guards)
+        return all(guard.xreplace(new_env.var_to_val) for guard, _ in self.guards)
+
+    def get_guard_expr(self):
+        """
+        Returns a sympy expression representing all of the shape env guards.
+
+        NOTE: Does not include implicit 0/1 or duck-shaping guards
+        """
+        return sympy.And(*[guard for guard, _ in self.guards])
 
     def get_nontrivial_guards(self):
-        return [(self.simplify(guard), val) for guard, val, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+        return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]
 
     def format_guards(self, verbose=False):
-        def format_val(guard, val):
-            if val is sympy.true:
-                return str(guard)
-            elif val is sympy.false:
-                return f"Not({guard})"
-            else:
-                return f"Eq({guard}, {val})"
-
         def format_tb(tb):
             if not verbose:
                 return ""
             return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
 
-        return '\n'.join(f" - {format_val(guard, val)}{format_tb(tb)}" for guard, val, tb in self.guards)
+        return '\n'.join(f" - {guard}{format_tb(tb)}" for guard, tb in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -570,5 +580,10 @@ class ShapeEnv(object):
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
         stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
-        self.guards.append((expr, concrete_val, stack))
+        if concrete_val is sympy.true:
+            self.guards.append((expr, stack))
+        elif concrete_val is sympy.false:
+            self.guards.append((sympy.Not(expr), stack))
+        else:
+            self.guards.append((sympy.Eq(expr, concrete_val), stack))
         return concrete_val
