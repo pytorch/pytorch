@@ -197,12 +197,17 @@ if TYPE_CHECKING:
     import torch._C as _C
 
 class SymInt:
-    """Like an int, but symbolically records operations on it.  Users interact
-    with this.  Has magic methods."""
+    """
+    Like an int (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+    """
 
     def __init__(self, node):
         from torch.fx.experimental.symbolic_shapes import SymNode
         assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
         self.node = node
 
     # Magic methods installed later
@@ -216,24 +221,25 @@ class SymInt:
     def __sym_float__(self):
         return SymFloat(self.node.sym_float())
 
-    def __str__(self):
-        return self.node.str()
-
     def __repr__(self):
         return self.node.str()
 
-    # for BC
+    # For BC; direct access of node is OK too
     def get_pyobj(self):
         return self.node
 
 class SymFloat:
-    """Like an float, but symbolically records operations on it.  Users interact
-    with this.  Has magic methods."""
+    """
+    Like an float (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+    """
 
-    # MUST be named this, C++ binding relies on it
     def __init__(self, node):
         from torch.fx.experimental.symbolic_shapes import SymNode
         assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
         self.node = node
 
     # Magic methods installed later
@@ -244,13 +250,10 @@ class SymFloat:
     def __sym_int__(self):
         return SymInt(self.node.sym_int())
 
-    def __str__(self):
-        return self.node.str()
-
     def __repr__(self):
         return self.node.str()
 
-    # for BC
+    # For BC; direct access of node is OK too
     def get_pyobj(self):
         return self.node
 
@@ -1029,5 +1032,5 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 
     csan.enable_cuda_sanitizer()
 
-# Populate magic methods
+# Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.symbolic_shapes

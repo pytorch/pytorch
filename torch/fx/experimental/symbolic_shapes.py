@@ -247,26 +247,6 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
-    class Ceil(sympy.Function):
-        """
-        sympy doesn't have its own ceil(), so rolling one here.
-        We maintain this so that we can simplify a sympy.Rational into a sympy.Float.
-        sympy.Float isn't supported.
-        """
-        nargs = (1,)
-
-        @classmethod
-        def eval(cls, a):
-            if isinstance(a, sympy.Integer):
-                return a
-            elif isinstance(a, sympy.core.symbol.Symbol) and a.is_scalar:
-                # TODO: do we need to simplify expr's first? (e.g. if we have 3/3), is is_scalar() true?
-                return a
-            elif isinstance(a, sympy.Rational):
-                return a.floor() + 1
-            else:
-                raise NotImplementedError("math.ceil() not supported for type: " + str(type(a)))
-
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
@@ -285,7 +265,7 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'ceil': lambda a: Ceil(a),
+    'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
@@ -322,12 +302,8 @@ def _make_node_magic(method, func):
             r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             assert isinstance(r, (SymInt, SymFloat)), type(r)
             return r.node
-        if isinstance(other, SymNode):
-            other_expr = other.expr
-        else:
-            # TODO: can this case actually occur :think:
-            assert isinstance(other, sympy.Expr)
-            other_expr = other
+        assert isinstance(other, SymNode)
+        other_expr = other.expr
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
         other_expr = self.shape_env.replace(other_expr)
@@ -367,6 +343,9 @@ def _make_node_magic(method, func):
     else:
         setattr(SymNode, method, binary_magic_impl)
 
+for method, func in magic_methods.items():
+    _make_node_magic(method, func)
+
 def _make_user_magic(method, user_type):
     # User magic takes care of wrapping the other operand into a node,
     # so that our internal logic can assume everything is nodes
@@ -386,9 +365,6 @@ def _make_user_magic(method, user_type):
         setattr(user_type, f"__{method}__", binary_magic_impl)
         if method in reflectable_magic_methods:
             setattr(user_type, f"__r{method}__", rbinary_magic_impl)
-
-for method, func in magic_methods.items():
-    _make_node_magic(method, func)
 
 for method, func in magic_methods.items():
     _make_user_magic(method, SymInt)

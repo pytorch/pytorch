@@ -12,26 +12,19 @@ namespace c10 {
 
 class SymFloat;
 
-// `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
-// represent concrete dimension values.
+// SymInt represents either a regular int64_t, or a symbolic integer
+// (represented in a type erased way as SymNode).  The intention is for SymInt
+// to represent symbolic sizes that arise when doing shape computation in
+// operator kernels. This allows for tracing through programs without baking in
+// concrete sizes into kernel calls.
 //
-// `SymInt` is also a data type in Pytorch that can be used in function schemas
-// to enable tracing.
+// SymInt has an API equivalent to int64_t.  In particular, it is a value type.
+// Internally, SymInt is represented in a clever packed way, so that it only
+// occupies one word of space; but morally, it is a union between an int64_t
+// and an intrusive pointer to SymNodeImpl.
 //
-// `SymInt` is introduced to enable tracing arithmetic
-// operations on symbolic integers (e.g. sizes). Tracing symbolic sizes will
-// allow LTC and AOTAutograd representing dynamic shapes in expression graphs
-// faithfully without baking in concrete dimension values.
-//
-// To trace the operations, SymInt will overload arithmetic operators (e.g. +,
-// -, *) and will provide overloads taking SymInt for commonly used math
-// functions.
-//
-// SymInt will be extenteded to represent a union structure Union[int64_t,
-// SymNodeImpl*] which will be implemented as a single packed int64_t field
-// named data_.
-//
-// Invariant: the referenced SymNodeImpl is guaranteed to be an int SymNode
+// Invariant: the referenced SymNodeImpl is guaranteed to be a SymNode where
+// is_int() returns true
 
 class C10_API SymInt {
  public:
