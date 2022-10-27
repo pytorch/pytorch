@@ -119,7 +119,7 @@ Tensor qcat_nhwc_kernel(
       c10::nullopt);
 
   // N, H, and W are explicitly captured here because there's a bug in GCC5
-  // which causes an internal compiler error if they're not
+  // and clang5 which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vectorized<scalar_t>;
     at::parallel_for(0, N * H * W, 0, [&](int64_t begin, int64_t end) {
