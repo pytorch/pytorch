@@ -1,7 +1,6 @@
 import contextlib
 import copy
 import functools
-import itertools
 import math
 import traceback
 import warnings
@@ -11,7 +10,6 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
-    cast,
     Dict,
     Generator,
     Iterable,
@@ -30,11 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
-)
-from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
-from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _get_param_to_unflat_param_names,
     clean_tensor_name,
@@ -45,23 +39,21 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
-    _check_single_device_module,
-    _get_buffer_names,
-    _get_compute_device,
-    _get_device_from_device_id,
-    _get_ignored_modules,
-    _get_ignored_params,
-    _get_orig_params,
-    _materialize_module,
-    _move_module_to_device,
-    _sync_module_states,
+    _init_core_state,
+    _init_ignored_modules_and_params,
+    _init_module_and_device_state,
+    _init_param_handle_from_params,
+    _init_prefetching_state,
+    _init_process_group_state,
+    _init_runtime_state,
+    _init_state_dict_state,
 )
-from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
     _prepare_forward_inputs,
     _wait_for_computation_stream,
 )
+from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.common_utils import (
     BackwardPrefetch,
     CPUOffload,
@@ -86,25 +78,14 @@ from ._state_dict_utils import (
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
 )
-from ._utils import (
-    _apply_to_tensors,
-    _contains_batchnorm,
-    _free_storage,
-    _override_batchnorm_mixed_precision,
-    p_assert,
-)
+from ._utils import _apply_to_tensors, _free_storage, p_assert
 from .flat_param import (
+    _HandlesKey,
     FlatParameter,
     FlatParamHandle,
-    HandleConfig,
     HandleShardingStrategy,
 )
-from .wrap import (
-    _or_policy,
-    _recursive_wrap,
-    _wrap_batchnorm_individually,
-    ParamExecOrderWrapPolicy,
-)
+from .wrap import ParamExecOrderWrapPolicy
 
 _TORCH_FX_AVAIL = True
 if not hasattr(torch, "fx"):
@@ -219,382 +200,6 @@ class ShardedStateDictConfig(StateDictConfig):
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
     PARAM_ID = auto()
-
-
-# A handles key represents the group of `FlatParamHandle`s involved in a given
-# module's forward. These will be all-gathered together in the pre-forward and
-# pre-backward.
-_HandlesKey = Tuple[FlatParamHandle, ...]
-
-
-class _ExecOrderWarnStatus(Enum):
-    """Used internally for execution order validation."""
-
-    NONE = auto()  # no deviation yet
-    WARNING = auto()  # deviated this iteration; currently issuing warnings
-    WARNED = auto()  # deviated in a previous iteration
-
-
-class _ExecOrderData:
-    """
-    This contains the data structures to track the execution order. We track
-    the pre-forward order on the *first* iteration for forward prefetching
-    (which thus assumes static graph) and the post-forward order on *every*
-    iteration for backward prefetching (which thus does not assume static
-    graph but may be provide an incorrect order).
-    """
-
-    def __init__(
-        self,
-        debug_level: dist.DebugLevel,
-        backward_prefetch_limit: int,
-        forward_prefetch_limit: int,
-    ) -> None:
-        # Tracks the (static) pre-forward order for execution order validation
-        # and forward prefetching
-        self.handles_pre_forward_order: List[int] = []
-        # Maps each handles key to its index in `handles_pre_forward_order`
-        self.handles_to_pre_forward_order_index: Dict[_HandlesKey, int] = {}
-        # Tracks the post-forward order for pre-backward prefetching
-        self.handles_post_forward_order: List[int] = []
-        # Maps each handles key to its index in `handles_post_forward_order`
-        self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
-        self.is_first_iter = True
-
-        # Gives the max number of backward/forward prefetched all-gathers by a
-        # single module
-        self._backward_prefetch_limit = backward_prefetch_limit
-        self._forward_prefetch_limit = forward_prefetch_limit
-
-        # Data structures for execution order validation
-        self._checking_order: bool = debug_level in [
-            dist.DebugLevel.INFO,
-            dist.DebugLevel.DETAIL,
-        ]
-        self.process_group: Optional[dist.ProcessGroup] = None
-        self.world_size: Optional[int] = None
-        self.all_handles: List[FlatParamHandle] = []
-        # Maps each handle to its index in `all_handles`, which must be the
-        # same across ranks for the execution order validation to work
-        self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
-        # Names are prefixed from the root module
-        self.flat_param_to_prefixed_param_names: Dict[FlatParameter, List[str]] = {}
-        # Current index in the pre-forward execution order
-        self.current_order_index = 0
-        self.warn_status = _ExecOrderWarnStatus.NONE
-
-    def init(
-        self,
-        fsdp_root: "FullyShardedDataParallel",
-        process_group: dist.ProcessGroup,
-    ) -> None:
-        """
-        Initializes the data structures needed for checking the forward order.
-        This should be called after a root FSDP instance has been set during
-        lazy initialization.
-        """
-        self.process_group = process_group
-        self.rank = process_group.rank()
-        self.world_size = process_group.size()
-        # Fix an order over the handles, which should be the same across ranks
-        for fsdp_module in fsdp_root.fsdp_modules(fsdp_root):
-            for handle in fsdp_module._handles:
-                index = len(self.all_handles)
-                self.all_handles.append(handle)
-                self.handle_to_handle_index[handle] = index
-        self.flat_param_to_prefixed_param_names = cast(
-            Dict[FlatParameter, List[str]],
-            _get_param_to_unflat_param_names(fsdp_root),
-        )
-        # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
-        # to check that all ranks have the same handles in the same order.
-        # https://github.com/pytorch/pytorch/issues/79620
-
-    def get_handles_to_backward_prefetch(
-        self,
-        current_handles_key: _HandlesKey,
-    ) -> List[_HandlesKey]:
-        """
-        Returns a :class:`list` of the handles keys of the handles to backward
-        prefetch given the current handles key. If there are no valid handles
-        keys to prefetch, then this returns an empty :class:`list`.
-        """
-        current_index = self.handles_to_post_forward_order_index.get(
-            current_handles_key, None
-        )
-        if current_index is None:
-            return None
-        target_index = current_index - 1
-        target_handles_keys: List[_HandlesKey] = []
-        for _ in range(self._backward_prefetch_limit):
-            if target_index < 0:
-                break
-            target_handles_keys.append(self.handles_post_forward_order[target_index])
-            target_index -= 1
-        return target_handles_keys
-
-    def get_handles_to_forward_prefetch(
-        self,
-        current_handles_key: _HandlesKey,
-    ) -> List[_HandlesKey]:
-        """
-        Returns a :class:`list` of the handles keys of the handles to forward
-        prefetch given the current handles key. If there are no valid handles
-        keys to prefetch, then this returns an empty :class:`list`.
-        """
-        current_index = self.handles_to_pre_forward_order_index.get(
-            current_handles_key, None
-        )
-        if current_index is None:
-            return None
-        target_index = current_index + 1
-        target_handles_keys: List[_HandlesKey] = []
-        for _ in range(self._forward_prefetch_limit):
-            if target_index >= len(self.handles_pre_forward_order):
-                break
-            target_handles_keys.append(self.handles_pre_forward_order[target_index])
-            target_index += 1
-        return target_handles_keys
-
-    def record_post_forward(self, handles: List[FlatParamHandle]) -> None:
-        """
-        Records ``handles`` in the post-forward order, where ``handles`` should
-        be a group of handles used in the same module's forward. If ``handles``
-        is empty, then it is omitted.
-
-        Unlike :meth:`record_pre_forward`, this records the order *every*
-        iteration with the expectation that the recorded order is reset in
-        :meth:`next_iter`.
-        """
-        if not handles:
-            return
-        handles_key = tuple(handles)
-        # Only record the first usage of a handles key
-        if handles_key in self.handles_to_post_forward_order_index:
-            return
-        index = len(self.handles_post_forward_order)
-        self.handles_to_post_forward_order_index[handles_key] = index
-        self.handles_post_forward_order.append(handles_key)
-
-    def record_pre_forward(
-        self, handles: List[FlatParamHandle], is_training: bool
-    ) -> None:
-        """
-        Records ``handles`` in the pre-forward order, where ``handles`` should
-        be a group of handles used in the same module's forward. If ``handles``
-        is empty, then it is omitted.
-
-        On the first iteration, this checks the execution order across ranks.
-        See :meth:`_check_order` for details.
-        """
-        if not handles:
-            return
-        handles_key = tuple(handles)
-        self._check_order(handles_key, is_training)
-        # Fix the order after the first iteration and only record the first
-        # usage of a handles key
-        if (
-            not self.is_first_iter
-            or handles_key in self.handles_to_pre_forward_order_index
-        ):
-            return
-        index = len(self.handles_pre_forward_order)
-        self.handles_to_pre_forward_order_index[handles_key] = index
-        self.handles_pre_forward_order.append(handles_key)
-
-    def _check_order(self, handles_key: _HandlesKey, is_training: bool) -> None:
-        """
-        Checks the forward execution order as long as ``is_training`` is
-        ``True`` since checking in eval mode is not supported.
-
-        - On the first iteration, this uses all-gathers to check that all ranks
-        are all-gathering the same handles and hence ``FlatParameter`` s,
-        raising an error if not.
-        - On subsequent iterations, if the distributed debug level is at least
-        INFO, then this checks that each rank is locally consistent with its
-        own forward order from the first iteration, issuing a warning if not.
-        This issues a warning on the first deviating iteration and stops
-        warning thereafter.
-        """
-        # Do not check order in eval mode since the post-backward callback does
-        # not run so it cannot be used to mark the end of an iteration
-        if not is_training:
-            return
-        if self.is_first_iter:
-            msg_prefix = "Forward order differs across ranks:"
-            local_indices: Optional[Tuple[int, ...]] = self._get_handle_indices(
-                handles_key
-            )
-            device = handles_key[0].device  # guaranteed to be non-CPU
-            num_valid_indices = sum((index is not None) for index in local_indices)
-            tensor_kwargs = {"dtype": torch.int32, "device": device}
-            world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)
-            local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)
-            dist.all_gather_into_tensor(
-                world_num_valid_indices,
-                local_num_valid_indices,
-                group=self.process_group,
-            )
-            # Check that all ranks plan to all-gather the same number of
-            # parameters
-            # TODO (awgu): Since every module has at most one handle in the
-            # current implementation, this should never raise the error.
-            for (r1, n1), (r2, n2) in itertools.combinations(
-                (
-                    (rank, world_num_valid_indices[rank])
-                    for rank in range(self.world_size)
-                ),
-                2,
-            ):
-                if n1 != n2:
-                    raise RuntimeError(
-                        f"{msg_prefix} rank {r1} is all-gathering {n1} parameters "
-                        f"while rank {r2} is all-gathering {n2} parameters"
-                    )
-            world_indices = torch.zeros(
-                self.world_size * num_valid_indices, **tensor_kwargs
-            )
-            local_indices = torch.tensor(local_indices, **tensor_kwargs)
-            dist.all_gather_into_tensor(
-                world_indices, local_indices, group=self.process_group
-            )
-            # Check that all ranks plan to all-gather the same index parameters
-            for (r1, i1), (r2, i2) in itertools.combinations(
-                (
-                    (
-                        rank,
-                        world_indices[
-                            rank * num_valid_indices : (rank + 1) * num_valid_indices
-                        ],
-                    )
-                    for rank in range(self.world_size)
-                ),
-                2,
-            ):
-                if i1 != i2:
-                    r1_param_names = self._get_names_from_handle_indices(i1)
-                    r2_param_names = self._get_names_from_handle_indices(i2)
-                    raise RuntimeError(
-                        f"{msg_prefix} rank {r1} is all-gathering parameters "
-                        f"for {r1_param_names} while rank {r2} is all-gathering "
-                        f"parameters for {r2_param_names}"
-                    )
-        elif self._checking_order:
-            # Only issue warnings on the first deviating iteration and stop
-            # checking thereafter to avoid flooding the console
-            if self.warn_status == _ExecOrderWarnStatus.WARNED:
-                return
-            msg_prefix = None  # non-`None` means we should warn
-            if self.current_order_index >= len(self.handles_pre_forward_order):
-                # This iteration sees extra all-gather(s) compared to the first
-                msg_prefix = (
-                    "Expected to not all-gather any more parameters in the "
-                    "forward but trying to all-gather parameters for "
-                )
-            else:
-                expected_handles_key = self.handles_pre_forward_order[
-                    self.current_order_index
-                ]
-                if expected_handles_key != handles_key:
-                    expected_param_names = self._get_names_from_handles(
-                        expected_handles_key
-                    )
-                    msg_prefix = (
-                        f"Expected to all-gather for {expected_param_names} "
-                        "but trying to all-gather parameters for "
-                    )
-            if msg_prefix is not None:
-                param_names = self._get_names_from_handles(handles_key)
-                msg_suffix = (
-                    f"{param_names}"
-                    if param_names
-                    else "a newly-added parameter since construction time"
-                )
-                warnings.warn(
-                    "Forward order differs from that of the first iteration "
-                    f"on rank {self.rank}. Collectives are unchecked and may "
-                    f"give incorrect results or hang.\n{msg_prefix}{msg_suffix}"
-                )
-                self.warn_status = _ExecOrderWarnStatus.WARNING
-            self.current_order_index += 1
-
-    def _get_handle_indices(
-        self,
-        handles_key: _HandlesKey,
-    ) -> Tuple[Optional[int], ...]:
-        """
-        Returns the handle indices (i.e. indices into ``self.all_handles``)
-        corresponding to the handles in ``handles_key``. An entry in the
-        returned tuple is ``None`` if the handle is invalid.
-        """
-        indices: List[int] = []
-        for handle in handles_key:
-            if handle not in self.handle_to_handle_index:
-                indices.append(None)
-            else:
-                indices.append(self.handle_to_handle_index[handle])
-        return tuple(indices)
-
-    def _get_names_from_handle_indices(
-        self,
-        handle_indices: Tuple[int, ...],
-    ) -> List[List[str]]:
-        """
-        Returns a list of prefixed parameter names for each handle in
-        ``handle_indices``. If a handle index is invalid, then its prefixed
-        parameter names are omitted from the returned list.
-        """
-        prefixed_param_names: List[List[str]] = []
-        for index in handle_indices:
-            if index is None or index < 0 or index >= len(self.all_handles):
-                continue
-            handle = self.all_handles[index]
-            flat_param = handle.flat_param
-            prefixed_param_names.append(
-                self.flat_param_to_prefixed_param_names[flat_param]
-            )
-        return prefixed_param_names
-
-    def _get_names_from_handles(
-        self,
-        handles_key: _HandlesKey,
-    ) -> List[List[str]]:
-        """
-        Returns a list of prefixed parameter names for each handle in
-        ``handles_key``. If a handle is invalid, then its prefixed parameter
-        names are omitted from the returned list.
-        """
-        prefixed_param_names: List[List[str]] = []
-        for handle in handles_key:
-            flat_param = handle.flat_param
-            if flat_param not in self.flat_param_to_prefixed_param_names:
-                continue
-            prefixed_param_names.append(
-                self.flat_param_to_prefixed_param_names[flat_param]
-            )
-        return prefixed_param_names
-
-    def next_iter(self):
-        """
-        Advances the internal data structures per iteration. This should be
-        called in the post-backward callback since that marks the true end of
-        an iteration.
-        """
-        self.is_first_iter = False
-        self.handles_to_post_forward_order_index.clear()
-        self.handles_post_forward_order.clear()
-        if self._checking_order:
-            self.current_order_index = 0
-            if self.warn_status == _ExecOrderWarnStatus.WARNING:
-                self.warn_status = _ExecOrderWarnStatus.WARNED
-
-
-# TODO (awgu): Refactor this later
-sharding_strategy_map = {
-    ShardingStrategy.NO_SHARD: HandleShardingStrategy.NO_SHARD,
-    ShardingStrategy.FULL_SHARD: HandleShardingStrategy.FULL_SHARD,
-    ShardingStrategy.SHARD_GRAD_OP: HandleShardingStrategy.SHARD_GRAD_OP,
-}
 
 
 class FullyShardedDataParallel(nn.Module):
@@ -852,18 +457,15 @@ class FullyShardedDataParallel(nn.Module):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
 
-        self._ignored_modules = _get_ignored_modules(module, ignored_modules)
-        ignored_params, self._ignored_param_names = _get_ignored_params(
-            module, self._ignored_modules
-        )
-        self._buffer_names = _get_buffer_names(module)
+        _init_ignored_modules_and_params(self, module, ignored_modules)
+
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
                 "auto_wrap_policy": auto_wrap_policy,
                 "wrapper_cls": FullyShardedDataParallel,
                 "ignored_modules": self._ignored_modules,
-                "ignored_params": ignored_params,
+                "ignored_params": self._ignored_params,
                 "only_wrap_children": True,  # avoid double wrapping the root
             }
             fsdp_kwargs = {
@@ -879,116 +481,50 @@ class FullyShardedDataParallel(nn.Module):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
             }
-            self._auto_wrap(auto_wrap_kwargs, fsdp_kwargs)
+            _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
 
-        self.process_group = process_group or _get_default_group()
-        self.rank = self.process_group.rank()
-        self.world_size = self.process_group.size()
-        self.training_state = TrainingState.IDLE
-        self.cpu_offload = cpu_offload or CPUOffload()
-        self.backward_prefetch = backward_prefetch
-        self.forward_prefetch = forward_prefetch
-        self.limit_all_gathers = limit_all_gathers
-        backward_prefetch_limit = 1
-        forward_prefetch_limit = 1
+        _init_process_group_state(self, process_group)
         # We clamp the strategy to `NO_SHARD` for world size of 1 since they
         # are currently functionally equivalent. This may change if/when we
         # integrate FSDP with MoE.
         if self.world_size == 1:
             sharding_strategy = ShardingStrategy.NO_SHARD
-        self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
-        self.mixed_precision = mixed_precision or MixedPrecision()
-        self._use_orig_params = use_orig_params
-        # Save a mapping from fully prefixed buffer name to its original dtype
-        # since for mixed precision, buffers are restored to their original
-        # dtype for model checkpointing
-        self._buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
-
-        _check_single_device_module(module, ignored_params)
-        device_from_device_id = _get_device_from_device_id(device_id, self.rank)
-        _materialize_module(
-            module,
-            param_init_fn,
-            ignored_params,
-            device_from_device_id,
-            lambda k: not isinstance(k, FullyShardedDataParallel),
-        )
-        _move_module_to_device(module, ignored_params, device_from_device_id)
-        self.compute_device = _get_compute_device(
-            module,
-            ignored_params,
-            device_from_device_id,
-            self.rank,
-        )
-        params_to_flatten = list(_get_orig_params(module, ignored_params))
-        if sync_module_states:
-            _sync_module_states(module, params_to_flatten, self.process_group)
-
-        # This FSDP instance's handles should inherit the same process group,
-        # compute device, CPU offload, and mixed precision settings. However,
-        # different sharding strategies are allowed.
-        config = HandleConfig(
-            sharding_strategy_map[self.sharding_strategy],
-            self.cpu_offload.offload_params,
-            self.mixed_precision.param_dtype,
-            self.mixed_precision.reduce_dtype,
-            self.mixed_precision.keep_low_precision_grads,
-        )
-        # Invariant: `self.params` contains exactly the `FlatParameter`s of the
-        # handles in `self._handles`
-        self._handles: List[FlatParamHandle] = []
-        self.params: List[FlatParameter] = []
-        self._fsdp_wrapped_module = module
-        if params_to_flatten:
-            handle = FlatParamHandle(
-                params_to_flatten,
-                module,
-                self.compute_device,
-                config,
-                self.process_group,
-                use_orig_params,
-            )
-            self._handles.append(handle)
-            self.params.append(handle.flat_param)
-            self._register_param_handle(handle)
-            handle.shard()
-            if (
-                self.cpu_offload.offload_params
-                and handle.flat_param.device != torch.device("cpu")
-            ):
-                handle.flat_param_to(torch.device("cpu"))
-        if not use_orig_params:
-            _check_orig_params_flattened(self, ignored_params)
-            self._register_flat_param()
-
-        self._sync_gradients = True
-        self._communication_hook = self._get_default_comm_hook()
-        self._communication_hook_state = self._get_default_comm_hook_state()
-        self._hook_registered = False
-
-        # Used to prevent running the pre-backward hook multiple times
-        self._ran_pre_backward_hook: Dict[_HandlesKey, bool] = {}
-        self._is_root: Optional[bool] = None  # `None` indicates not yet set
-        # The following attributes are owned by the root FSDP instance and
-        # shared with non-root FSDP instances
-        self._streams: Dict[str, torch.cuda.Stream] = {}
-        self._free_event_queue = _FreeEventQueue()
-        self._debug_level = dist.get_debug_level()
-        self._exec_order_data = _ExecOrderData(
-            self._debug_level,
+        backward_prefetch_limit = 1
+        forward_prefetch_limit = 1
+        _init_core_state(
+            self,
+            sharding_strategy,
+            mixed_precision,
+            cpu_offload,
+            limit_all_gathers,
+            use_orig_params,
             backward_prefetch_limit,
             forward_prefetch_limit,
         )
-        self._handles_prefetched: Dict[_HandlesKey, bool] = {}
-        # Used for guarding against mistargeted backward prefetches
-        self._needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
-        # Used for guarding against mistargeted forward prefetches
-        self._needs_pre_forward_unshard: Dict[_HandlesKey, bool] = {}
-        # The data structures use tuples of handles to generalize over the case
-        # where a module's forward involves multiple handles.
+        _init_module_and_device_state(
+            self,
+            module,
+            device_id,
+            param_init_fn,
+            sync_module_states,
+        )
+        _init_prefetching_state(self)
+        _init_runtime_state(self)
+        self._fsdp_wrapped_module = module
+        _init_param_handle_from_params(self, self._managed_params, module)
+        if not use_orig_params:
+            _check_orig_params_flattened(self, self._ignored_params)
+            self._register_flat_param()
+
+        # TODO (revisit): I explicitly delete these because we do want to keep
+        # references to these from FSDP. I only added them to the state for
+        # convenience in this refactoring.
+        delattr(self, "_ignored_params")
+        delattr(self, "_managed_params")
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
+        _init_state_dict_state(self)  # TODO: currently a no-op; need to refactor below
         self._state_dict_type = StateDictType.FULL_STATE_DICT
         self._state_dict_config = FullStateDictConfig()
         self._register_state_dict_hook(_post_state_dict_hook)
@@ -996,47 +532,6 @@ class FullyShardedDataParallel(nn.Module):
             _pre_load_state_dict_hook, with_module=True
         )
         self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
-
-    def _auto_wrap(
-        self,
-        auto_wrap_kwargs: Dict[str, Any],
-        fsdp_kwargs: Dict[str, Any],
-    ) -> None:
-        """
-        Recursively auto wraps the root module given by the key "module" in
-        ``auto_wrap_kwargs`` with the arguments in ``auto_wrap_kwargs`` and
-        ``fsdp_kwargs``.
-
-        Precondition: ``auto_wrap_policy`` contains the arguments expected by
-        ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
-        ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
-        """
-        auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
-        root_module = auto_wrap_kwargs["module"]
-        assert auto_wrap_policy is not None
-        # For auto wrapping, submodules should not already be wrapped with FSDP
-        # since double wrapping is not supported
-        for module_name, module in root_module.named_modules():
-            if isinstance(module, FullyShardedDataParallel):
-                raise ValueError(
-                    f"Expected {module_name} to NOT be FullyShardedDataParallel "
-                    "if using an `auto_wrap_policy`"
-                )
-        mixed_precision = fsdp_kwargs["mixed_precision"]
-        if mixed_precision is not None and _contains_batchnorm(root_module):
-            _override_batchnorm_mixed_precision(root_module)
-            auto_wrap_policy = functools.partial(
-                _or_policy, policies=[_wrap_batchnorm_individually, auto_wrap_policy]
-            )
-            warnings.warn(
-                "Both mixed precision and an `auto_wrap_policy` were specified "
-                "for FSDP, where the wrapped module has batch norm submodules. "
-                "The batch norm submodules will be wrapped as separate FSDP "
-                "instances with mixed precision disabled since some batch norm "
-                "kernels do not support low precision."
-            )
-            auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
-        _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
 
     def _register_param_handle(self, handle: FlatParamHandle) -> None:
         """Registers the parameter handle to this FSDP instance."""
@@ -1122,7 +617,10 @@ class FullyShardedDataParallel(nn.Module):
         """
         Returns the wrapped module (like :class:`DistributedDataParallel`).
         """
-        return self._fsdp_wrapped_module
+        if hasattr(self, FSDP_WRAPPED_MODULE):
+            return self._fsdp_wrapped_module
+        else:
+            raise RuntimeError("_fsdp_wrapped_module not yet defined")
 
     @property
     def _has_params(self) -> bool:
@@ -1142,7 +640,9 @@ class FullyShardedDataParallel(nn.Module):
 
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is an ``nn.Sequential``."""
-        return self._fsdp_wrapped_module.__getitem__(key)  # type: ignore[operator]
+        if hasattr(self, FSDP_WRAPPED_MODULE):
+            return self._fsdp_wrapped_module.__getitem__(key)  # type: ignore[operator]
+        return super().__getitem__(key)
 
     def check_is_root(self) -> bool:
         self._lazy_init()
@@ -3548,21 +3048,6 @@ class FullyShardedDataParallel(nn.Module):
             return new_osd
         return new_osd  # should never reach here
 
-    def _get_default_comm_hook(self) -> Any:
-        r"""
-        Returns a default communication hook based on a sharding strategy.
-        """
-        if self.sharding_strategy != ShardingStrategy.NO_SHARD:
-            return default_hooks.reduce_scatter_hook
-        else:
-            return default_hooks.allreduce_hook
-
-    def _get_default_comm_hook_state(self) -> Any:
-        r"""
-        Returns a default communication hook state based on a sharding strategy.
-        """
-        return default_hooks.DefaultState(process_group=self.process_group)
-
     def register_comm_hook(self, state: object, hook: callable):
         """
         Registers a communication hook which is an enhancement that provides a
@@ -3611,9 +3096,6 @@ class FullyShardedDataParallel(nn.Module):
                 not submodule._hook_registered
             ), "communication hook can be only registered once"
             submodule._hook_registered = True
-            assert (
-                submodule._communication_hook == self._get_default_comm_hook()
-            ), f"communication hook should be default, but it is {submodule._communication_hook.__name__} instead"
             submodule._communication_hook_state = state
             submodule._communication_hook = hook
 

@@ -1,17 +1,50 @@
+import collections
 import warnings
-from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple, Union
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    no_type_check,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
+from torch.distributed.algorithms._comm_hooks import default_hooks
+from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _get_param_to_unflat_param_names,
     _is_fsdp_flattened,
+    _State,
     clean_tensor_name,
+    TrainingState,
+)
+from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
+from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
+from torch.distributed.fsdp._wrap_utils import _get_params_per_wrapped_module
+from torch.distributed.fsdp.common_utils import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.flat_param import (
+    _HandlesKey,
+    FlatParameter,
+    FlatParamHandle,
+    HandleConfig,
+    HandleShardingStrategy,
 )
 from torch.distributed.utils import _sync_params_and_buffers
+from torch.utils.hooks import RemovableHandle
 
 _TORCHDISTX_AVAIL = True
 try:
@@ -21,6 +54,219 @@ except ImportError:
 
 PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
 FSDP_SYNCED = "_fsdp_synced"
+
+# TODO (awgu): Refactor this later
+SHARDING_STRATEGY_MAP = {
+    ShardingStrategy.NO_SHARD: HandleShardingStrategy.NO_SHARD,
+    ShardingStrategy.FULL_SHARD: HandleShardingStrategy.FULL_SHARD,
+    ShardingStrategy.SHARD_GRAD_OP: HandleShardingStrategy.SHARD_GRAD_OP,
+}
+
+
+# NOTE: Since non-self attributes cannot be type annotated, several attributes
+# on `state` are defined first as local variables before being assigned.
+
+
+@no_type_check
+def _init_process_group_state(
+    state: _State,
+    process_group: Optional[dist.ProcessGroup],
+) -> _State:
+    state.process_group = process_group or _get_default_group()
+    state.rank = state.process_group.rank()
+    state.world_size = state.process_group.size()
+    return state
+
+
+@no_type_check
+def _init_ignored_module_states(
+    state: _State,
+    module: nn.Module,
+    ignored_modules: Optional[Iterable[torch.nn.Module]],
+) -> _State:
+    state._ignored_modules = _get_ignored_modules(module, ignored_modules)
+    state._ignored_params, state._ignored_param_names = _get_ignored_params(
+        module,
+        state._ignored_modules,
+    )
+    # TODO: FSDP's contract for buffers is not well-defined. They are
+    # implicitly ignored for most functionality since they are not sharded;
+    # however, FSDP still imposes some semantics on buffers (e.g. buffer mixed
+    # precision). We should formalize this contract and decide if we need to
+    # compute and store `_ignored_buffers`.
+    return state
+
+
+@no_type_check
+def _init_module_and_device_state(
+    state: _State,
+    module: nn.Module,
+    device_id: Optional[Union[int, torch.device]],
+    param_init_fn: Optional[Callable[[nn.Module], None]],
+    sync_module_states: bool,
+) -> _State:
+    state._buffer_names = _get_buffer_names(module)
+    # Save a mapping from fully prefixed buffer name to its original dtype
+    # since when buffer mixed precision is enabled, buffers are restored to
+    # their original dtype for model checkpointing
+    _buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+    state._buffer_name_to_orig_dtype = _buffer_name_to_orig_dtype
+    _check_single_device_module(module, state._ignored_params)
+    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
+    _materialize_module(
+        module,
+        param_init_fn,
+        state._ignored_params,
+        device_from_device_id,
+        lambda _: True,
+    )
+    # TODO: We need to skip this for functional-like to avoid moving the entire
+    # unsharded module onto GPU before any sharding.
+    _move_module_to_device(module, state._ignored_params, device_from_device_id)
+    state.compute_device = _get_compute_device(
+        module,
+        state._ignored_params,
+        device_from_device_id,
+        state.rank,
+    )
+    state._managed_params = list(_get_orig_params(module, state._ignored_params))
+    if sync_module_states:
+        _sync_module_states(module, state._managed_params, state.process_group)
+    return state
+
+
+@no_type_check
+def _init_core_state(
+    state: _State,
+    sharding_strategy: Optional[ShardingStrategy],
+    mixed_precision: Optional[MixedPrecision],
+    cpu_offload: Optional[CPUOffload],
+    limit_all_gathers: bool,
+    use_orig_params: bool,
+    backward_prefetch_limit: int,
+    forward_prefetch_limit: int,
+) -> _State:
+    state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
+    state.mixed_precision = mixed_precision or MixedPrecision()
+    state.cpu_offload = cpu_offload or CPUOffload()
+    state.limit_all_gathers = limit_all_gathers
+    state._use_orig_params = use_orig_params
+    state.training_state = TrainingState.IDLE
+    state._is_root = None
+    _streams: Dict[str, torch.cuda.Stream] = {}
+    state._streams = _streams
+    state._free_event_queue = _FreeEventQueue()
+    state._debug_level = dist.get_debug_level()
+    state._exec_order_data = _ExecOrderData(
+        state._debug_level,
+        backward_prefetch_limit,
+        forward_prefetch_limit,
+    )
+    # Invariant: `self.params` contains exactly the `FlatParameter`s of the
+    # handles in `self._handles`
+    _handles: List[FlatParamHandle] = []
+    state._handles = _handles
+    params: List[FlatParameter] = []
+    state.params = params
+    return state
+
+
+@no_type_check
+def _init_runtime_state(
+    state: _State,
+) -> _State:
+    _pre_forward_handles: List[RemovableHandle] = []
+    state._pre_forward_handles = _pre_forward_handles
+    _post_forward_handles: List[RemovableHandle] = []
+    state._post_forward_handles = _post_forward_handles
+    _module_to_handles: Dict[
+        nn.Module, List[FlatParamHandle]
+    ] = collections.defaultdict(list)
+    state._module_to_handles = _module_to_handles
+    state._sync_gradients = True
+    state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
+    state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
+    state._hook_registered = False
+    # Used to prevent running the pre-backward hook multiple times
+    _ran_pre_backward_hook: Dict[_HandlesKey, bool] = {}
+    state._ran_pre_backward_hook = _ran_pre_backward_hook
+    return state
+
+
+@no_type_check
+def _init_prefetching_state(state: _State) -> _State:
+    state.backward_prefetch = BackwardPrefetch.BACKWARD_PRE
+    state.forward_prefetch = False
+    _handles_prefetched: Dict[_HandlesKey, bool] = {}
+    state._handles_prefetched = _handles_prefetched
+    # Used for guarding against mistargeted backward prefetches
+    _needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
+    state._needs_pre_backward_unshard = _needs_pre_backward_unshard
+    # Used for guarding against mistargeted forward prefetches
+    _needs_pre_forward_unshard: Dict[_HandlesKey, bool] = {}
+    state._needs_pre_forward_unshard = _needs_pre_forward_unshard
+    # The data structures use tuples of handles to generalize over the case
+    # where a module's forward involves multiple handles.
+    return state
+
+
+def _init_state_dict_state(state: _State) -> _State:
+    # TODO: after rebase
+    return state
+
+
+def _init_param_handles_from_module(
+    state: _State,
+    root_module: nn.Module,
+    auto_wrap_policy: Callable,
+    ignored_modules: Set[nn.Module],
+    ignored_params: Set[nn.Parameter],
+) -> _State:
+    params_per_wrapped_module = _get_params_per_wrapped_module(
+        root_module,
+        auto_wrap_policy,
+        ignored_modules,
+        ignored_params,
+    )
+    for params in params_per_wrapped_module:
+        _init_param_handle_from_params(state, params, root_module)
+    return state
+
+
+@no_type_check
+def _init_param_handle_from_params(
+    state: _State,
+    params: List[nn.Parameter],
+    root_module: nn.Module,
+):
+    if len(params) == 0:
+        return
+    # TODO: Move module to GPU if needed (for non-wrapper code path) -- we need
+    # to fuse this method with `_init_module_and_device_state()`
+    handle_config = HandleConfig(
+        SHARDING_STRATEGY_MAP[state.sharding_strategy],
+        state.cpu_offload.offload_params,
+        state.mixed_precision.param_dtype,
+        state.mixed_precision.reduce_dtype,
+        state.mixed_precision.keep_low_precision_grads,
+    )
+    handle = FlatParamHandle(
+        params,
+        root_module,
+        state.compute_device,
+        handle_config,
+        state.process_group,
+        state._use_orig_params,
+    )
+    # TODO: Can simplify call `shard()` in the `FlatParamHandle` ctor
+    handle.shard()
+    assert handle.flat_param not in state.params
+    assert handle not in state._handles
+    state.params.append(handle.flat_param)
+    state._handles.append(handle)
+    cpu_device = torch.device("cpu")
+    if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
+        handle.flat_param_to(cpu_device)
 
 
 def _get_ignored_modules(
@@ -362,3 +608,17 @@ def _check_orig_params_flattened(
                 f"Found an unflattened parameter: {param_name}; "
                 f"{param.size()} {param.__class__}"
             )
+
+
+def _get_default_comm_hook(sharding_strategy: ShardingStrategy):
+    return (
+        default_hooks.allreduce_hook
+        if sharding_strategy == ShardingStrategy.NO_SHARD
+        else default_hooks.reduce_scatter_hook
+    )
+
+
+def _get_default_comm_hook_state(
+    process_group: dist.ProcessGroup,
+) -> default_hooks.DefaultState:
+    return default_hooks.DefaultState(process_group=process_group)
