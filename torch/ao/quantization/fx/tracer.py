@@ -110,6 +110,7 @@ class QuantizationTracer(Tracer):
         kwargs: Dict[str, Argument],
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
+        parent_module: Optional[str] = "",
     ) -> Node:
         node = super().create_node(kind, target, args, kwargs, name, type_expr)
         self.node_name_to_scope[node.name] = (
