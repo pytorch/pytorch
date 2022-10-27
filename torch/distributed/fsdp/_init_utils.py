@@ -109,6 +109,8 @@ def _init_buffer_state(
     # since when buffer mixed precision is enabled, buffers are restored to
     # their original dtype for model checkpointing
     _buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+    for buffer_name, buffer in module.named_buffers():
+        _buffer_name_to_orig_dtype[buffer_name] = buffer.dtype
     state._buffer_name_to_orig_dtype = _buffer_name_to_orig_dtype
     return state
 

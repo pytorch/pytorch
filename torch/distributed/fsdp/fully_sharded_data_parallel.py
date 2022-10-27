@@ -709,8 +709,6 @@ class FullyShardedDataParallel(nn.Module):
                     if buf is None:
                         continue
                     buf = buf.to(self.compute_device)
-                    if name not in self._buffer_name_to_orig_dtype:
-                        self._buffer_name_to_orig_dtype[name] = buf.dtype
                     # If given, cast buffer to the given dtype. This is used to
                     # suppport mixed precision for buffers
                     # (given by self.mixed_precision.buffer_dtype) and also used
