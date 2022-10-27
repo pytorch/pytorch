@@ -9,24 +9,20 @@ from typing import Any, Optional, Tuple
 from .contract import contract
 
 
-# state key to store per-module enable_hook flag
-ENALBE_HOOK_KEY = object()
-
-
 @contextmanager
 def _no_hook(module: nn.Module):
     r"""
     Disable hooks installed by checkpoint to avoid unintentional recursion
     during backward recomputation.
     """
-    orig_enable_hook = checkpoint.get_state(module, ENALBE_HOOK_KEY)
-    checkpoint.set_state(module, ENALBE_HOOK_KEY, False)
+    orig_enable_hook = checkpoint.state(module).enable_hook
+    checkpoint.state(module).enable_hook = False
     try:
         yield
     except Exception:
         raise
     finally:
-        checkpoint.set_state(module, ENALBE_HOOK_KEY, orig_enable_hook)
+        checkpoint.state(module).enable_hook = orig_enable_hook
 
 
 class _ModuleHookCheckpointFunction(torch.autograd.Function):
@@ -107,11 +103,11 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
 @contract
 def checkpoint(module: nn.Module) -> nn.Module:
     def forward_pre_hook(module: nn.Module, inputs: Tuple[Any]) -> None:
-        if checkpoint.get_state(module, ENALBE_HOOK_KEY):
+        if checkpoint.state(module).enable_hook:
             torch.set_grad_enabled(False)
 
     def forward_hook(module: nn.Module, inputs: Tuple[Any], output: Any) -> Any:
-        if not checkpoint.get_state(module, ENALBE_HOOK_KEY):
+        if not checkpoint.state(module).enable_hook:
             return output
 
         torch.set_grad_enabled(True)
@@ -121,7 +117,7 @@ def checkpoint(module: nn.Module) -> nn.Module:
     # 1. detach outputs from the autograd graph to discard activations
     # 2. insert an autograd.Function after the forward pass to recompute
     #    activations during the backward pass.
-    checkpoint.set_state(module, ENALBE_HOOK_KEY, True)
+    checkpoint.state(module).enable_hook = True
     module.register_forward_pre_hook(forward_pre_hook)
     module.register_forward_hook(forward_hook)
     return module
