@@ -474,7 +474,7 @@ class BuiltinVariable(VariableTracker):
             )
 
     def call_slice(self, tx, *args):
-        return variables.SliceVariable(tx, args)
+        return variables.SliceVariable(args)
 
     def _call_iter_tuple_list(self, tx, obj=None):
         cls = variables.BaseListVariable.cls_for(self.fn)

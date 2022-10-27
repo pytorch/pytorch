@@ -348,7 +348,7 @@ class NamedTupleVariable(TupleVariable):
 
 
 class SliceVariable(BaseListVariable):
-    def __init__(self, tx, items, **kwargs):
+    def __init__(self, items, **kwargs):
         from .tensor import DynamicShapeVariable
 
         if any([isinstance(x, DynamicShapeVariable) for x in items]):

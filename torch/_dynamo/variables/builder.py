@@ -436,9 +436,7 @@ class VariableBuilder:
                 )
                 for k in ("start", "stop", "step")
             ]
-            return SliceVariable(
-                self.tx, items, guards=make_guards(GuardBuilder.TYPE_MATCH)
-            )
+            return SliceVariable(items, guards=make_guards(GuardBuilder.TYPE_MATCH))
         elif isinstance(value, PyOperator):
             return TorchPyOperator(
                 value,

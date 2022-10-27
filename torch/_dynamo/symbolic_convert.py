@@ -881,7 +881,6 @@ class InstructionTranslatorBase(object):
         options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
-                self,
                 [x.as_specialized(self) for x in items],
                 **options,
             )
