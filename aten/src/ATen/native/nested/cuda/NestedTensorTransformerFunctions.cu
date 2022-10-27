@@ -821,6 +821,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       all_row_major);
   if (success) {
     return output;
+  }
 #ifndef USE_ROCM
 #ifndef _WIN32
   auto dprops = at::cuda::getCurrentDeviceProperties();
