@@ -2843,6 +2843,13 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
+        if torch.cuda.is_available():
+            linear = torch.linspace(0, 0.99, 1001)
+            self.assertEqual(
+                torch.histc(linear, bins=10, min=0, max=0.99), 
+                torch.histc(linear.cuda(), bins=10, min=0, max=0.99)
+            )
+
     @onlyCPU
     def test_histc_bfloat16(self, device):
         actual = torch.histc(
