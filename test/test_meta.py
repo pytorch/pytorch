@@ -928,7 +928,9 @@ def get_strided_args(args):
         # transposed
         if t.ndim > 1:
             perm = list(reversed(range(t.ndim)))
-            transposed = torch.empty(t.shape[::-1], device=t.device, dtype=t.dtype, requires_grad=t.requires_grad).permute(perm).copy_(t)
+            transposed = torch.empty(
+                t.shape[::-1], device=t.device, dtype=t.dtype, requires_grad=t.requires_grad
+            ).permute(perm).copy_(t)
             variants.append(transposed)
 
         # nondense
@@ -1107,7 +1109,6 @@ class TestMeta(TestCase):
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
 
-
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
@@ -1117,6 +1118,17 @@ class TestMeta(TestCase):
     @onlyCUDA
     def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False, all_stride_variants=True)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    # only test one dtype, as output stride behavior is the same for all dtypes
+    @ops(op_db, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    # Only test on CUDA, as CUDA kernel's stride is the reference
+    @onlyCUDA
+    def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):
+        self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True, all_stride_variants=True)
+
 
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
