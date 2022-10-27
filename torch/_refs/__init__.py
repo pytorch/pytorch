@@ -222,6 +222,7 @@ __all__ = [
     "diag",
     "diagonal",
     "diagonal_copy",
+    "diagonal_scatter",
     "dsplit",
     "dstack",
     "expand",
@@ -3499,6 +3500,26 @@ def diag(
         return torch.diag_embed(self, offset)
     else:
         return torch.diagonal_copy(self, offset)
+
+
+@register_decomposition(torch.ops.aten.diagonal_scatter)
+@out_wrapper()
+def diagonal_scatter(
+    input: TensorLikeType,
+    src: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    out = input.clone()
+    diag = out.diagonal(offset, dim1, dim2)
+    check(
+        diag.shape == src.shape,
+        lambda: "expected src to have a size equal to the diagonal of the input."
+        f"Got {src.shape} for a diagonal of shape {diag.shape}",
+    )
+    copy_to(diag, src)
+    return out
 
 
 @register_decomposition(torch.ops.aten.diagonal)
