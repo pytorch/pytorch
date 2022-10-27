@@ -2,7 +2,11 @@
 Public common utilities for FSDP.
 """
 
+from dataclasses import dataclass
 from enum import auto, Enum
+from typing import Optional
+
+import torch
 
 
 class ShardingStrategy(Enum):
@@ -64,3 +68,50 @@ class BackwardPrefetch(Enum):
 
     BACKWARD_PRE = auto()
     BACKWARD_POST = auto()
+
+
+@dataclass
+class MixedPrecision:
+    """
+    This configures FSDP-native mixed precision training.
+
+    Attributes:
+        param_dtype (torch.dtype): This specifies the dtype for model
+            parameters, inputs, and therefore the dtype for computation.
+            However, outside the forward and backward passes, parameters are in
+            full precision. Model checkpointing always happens in full
+            precision.
+        reduce_dtype (torch.dtype): This specifies the dtype for gradient
+            reduction, which is permitted to differ from ``param_dtype``.
+        buffer_dtype (torch.dtype): This specifies the dtype for buffers. FSDP
+            does not shard buffers, casts them to ``buffer_dtype`` in the first
+            forward pass, and keeps them in that dtype thereafter. Model
+            checkpointing always happens in full precision.
+        keep_low_precision_grads (bool): This specifies whether to upcast
+            gradients back to the full parameter precision after the backward
+            pass. This may be set to ``False`` to save memory if using custom
+            optimizers that can perform the optimizer step in ``reduce_dtype``.
+
+    .. note:: In ``summon_full_params``, parameters are forced to full
+        precision, but buffers are not.
+
+    .. note:: ``state_dict`` checkpoints parameters and buffers in full
+        precision. For buffers, this is only supported for
+        ``StateDictType.FULL_STATE_DICT``.
+
+    .. note:: This API is experimental and subject to change.
+
+    .. note:: Each low precision dtype must be specified explicitly. For
+        example, ``MixedPrecision(reduce_dtype=torch.float16)`` only specifies
+        the reduction dtype to be low precision, and FSDP will not cast
+        parameters or buffers.
+
+    .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
+        happens in ``param_dtype`` if specified or the original parameter dtype
+        otherwise.
+    """
+
+    param_dtype: Optional[torch.dtype] = None
+    reduce_dtype: Optional[torch.dtype] = None
+    buffer_dtype: Optional[torch.dtype] = None
+    keep_low_precision_grads: bool = False

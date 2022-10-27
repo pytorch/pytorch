@@ -43,7 +43,11 @@ from torch.distributed.fsdp._runtime_utils import (
     _prepare_forward_inputs,
     _wait_for_computation_stream,
 )
-from torch.distributed.fsdp.common_utils import BackwardPrefetch, ShardingStrategy
+from torch.distributed.fsdp.common_utils import (
+    BackwardPrefetch,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.utils import _sync_params_and_buffers
 
 from ._optim_utils import (
@@ -122,62 +126,6 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FLAT_PARAM = "_flat_param"
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
-
-
-@dataclass
-class MixedPrecision:
-    """
-    A config to enable mixed precision training with FullyShardedDataParallel.
-    This class can be constructed with several flags:
-        ``param_dtype`` controls the precision of model parameters, inputs, and
-        therefore the precision under which computation happens. After forward
-        and backward passes, FSDP parameters point to full precision shards
-        that are kept in memory. Full precision parameters are always
-        checkpointed.
-        ``reduce_dtype`` controls the precision under which gradient reduction
-        would occur, which can potentially be different than ``param_dtype``
-        for use cases such as communication efficiency.
-        ``buffer_dtype`` controls the precision that buffers are cast to. Note
-        that buffers are unsharded and are cast in the first forward pass, and
-        remain in their reduced precision state even after forward/backward
-        passes. However, when taking checkpoints with ``state_dict``, buffers
-        are checkpointed in their full precision (and then restored back to
-        to their reduced precision) as expected. Note that this checkpoint
-        support is currently limited to ``StateDictType.FULL_STATE_DICT``.
-        ``keep_low_precision_grads``: Whether to upcast gradients back to the
-        full parameter precision after backwards or not. This can be disabled
-        to keep the gradients in the lower precision, which can potentially
-        save memory if custom Optimizers are able to perform parameter updates
-        effectively with lower precision grads.
-
-    .. note:: In ``summon_full_params``, parameters are summoned in full
-        precision but buffers are not.
-
-    .. note:: Parameters and buffers are checkpointed in full precision. For
-        buffers, this is only guaranteed to work for ``StateDictType.FULL_STATE_DICT``.
-
-    .. note:: This API is experimental and subject to change.
-
-    .. note:: Specification of reduced precision types must be explicit, in that
-        if, for example, ``param_dtype`` is not specified, it will not be cast by
-        FSDP. Thus, a config such as ``MixedPrecision(reduce_dtype=torch.float16)``
-        will not cast buffers or parameters. Note that if a ``MixedPrecision``
-        config is specified without a ``reduce_dtype``, gradient communication
-        would occur in the `param_dtype` precision, if given, otherwise, in the
-        original parameter precision.
-    """
-
-    # maintain a tensor of this dtype that the fp32 param shard will be cast to.
-    # Will control the precision of model params, inputs, and thus compute as
-    # well.
-    param_dtype: Optional[torch.dtype] = None
-    # Gradient communication precision.
-    reduce_dtype: Optional[torch.dtype] = None
-    # Buffer precision.
-    # TODO: buffer + param are usually of the same type, if user specifies
-    # param but not buffer, should we automatically make buffer be the same?
-    buffer_dtype: Optional[torch.dtype] = None
-    keep_low_precision_grads: Optional[bool] = False
 
 
 @dataclass
