@@ -30,9 +30,8 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
-    : impl_{t.unsafeGetTensorImpl()},
-      data_{t.has_storage() ? t.storage().data() : nullptr},
+RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
+    : data_{t.has_storage() ? t.storage().data() : nullptr},
       device_type_{t.device().type()},
       device_index_{t.device().index()},
       dtype_{t.scalar_type()},
@@ -522,7 +521,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
-static constexpr const char* indexKey = "Profiler Event Index";
+static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
@@ -864,10 +863,10 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
 
     ska::flat_hash_set<storage_id_t> tensor_set;
     auto insert_tensor = [&lookup, &tensors, &tensor_set](TensorMetadata& m) {
-      if (m.impl_ && m.data_) {
+      if (m.impl() && m.data_) {
         const auto id = lookup(m.data_);
         tensor_set.insert(id);
-        tensors.emplace_back(TensorStoragePair{m.impl_, id, m.id_});
+        tensors.emplace_back(TensorStoragePair{m.impl(), id, m.id_});
       }
     };
 
