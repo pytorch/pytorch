@@ -3785,6 +3785,11 @@ TEST_F(NVFuserTest, FusionSimpleSwizzle0_CUDA) {
   tv1->computeAt(tv2, 1);
   tv1->swizzle(Swizzle2DType::ZShape, -2, -1);
 
+  GpuLower gpulw(&fusion);
+  auto exprs = gpulw.kernel()->topLevelExprs();
+  auto str = ir_utils::toString(exprs);
+  TORCH_CHECK(str.find("ZShape2D") != string::npos);
+
   FusionExecutor fe;
   fe.compileFusion(&fusion);
 

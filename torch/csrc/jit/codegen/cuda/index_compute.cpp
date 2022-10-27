@@ -1036,14 +1036,25 @@ void IndexSwizzle::run() {
 }
 
 void IndexSwizzle::handle(Expr* e) {
-  bool needs_update = e->isA<Swizzle2D>() &&
-      e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle &&
-      e->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Data;
+  auto out_ids = ir_utils::filterByType<IterDomain>(e->outputs());
+  bool needs_update =
+      std::any_of(
+          out_ids.begin(),
+          out_ids.end(),
+          [this](IterDomain* id) {
+            return swizzled_ids_.find(id) != swizzled_ids_.end();
+          }) ||
+      (e->isA<Swizzle2D>() &&
+       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle &&
+       e->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Data);
   if (!needs_update) {
     return;
   }
 
   IndexCompute::handle(e);
+  for (auto input : ir_utils::filterByType<IterDomain>(e->inputs())) {
+    swizzled_ids_.insert(input);
+  }
 }
 
 void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
