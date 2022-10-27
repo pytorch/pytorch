@@ -6,7 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
+    _all_handles,
     _assert_in_training_states,
+    _is_composable,
     _State,
     TrainingState,
 )
@@ -180,6 +182,43 @@ def _post_forward(
 
 
 @no_type_check
+def _fsdp_root_pre_forward(
+    state: _State,
+    *args,
+    **kwargs,
+):
+    """
+    Runs pre-forward logic specific to the root FSDP instance, which should run
+    before any individual module's pre-forward. If this is called on a non-root
+    FSDP instance, then the forward inputs are returned directly.
+    """
+    p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
+    if not state._is_root:
+        return args, kwargs
+    if state.forward_prefetch:
+        handles_keys = []
+        if _is_composable(state):
+            # TODO: This assumes singleton handles keys.
+            handles_keys = [tuple(handle) for handle in state._handles]
+        else:
+            for fsdp_module in state.fsdp_modules(state):
+                handles_key = tuple(fsdp_module._handles)
+        for handles_key in handles_keys:
+            state._needs_pre_forward_unshard[handles_key] = True
+    _wait_for_computation_stream(
+        torch.cuda.current_stream(),
+        state._streams["unshard"],
+        state._streams["pre_unshard"],
+    )
+    _clear_grads_if_needed(_all_handles(state))
+    input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
+    args, kwargs = _prepare_forward_inputs(
+        state.compute_device, input_dtype, *args, **kwargs
+    )
+    return args, kwargs
+
+
+@no_type_check
 def _pre_backward_hook(
     state: _State,
     _handles: List[FlatParamHandle],
@@ -200,13 +239,7 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             state._queue_wait_for_post_backward()
-            # TODO: Use temporary hack to get all handles
-            all_handles = (
-                state._fsdp_handles(state)
-                if isinstance(state, nn.Module)  # `FullyShardedDataParallel`
-                else state._handles
-            )
-            _clear_grads_if_needed(all_handles)
+            _clear_grads_if_needed(_all_handles(state))
         elif _handles_key:
             _assert_in_training_states(state, [TrainingState.IDLE])
         state.training_state = TrainingState.FORWARD_BACKWARD

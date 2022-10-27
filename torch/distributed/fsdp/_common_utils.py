@@ -51,6 +51,20 @@ class HandleTrainingState(Enum):
     SUMMON_FULL_PARAMS = auto()
 
 
+def _is_composable(state: _State):
+    # TODO: This is a temporary hack for differentiate between code paths.
+    return not isinstance(state, nn.Module)
+
+
+@no_type_check
+def _all_handles(state: _State):
+    return (
+        state._handles
+        if _is_composable(state)
+        else state._fsdp_handles(state)  # `FullyShardedDataParallel`
+    )
+
+
 def clean_tensor_name(tensor_name: str) -> str:
     """Cleans the parameter or buffer name by removing any module wrapper
     prefixes."""
