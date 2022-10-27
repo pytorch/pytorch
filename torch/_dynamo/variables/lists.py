@@ -352,9 +352,7 @@ class SliceVariable(BaseListVariable):
         from .tensor import DynamicShapeVariable
 
         if any([isinstance(x, DynamicShapeVariable) for x in items]):
-            self.dynamic = True
-        else:
-            self.dynamic = False
+            unimplemented("Dynamic slicing not supported")
 
         items_to_map = items
         start, stop, step = [variables.ConstantVariable(None)] * 3
@@ -387,10 +385,7 @@ class SliceVariable(BaseListVariable):
         return slice
 
     def as_python_constant(self):
-        if self.dynamic:
-            unimplemented("Dynamic slicing not yet supported")
-        else:
-            return slice(*[x.as_python_constant() for x in self.items])
+        return slice(*[x.as_python_constant() for x in self.items])
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
