@@ -428,7 +428,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   alignas(64) int32_t temp[16];
   int overflow_threshold = 262144; // 2147483647(max of int32)/(512*512)*8 = 262144
   int loop = len / overflow_threshold + 1;
-  for (const auto j : c10::irange(=loop)) {
+  for (const auto j : c10::irange(loop+1)) {
     for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
       // (i31, ..., i0)
       __m256i src_epu8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
@@ -508,7 +508,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int overflow_threshold = 1048576; //2147483647/(256*256)*8 = 1048576
   int loop = len / overflow_threshold + 1;
 
-  for (const auto j : c10::irange(=loop)) {
+  for (const auto j : c10::irange(loop+1)) {
     for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
       // (i31, ..., i0)
       __m256i src_epi8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
