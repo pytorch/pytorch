@@ -852,7 +852,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
       return output;
     }
->>>>>>> b8b1d7be24a29d9b20b25c0dd5273a499af07097
   }
 #endif
 #endif
