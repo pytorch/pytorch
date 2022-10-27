@@ -19,7 +19,6 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
     from torch._C._nvfuser import (  # type: ignore[import]
-        compute_contiguity,
         DataType,
         Fusion,
         FusionDefinition,
@@ -51,8 +50,21 @@ class nvFuserScalarTemplate:
     dtype: DataType
 
 
-def compute_nvfuser_symbolic_shape(shape):
+@lru_cache(maxsize=2048)
+def compute_symbolic_shape(shape):
+    """Computes the symbolic shape of a tensor.
+    nvFuser specializes on size-1 dimensions as broadcasted dimensions.
+    -1 is used to represent any size."""
     return tuple(1 if s == 1 else -1 for s in shape)
+
+
+@lru_cache(maxsize=2048)
+def compute_contiguity(shape, strides):
+    """Computes the contiguity information to simplify internal indexing.
+    Contiguous dimensions are represented by True, strided dimensions
+    are represented by False.
+    """
+    return torch._C._nvfuser.compute_contiguity(shape, strides)
 
 
 def to_nvfuser_template_args(args):
