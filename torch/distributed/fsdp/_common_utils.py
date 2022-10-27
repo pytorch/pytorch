@@ -1,3 +1,7 @@
+"""
+Private common utilities for FSDP.
+"""
+
 from enum import auto, Enum
 
 

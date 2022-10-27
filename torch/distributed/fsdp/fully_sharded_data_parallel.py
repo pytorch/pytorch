@@ -230,34 +230,6 @@ class CPUOffload:
     offload_params: bool = False
 
 
-class BackwardPrefetch(Enum):
-    """
-    Specify where to prefetch next layer's full parameters
-    during backward pass.
-    BACKWARD_PRE: prefetch right before current layer's backward computation
-                  starts, this approach will increase backward communication
-                  and computation overalpping and potentialy improve training
-                  performance, but it may increase the peak memory usage as
-                  the prefetched full parameters will be kept in the GPU memory
-                  until next layer's backward computation is done.
-    BACKWARD_POST: prefetch right after current layer's backward computation finishes,
-                   this approach will not increase peak memory as prefetching happens
-                   after current layer's full parameters are freed.
-                   It could potentially improve backward communication and computation
-                   overlapping as it avoids all_gather and reduce_scatter are blocked
-                   each other in the single NCCL stream. However, based on our experiments,
-                   for some models, the backward post backward hook fire order is not always
-                   the reversed forward computation order, so this
-                   approach may prefetch full parameters for layers ahead of next layer,
-                   this 'ahead' all_gather could delay next layer's all_gather in the
-                   single NCCL stream and cause the next layer's computation delay. So it may
-                   cause some performance regession for some models.
-    """
-
-    BACKWARD_PRE = auto()
-    BACKWARD_POST = auto()
-    # TODO, BACKWARD_PRE_CPU, prefetch full parameters and keep them in the CPU memory
-
 
 class StateDictType(Enum):
     """
