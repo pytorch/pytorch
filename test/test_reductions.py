@@ -2846,7 +2846,7 @@ class TestReductions(TestCase):
         if torch.cuda.is_available():
             linear = torch.linspace(0, 0.99, 1001)
             self.assertEqual(
-                torch.histc(linear, bins=10, min=0, max=0.99), 
+                torch.histc(linear, bins=10, min=0, max=0.99),
                 torch.histc(linear.cuda(), bins=10, min=0, max=0.99)
             )
 
