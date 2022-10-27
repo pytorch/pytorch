@@ -804,6 +804,8 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor output = wrap_buffer(out_buffer, out_sizemat);
   at::Device device = output.device();
 
+#ifndef USE_ROCM
+#ifndef _WIN32
   bool success = group_gemm_dispatch(
       self.scalar_type(),
       output.device(),
@@ -821,38 +823,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       all_row_major);
   if (success) {
     return output;
-  }
-#ifndef USE_ROCM
-#ifndef _WIN32
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  if (is_sm8x && all_row_major) {
-    if (self.dtype() == at::kFloat) {
-      std::vector<float*> aptr;
-      std::vector<float*> bptr;
-      std::vector<float*> dptr;
-      for (int64_t i = 0; i < ntensors; i++) {
-        aptr.push_back(self_buffer.data_ptr<float>() + a_offsets[i]);
-        bptr.push_back(mat2_buffer.data_ptr<float>() + b_offsets[i]);
-        dptr.push_back(out_buffer.data_ptr<float>() + output_offsets[i]);
-      }
-      gemm_grouped_cuda_internal<float>(
-          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-      return output;
-    }
-    if (self.dtype() == at::kHalf) {
-      std::vector<c10::Half*> aptr;
-      std::vector<c10::Half*> bptr;
-      std::vector<c10::Half*> dptr;
-      for (int64_t i = 0; i < ntensors; i++) {
-        aptr.push_back(self_buffer.data_ptr<c10::Half>() + a_offsets[i]);
-        bptr.push_back(mat2_buffer.data_ptr<c10::Half>() + b_offsets[i]);
-        dptr.push_back(out_buffer.data_ptr<c10::Half>() + output_offsets[i]);
-      }
-      gemm_grouped_cuda_internal<c10::Half>(
-          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-      return output;
-    }
   }
 #endif
 #endif
