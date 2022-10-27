@@ -60,8 +60,8 @@ class TransformedDistribution(Distribution):
         if len(base_shape) < transform.domain.event_dim:
             raise ValueError("base_distribution needs to have shape with size at least {}, but got {}."
                              .format(transform.domain.event_dim, base_shape))
-        sample_shape = transform.forward_shape(base_shape)
-        expanded_base_shape = transform.inverse_shape(sample_shape)
+        forward_shape = transform.forward_shape(base_shape)
+        expanded_base_shape = transform.inverse_shape(forward_shape)
         if base_shape != expanded_base_shape:
             base_batch_shape = expanded_base_shape[:len(expanded_base_shape) - base_event_dim]
             base_distribution = base_distribution.expand(base_batch_shape)
@@ -76,10 +76,10 @@ class TransformedDistribution(Distribution):
             transform.codomain.event_dim,  # the transform is coupled
             base_event_dim + transform_change_in_event_dim  # the base dist is coupled
         )
-        assert len(sample_shape) >= event_dim
-        cut = len(sample_shape) - event_dim
-        batch_shape = sample_shape[:cut]
-        event_shape = sample_shape[cut:]
+        assert len(forward_shape) >= event_dim
+        cut = len(forward_shape) - event_dim
+        batch_shape = forward_shape[:cut]
+        event_shape = forward_shape[cut:]
         super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
