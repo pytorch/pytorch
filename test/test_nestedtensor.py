@@ -860,6 +860,19 @@ class TestNestedTensorDeviceType(TestCase):
     @dtypes(torch.float, torch.float16)
     @skipMeta
     @torch.inference_mode()
+    def test_nested_tensor_div(self, device, dtype):
+        nt, _ = self.random_nt_pair(device, dtype, 4, (4, 4))
+        scale = 4.0
+        ref = torch.nested.nested_tensor([t / scale for t in nt.unbind()])
+        out = nt / 4.0
+        self.assertEqual(ref, out)
+        ref_transposed = ref.transpose(1, 2)
+        out = nt.transpose(1, 2) / 4.0
+        self.assertEqual(ref_transposed, out)
+
+    @dtypes(torch.float, torch.float16)
+    @skipMeta
+    @torch.inference_mode()
     def test_nested_tensor_add_in_place(self, device, dtype):
         (nt1, nt2) = self.random_nt_pair(device, dtype, 4, (4, 4))
         ref = torch.nested.nested_tensor([t1 + t2 for (t1, t2) in zip(nt1.unbind(), nt2.unbind())])

@@ -540,13 +540,9 @@ Tensor NestedTensor_elementwise_Tensor(
       get_elementwise_nested_tensor_impl(self, other, op_name);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
-  const auto& nt_self = *self_impl;
-  const auto& nt_other = *other_impl;
-  const auto& self_sizes = nt_self.get_nested_size_tensor();
-  const auto& self_sizes = nt_self.get_nested_size_tensor();
   return wrap_buffer(
-      f(nt_self.get_unsafe_storage_as_tensor(),
-        nt_other.get_unsafe_storage_as_tensor()),
+      f(self_impl->get_unsafe_storage_as_tensor(),
+        other_impl->get_unsafe_storage_as_tensor()),
       self_impl->get_nested_size_tensor(),
       self_impl->get_nested_stride_tensor(),
       self_impl->get_storage_offsets());

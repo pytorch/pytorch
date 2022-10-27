@@ -55,7 +55,7 @@ inline at::Tensor wrap_buffer(
     at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor,
     const std::vector<int64_t>& offsets) {
-  const std::vector<int64_t> offsets_copy;
+  std::vector<int64_t> offsets_copy;
   offsets_copy.resize(offsets.size());
   for (size_t i = 0; i < offsets.size(); i++) {
     offsets_copy[i] = offsets[i];
