@@ -188,15 +188,79 @@ class TestMetaConverter(TestCase):
         del m
         self.assertIs(ref(), None)
 
+aten = torch.ops.aten
+
 CHECK_STRIDES = {
     torch.Tensor.__getitem__,
-    torch.ops.aten.index_put,
-    torch.ops.aten.index_add,
+}
+
+CHECK_STRIDES_SKIPS = {
+    aten._conj_physical.default,
+    aten._fft_c2c.default,
+    aten._fft_c2r.default,
+    aten._fft_r2c.default,
+    aten._linalg_svd.default,
+    aten._scaled_dot_product_attention_forward.default,
+    aten.add.Tensor,
+    aten.addmm.default,
+    aten.angle.default,
+    aten.atan2.default,
+    aten.binary_cross_entropy.default,
+    aten.bitwise_and.Tensor,
+    aten.bitwise_left_shift.Tensor,
+    aten.bitwise_or.Tensor,
+    aten.bitwise_right_shift.Tensor,
+    aten.bitwise_xor.Tensor,
+    aten.clamp_max.Tensor,
+    aten.clamp_min.Tensor,
+    aten.complex.default,
+    aten.copysign.Tensor,
+    aten.div.Tensor_mode,
+    aten.div.Tensor,
+    aten.eq.Tensor,
+    aten.flip.default,
+    aten.floor_divide.default,
+    aten.fmax.default,
+    aten.fmin.default,
+    aten.fmod.Tensor,
+    aten.gcd.default,
+    aten.ge.Tensor,
+    aten.gt.Tensor,
+    aten.heaviside.default,
+    aten.hypot.default,
+    aten.igamma.default,
+    aten.igammac.default,
+    aten.index_copy.default,
+    aten.lcm.default,
+    aten.le.Tensor,
+    aten.logical_and.default,
+    aten.logical_or.default,
+    aten.logical_xor.default,
+    aten.lt.Tensor,
+    aten.maximum.default,
+    aten.minimum.default,
+    aten.mul.Tensor,
+    aten.ne.Tensor,
+    aten.nextafter.default,
+    aten.pow.Scalar,
+    aten.pow.Tensor_Scalar,
+    aten.pow.Tensor_Tensor,
+    aten.prelu.default,
+    aten.remainder.Tensor,
+    aten.rot90.default,
+    aten.rsub.Tensor,
+    aten.special_xlog1py.default,
+    aten.special_zeta.default,
+    aten.sub.Tensor,
+    aten.where.self,
+    aten.xlogy.Tensor,
 }
 
 def should_check_strides(func):
     if func in CHECK_STRIDES:
         return True
+    if func in CHECK_STRIDES_SKIPS:
+        return False
     if not isinstance(func, torch._ops.OpOverload):
         return False
     # Prims are expected to model strides correctly
@@ -689,8 +753,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
             kwargs, dtype=self.dtype, device_type=self.device_type, run_symbolic_meta=False
         )
 
-aten = torch.ops.aten
-
 # these always fail
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
@@ -878,7 +940,7 @@ def get_strided_args(args):
 
     strided_args = []
     for arg in args:
-        if isinstance(arg, torch.Tensor) and arg.is_contiguous():
+        if isinstance(arg, torch.Tensor) and not arg.is_sparse_csr and arg.is_contiguous():
             strided_arg_variants = get_strided_variants(arg)
         else:
             strided_arg_variants = [arg]
