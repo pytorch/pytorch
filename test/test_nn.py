@@ -15159,6 +15159,16 @@ class TestNNDeviceType(NNTestCase):
         input_large = torch.randn(1, 1, 2048, 1024 , dtype=dtype, device=device)
         conv2(input_large)
 
+    @onlyCUDA
+    @largeTensorTest('40GB')
+    @largeTensorTest('24GB', 'cpu')
+    def test_conv3d_64bit_indexing(self, device):
+        x = torch.rand(1, 32, 512, 512, 256)
+        m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)
+        yref = m(x)
+        y = m.to(device=device)(x.to(device=device))
+        self.assertEqual(yref, y)
+
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
             for grouped in (False, True):
