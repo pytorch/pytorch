@@ -70,8 +70,7 @@ class BaseListVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            out = self.getitem_const(args[0])
-            return out
+            return self.getitem_const(args[0])
         elif name == "__add__":
             assert not kwargs and len(args) == 1
             return type(self)(self.items + args[0].items, **options)
