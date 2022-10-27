@@ -54,7 +54,7 @@ def _create_differentiable(inps, level=None):
                 return x.requires_grad_()
         raise ValueError(f'Thing passed to transform API must be Tensor, '
                          f'got {type(x)}')
-    return tree_map(create_differentiable, inps)
+    return tree_map(create_differentiable, inps, grad_fn=True)
 
 
 def _undo_create_differentiable(inps, level=None):
@@ -297,9 +297,9 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
                 primals_out, aux = primals_out
                 aux = _undo_create_differentiable(aux, level)
 
-            flat_primals_out, primals_out_spec = tree_flatten(primals_out)
+            flat_primals_out, primals_out_spec = tree_flatten(primals_out, grad_fn=True)
             assert_non_empty_tensor_output(flat_primals_out, 'vjp(f, *primals)')
-            flat_diff_primals, primals_spec = tree_flatten(diff_primals)
+            flat_diff_primals, primals_spec = tree_flatten(diff_primals, grad_fn=True)
             results = _undo_create_differentiable(primals_out, level)
 
             for primal_out in flat_primals_out:
@@ -313,7 +313,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
         def wrapper(cotangents, retain_graph=True, create_graph=None):
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
-            flat_cotangents, cotangents_spec = tree_flatten(cotangents)
+            flat_cotangents, cotangents_spec = tree_flatten(cotangents, grad_fn=True)
             if primals_out_spec != cotangents_spec:
                 raise RuntimeError(
                     f'Expected pytree structure of cotangents to be the same '
@@ -322,7 +322,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
                     f'primal output: {treespec_pprint(primals_out_spec)}')
             result = _autograd_grad(flat_primals_out, flat_diff_primals, flat_cotangents,
                                     retain_graph=retain_graph, create_graph=create_graph)
-            return tree_unflatten(result, primals_spec)
+            return tree_unflatten(result, primals_spec, grad_fn=True, output=True)
 
     finally:
         _grad_decrement_nesting()
@@ -760,11 +760,9 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
         evaluated at ``primals`` and the Jacobian-vector product.
         If ``has_aux is True``, then instead returns a ``(output, jvp_out, aux)`` tuple.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
 
     jvp is useful when you wish to compute gradients of a function R^1 -> R^N
 
@@ -812,8 +810,8 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
             f'{jvp_str}: Expected primals to be a tuple. '
             f'E.g. it should be valid to call f(*primals).')
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
-    flat_primals, primals_spec = tree_flatten(diff_args)
-    flat_tangents, tangents_spec = tree_flatten(tangents)
+    flat_primals, primals_spec = tree_flatten(diff_args, grad_fn=True)
+    flat_tangents, tangents_spec = tree_flatten(tangents, grad_fn=True)
     if primals_spec != tangents_spec:
         raise RuntimeError(
             f'{jvp_str}: Expected primals and tangents to have the same python '
@@ -832,7 +830,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))
-                duals = tree_unflatten(flat_duals, primals_spec)
+                duals = tree_unflatten(flat_duals, primals_spec, grad_fn=True)
                 if argnums is not None:
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
@@ -901,11 +899,10 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
         is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use :func:`jacrev`, which has better operator coverage.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
@@ -1050,11 +1047,11 @@ def hessian(func, argnums=0):
         returns the Hessian of :attr:`func` with respect to the arg(s) at
         :attr:`argnums`.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use ``jacrev(jacrev(func))``, which has better
+        operator coverage.
 
     A basic usage with a R^N -> R^1 function gives a N x N Hessian:
 
@@ -1109,7 +1106,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
                 args = _wrap_all_tensors(args, level)
                 kwargs = _wrap_all_tensors(kwargs, level)
                 diff_args = _slice_argnums(args, argnums, as_tuple=False)
-                tree_map_(partial(_create_differentiable, level=level), diff_args)
+                tree_map_(partial(_create_differentiable, level=level), diff_args, grad_fn=True)
 
                 output = func(*args, **kwargs)
                 if has_aux:
@@ -1129,12 +1126,12 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
                                        f'{output.dim()} dims. Maybe you wanted to '
                                        'use the vjp or jacrev APIs instead?')
 
-                flat_diff_args, spec = tree_flatten(diff_args)
+                flat_diff_args, spec = tree_flatten(diff_args, grad_fn=True)
 
                 # NB: need create_graph so that backward pass isn't run in no_grad mode
                 flat_outputs = _as_tuple(output)
                 flat_grad_input = _autograd_grad(flat_outputs, flat_diff_args, create_graph=True)
-                grad_input = tree_unflatten(flat_grad_input, spec)
+                grad_input = tree_unflatten(flat_grad_input, spec, grad_fn=True, output=True)
 
                 grad_input = _undo_create_differentiable(grad_input, level)
                 output = _undo_create_differentiable(output, level)

@@ -2,11 +2,13 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec, _register_pytree_node, \
+    _register_leaf_node
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
 from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
 from collections import namedtuple, OrderedDict
 from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests
+from dataclasses import dataclass
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):
@@ -250,6 +252,49 @@ class TestPytree(TestCase):
             _, to_spec = tree_flatten(to_pytree)
             result = _broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
+
+    def test_pytree_subclass(self):
+        @dataclass
+        class Foo:
+            x: int
+            y: int
+
+        class Bar(Foo):
+            def __init__(self, x, y):
+                super().__init__(x, y)
+
+        def foo_flatten(foo):
+            return [foo.x, foo.y], type(foo)
+
+        def foo_unflatten(values, context):
+            return context(*values)
+
+        _register_pytree_node(Foo, foo_flatten, foo_unflatten)
+        out = tree_map(lambda x: x + 1, Bar(3, 4))
+        self.assertIsInstance(out, Bar)
+        self.assertEqual(out.x, 4)
+        self.assertEqual(out.y, 5)
+
+    def test_pytree_subclass_set_leaf(self):
+        @dataclass
+        class Foo:
+            x: int
+            y: int
+
+        class Bar(Foo):
+            def __init__(self, x, y):
+                super().__init__(x, y)
+
+        def foo_flatten(foo):
+            return [foo.x, foo.y], type(foo)
+
+        def foo_unflatten(values, context):
+            return context(*values)
+
+        _register_pytree_node(Foo, foo_flatten, foo_unflatten)
+        _register_leaf_node(Bar)
+        with self.assertRaisesRegex(TypeError, r"\+: 'Bar' and 'int'"):
+            tree_map(lambda x: x + 1, Bar(3, 4))
 
 
 instantiate_parametrized_tests(TestPytree)
