@@ -813,28 +813,6 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_getCurrentGraphTaskExecutionOrder(
-    PyObject* _unused,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  std::vector<torch::autograd::Node*> nodes =
-      torch::autograd::get_current_graph_task_execution_order();
-  TORCH_CHECK(
-      nodes.size(),
-      "_current_graph_task_execution_order should only be called during the backward pass");
-  auto list = THPObjectPtr(PyList_New(nodes.size()));
-  if (!list)
-    return nullptr;
-  for (const auto i : c10::irange(nodes.size())) {
-    // This node is guaranteed to be alive since the backward is still running
-    PyObject* pyobj_node =
-        torch::autograd::functionToPyObject(nodes[i]->getptr());
-    PyList_SET_ITEM(list.get(), i, pyobj_node);
-  }
-  return list.release();
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packInt64(torch::autograd::get_current_graph_task_id());
@@ -1040,10 +1018,6 @@ static PyMethodDef TorchMethods[] = {
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,
-     nullptr},
-    {"_current_graph_task_execution_order",
-     THPModule_getCurrentGraphTaskExecutionOrder,
-     METH_NOARGS,
      nullptr},
     {"_current_graph_task_id",
      THPModule_getCurrentGraphTaskId,

@@ -6,7 +6,6 @@
 #include <xnnpack.h>
 
 #include <ATen/core/List.h>
-#include <torch/csrc/jit/backends/xnnpack/xnnpack_graph_builder.h>
 
 namespace torch {
 namespace jit {
@@ -83,10 +82,6 @@ c10::IValue preprocess(
     graph->inputs()[0]->setType(TensorType::create(inp.toTensor()));
     example_inputs.emplace_back(inp.toTensor());
   }
-
-  // inp above has been confirmed to be either Tensor or TensorList
-  XNNGraph graph_builder;
-  graph_builder.buildXNNGraph(graph, example_inputs);
 
   compiled.insert("Answer", at::empty({1}, c10::ScalarType::Float));
 

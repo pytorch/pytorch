@@ -3280,10 +3280,7 @@ def index_add(
     *,
     alpha: NumberType = 1,
 ):
-    # index_add always returns a new contiguous tensor
-    return x.clone(memory_format=torch.contiguous_format).index_add_(
-        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
-    )
+    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
 
 
 @register_decomposition(torch.ops.aten.index_select)
@@ -3597,10 +3594,7 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-
-    # aten.diag_embed always returns a new contiguous tensor
-    # contiguous() is needed to correctly model the output stride
-    return utils.mask_tensor(cond, t).contiguous()
+    return utils.mask_tensor(cond, t)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3735,7 +3729,7 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_decomposition(torch.ops.aten.empty.memory_format)
+@register_decomposition(torch.ops.aten.empty)
 @out_wrapper()
 def empty(
     *shape,
@@ -3828,7 +3822,7 @@ def new_empty_strided(
     )
 
 
-@register_decomposition(torch.ops.aten.zeros.default)
+@register_decomposition(torch.ops.aten.zeros)
 @out_wrapper()
 def zeros(
     *size,
@@ -3880,7 +3874,7 @@ def new_zeros(
     )
 
 
-@register_decomposition(torch.ops.aten.ones.default)
+@register_decomposition(torch.ops.aten.ones)
 @out_wrapper()
 def ones(
     *size,
@@ -4415,7 +4409,7 @@ zeros_like = partial(full_like, fill_value=False)
 ones_like = partial(full_like, fill_value=True)
 
 # TODO: add pin_memory support
-@register_decomposition(torch.ops.aten.randn.default)
+@register_decomposition(torch.ops.aten.randn)
 @out_wrapper()
 def randn(
     *shape,
@@ -4523,14 +4517,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     if isinstance(value, Number):
-        r = torch.where(mask, python_type(value), a)
-    else:
-        assert isinstance(value, TensorLike)
-        r = torch.where(mask, prims.to_dtype(value, a.dtype), a)
+        return torch.where(mask, python_type(value), a)
 
-    # aten.mask_fill always return a new contiguous tensor
-    # contiguous() is needed to correctly model the output stride
-    return r.contiguous()
+    assert isinstance(value, TensorLike)
+    return torch.where(mask, prims.to_dtype(value, a.dtype), a)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4632,9 +4622,7 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) >= diagonal
 
-    # aten.triu always returns a new contiguous tensor
-    # contiguous() is needed to correctly model the output stride
-    return utils.mask_tensor(mask, a).contiguous()
+    return utils.mask_tensor(mask, a)
 
 
 @register_decomposition(torch.ops.aten.tril)
@@ -4649,9 +4637,7 @@ def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) <= diagonal
 
-    # aten.tril always returns a new contiguous tensor
-    # contiguous() is needed to correctly model the output stride
-    return utils.mask_tensor(mask, a).contiguous()
+    return utils.mask_tensor(mask, a)
 
 
 # This is based on get_tril_size in aten/src/ATen/native/TensorFactories.h

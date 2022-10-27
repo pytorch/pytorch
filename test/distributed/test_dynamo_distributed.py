@@ -12,10 +12,6 @@ from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-def init_weights(m):
-    if isinstance(m, nn.Linear):
-        nn.init.xavier_uniform_(m.weight)
-        m.bias.data.fill_(0.01)
 
 class ToyModel(nn.Module):
     def __init__(self, in_feat=10, hidden_feat=5000, num_hidden=2, out_feat=5):
@@ -23,7 +19,7 @@ class ToyModel(nn.Module):
         self.net = nn.Sequential(
             *[nn.Linear(in_feat, hidden_feat), nn.ReLU()]
             + [nn.Linear(hidden_feat, hidden_feat), nn.ReLU()] * num_hidden
-            + [nn.Linear(hidden_feat, out_feat), nn.ReLU()]
+            + [nn.Linear(hidden_feat, 5), nn.ReLU()]
         )
 
     def forward(self, inputs):
@@ -67,10 +63,9 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         dist.destroy_process_group()
         super().tearDownClass()
 
-    def get_model(self, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
-        m = ToyModel(in_feat=in_feat, hidden_feat=hidden_feat, out_feat=out_feat).to(self.device)
-        m.apply(init_weights)
-        inputs = torch.rand(bsz, in_feat).to(self.device)
+    def get_model(self):
+        m = ToyModel().to(self.device)
+        inputs = torch.randn(20, 10).to(self.device)
         outputs = m(inputs)
         return m, inputs, outputs
 
@@ -141,6 +136,8 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
+    # hangs/crashes with inductor currently
+    @unittest.skip("hangs/crashes with inductor currently")
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split_inductor(self):
         """
@@ -164,8 +161,11 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         introducing graph splits. (Based on model parmeters fitting in the bucket)
         """
         # DDP will always do a 'first bucket' with a really small size;  so only a tiny model will escape this
-        m, inputs, correct_outputs = self.get_model(hidden_feat=5)
+        m = ToyModel(hidden_feat=5).to(self.device)
+        inputs = torch.randn(20, 10).to(self.device)
+        correct_outputs = m(inputs)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=250)
+
         check_splits_compiler = CheckSplitsCompiler()
 
         @torch._dynamo.optimize(check_splits_compiler.compile_fn)
@@ -233,8 +233,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
                 return self.seq(x)
 
         m = MyModule().to(self.device)
-        m.apply(init_weights)
-        inputs = torch.rand((512, 512)).to(self.device)
+        inputs = torch.randn((512, 512)).to(self.device)
         correct_outputs = m(inputs)
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=1)
 

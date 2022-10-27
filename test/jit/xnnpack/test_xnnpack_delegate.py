@@ -67,37 +67,3 @@ class TestXNNPackBackend(unittest.TestCase):
             }
         )
         lowered(torch.zeros(1))
-
-    def test_xnnpack_unsupported(self):
-        class AddSpliceModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x, y):
-                z = x + y[:, :, 1, :]
-                return z
-
-        sample_inputs = (torch.rand(1, 512, 512, 3), torch.rand(1, 512, 512, 3))
-        sample_output = torch.zeros(1, 512, 512, 3)
-
-        error_msg = (
-            "the module contains the following unsupported ops:\n"
-            "aten::select\n"
-            "aten::slice\n"
-        )
-
-        add_module = torch.jit.script(AddSpliceModule())
-        with self.assertRaisesRegex(
-            RuntimeError,
-            error_msg,
-        ):
-            _ = torch._C._jit_to_backend(
-                "xnnpack",
-                add_module,
-                {
-                    "forward": {
-                        "inputs" : [sample_inputs[0], sample_inputs[1]],
-                        "outputs": [sample_output]
-                    }
-                }
-            )

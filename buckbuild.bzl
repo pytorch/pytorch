@@ -22,7 +22,6 @@ load(
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
-    "torch_cpp_srcs",
     "torch_mobile_tracer_sources",
 )
 load(
@@ -1366,19 +1365,6 @@ def define_buck_targets(
         exported_deps = [
             ":flatbuffers_mobile",
             ":torch_mobile_core",
-        ],
-    )
-
-    pt_xplat_cxx_library(
-        name = "torch_cpp_cpu",
-        srcs = torch_cpp_srcs,
-        headers = native.glob(["torch/csrc/api/include/**/*.h"]) + ["torch/script.h"],
-        compiler_flags = get_pt_compiler_flags(),
-        exported_preprocessor_flags = get_pt_preprocessor_flags(),
-        visibility = ["PUBLIC"],
-        exported_deps = [
-            ":torch",
-            ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
         ],
     )
 

@@ -821,13 +821,7 @@ def replication_pad(g: jit_utils.GraphContext, input, padding):
 
 @_onnx_symbolic("aten::pad")
 @_beartype.beartype
-def pad(
-    g: jit_utils.GraphContext,
-    input: _C.Value,
-    pad: _C.Value,
-    mode: _C.Value,
-    value: _C.Value,
-):
+def pad(g: jit_utils.GraphContext, input, pad, mode, value):
     mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)

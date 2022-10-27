@@ -1,26 +1,18 @@
 # Owner(s): ["module: nestedtensor"]
 
-import unittest
-
 import torch
 import torch.nn
+import unittest
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
-    onlyCPU,
-    onlyCUDA,
     skipMeta,
+    onlyCUDA,
+    onlyCPU
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
-from torch.testing._internal.common_utils import (
-    freeze_rng_state,
-    gradcheck,
-    IS_FBCODE,
-    parametrize,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize, gradcheck
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -372,66 +364,6 @@ class TestNestedTensor(TestCase):
                     self.assertEqual(nt.device, nt2.to('cpu', dtype=torch.int32, non_blocking=non_blocking).device)
                     self.assertIs(torch.int32, nt2.to(dtype=torch.int32).dtype)
                     self.assertEqual(nt2.device, nt2.to(dtype=torch.int32).device)
-
-    def test_copy_(self):
-        ntensors = 4
-        nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
-        nt_copy = torch.empty_like(nt)
-        nt_copy.copy_(nt)
-
-        for (nt_ub, nt_copy_ub) in zip(nt.unbind(), nt_copy):
-            self.assertEqual(nt_ub, nt_copy_ub)
-
-        nt_error = torch.nested.nested_tensor([torch.tensor([0, 0])])
-        self.assertRaisesRegex(
-            RuntimeError,
-            "copy_ only supports tensors that are the same size for Nested implementations",
-            lambda: nt_error.copy_(nt)
-        )
-
-        if torch.cuda.is_available():
-            nt = random_nt(torch.device('cuda'), torch.float32, ntensors, (4, 4))
-            nt_copy = torch.empty_like(nt, device=torch.device('cpu'))
-            nt_copy.copy_(nt, non_blocking=True)
-            torch.cuda.current_stream(torch.cuda.current_device()).synchronize()
-            for (nt_ub, nt_copy_ub) in zip(nt.unbind(), nt_copy):
-                self.assertEqual(nt_ub, nt_copy_ub)
-
-            nt_copy = torch.empty_like(nt, device=torch.device('cpu'))
-            nt_copy.copy_(nt, non_blocking=False)
-            for (nt_ub, nt_copy_ub) in zip(nt.unbind(), nt_copy):
-                self.assertEqual(nt_ub, nt_copy_ub)
-
-    def test_fill_(self):
-        ntensors = 4
-        nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
-        nt.fill_(10.)
-        for nt_ub in nt.unbind():
-            t = torch.empty_like(nt_ub)
-            t.fill_(10.)
-            self.assertEqual(nt_ub, t)
-
-        fill_tensor = torch.tensor([11.])
-        self.assertRaisesRegex(
-            RuntimeError,
-            "fill_ only supports 0-dimension value tensor",
-            lambda: nt.fill_(fill_tensor)
-        )
-
-        nt.fill_(fill_tensor[0])
-        for nt_ub in nt.unbind():
-            t = torch.empty_like(nt_ub)
-            t.fill_(11.)
-            self.assertEqual(nt_ub, t)
-
-    def test_ones_like(self):
-        ntensors = 4
-        nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
-        ones_nt = torch.ones_like(nt)
-
-        for nt_ub in ones_nt.unbind():
-            t = torch.ones_like(nt_ub)
-            self.assertEqual(nt_ub, t)
 
 
 class TestNestedTensorDeviceType(TestCase):
