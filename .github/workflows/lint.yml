@@ -23,16 +23,18 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: 3.8
           architecture: x64
-          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
 
-      - name: Install requirements
-        run: |
-          pip install -r .github/requirements-gha-cache.txt --user
+      - name: Install lintrunner
+        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          command: pip install lintrunner==0.9.2
 
       - name: Initialize lint dependencies
         run: lintrunner init
@@ -83,9 +85,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: 3.x
           architecture: x64
-          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -148,9 +149,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: 3.x
           architecture: x64
-          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -240,10 +240,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: 3.8
           architecture: x64
-          check-latest: false
-          cache: pip
+          cache: 'pip'
           cache-dependency-path: |
             **/.github/requirements-gha-cache.txt
 
@@ -274,9 +273,8 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: 3.8
           architecture: x64
-          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
@@ -320,26 +318,23 @@ jobs:
         if: matrix.test_type == 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.5'
+          python-version: 3.5
           architecture: x64
-          check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/requirements.txt
+            **/.github/requirements-gha-cache.txt
       - name: Setup Python 3.8
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: 3.8
           architecture: x64
-          check-latest: false
           cache: pip
           cache-dependency-path: |
-            **/requirements.txt
+            **/.github/requirements-gha-cache.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
         run: |
-          pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
       - name: Run collect_env.py

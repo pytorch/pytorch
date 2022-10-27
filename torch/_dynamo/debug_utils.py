@@ -240,7 +240,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
 def isolate_fails(fx_g, args, compiler_name: str, env=None):
     if env is None:
         env = {}
-    subdir = os.path.join(os.getcwd(), "isolate")
+    subdir = f"{minifier_dir()}/isolate"
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
@@ -600,11 +600,10 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     """
     Saves the repro to a repro.py file
     """
-    curdir = os.getcwd()
-    subdir = os.path.join(os.getcwd(), "checkpoints")
+    subdir = os.path.join(minifier_dir())
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    file_name = os.path.join(subdir, f"minified_{len(gm.graph.nodes)}_nodes.py")
+    file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
     log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
 
     model_str = NNModuleToString.convert(gm)
@@ -614,9 +613,18 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
                 model_str, args, compiler_name, check_accuracy
             )
         )
-    latest_repro = os.path.join(curdir, "repro.py")
+    latest_repro = os.path.join(subdir, "repro.py")
     log.warning(f"Copying {file_name} to {latest_repro} for convenience")
     shutil.copyfile(file_name, latest_repro)
+
+    local_path = os.path.join(config.base_dir, "repro.py")
+    try:
+        shutil.copyfile(file_name, local_path)
+        log.warning(
+            f"Copying minified repro from {file_name} to {local_path} for convenience"
+        )
+    except OSError:
+        log.warning("No write permissions for {local_path}")
 
 
 # TODO - Commented because we are assuming that nn.Modules can be safely repr'd
@@ -739,6 +747,8 @@ import {config.dynamo_import}
 from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
+
+{config.dynamo_import}.config.repro_dir = \"{minifier_dir()}\"
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]

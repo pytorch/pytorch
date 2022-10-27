@@ -9,7 +9,6 @@ import re
 import shutil
 import signal
 import subprocess
-import sys
 import sysconfig
 import tempfile
 import types
@@ -305,15 +304,9 @@ class AsyncCompile:
         # we rely on 'fork' because we cannot control whether users
         # have an `if __name__ == '__main__'` in their main process.
         fork_context = multiprocessing.get_context("fork")
-        pool = ProcessPoolExecutor(
+        return ProcessPoolExecutor(
             config.compile_threads, mp_context=fork_context, initializer=init
         )
-        # when this pool is created in a subprocess object, the normal exit handler
-        # doesn't run, and we need to register our own handler.
-        # exitpriority has to be high, because another one of the finalizers will
-        # kill the worker thread that sends the shutdown message to the workers...
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
-        return pool
 
     @classmethod
     def warm_pool(cls):

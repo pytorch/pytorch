@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
-    skipIfTorchInductor,
     slowTest,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -210,7 +209,6 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
-    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_meta(self, device, dtype, op):
         with FakeTensorMode() as mode:
             pass
@@ -376,7 +374,6 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
-    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref(self, device, dtype, op):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
@@ -389,7 +386,6 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
-    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_torch_fallback(self, device, dtype, op):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
@@ -401,7 +397,6 @@ class TestCommon(TestCase):
     @skipCUDAIfRocm
     @ops(python_ref_db)
     @parametrize('executor', ['aten', 'nvfuser'])
-    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
         # TODO: Not all dtypes are supported with nvfuser
         from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
@@ -462,7 +457,6 @@ class TestCommon(TestCase):
     @skipMeta
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
-    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_errors(self, device, op):
         mode = FakeTensorMode()
         with mode:
