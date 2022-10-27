@@ -498,7 +498,7 @@ Tensor nll_loss2d(const Tensor & self, const Tensor & target, const c10::optiona
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss2d_forward(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss2d_forward_symint(self, target, weight, reduction, ignore_index));
 }
 
 } // namespace native
