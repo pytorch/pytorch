@@ -1011,6 +1011,49 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=2e-3, rtol=1e-2)
 
+    @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
+    @parametrize("type", ["dense", "nested"])
+    def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, type: str):
+        def rand_nt(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.nested.nested_tensor([torch.randn(seq_len, 3 * num_heads * head_dim,
+                                                           device="cuda", dtype=torch.float16)*10 for _ in range(batch)])
+        def rand_tensor(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.randn(batch, seq_len, 3 * num_heads * head_dim, device="cuda", dtype=torch.float16) * 10
+
+        batch_size, seq_len, num_heads, head_dim = 16, 8, 4, 64
+        shape = (batch_size, seq_len, num_heads, head_dim)
+
+        # Test Packed
+        qkv = rand_tensor(shape) if type == "dense" else rand_nt(shape)
+        query, key, value = qkv.chunk(3, dim=-1)
+
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        with sdp_kernel(enable_math=False):
+            actual = torch.nn.functional._scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        with sdp_kernel(enable_flash=False):
+            math_query = query.contiguous().to(dtype=torch.float32)
+            math_key = key.contiguous().to(dtype=torch.float32)
+            math_value = value.contiguous().to(dtype=torch.float32)
+
+            math_ref = torch.nn.functional._scaled_dot_product_attention(math_query, math_key, math_value,
+                attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        actual_test = actual[0]
+        math_ref_test = math_ref[0]
+
+        if actual_test.is_nested:
+            actual_test = torch.nested.to_padded_tensor(actual_test.contiguous(), padding=0.0)
+            math_ref_test = torch.nested.to_padded_tensor(math_ref_test, padding=0.0)
+
+        self.assertEqual(actual_test.to(dtype=torch.float32).contiguous(),math_ref_test.contiguous(), atol=5e-3, rtol=5e-3)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sdp_runtime_dispatch(self):
         # We will test all the constraints that we know will cause a failure

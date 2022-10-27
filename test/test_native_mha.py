@@ -9,7 +9,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     skipMeta,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 
 class TestMHADeviceType(TestCase):
     @torch.no_grad()
@@ -256,31 +256,56 @@ class TestMHADeviceType(TestCase):
         else:
             self.assertEqual(weight_pt, weight_npt)
 
+    # @dtypesIfCUDA(torch.float, torch.half)
+    # @dtypes(torch.float)
+    # @skipMeta
+    # @torch.no_grad()
+    # def test_native_multihead_self_attention(self, device, dtype):
+    #     for (use_padding, pad_all) in ((False, False), (True, False), (True, True)):
+    #         for use_nt in (False, True):
+    #             # Figuring out exactly which elements of the weights are garbage in this
+    #             # case eludes me, and it's not particularly enlightening to test anyway
+    #             # because padding doesn't especially affect the intermediate weights.
+    #             for need_weights in (False, not pad_all):
+    #                 for average_attn_weights in (False, True):
+    #                     with self.subTest(use_padding=use_padding, pad_all=pad_all,
+    #                                       use_nt=use_nt, need_weights=need_weights,
+    #                                       average_attn_weights=average_attn_weights):
+    #                         self._test_multihead_attention_impl(
+    #                             device,
+    #                             dtype,
+    #                             "self",
+    #                             use_nt=use_nt,
+    #                             use_padding=use_padding,
+    #                             pad_all=pad_all,
+    #                             need_weights=need_weights,
+    #                             average_attn_weights=average_attn_weights,
+    #                         )
+
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
+    @parametrize("use_nt", [False, True])
+    @parametrize("use_padding, pad_all", [(False, False), (True, False), (True, True)])
+    @parametrize("need_weights", [False])
+    @parametrize("average_attn_weights", [False, True])
     @torch.no_grad()
-    def test_native_multihead_self_attention(self, device, dtype):
-        for (use_padding, pad_all) in ((False, False), (True, False), (True, True)):
-            for use_nt in (False, True):
-                # Figuring out exactly which elements of the weights are garbage in this
-                # case eludes me, and it's not particularly enlightening to test anyway
-                # because padding doesn't especially affect the intermediate weights.
-                for need_weights in (False, not pad_all):
-                    for average_attn_weights in (False, True):
-                        with self.subTest(use_padding=use_padding, pad_all=pad_all,
-                                          use_nt=use_nt, need_weights=need_weights,
-                                          average_attn_weights=average_attn_weights):
-                            self._test_multihead_attention_impl(
-                                device,
-                                dtype,
-                                "self",
-                                use_nt=use_nt,
-                                use_padding=use_padding,
-                                pad_all=pad_all,
-                                need_weights=need_weights,
-                                average_attn_weights=average_attn_weights,
-                            )
+    def test_native_multihead_self_attention(self, device, dtype, use_nt, need_weights, average_attn_weights, use_padding=False, pad_all=False
+                                             ):
+        for need_weights in (False, not pad_all):
+            with self.subTest(use_padding=use_padding, pad_all=pad_all,
+                              use_nt=use_nt, need_weights=need_weights,
+                              average_attn_weights=average_attn_weights):
+                self._test_multihead_attention_impl(
+                    device,
+                    dtype,
+                    "self",
+                    use_nt=use_nt,
+                    use_padding=use_padding,
+                    pad_all=pad_all,
+                    need_weights=need_weights,
+                    average_attn_weights=average_attn_weights,
+                )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
