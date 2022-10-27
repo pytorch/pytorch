@@ -505,6 +505,16 @@ get_elementwise_nested_tensor_impl(
           other_ptr->get_nested_stride_tensor()),
       op_name,
       " requires strides to match when given NestedTensors");
+  auto self_offsets = self_ptr->get_storage_offsets();
+  auto other_offsets = other_ptr->get_storage_offsets();
+  bool offsets_match = true;
+  for (size_t i = 0; i < self_offsets.size(); i++) {
+    offsets_match = offsets_match && (self_offsets[i] == other_offsets[i]);
+  }
+  TORCH_CHECK(
+      offsets_match,
+      op_name,
+      " requires offsets to match when given NestedTensors");
   return std::make_pair(self_ptr, other_ptr);
 }
 

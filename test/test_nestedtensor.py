@@ -891,6 +891,13 @@ class TestNestedTensorDeviceType(TestCase):
             RuntimeError, "div requires strides to match when given NestedTensors",
             lambda: nt_transpose_copy.transpose(1, 2) / nt2)
 
+        nt = torch.nested.nested_tensor([torch.randn(i, 4) for i in [3, 4, 5]], device=device, dtype=dtype)
+        nt_chunks = nt.chunk(2, -1)
+        self.assertRaisesRegex(
+            RuntimeError, "div requires offsets to match when given NestedTensors",
+            lambda: nt_chunks[0] / nt_chunks[1])
+
+
     @dtypes(torch.float, torch.float16)
     @skipMeta
     @torch.inference_mode()
