@@ -2813,6 +2813,14 @@ class TestReductions(TestCase):
             torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
                         bins=4, min=5, max=1)
 
+        # test consistency between CPU and GPU
+        actual = torch.histc(
+            torch.linspace(0, 0.99, 1001, dtype=torch.float32).to(device),
+            bins=10, min=0, max=0.99)
+        self.assertEqual(
+            torch.tensor([101, 99, 101, 99, 101, 99, 100, 100, 100, 101], dtype=torch.float, device=device),
+            actual)
+
         # test against numpy.histogram()
         def test_against_np(tensor, bins=100, min=0, max=0):
             if min == 0 and max == 0:
@@ -2842,13 +2850,6 @@ class TestReductions(TestCase):
 
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
-
-        if torch.cuda.is_available():
-            linear = torch.linspace(0, 0.99, 1001)
-            self.assertEqual(
-                torch.histc(linear, bins=10, min=0, max=0.99),
-                torch.histc(linear.cuda(), bins=10, min=0, max=0.99)
-            )
 
     @onlyCPU
     def test_histc_bfloat16(self, device):
