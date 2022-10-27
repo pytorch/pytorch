@@ -234,7 +234,10 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
-    @parametrize("checkpoint_wrap", ["source", "dest", "both", "source_after_wrap"])
+    @parametrize(
+        "checkpoint_wrap",
+        ["source", "dest", "both", "source_after_wrap", "both_after_wrap"],
+    )
     @parametrize("rank0_only_and_offload", [False, True])
     def test_fsdp_state_dict_with_activation_checkpoint(
         self, state_dict_type, checkpoint_wrap, rank0_only_and_offload
@@ -242,23 +245,26 @@ class TestFSDPStateDict(FSDPTest):
         """Tests saving the state dict, zeroing a target model's parameters, and
         loading the state dict, where the source and target models may have a
         checkpoint wrapper."""
+
+        def apply_ac_to_linears(model) -> None:
+            non_reentrant_wrapper = partial(
+                checkpoint_wrapper,
+                offload_to_cpu=False,
+                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            )
+            apply_activation_checkpointing(
+                model,
+                checkpoint_wrapper_fn=non_reentrant_wrapper,
+                check_fn=lambda submodule: isinstance(submodule, nn.Linear),
+            )
+
         for model_call in [
             partial(self._get_simple_model),
             partial(self._get_simple_nested_model),
         ]:
-            model = model_call(checkpoint_wrap=(checkpoint_wrap in ["source", "both"]))
-            if checkpoint_wrap == "source_after_wrap":
-                non_reentrant_wrapper = partial(
-                    checkpoint_wrapper,
-                    offload_to_cpu=False,
-                    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-                )
-                check_fn = lambda submodule: isinstance(submodule, nn.Linear)
-                apply_activation_checkpointing(
-                    model,
-                    checkpoint_wrapper_fn=non_reentrant_wrapper,
-                    check_fn=check_fn,
-                )
+            model = model_call(checkpoint_wrap=(checkpoint_wrap in ("source", "both")))
+            if checkpoint_wrap in ("source_after_wrap", "both_after_wrap"):
+                apply_ac_to_linears(model)
             with self._get_state_dict_mgr(
                 model, state_dict_type, rank0_only_and_offload
             ):
@@ -266,8 +272,10 @@ class TestFSDPStateDict(FSDPTest):
                 # Possibly wrap new model in activation checkpoint wrapper to test save/
                 # load with this wrapper
                 model_new = model_call(
-                    checkpoint_wrap=(checkpoint_wrap in ["dest", "both"])
+                    checkpoint_wrap=(checkpoint_wrap in ("dest", "both"))
                 )
+                if checkpoint_wrap == "both_after_wrap":
+                    apply_ac_to_linears(model_new)
                 _zero_model(model_new)
                 self._compare_models(model, model_new, self.assertNotEqual)
                 if rank0_only_and_offload:

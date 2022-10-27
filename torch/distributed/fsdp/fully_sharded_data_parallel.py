@@ -1894,10 +1894,12 @@ class FullyShardedDataParallel(nn.Module):
                 target_name = None
                 for submodule in fsdp_module.modules():
                     for param_name, param in submodule._parameters.items():
-                        if flat_param is param:
+                        if flat_param is param:  # found registered `FlatParameter`
                             target_submodule = submodule
                             target_name = param_name
                             break
+                    if target_submodule is not None:
+                        break
                 if (
                     target_submodule is not None
                     and target_submodule is not fsdp_module.module
@@ -1910,6 +1912,7 @@ class FullyShardedDataParallel(nn.Module):
                             f"rank {fsdp_module.rank}. {fsdp_module}"
                         )
                     target_submodule._parameters.pop(target_name)  # de-register
+                    fsdp_module._register_flat_param()  # re-register
                 elif target_submodule is None:
                     raise RuntimeError(
                         "Either the FSDP wrapped module was removed from "
@@ -1917,8 +1920,6 @@ class FullyShardedDataParallel(nn.Module):
                         f"de-registered on rank {fsdp_module.rank}. Both of "
                         f"these are invalid behavior. {fsdp_module}"
                     )
-                if target_submodule is not fsdp_module.module:
-                    fsdp_module._register_flat_param()
             if fsdp_module is not self:
                 # Relax the assert for non-root FSDP instances in case the
                 # nested initialized module is wrapped again in FSDP later (e.g.

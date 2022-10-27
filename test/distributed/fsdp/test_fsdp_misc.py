@@ -536,11 +536,10 @@ class TestFSDPMisc(FSDPTest):
             offload_to_cpu=False,
             checkpoint_impl=CheckpointImpl.NO_REENTRANT,
         )
-        check_fn = lambda submodule: isinstance(submodule, nn.Linear)
         apply_activation_checkpointing(
             model,
             checkpoint_wrapper_fn=non_reentrant_wrapper,
-            check_fn=check_fn,
+            check_fn=lambda submodule: isinstance(submodule, nn.Linear),
         )
 
         # Check that `seq2[0]` only has a single `FlatParameter` registered and
