@@ -1098,15 +1098,15 @@ Tensor convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups) {
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
-      at::convolution(
+      at::convolution_symint(
           input_t,
           weight_p,
           c10::nullopt,
@@ -1116,7 +1116,7 @@ Tensor convolution_jvp(
           transposed,
           output_padding,
           groups) +
-      at::convolution(
+      at::convolution_symint(
           input_p,
           weight_t,
           bias_t_opt,
@@ -1136,10 +1136,10 @@ Tensor _convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups,
     bool benchmark,
     bool deterministic,
@@ -1148,7 +1148,7 @@ Tensor _convolution_jvp(
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
-      at::_convolution(
+      at::_convolution_symint(
           input_t,
           weight_p,
           c10::nullopt,
@@ -1162,7 +1162,7 @@ Tensor _convolution_jvp(
           deterministic,
           cudnn_enabled,
           allow_tf32) +
-      at::_convolution(
+      at::_convolution_symint(
           input_p,
           weight_t,
           bias_t_opt,
@@ -4859,15 +4859,15 @@ Tensor sparse_constructor_values_backward(
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
 // in pads])
-Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
+Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   auto negated_pad = pad.vec();
   // NOLINTNEXTLINE(modernize-use-transparent-functors)
   std::transform(
       negated_pad.cbegin(),
       negated_pad.cend(),
       negated_pad.begin(),
-      std::negate<int64_t>());
-  return at::constant_pad_nd(grad, negated_pad, 0);
+      std::negate<c10::SymInt>());
+  return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 
 Tensor embedding_dense_double_backward(
@@ -5026,7 +5026,13 @@ std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
     const Tensor& result,
     const Tensor& input_,
-    const Tensor& tau) {
+    const Tensor& tau,
+    const bool flip_order) {
+  // NOTE on `flip_order`: when flip_order is true,
+  // the algorithm below reverses the processing direction from
+  // range(k) to range(k - 1, -1, -1) in the main loop, and left/right
+  // Householder projection applications get flipped.
+  // The comments below about the algorithmic details assume flip_order = false.
   if (!grad.defined() || !input_.numel() || !tau.numel()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
@@ -5099,9 +5105,22 @@ std::tuple<Tensor, Tensor> householder_product_backward(
         left);
   };
 
+  const auto flip_i = [flip_order, k](int64_t i) -> int64_t {
+    return !flip_order ? i : k - i - 1;
+  };
+  const auto next_i = [flip_order](int64_t i) -> int64_t {
+    return !flip_order ? ++i : --i;
+  };
+  const auto apply_left = !flip_order;
+
   // K <- H_0^{-1} @ K
+  const auto zero_idx = flip_i(0);
   K = apply_householder_reflector(
-      0, input.narrow(-1, 0, 1), sigma.narrow(-1, 0, 1), K, /*left=*/true);
+      zero_idx,
+      input.narrow(-1, zero_idx, 1),
+      sigma.narrow(-1, zero_idx, 1),
+      K,
+      /*left=*/apply_left);
 
   Tensor input_grad, tau_grad;
   // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
@@ -5111,25 +5130,29 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // one to choose for creating output buffer.
   // eg. if both are BatchedTensor at different level.
   if (areAnyTensorSubclassLike({input, tau, K})) {
-    std::vector<Tensor> input_grads = {};
-    std::vector<Tensor> tau_grads = {};
-    for (const auto i : c10::irange(k)) {
+    // k + 1 if input_grads hold a matrix of zeros for inactive parts of input.
+    auto input_grads = std::vector<Tensor>(k < input.size(-1) ? k + 1 : k);
+    auto tau_grads = std::vector<Tensor>(k);
+
+    for (const auto i_idx : c10::irange(k)) {
+      auto i = flip_i(i_idx);
       // NOTE: narrow will unsqueeze(-1)
       auto v_i = input.narrow(-1, i, 1);
       auto t_i = tau.narrow(-1, i, 1);
 
       Tensor v_i_grad, tau_i_grad;
       std::tie(v_i_grad, tau_i_grad) = update_grad(i, v_i, t_i, K);
-      input_grads.push_back(v_i_grad);
-      tau_grads.push_back(tau_i_grad);
+      input_grads[i] = v_i_grad;
+      tau_grads[i] = tau_i_grad;
 
       // K <- H_{i + 1}^{-1} @ K @ H_i
-      if (i < k - 1) {
-        auto v_i_next = input.narrow(-1, i + 1, 1);
-        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+      if (i != flip_i(k - 1)) {
+        auto i_next = next_i(i);
+        auto v_i_next = input.narrow(-1, i_next, 1);
+        auto s_i_next = sigma.narrow(-1, i_next, 1);
         K = apply_householder_reflector(
-            i + 1, v_i_next, s_i_next, K, /*left=*/true);
-        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+            i_next, v_i_next, s_i_next, K, /*left=*/apply_left);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/!apply_left);
       }
     }
 
@@ -5140,7 +5163,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
           at::DimVector(input_.sizes().slice(0, input_.dim() - 1));
       zero_grad_shape.push_back(input.size(-1) - k);
       auto zero_grad = at::zeros(zero_grad_shape, input_.options());
-      input_grads.push_back(zero_grad);
+      input_grads[k] = zero_grad;
     }
 
     input_grad = at::cat(input_grads, -1);
@@ -5148,7 +5171,8 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   } else {
     input_grad = at::zeros_like(input_);
     tau_grad = at::zeros_like(tau);
-    for (const auto i : c10::irange(k)) {
+    for (const auto i_idx : c10::irange(k)) {
+      auto i = flip_i(i_idx);
       // NOTE: narrow will unsqueeze(-1)
       auto v_i = input.narrow(-1, i, 1);
       auto t_i = tau.narrow(-1, i, 1);
@@ -5159,12 +5183,13 @@ std::tuple<Tensor, Tensor> householder_product_backward(
       tau_grad.select(-1, i).copy_(tau_i_grad.squeeze(-1));
 
       // K <- H_{i + 1}^{-1} @ K @ H_i
-      if (i < k - 1) {
-        auto v_i_next = input.narrow(-1, i + 1, 1);
-        auto s_i_next = sigma.narrow(-1, i + 1, 1);
+      if (i != flip_i(k - 1)) {
+        auto i_next = next_i(i);
+        auto v_i_next = input.narrow(-1, i_next, 1);
+        auto s_i_next = sigma.narrow(-1, i_next, 1);
         K = apply_householder_reflector(
-            i + 1, v_i_next, s_i_next, K, /*left=*/true);
-        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/false);
+            i_next, v_i_next, s_i_next, K, /*left=*/apply_left);
+        K = apply_householder_reflector(i, v_i, t_i, K, /*left=*/!apply_left);
       }
     }
   }
@@ -5274,6 +5299,67 @@ Tensor householder_product_jvp(
   }
 
   return dprod;
+}
+
+std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
+    const Tensor& grad,
+    const Tensor& result,
+    const Tensor& self,
+    const Tensor& tau,
+    const Tensor& other,
+    bool left,
+    bool transpose,
+    std::array<bool, 3> grad_output_mask) {
+  Tensor self_grad, tau_grad, other_grad;
+
+  if (!grad.defined()) {
+    return std::make_tuple(self_grad, tau_grad, other_grad);
+  }
+
+  const auto self_requires_grad = grad_output_mask[0];
+  const auto tau_requires_grad = grad_output_mask[1];
+  const auto other_requires_grad = grad_output_mask[2];
+
+  if (other_requires_grad) {
+    other_grad = at::ormqr(self, tau, grad, left, !transpose);
+  }
+  if (self_requires_grad || tau_requires_grad) {
+    if (left ^ transpose) {
+      // Assume left = true and transpose = false. The case with
+      // left = false and tranpose = true is very much similar with just
+      // transposed arguments passed into householder_product_backward.
+      // Ormqr computes B = H_1 * ... * H_k * A.
+      // The sensivity wrt H_i is given by (see notes in
+      // householder_product_backward) Tr(H_i_plus B B_grad^H H_i_minus dH_i),
+      // so, since householder_product_backward respects `for i in range(k)`, we
+      // could reuse householder_product_backward with
+      // householder_product_backward.grad = grad and
+      // householder_product_backward.result = result.
+      const auto hpb_grad = !transpose ? grad : grad.mH();
+      const auto hpb_result = !transpose ? result : result.mH();
+      std::tie(self_grad, tau_grad) =
+          householder_product_backward(hpb_grad, hpb_result, self, tau);
+    } else {
+      // Assuming left = false and transpose = false. The case with
+      // left = true and transpose = true is very much similar with just
+      // transposed arguments passed into householder_product_backward.
+      // In this case Ormqr computes B = H_1 * ... * H_k * A and the sensitivity
+      // wrt H_i becomes Tr(H_i_plus B_grad^H B H_i_minus dH_k).
+      // We could see that the role of `grad` and `result` in
+      // householder_product_backward gets "swapped" and "transposed" and that
+      // in order to compute H_k_grad efficiently we would need to compute grads
+      // in reversed order (`for i in range(k - 1, -1, -1)`). Hence we reuse
+      // householder_product_backward with householder_product_backward.grad =
+      // result.mH, householder_product_backward.result = grad.mH,
+      // householder_product_backward.flip_order = true.
+      const auto hpb_grad = !transpose ? result.mH() : result;
+      const auto hpb_result = !transpose ? grad.mH() : grad;
+      std::tie(self_grad, tau_grad) = householder_product_backward(
+          hpb_grad, hpb_result, self, tau, /*flip_order=*/true);
+    }
+  }
+
+  return std::make_tuple(self_grad, tau_grad, other_grad);
 }
 
 std::tuple<Tensor, Tensor> polar_backward(

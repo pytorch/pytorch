@@ -1,4 +1,3 @@
-import contextlib
 import copy
 import functools
 import itertools
@@ -18,7 +17,7 @@ if fake_tensors_available:
         DataDependentOutputException,
         DynamicOutputShapeException,
     )
-    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor
+    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
 import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
@@ -46,6 +45,117 @@ class _missing:
     pass
 
 
+def _run_node(output_graph, node, args, kwargs, nnmodule):
+    op = node.op
+    if op == "call_function":
+        return node.target(*args, **kwargs)
+    elif op == "call_method":
+        return getattr(args[0], node.target)(*args[1:], **kwargs)
+    elif op == "call_module":
+        assert nnmodule is not None
+        return nnmodule(*args, **kwargs)
+    elif op == "get_attr":
+        return output_graph.get_submodule(node.target)
+    raise AssertionError(op)
+
+
+def _get_real_value(node, output_graph):
+    """
+    Run the actual computation represented by `node` and return the result.
+    This will execute any dependent nodes in the graph as well.
+    """
+    cache = output_graph.real_value_cache
+    if node in cache:
+        return cache[node]
+
+    op = node.op
+    args, kwargs = torch.fx.node.map_arg(
+        (node.args, node.kwargs),
+        lambda n: _get_real_value(n, output_graph),
+    )
+
+    if op == "call_module":
+        nn_module = output_graph.nn_modules[node.target]
+        if not is_lazy_module(nn_module):
+            nn_module = copy.deepcopy(nn_module)
+        else:
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it
+            nn_module(*args, **kwargs)
+    else:
+        nn_module = None
+
+    try:
+        real_value = _run_node(output_graph, node, args, kwargs, nn_module)
+        cache[node] = real_value
+    except RuntimeError as e:
+        raise TorchRuntimeError() from e
+    return real_value
+
+
+def _get_fake_value(node, tx):
+    """
+    Run the computation represented by `node` using fake tensors and return the result.
+    """
+    op = node.op
+    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
+    from ..utils import wrap_fake_exception
+
+    def visit(n: torch.fx.Node):
+        return n.meta["example_value"]
+
+    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
+    args = tree_map(fake_wrapper, args)
+    kwargs = tree_map(fake_wrapper, kwargs)
+
+    nnmodule = None
+    if op == "call_module":
+        nnmodule = tx.output.nn_modules[node.target]
+
+        if not is_lazy_module(nnmodule):
+            nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
+    def context():
+        if hasattr(py_dispatch, "enable_torch_dispatch_mode"):
+            return py_dispatch.enable_torch_dispatch_mode(tx.fake_mode)
+        else:
+            return tx.fake_mode
+
+    if op == "call_module" and is_lazy_module(nnmodule):
+        assert nnmodule is not None
+        # In the case of a lazy module, we want to run
+        # the pre-hooks which initialize it
+        nnmodule(*args, **kwargs)
+    try:
+        with context():
+            return wrap_fake_exception(
+                lambda: _run_node(tx.output, node, args, kwargs, nnmodule)
+            )
+    except Unsupported:
+        raise
+    except RuntimeError as e:
+        if isinstance(e, DataDependentOutputException):
+            if config.capture_scalar_outputs and node.target == "item":
+                return torch.zeros(size=(), dtype=args[0].dtype).item()
+            else:
+                unimplemented(f"data dependent operator: {e.func}")
+        elif isinstance(e, DynamicOutputShapeException):
+            unimplemented(f"dynamic shape operator: {e.func}")
+        else:
+            raise TorchRuntimeError() from e
+
+
+def _clone_input(value):
+    if isinstance(value, torch.Tensor):
+        use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
+        # tensor subclasses will not be converted to FakeTensors and need to be cloned
+        if not use_fake_tensors or not isinstance(value, FakeTensor):
+            # NB: ensure strides are preserved
+            value = clone_input(value)
+
+    return value
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -61,27 +171,17 @@ class TensorVariable(VariableTracker):
         "is_contiguous",
     ]
 
-    @staticmethod
-    def propagate_args_kwargs(node):
-        def visit(n: torch.fx.Node):
-            return n.meta["example_value"]
-
-        return torch.fx.node.map_arg((node.args, node.kwargs), visit)
-
-    @staticmethod
-    def run_proxy(proxy, args, kwargs, nnmodule):
-        op = proxy.node.op
-        if op == "call_function":
-            return proxy.node.target(*args, **kwargs)
-        elif op == "call_method":
-            return getattr(args[0], proxy.node.target)(*args[1:], **kwargs)
-        elif op == "call_module":
-            assert nnmodule is not None
-            return nnmodule(*args, **kwargs)
-        raise AssertionError(op)
+    def get_real_value(self):
+        """
+        Get the actual value represented by this variable if computation is run
+        using the user-provided inputs.
+        NOTE: this runs actual tensor computation and may be
+        slow and memory-intensive.
+        """
+        return _get_real_value(self.proxy.node, self.proxy.tracer)
 
     @classmethod
-    def create(cls, tx, proxy, example_value=None, nnmodule=None, **options):
+    def create(cls, tx, proxy, example_value=None, **options):
         if "guards" in options and options["guards"] is not None:
             tx.output.guards.update(options["guards"])
 
@@ -92,82 +192,33 @@ class TensorVariable(VariableTracker):
             return cls(proxy, **options)
 
         use_fake_tensors = fake_tensors_available and config.fake_tensor_propagation
-        if use_fake_tensors:
-            fake_wrapper = functools.partial(
-                wrap_to_fake_tensor, fake_mode=tx.fake_mode
-            )
-            # python errors if the import isnt here
-            from ..utils import wrap_fake_exception
-        else:
 
-            def wrap_fake_exception(func):
-                return func()
-
-        args = kwargs = None
         initial_example_value = example_value
 
         with preserve_rng_state():
             if example_value is None:
-                op = proxy.node.op
-                args, kwargs = cls.propagate_args_kwargs(proxy.node)
                 if use_fake_tensors:
-                    args = tree_map(fake_wrapper, args)
-                    kwargs = tree_map(fake_wrapper, kwargs)
-                    if op == "call_module" and not is_lazy_module(nnmodule):
-                        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
-
-                    def context():
-                        if hasattr(py_dispatch, "enable_torch_dispatch_mode"):
-                            return py_dispatch.enable_torch_dispatch_mode(tx.fake_mode)
-                        else:
-                            return tx.fake_mode
-
+                    example_value = _get_fake_value(proxy.node, tx)
                 else:
-                    context = contextlib.nullcontext
-                    if op == "call_module" and not is_lazy_module(nnmodule):
-                        nnmodule = copy.deepcopy(nnmodule)
+                    example_value = _get_real_value(proxy.node, tx.output)
 
-                if op == "call_module" and is_lazy_module(nnmodule):
-                    assert nnmodule is not None
-                    # In the case of a lazy module, we want to run
-                    # the pre-hooks which initialize it
-                    example_value = nnmodule(*args, **kwargs)
-                try:
-                    with context():
-                        example_value = wrap_fake_exception(
-                            lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
-                        )
-                except Unsupported:
-                    raise
-                except RuntimeError as e:
-                    if use_fake_tensors and isinstance(e, DataDependentOutputException):
-                        if (
-                            config.capture_scalar_outputs
-                            and proxy.node.target == "item"
-                        ):
-                            example_value = torch.zeros(
-                                size=(), dtype=args[0].dtype
-                            ).item()
-                        else:
-                            unimplemented(f"data dependent operator: {e.func}")
-                    elif use_fake_tensors and isinstance(
-                        e, DynamicOutputShapeException
-                    ):
-                        unimplemented(f"dynamic shape operator: {e.func}")
-                    else:
-                        raise TorchRuntimeError() from e
             else:
+                proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
                 if use_fake_tensors:
+                    fake_wrapper = functools.partial(
+                        wrap_to_fake_tensor_and_record, tx=tx
+                    )
                     example_value = fake_wrapper(example_value)
 
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
-            parameter_value = initial_example_value if is_parameter else None
+            should_specialize = options.pop("should_specialize", False)
+            if is_parameter or should_specialize:
+                specialized_value = initial_example_value
+            else:
+                specialized_value = None
 
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not use_fake_tensors or not isinstance(example_value, FakeTensor):
-                # NB: ensure strides are preserved
-                example_value = clone_input(example_value)
+            example_value = _clone_input(example_value)
             proxy.node.meta["example_value"] = example_value
             specialized_props = cls.specialize(example_value)
             if use_fake_tensors and isinstance(example_value, FakeTensor):
@@ -175,7 +226,7 @@ class TensorVariable(VariableTracker):
                     torch.nn.Parameter if is_parameter else torch.Tensor
                 )
 
-            specialized_props["parameter_value"] = parameter_value
+            specialized_props["specialized_value"] = specialized_value
 
             options.update(specialized_props)
             return cls(proxy, **options)
@@ -190,14 +241,14 @@ class TensorVariable(VariableTracker):
             return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
             sizes = []
             for i, v in enumerate(example_value):
                 proxy_i = proxy[i]
                 proxy_i.node.meta["example_value"] = v
-                sizes.append(DynamicShapeVariable(proxy_i, int))
+                sizes.append(DynamicShapeVariable(proxy_i, v))
             return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
@@ -207,7 +258,7 @@ class TensorVariable(VariableTracker):
             getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and all(
             [isinstance(x, int) for x in example_value]
         ):
@@ -281,11 +332,14 @@ class TensorVariable(VariableTracker):
                 )
         elif (
             proxy.node.target == torch._C._DisableFuncTorch
-            or proxy.node.target == torch._C._cuda_isInBadFork
+            or proxy.node.target == torch.cuda._is_in_bad_fork
         ):
             from . import UserDefinedObjectVariable
 
             return UserDefinedObjectVariable(example_value)
+        elif isinstance(example_value, torch.SymInt):
+            proxy.node.meta["example_value"] = example_value
+            return cls(proxy, **options)
         else:
             raise AssertionError(
                 "torch.* op returned non-Tensor "
@@ -305,7 +359,7 @@ class TensorVariable(VariableTracker):
         is_contiguous=None,
         is_sparse=None,
         class_type=torch.Tensor,
-        parameter_value=None,
+        specialized_value=None,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -320,7 +374,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.parameter_value = parameter_value
+        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
@@ -423,7 +477,6 @@ class TensorVariable(VariableTracker):
         kwargs = dict(kwargs)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
@@ -527,12 +580,12 @@ class DynamicShapeVariable(TensorVariable):
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
 
-    def __init__(self, proxy, dyn_shape_cls, **kwargs):
+    def __init__(self, proxy, dyn_shape, **kwargs):
         super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
-        self.dyn_shape_cls = dyn_shape_cls
+        self.dyn_shape = dyn_shape
 
     def python_type(self):
-        return self.dyn_shape_cls
+        return type(self.dyn_shape)
 
     def unpack_var_sequence(self, tx):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
