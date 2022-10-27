@@ -343,7 +343,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 1), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
