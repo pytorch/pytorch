@@ -3278,7 +3278,10 @@ def index_add(
     *,
     alpha: NumberType = 1,
 ):
-    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
+    # index_add always returns a new contiguous tensor
+    return x.clone(memory_format=torch.contiguous_format).index_add_(
+        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+    )
 
 
 @register_decomposition(torch.ops.aten.index_select)
