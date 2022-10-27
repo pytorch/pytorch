@@ -4,18 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import (
-    Any,
-    FrozenSet,
-    List,
-    Mapping,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Type,
-    TypeVar,
-)
+from typing import FrozenSet, List, Optional, Sequence, Tuple, TypeVar
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
@@ -56,10 +45,6 @@ class PatchedPropertyBag(sarif.PropertyBag):
     def __init__(self, tags: Optional[List[str]] = None, **kwargs):
         super().__init__(tags=tags)
         self.__dict__.update(kwargs)
-
-
-# This is a workaround for mypy not supporting Self from typing_extensions.
-_Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -115,14 +100,14 @@ class Rule:
             help_uri=self.help_uri,
         )
 
-    def format_message(self, **kwargs) -> str:
+    def format_message(self, *args, **kwargs) -> str:
         """Returns the formatted default message of this Rule.
 
         This method should be overridden (with code generation) by subclasses to reflect
         the exact arguments needed by the message template. This is a helper method to
         create the default message for a diagnostic.
         """
-        return self.message_default_template.format(**kwargs)
+        return self.message_default_template.format(*args, **kwargs)
 
 
 @dataclasses.dataclass

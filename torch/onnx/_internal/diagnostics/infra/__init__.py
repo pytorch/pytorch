@@ -3,11 +3,11 @@ from ._infra import (
     DiagnosticContext,
     DiagnosticOptions,
     Level,
+    levels,
     Location,
     Rule,
     RuleCollection,
     Stack,
-    levels,
 )
 from .engine import DiagnosticEngine
 
