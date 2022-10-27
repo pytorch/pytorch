@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-
 namespace torch {
 namespace jit {
 namespace xnnpack {
@@ -26,7 +25,7 @@ class XNNSerializer {
         _nodes(),
         _values(),
         _constantBuffer(),
-        _bufferSizes(){}
+        _bufferSizes() {}
 
   // Serializing Nodes
 
@@ -50,7 +49,9 @@ class XNNSerializer {
       uint32_t id_out);
 
   // finish and serialize xnngraph returning serialized data
-  std::string finishAndSerialize(std::vector<uint32_t> input_ids, std::vector<uint32_t> output_ids);
+  std::string finishAndSerialize(
+      std::vector<uint32_t> input_ids,
+      std::vector<uint32_t> output_ids);
 
  private:
   // xnnpack version we are serializing

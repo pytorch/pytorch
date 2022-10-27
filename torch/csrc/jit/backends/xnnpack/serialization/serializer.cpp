@@ -19,8 +19,8 @@ void XNNSerializer::serializeAddNode(
     uint32_t flags) {
   const auto addNode =
       CreateXNNAdd(_builder, input1_id, input2_id, output_id, flags);
-  const auto flatbufferNode = CreateNode(
-      _builder, NodeUnion::XNNAdd, addNode.Union());
+  const auto flatbufferNode =
+      CreateNode(_builder, NodeUnion::XNNAdd, addNode.Union());
   _nodes.push_back(flatbufferNode);
 }
 
@@ -37,7 +37,7 @@ void XNNSerializer::serializeTensorValue(
   // Handling the tensor _values with data
   // TODO @maxren fill out when handling tensors with data
   if (data != nullptr) {
-    assert(false); //not supported yet
+    assert(false); // not supported yet
     // steps:
     // 1. creating buffer to store the 16 bit aligned data
     // 2. increment buffer_idx, to reflect no buffer being added
@@ -46,8 +46,8 @@ void XNNSerializer::serializeTensorValue(
 
   std::vector<uint32_t> serialized_dims;
   serialized_dims.reserve(dims.size());
-  for(auto dim: dims){
-      serialized_dims.push_back(static_cast<uint32_t>(dim));
+  for (auto dim : dims) {
+    serialized_dims.push_back(static_cast<uint32_t>(dim));
   }
 
   const auto tensorValue = CreateXNNTensorValueDirect(
@@ -60,16 +60,14 @@ void XNNSerializer::serializeTensorValue(
       flags,
       id_out);
 
-  const auto flatbufferValue = CreateValue(
-      _builder,
-      ValueUnion::XNNTensorValue,
-      tensorValue.Union());
+  const auto flatbufferValue =
+      CreateValue(_builder, ValueUnion::XNNTensorValue, tensorValue.Union());
   _values.push_back(flatbufferValue);
 }
 
-std::string XNNSerializer::finishAndSerialize(std::vector<uint32_t> input_ids, std::vector<uint32_t> output_ids) {
-
-
+std::string XNNSerializer::finishAndSerialize(
+    std::vector<uint32_t> input_ids,
+    std::vector<uint32_t> output_ids) {
   auto xnnGraph = CreateXNNGraphDirect(
       _builder,
       _version_sha1,
@@ -83,11 +81,10 @@ std::string XNNSerializer::finishAndSerialize(std::vector<uint32_t> input_ids, s
   _builder.Finish(xnnGraph);
 
   std::stringstream ss;
-  ss.write(reinterpret_cast<char*>(_builder.GetBufferPointer()), _builder.GetSize());
+  ss.write(
+      reinterpret_cast<char*>(_builder.GetBufferPointer()), _builder.GetSize());
 
   return ss.str();
-
-
 }
 
 } // namespace delegate
