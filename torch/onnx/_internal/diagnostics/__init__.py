@@ -1,9 +1,9 @@
 from ._diagnostic import (
-    ExportDiagnostic,
     context,
     create_export_diagnostic_context,
     diagnose,
     engine,
+    ExportDiagnostic,
 )
 from .generated._rules import rules
 from .infra import levels

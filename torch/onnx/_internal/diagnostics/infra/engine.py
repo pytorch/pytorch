@@ -6,9 +6,7 @@ from typing import List, Optional
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
-from torch.onnx._internal.diagnostics.infra.sarif import (
-    version as sarif_version,
-)
+from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_version
 
 
 class DiagnosticEngine:

@@ -2,11 +2,10 @@
 
 import contextlib
 import inspect
-from typing import Any, Optional, Tuple, TypeVar
+from typing import TypeVar
 
 import torch
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.diagnostics.generated import _rules
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
