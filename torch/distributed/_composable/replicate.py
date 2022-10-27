@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import _ddp
+from . import _ddp
 
 from typing import List, Tuple
 
