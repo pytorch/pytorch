@@ -62,7 +62,7 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
 };
 
 // Used during post processing.
-struct TensorMetadata : public RawTensorMetadataBase {
+struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   TensorMetadata(
       const RawTensorMetadata& r,
       const std::vector<int64_t>& sizes,
