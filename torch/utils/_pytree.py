@@ -1,4 +1,4 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union, Set
 import functools
 from collections import namedtuple, OrderedDict
 from dataclasses import dataclass
@@ -46,8 +46,12 @@ class GradNodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
     tangenttype_fn: UnflattenFunc
 
+LEAF_NODES: Set[Type[Any]] = set()
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 GRAD_NODES: Dict[Type[Any], GradNodeDef] = {}
+
+def _register_leaf_node(typ: Any) -> None:
+    LEAF_NODES.add(typ)
 
 def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc) -> None:
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
@@ -111,7 +115,7 @@ def _get_node_type(pytree: Any) -> Optional[Any]:
         return namedtuple
     if isinstance(pytree, type):
         return None
-    supported_types = [i for i in type(pytree).mro() if i in SUPPORTED_NODES]
+    supported_types = [i for i in type(pytree).mro() if i in SUPPORTED_NODES or i in LEAF_NODES]
     return supported_types[0] if len(supported_types) > 0 else None
 
 
@@ -154,7 +158,7 @@ def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], Tree
     to reconstruct the pytree.
     """
     node_type = _get_node_type(pytree)
-    if not node_type:
+    if not node_type or node_type in LEAF_NODES:
         return [pytree], LeafSpec()
 
     if grad_fn and node_type in GRAD_NODES:
