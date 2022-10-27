@@ -426,38 +426,35 @@ def nyi(fake_mode, func, *args, **kwargs):
     lambda func: func in (aten.convolution.default, aten.convolution_backward.default)
 )
 def conv(fake_mode, func, *args, **kwargs):
-    args, kwargs = normalize_function(
+    _, kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     device = kwargs["input"].fake_device
-    # meta kernel needs to not have unsqueezed input/weight
-    kwargs_orig = dict(kwargs)
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
-        # if the input manipulation is done in Convolution.cpp we get segfault
+        # if the input is unsqueezed is done in Convolution.cpp we get segfault
         k = kwargs["weight"].ndim
         if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
-            kwargs["input"] = kwargs["input"].contiguous().unsqueeze(2)
-            kwargs["weight"] = kwargs["weight"].unsqueeze(2)
-
-        if func is aten.convolution.default:
-            conv_backend = torch._C._select_conv_backend(*args, **kwargs)
+            mem_fmt = None
         else:
-            conv_backend = torch._C._select_conv_backend(
-                kwargs["input"],
-                kwargs["weight"],
-                bias=None,
-                stride=kwargs["stride"],
-                padding=kwargs["padding"],
-                dilation=kwargs["dilation"],
-                transposed=kwargs["transposed"],
-                output_padding=kwargs["output_padding"],
-                groups=kwargs["groups"],
-                bias_sizes=kwargs["bias_sizes"],
+            if func is aten.convolution.default:
+                conv_backend = torch._C._select_conv_backend(**kwargs)
+            else:
+                conv_backend = torch._C._select_conv_backend(
+                    kwargs["input"],
+                    kwargs["weight"],
+                    bias=None,
+                    stride=kwargs["stride"],
+                    padding=kwargs["padding"],
+                    dilation=kwargs["dilation"],
+                    transposed=kwargs["transposed"],
+                    output_padding=kwargs["output_padding"],
+                    groups=kwargs["groups"],
+                    bias_sizes=kwargs["bias_sizes"],
+                )
+            mem_fmt = torch._C._conv_determine_backend_memory_format(
+                kwargs["input"], kwargs["weight"], conv_backend
             )
-        mem_fmt = torch._C._conv_determine_backend_memory_format(
-            kwargs["input"], kwargs["weight"], conv_backend
-        )
 
     def convert(t, mem_fmt):
         if t is None:
@@ -467,7 +464,7 @@ def conv(fake_mode, func, *args, **kwargs):
         return FakeTensor(fake_mode, t, device)
 
     with in_kernel_invocation_manager(fake_mode):
-        out = func(**kwargs_orig)
+        out = func(**kwargs)
 
         if func is aten.convolution.default:
             return convert(out, mem_fmt)
