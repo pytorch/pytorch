@@ -1011,9 +1011,7 @@ void initJitScriptBindings(PyObject* module) {
           mm_name,
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
-            if (!method) {
-              throw NotImplementedError();
-            }
+            TORCH_CHECK_NOT_IMPLEMENTED(!method, c10::str( "object has no attribute '", mm_name, "'"));
             return invokeScriptMethodFromPython(
                 *method,
                 // NOLINTNEXTLINE(performance-move-const-arg)
