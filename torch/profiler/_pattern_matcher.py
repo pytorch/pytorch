@@ -583,7 +583,7 @@ def source_code_location(event: Optional[_ProfilerEvent]):
 
 def input_shapes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-    return tuple([tuple(shape) for shape in event.extra_fields.inputs.shapes])
+    return tuple(tuple(getattr(i, "sizes", ())) for i in event.extra_fields.inputs)
 
 
 def input_dtypes(event: _ProfilerEvent):
