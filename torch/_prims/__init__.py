@@ -306,6 +306,7 @@ def _make_prim(
         p.schema = schema
         p.prim_impl = _prim_impl
         p.prim_meta_impl = meta
+        p.impl_aten = impl_aten
 
     return _prim
 
@@ -335,7 +336,7 @@ def _elementwise_meta(
 
     args_ = list(args)
     if args_with_fixed_dtypes is not None:
-        args_.extend(args_with_fixed_dtypes)
+        args_ = list(args_with_fixed_dtypes) + args_
 
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
@@ -1273,7 +1274,7 @@ def _collapse_view_helper(
         strides = (1,)
     else:
         shape = a.shape  # type: ignore[assignment]
-        strides = a.stride()
+        strides = a.stride()  # type: ignore[assignment]
 
     utils.validate_idx(len(shape), start)
     utils.validate_exclusive_idx(len(shape), end)
