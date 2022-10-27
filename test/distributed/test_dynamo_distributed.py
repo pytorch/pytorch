@@ -10,6 +10,7 @@ import torch.distributed as dist
 from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
+from torch._inductor.utils import has_triton
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import requires_nccl
 
@@ -85,7 +86,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
-    @unittest.expectedFailure  # CI fails with submod returning Nonetype, can't repro locally
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
         from torch.nn.parallel import DistributedDataParallel as DDP
@@ -107,6 +108,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @unittest.expectedFailure  # Exception: Invoking operators with non-Fake Tensor inputs in FakeTensorMode...
     @patch.object(config, "optimize_ddp", False)
     def test_fsdp_baseline_inductor(self):
@@ -141,6 +143,7 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
     @patch.object(config, "optimize_ddp", True)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
         """
         Same as above, but using inductor backend.
@@ -247,7 +250,8 @@ class TestDistributed(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(correct_outputs, opt_outputs))
         self.assertEqual(check_splits_compiler.compiler_called, 3)
 
-    def test_empty_graph(self):
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_empty_graph_inductor(self):
         def fn():
             get_world_size = torch.distributed.distributed_c10d.get_world_size()
             return (get_world_size,)
