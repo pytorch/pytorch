@@ -20,6 +20,7 @@ if fake_tensors_available:
     from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
 import torch.utils._python_dispatch as py_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._pytree import tree_map
 

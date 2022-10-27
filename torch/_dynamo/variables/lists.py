@@ -352,27 +352,12 @@ class SliceVariable(BaseListVariable):
         from .tensor import DynamicShapeVariable
 
         if any([isinstance(x, DynamicShapeVariable) for x in items]):
-            items_to_map = []
             self.dynamic = True
-            for item in items:
-                if isinstance(item, DynamicShapeVariable):
-                    items_to_map.append(item)
-                elif isinstance(item, ConstantVariable):
-                    if item.value is None:
-                        items_to_map.append(item)
-                    else:
-                        sym = tx.output.shape_env.create_symintnode(
-                            tx.output.shape_env.create_symbol(item.value)
-                        )
-                        dyn_shape = tx.output.register_attr_or_module(
-                            sym, f"sym_shape_{item.value}", source=None
-                        )
-                        items_to_map.append(dyn_shape)
-            start, stop, step = [variables.ConstantVariable(None)] * 3
         else:
             self.dynamic = False
-            items_to_map = items
-            start, stop, step = [variables.ConstantVariable(None)] * 3
+
+        items_to_map = items
+        start, stop, step = [variables.ConstantVariable(None)] * 3
 
         if len(items_to_map) == 1:
             (stop,) = items_to_map
@@ -404,7 +389,6 @@ class SliceVariable(BaseListVariable):
     def as_python_constant(self):
         if self.dynamic:
             unimplemented("Dynamic slicing not yet supported")
-            slice(*[x.as_python_constant() for x in self.items])
         else:
             return slice(*[x.as_python_constant() for x in self.items])
 
