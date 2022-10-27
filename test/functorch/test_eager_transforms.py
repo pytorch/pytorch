@@ -37,6 +37,7 @@ from functorch._src.make_functional import (
 )
 from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
+from torch.utils._pytree import _register_pytree_node, _register_pytree_node_grad
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -3108,6 +3109,97 @@ class TestExamplesCorrectness(TestCase):
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
 
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
+
+    def _build_test_class(self):
+        class Foo:
+            def __init__(self, weight=None, const=None):
+                self.weight = weight if weight is not None else torch.randn(5, 3, 4)
+                self.constant = const if const is not None else torch.randint(1, 5, [5])
+
+            def apply(self, x):
+                return self.weight @ x + self.constant
+
+        def foo_flatten(foo):
+            return [foo.weight, foo.constant], None
+
+        def foo_unflatten(values, context):
+            return Foo(values[0], values[1])
+
+        def foo_flatten_grad(foo):
+            return [foo.weight], foo.constant
+
+        def foo_unflatten_grad(values, context):
+            return Foo(values[0], context)
+
+        def foo_tangenttype(values, _):
+            return {'weight': values[0]}
+
+        _register_pytree_node(Foo, foo_flatten, foo_unflatten)
+        _register_pytree_node_grad(Foo, foo_flatten_grad, foo_unflatten_grad, foo_tangenttype)
+        return Foo
+
+    def test_pytrees_with_grad_fn_grad_and_grad_grad(self):
+        def loss(foo, x):
+            return foo.apply(x).sum()
+
+        def g(foo, x):
+            return grad(loss)(foo, x)['weight'].sum()
+
+        Foo = self._build_test_class()
+        foo = Foo()
+        x = torch.randn(4, 5)
+
+        # test grad and grad(grad())
+        gw = grad(loss)(foo, x)
+        self.assertEqual(gw, {'weight': torch.ones(5, 3, 5) @ x.transpose(0, 1)})
+        ggw = grad(g)(foo, x)
+        self.assertEqual(ggw, {'weight': torch.zeros(5, 3, 4)})
+
+    def test_pytrees_with_grad_fn_vmap_and_vmap_grad(self):
+        def loss(foo, x):
+            return foo.apply(x).sum()
+
+        Foo = self._build_test_class()
+        foo = Foo()
+        x = torch.randn(4, 5)
+
+        ensemble_out = vmap(loss, in_dims=(0, None))(foo, x)
+        self.assertEqual(ensemble_out.shape, [5])
+        ensemble_grad = vmap(grad(loss), in_dims=(0, None))(foo, x)
+        self.assertEqual(ensemble_grad, {'weight': torch.ones(5, 3, 5) @ x.transpose(0, 1)})
+
+    def test_pytrees_with_grad_fn_return_vmap(self):
+        def foo(dummy):
+            return Foo()
+
+        Foo = self._build_test_class()
+        x = torch.randn(4)
+
+        ensemble_out = vmap(foo, randomness="different")(x)
+        self.assertIsInstance(ensemble_out, Foo)
+        self.assertEqual(ensemble_out.weight.shape, [4, 5, 3, 4])
+        self.assertEqual(ensemble_out.constant.shape, [4, 5])
+
+    def test_pytrees_with_grad_fn_vjp(self):
+        Foo = self._build_test_class()
+        foo = Foo()
+        x = torch.randn(4, 5)
+
+        out, vjp_fn = vjp(Foo.apply, foo, x)
+        seed = torch.randn([5, 3, 5])
+        gw = vjp_fn(seed)
+        self.assertEqual(len(gw), 2)
+        self.assertEqual(gw[0], {'weight': seed @ x.transpose(0, 1)})
+
+    def test_pytrees_with_grad_fn_jvp(self):
+        Foo = self._build_test_class()
+        foo = Foo()
+        x = torch.randn(4, 5)
+
+        seed = torch.randn([5, 3, 4])
+        value, gw = jvp(Foo.apply, (foo, x), (Foo(seed, foo.constant), torch.zeros_like(x)))
+        self.assertEqual(gw.shape, [5, 3, 5])
+        self.assertEqual(gw, seed @ x)
 
 def normalize_devices(fx_g):
     for node in fx_g.graph.nodes:
