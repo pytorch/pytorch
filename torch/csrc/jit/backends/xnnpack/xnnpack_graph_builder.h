@@ -6,6 +6,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <torch/csrc/jit/backends/xnnpack/serialization/serializer.h>
+
 namespace torch {
 namespace jit {
 namespace xnnpack {
@@ -16,7 +18,9 @@ class XNNGraph {
   const float output_min = -std::numeric_limits<float>::infinity();
   const float output_max = std::numeric_limits<float>::infinity();
 
-  // xnn_subgraph
+  // serializer class
+  XNNSerializer _serializer;
+  // xnn subgraph
   xnn_subgraph_t _subgraph_ptr;
   // Set of all the tensor values throughout the jit graph
   std::unordered_set<torch::jit::Value*> _intermediate_tensors;
@@ -58,7 +62,7 @@ class XNNGraph {
   void checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph);
 
  public:
-  XNNGraph() : _subgraph_ptr(nullptr) {
+  XNNGraph() : _serializer(), _subgraph_ptr(nullptr) {
     xnn_status status = xnn_initialize(/*allocator =*/nullptr);
     TORCH_CHECK(xnn_status_success == status, "Failed to initialize xnnpack");
   }
@@ -77,6 +81,8 @@ class XNNGraph {
   void runGraphOnInputs(
       std::vector<at::Tensor> tensor_inputs,
       std::vector<at::Tensor> tensor_outputs);
+
+  std::string serializedXNNGraph();
 };
 
 } // namespace delegate
