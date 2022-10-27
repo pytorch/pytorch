@@ -3,7 +3,6 @@ import copy
 import hashlib
 import json
 import logging
-import multiprocessing
 import os.path
 import re
 import threading
@@ -12,7 +11,6 @@ from typing import List
 import torch
 
 from .. import config
-from ..codecache import AsyncCompile
 from ..ir import ReductionHint
 from ..triton_ops.mm_perf_model import estimate_matmul_time
 from ..utils import conditional_product, has_triton
@@ -53,36 +51,34 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []
         self.lock = threading.Lock()
 
-    def precompile(self):
+    def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
             if self.launchers:
                 return
-            self.launchers = AsyncCompile.map(self._precompile_config, self.configs)
+            self.launchers = [
+                self._precompile_config(c, warm_cache_only_with_cc)
+                for c in self.configs
+            ]
             self.configs = None
 
-    def _precompile_config(self, cfg: Config):
+    def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: int):
         """Ahead of time compile a given autotuner config."""
-        torch.cuda.set_device(torch.cuda.current_device())
         compile_meta = copy.deepcopy(self.meta)
         for k, v in cfg.kwargs.items():
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
 
-        if config.compile_threads > 1:
-            major, minor = torch.cuda.get_device_capability(compile_meta["device"])
-            compile_meta["cc"] = major * 10 + minor
-            try:
-                p = multiprocessing.Process(
-                    target=triton.compile,
-                    args=(self.fn,),
-                    kwargs={**compile_meta, "warm_cache_only": True},
-                )
-                p.start()
-                p.join()
-            except Exception:
-                log.exception("Error in async Triton compile")
-                # continue on to hopefully get a better error message below
+        if warm_cache_only_with_cc:
+            triton.compile(
+                self.fn,
+                warm_cache_only=True,
+                cc=warm_cache_only_with_cc,
+                **compile_meta,
+            )
+            return
+
+        torch.cuda.set_device(torch.cuda.current_device())
 
         binary = triton.compile(
             self.fn,
@@ -142,8 +138,16 @@ class CachingAutotuner(KernelInterface):
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
+        from ..compile_fx import clone_preserve_strides
+
+        # clone the input args to avoid autotune contaminating them if
+        # the kernel does in-place stores
+        cloned_args = [
+            clone_preserve_strides(arg) if isinstance(arg, torch.Tensor) else arg
+            for arg in args
+        ]
         timings = {
-            launcher: self.bench(launcher, *args, **kwargs)
+            launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
         }
         self.launchers = [builtins.min(timings, key=timings.get)]
@@ -339,7 +343,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 1), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 

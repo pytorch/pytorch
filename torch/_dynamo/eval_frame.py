@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
+from torch.fx._symbolic_trace import is_fx_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
@@ -149,6 +150,14 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            if is_fx_tracing():
+                if config.error_on_nested_fx_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to symbolically trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                return fn
+
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
@@ -224,7 +233,7 @@ def catch_errors_wrapper(callback):
                 return None
             if config.optimize_ddp:
                 ddp_module = DistributedDataParallel._get_active_ddp_module()
-                if ddp_module and frame.f_code.co_name == "forward":
+                if ddp_module:
                     with compile_lock:
                         ddp_optimizer = DDPOptimizer(
                             bucket_bytes_cap=ddp_module.bucket_bytes_cap,
@@ -375,7 +384,7 @@ def optimize(
     )
 
 
-@patch("torchdynamo.symbolic_convert.explain", True)
+@patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
     from . import reset

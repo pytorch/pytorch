@@ -3,15 +3,15 @@ import logging
 import os
 
 # logging level for dynamo generated graphs/bytecode/guards
-CODE = 15
-logging.addLevelName(CODE, "CODE")
+logging.CODE = 15
+logging.addLevelName(logging.CODE, "CODE")
 
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
     return [
-        logging.getLogger("torchdynamo"),
-        logging.getLogger("torchinductor"),
+        logging.getLogger("torch._dynamo"),
+        logging.getLogger("torch._inductor"),
     ]
 
 
@@ -37,12 +37,12 @@ LOGGING_CONFIG = {
         },
     },
     "loggers": {
-        "torchdynamo": {
+        "torch._dynamo": {
             "level": "DEBUG",
             "handlers": ["torchdynamo_console"],
             "propagate": False,
         },
-        "torchinductor": {
+        "torch._inductor": {
             "level": "DEBUG",
             "handlers": ["torchdynamo_console"],
             "propagate": False,

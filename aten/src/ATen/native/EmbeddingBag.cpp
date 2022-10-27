@@ -1,7 +1,8 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/EmbeddingBag.h>
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
@@ -9,6 +10,7 @@
 #include <ATen/native/NonSymbolicBC.h>
 
 #include <c10/util/irange.h>
+#include <c10/util/Half.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -19,12 +21,32 @@
 
 #include <algorithm>
 #include <cstring>
-#include <iostream>
-#include <memory>
-#include <sstream>
 #include <tuple>
 #include <vector>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_embedding_bag.h>
+#include <ATen/ops/_embedding_bag_backward_native.h>
+#include <ATen/ops/_embedding_bag_dense_backward.h>
+#include <ATen/ops/_embedding_bag_dense_backward_native.h>
+#include <ATen/ops/_embedding_bag_forward_only.h>
+#include <ATen/ops/_embedding_bag_forward_only_native.h>
+#include <ATen/ops/_embedding_bag_native.h>
+#include <ATen/ops/_embedding_bag_per_sample_weights_backward_native.h>
+#include <ATen/ops/_embedding_bag_sparse_backward.h>
+#include <ATen/ops/_embedding_bag_sparse_backward_native.h>
+#include <ATen/ops/embedding_backward_native.h>
+#include <ATen/ops/embedding_bag_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/resize_native.h>
+#include <ATen/ops/zero_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace {
   const int MODE_SUM = 0;
@@ -1285,7 +1307,7 @@ Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_
   checkContiguous("embedding_bag", offsets_arg);
 
   Tensor offset2bag_;
-  if (indices.numel() != 0 && offset2bag.numel() == 0) {
+  if (indices.sym_numel() != 0 && offset2bag.sym_numel() == 0) {
     offset2bag_ = offsets.new_zeros(
       {indices.size(0) + 1}, offsets.options()); // offset2bag = [0 0 0 0 0]
 
