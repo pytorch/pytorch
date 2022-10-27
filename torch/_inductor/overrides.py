@@ -300,7 +300,6 @@ def check_node_is_binary(node):
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    gm = fuse_conv_bn(gm)
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
     is_cpu = all(
@@ -308,6 +307,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     )
     if not is_cpu:
         return gm
+    gm = fuse_conv_bn(gm)
     # For binary fusion, we need to check inputs info to make sure
     # the binary inputs have same tensor info(device, dtype, and layout).
     ShapeProp(gm).propagate(*example_inputs)
@@ -319,7 +319,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
     """
-    Fuses convolution/BN layers for inference purposes.
+    Fuses Convolution/BN layers for inference purposes.
     """
     patterns = [
         (torch.nn.Conv1d, torch.nn.BatchNorm1d),

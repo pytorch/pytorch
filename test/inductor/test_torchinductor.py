@@ -20,6 +20,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -55,6 +56,9 @@ except (ImportError, AssertionError) as e:
 
 HAS_CPU = False
 try:
+    if IS_FBCODE:
+        raise torch._inductor.exc.CppCompileError
+
     from subprocess import CalledProcessError
 
     from torch._inductor.codecache import CppCodeCache
@@ -451,13 +455,6 @@ class SweepInputs2:
                 cls.gen_template(name1, name2)
 
 
-class SweepInputsCpuTest(SweepInputs2, TestCase):
-    gen = InputGen(10, "cpu")
-
-
-SweepInputsCpuTest.populate()
-
-
 class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
@@ -761,6 +758,17 @@ class CommonTemplate:
             return (a.sum(), a.max(), a.min(), a.argmax())
 
         self.common(fn, (torch.full((4,), float("-inf")),))
+
+    def test_reduction4(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
+        def fn(a):
+            return (a.argmax(-1), a.argmin(-1))
+
+        inputs = (torch.ones(128), torch.ones(4, 4, 1))
+        for i in inputs:
+            self.common(fn, (i,))
 
     @patch.object(config, "dynamic_shapes", False)
     def test_unroll_small_reduction(self):
@@ -1325,6 +1333,8 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    # For gpu path, there has a accurcy issue,
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv  bn test")
     def test_conv_bn_fuse(self):
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
@@ -4274,6 +4284,11 @@ class CommonTemplate:
 
 
 if HAS_CPU:
+
+    class SweepInputsCpuTest(SweepInputs2, TestCase):
+        gen = InputGen(10, "cpu")
+
+    SweepInputsCpuTest.populate()
 
     class CpuTests(TestCase):
         common = check_model
