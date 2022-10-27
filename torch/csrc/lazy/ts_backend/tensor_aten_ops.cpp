@@ -105,14 +105,12 @@ torch::lazy::LazyTensorPtr expand(
     const torch::lazy::LazyTensorPtr& input,
     std::vector<int64_t> size) {
   auto input_shape = input->shape();
-  auto output = torch::lazy::LazyTensor::Create(
+  return torch::lazy::LazyTensor::Create(
       torch::lazy::MakeExpand(
           input->GetIrValue(),
           GetExpandDimensions(input_shape.Get(), std::move(size)),
           /*is_scalar_expand=*/false),
       input->GetDevice());
-  output->SetStorage(input->Storage());
-  return output;
 }
 
 void fill_(torch::lazy::LazyTensorPtr& input, const at::Scalar& value) {
