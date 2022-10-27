@@ -1194,7 +1194,7 @@ def meta_relu_(self):
 
 @register_meta(aten.index_put.default)
 def meta_index_put(self, indices, values, accumulate=False):
-    return self.new_empty(self.size())
+    return torch.empty_like(self)
 
 
 @register_meta(aten.masked_fill_.Scalar)

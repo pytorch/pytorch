@@ -1,5 +1,6 @@
 # Owner(s): ["module: primTorch"]
 
+import itertools
 import torch
 import os
 from enum import Enum
@@ -20,6 +21,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
+    onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torchgen.utils import YamlLoader
@@ -187,6 +189,8 @@ class TestMetaConverter(TestCase):
 
 CHECK_STRIDES = {
     torch.Tensor.__getitem__,
+    torch.ops.aten.index_put,
+    torch.ops.aten.index_add,
 }
 
 def should_check_strides(func):
@@ -1026,6 +1030,66 @@ class TestMeta(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
+
+    def get_stride_variants(self, t):
+        results = []
+
+        # contiguous
+        results.append(t)
+
+        # transposed
+        if t.ndim > 1:
+            perm = list(reversed(range(t.ndim)))
+            transposed = torch.empty(t.shape[::-1], device=t.device, dtype=t.dtype).permute(perm).copy_(t)
+            results.append(transposed)
+
+        # nondense
+        nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
+        results.append(nondense)
+
+        return results
+
+    @onlyCUDA
+    def test_index_add_stride(self, device):
+        to_meta = MetaConverter()
+
+        x = torch.ones(5, 3, device=device)
+        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float, device=device)
+        index = torch.tensor([0, 4, 2], device=device)
+
+        xs = self.get_stride_variants(x)
+        ts = self.get_stride_variants(t)
+
+        for x, t in itertools.product(xs, ts):
+            args = (x, 0, index, t)
+            meta_args = tree_map(to_meta, args)
+
+            r = torch.ops.aten.index_add(*args)
+            meta_r = torch.ops.aten.index_add(*meta_args)
+
+            self.assertEqual(r.size(), meta_r.size())
+            self.assertEqual(r.stride(), meta_r.stride())
+
+    @onlyCUDA
+    def test_index_put_stride(self, device):
+        to_meta = MetaConverter()
+
+        x = torch.rand(5, 5, device=device)
+        t = torch.rand(5, device=device)
+        index = torch.tensor([True, False, True, True, False], device=device)
+
+        xs = self.get_stride_variants(x)
+        ts = self.get_stride_variants(t)
+
+        for x, t in itertools.product(xs, ts):
+            args = (x, [index], t)
+            meta_args = tree_map(to_meta, args)
+
+            r = torch.ops.aten.index_put(*args)
+            meta_r = torch.ops.aten.index_put(*meta_args)
+
+            self.assertEqual(r.size(), meta_r.size())
+            self.assertEqual(r.stride(), meta_r.stride())
 
     def test_map_location_deserialize(self):
         import io

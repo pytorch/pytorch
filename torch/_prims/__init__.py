@@ -394,12 +394,12 @@ def _elementwise_meta(
     # TODO: fix number type promotion (bool, complex->float)
     # For now for symint/float, just implementing the common / simple cases of (int,float,symint,symfloat)
     seen_float = False
-    if isinstance(number, (torch.SymIntNode, torch.SymFloatNode)):
+    if isinstance(number, (torch.SymInt, torch.SymFloat)):
         for a in args:
             assert isinstance(
-                a, (int, float, torch.SymIntNode, torch.SymFloatNode)
+                a, (int, float, torch.SymInt, torch.SymFloat)
             ), "NYI"
-            seen_float = seen_float or isinstance(a, (float, torch.SymFloatNode))
+            seen_float = seen_float or isinstance(a, (float, torch.SymFloat))
         if seen_float:
             number = sym_float(number)
 
@@ -941,7 +941,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
-    is_integral = isinstance(a, (bool, int, torch.SymIntNode)) or (
+    is_integral = isinstance(a, (bool, int, torch.SymInt)) or (
         isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype)
     )
 
