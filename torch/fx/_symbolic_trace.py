@@ -600,7 +600,7 @@ class Tracer(TracerBase):
                 name,
                 default,
                 {},
-                type_expr=fn_for_analysis.__annotations__.get(name, None),
+                type_expr=fn_for_analysis.__annotations__.get(name, None)
             )
 
         arg_names = [next(names_iter) for idx in range(skip_arg_idx, total_args)]
@@ -728,8 +728,7 @@ class Tracer(TracerBase):
             @functools.wraps(_orig_module_call)
             def module_call_wrapper(mod, *args, **kwargs):
                 def forward(*args, **kwargs):
-                    ret_val = _orig_module_call(mod, *args, **kwargs)
-                    return ret_val
+                    return _orig_module_call(mod, *args, **kwargs)
 
                 _autowrap_check(
                     patcher,
@@ -850,8 +849,7 @@ def _create_wrapped_method(cls, name):
         """
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
-            return proxy.tracer.create_proxy(
-                "call_method", name, args, kwargs)
+            return proxy.tracer.create_proxy("call_method", name, args, kwargs)
         return orig_fn(*args, **kwargs)
 
     return wrapped
