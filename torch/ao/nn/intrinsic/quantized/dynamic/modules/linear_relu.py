@@ -2,6 +2,10 @@ import torch
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.intrinsic as nni
 
+__all__ = [
+    "LinearReLU"
+]
+
 class LinearReLU(nnqd.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules that can be used
