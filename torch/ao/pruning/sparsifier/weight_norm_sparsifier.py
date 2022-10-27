@@ -99,7 +99,7 @@ class WeightNormSparsifier(BaseSparsifier):
         dw = (block_w - w % block_w) % block_w
 
         if mask is None:
-            mask = torch.ones(h, w, device=data.device)
+            mask = torch.ones(h + dh, w + dw, device=data.device)
 
         if sparsity_level >= 1.0:
             mask.data = torch.zeros_like(mask)
@@ -141,13 +141,14 @@ class WeightNormSparsifier(BaseSparsifier):
 
         In this context the `zeros_per_block` describes the number of zeroed-out elements within a patch.
         """
-        if mask is None:
-            mask = torch.ones(data.shape, device=data.device)
         h, w = data.shape[-2:]
         block_h, block_w = sparse_block_shape
         dh = (block_h - h % block_h) % block_h
         dw = (block_w - w % block_w) % block_w
         values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
+
+        if mask is None:
+            mask = torch.ones((h + dh, w + dw), device=data.device)
 
         if values_per_block == zeros_per_block:
             # Everything should be sparsified
@@ -168,7 +169,7 @@ class WeightNormSparsifier(BaseSparsifier):
             dim=1, indices=sorted_idx, output_shape=padded_data.shape, block_shape=sparse_block_shape, mask=mask_reshape
         )
 
-        mask.data = mask_reshape.squeeze().reshape(mask.shape)[:h, :w].contiguous()
+        mask.data = mask_reshape.squeeze().reshape(mask.shape).contiguous()
         return mask
 
     def update_mask(self, module, tensor_name, sparsity_level, sparse_block_shape,
