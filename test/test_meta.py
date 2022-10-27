@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
     onlyCUDA,
+    OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torchgen.utils import YamlLoader
@@ -206,7 +207,7 @@ def should_check_strides(func):
     if any(r.alias_info.before_set for r in func._schema.returns if r.alias_info):
         return True
     # TODO: check for TensorIterator
-    return False
+    return True
 
 def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
@@ -854,6 +855,38 @@ meta_dispatch_device_skips['cuda'] = {
     aten.miopen_batch_norm.default: {f32},
 }
 
+def get_strided_args(args):
+
+    def get_strided_variants(t):
+        variants = []
+
+        # contiguous
+        variants.append(t)
+
+        # transposed
+        if t.ndim > 1:
+            perm = list(reversed(range(t.ndim)))
+            transposed = torch.empty(t.shape[::-1], device=t.device, dtype=t.dtype, requires_grad=t.requires_grad).permute(perm).copy_(t)
+            variants.append(transposed)
+
+        # nondense
+        if t.ndim > 0:
+            nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
+            variants.append(nondense)
+
+        return variants
+
+    strided_args = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor) and arg.is_contiguous():
+            strided_arg_variants = get_strided_variants(arg)
+        else:
+            strided_arg_variants = [arg]
+        strided_args.append(strided_arg_variants)
+
+    for result in itertools.product(*strided_args):
+        yield result
+
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase
     device: torch.device
@@ -947,7 +980,7 @@ class TestMeta(TestCase):
             with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=True):
                 expected = func(*args, **kwargs)
 
-    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace):
+    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
         if inplace:
             func = op.get_inplace()
             if not func:
@@ -966,14 +999,20 @@ class TestMeta(TestCase):
             if inplace and sample_input.broadcasts_input:
                 continue
 
-            args = [sample_input.input] + list(sample_input.args)
+            sample_args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=symbolic_meta):
-                expected = func(*args, **kwargs)
+            if all_stride_variants:
+                strided_args = get_strided_args(sample_args)
+            else:
+                strided_args = [sample_args]
 
-                if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
-                    func(*args, **kwargs, out=expected)
+            for args in strided_args:
+                with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=symbolic_meta):
+                    expected = func(*args, **kwargs)
+
+                    if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
+                        func(*args, **kwargs, out=expected)
 
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -1007,6 +1046,16 @@ class TestMeta(TestCase):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
 
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    # only test one dtype, as output stride behavior is the same for all dtypes
+    @ops(op_db, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    # Only test on CUDA, as CUDA kernel's stride is the reference
+    @onlyCUDA
+    def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
+        self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False, all_stride_variants=True)
+
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
@@ -1026,66 +1075,6 @@ class TestMeta(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
-
-    def get_stride_variants(self, t):
-        results = []
-
-        # contiguous
-        results.append(t)
-
-        # transposed
-        if t.ndim > 1:
-            perm = list(reversed(range(t.ndim)))
-            transposed = torch.empty(t.shape[::-1], device=t.device, dtype=t.dtype).permute(perm).copy_(t)
-            results.append(transposed)
-
-        # nondense
-        nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
-        results.append(nondense)
-
-        return results
-
-    @onlyCUDA
-    def test_index_add_stride(self, device):
-        to_meta = MetaConverter()
-
-        x = torch.ones(5, 3, device=device)
-        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float, device=device)
-        index = torch.tensor([0, 4, 2], device=device)
-
-        xs = self.get_stride_variants(x)
-        ts = self.get_stride_variants(t)
-
-        for x, t in itertools.product(xs, ts):
-            args = (x, 0, index, t)
-            meta_args = tree_map(to_meta, args)
-
-            r = torch.ops.aten.index_add(*args)
-            meta_r = torch.ops.aten.index_add(*meta_args)
-
-            self.assertEqual(r.size(), meta_r.size())
-            self.assertEqual(r.stride(), meta_r.stride())
-
-    @onlyCUDA
-    def test_index_put_stride(self, device):
-        to_meta = MetaConverter()
-
-        x = torch.rand(5, 5, device=device)
-        t = torch.rand(5, device=device)
-        index = torch.tensor([True, False, True, True, False], device=device)
-
-        xs = self.get_stride_variants(x)
-        ts = self.get_stride_variants(t)
-
-        for x, t in itertools.product(xs, ts):
-            args = (x, [index], t)
-            meta_args = tree_map(to_meta, args)
-
-            r = torch.ops.aten.index_put(*args)
-            meta_r = torch.ops.aten.index_put(*meta_args)
-
-            self.assertEqual(r.size(), meta_r.size())
-            self.assertEqual(r.stride(), meta_r.stride())
 
     def test_map_location_deserialize(self):
         import io
