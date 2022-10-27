@@ -354,6 +354,18 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
   EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
 }
 
+TEST(StaticRuntime, CanEnableStaticRuntimeSubBlocks) {
+  const auto src = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, cond: bool):
+        if cond:
+            # aten::__is__ on tensors is blocked
+            return a is b
+        return False
+  )JIT";
+
+  EXPECT_FALSE(testCanEnableStaticRuntime(src));
+}
+
 TEST(StaticRuntime, NestedOutput) {
   // dict of tuple of list
   const auto nested_output_script_0 = R"JIT(
