@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
     onlyCUDA,
+    OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torchgen.utils import YamlLoader
@@ -187,15 +188,95 @@ class TestMetaConverter(TestCase):
         del m
         self.assertIs(ref(), None)
 
+aten = torch.ops.aten
+
 CHECK_STRIDES = {
     torch.Tensor.__getitem__,
-    torch.ops.aten.index_put,
-    torch.ops.aten.index_add,
+}
+
+CHECK_STRIDES_SKIPS = {
+    aten._conj_physical.default,
+    aten._fft_c2c.default,
+    aten._fft_c2r.default,
+    aten._fft_r2c.default,
+    aten._linalg_svd.default,
+    aten._scaled_dot_product_attention_forward.default,
+    aten.add.Tensor,
+    aten.addmm.default,
+    aten.angle.default,
+    aten.atan2.default,
+    aten.binary_cross_entropy.default,
+    aten.bitwise_and.Tensor,
+    aten.bitwise_left_shift.Tensor,
+    aten.bitwise_or.Tensor,
+    aten.bitwise_right_shift.Tensor,
+    aten.bitwise_xor.Tensor,
+    aten.clamp_max.Tensor,
+    aten.clamp_min.Tensor,
+    aten.complex.default,
+    aten.copysign.Tensor,
+    aten.div.Tensor_mode,
+    aten.div.Tensor,
+    aten.eq.Tensor,
+    aten.flip.default,
+    aten.floor_divide.default,
+    aten.fmax.default,
+    aten.fmin.default,
+    aten.fmod.Tensor,
+    aten.gcd.default,
+    aten.ge.Tensor,
+    aten.gt.Tensor,
+    aten.heaviside.default,
+    aten.hypot.default,
+    aten.igamma.default,
+    aten.igammac.default,
+    aten.index_copy.default,
+    aten.lcm.default,
+    aten.le.Tensor,
+    aten.logical_and.default,
+    aten.logical_or.default,
+    aten.logical_xor.default,
+    aten.lt.Tensor,
+    aten.maximum.default,
+    aten.minimum.default,
+    aten.mul.Tensor,
+    aten.ne.Tensor,
+    aten.nextafter.default,
+    aten.pow.Scalar,
+    aten.pow.Tensor_Scalar,
+    aten.pow.Tensor_Tensor,
+    aten.prelu.default,
+    aten.remainder.Tensor,
+    aten.rot90.default,
+    aten.rsub.Tensor,
+    aten.special_xlog1py.default,
+    aten.special_zeta.default,
+    aten.sub.Tensor,
+    aten.where.self,
+    aten.xlogy.Tensor,
+
+    # channel_last and channel_last_3d related failures
+    aten.constant_pad_nd.default,
+    aten._adaptive_avg_pool2d.default,
+    aten.constant_pad_nd.default,
+    aten.convolution.default,
+    aten.convolution.default,
+    aten._adaptive_avg_pool2d.default,
+    aten.upsample_bilinear2d.vec,
+    aten.constant_pad_nd.default,
+    aten.upsample_bilinear2d.vec,
+
+    # following ops fails if include_storage_offset = True, but these are a bit edge casey
+    # we should still fix them, leaving them here for tracking.
+    # aten._reshape_alias.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_matmul_cuda_float32
+    # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
 def should_check_strides(func):
     if func in CHECK_STRIDES:
         return True
+    if func in CHECK_STRIDES_SKIPS:
+        return False
     if not isinstance(func, torch._ops.OpOverload):
         return False
     # Prims are expected to model strides correctly
@@ -206,7 +287,7 @@ def should_check_strides(func):
     if any(r.alias_info.before_set for r in func._schema.returns if r.alias_info):
         return True
     # TODO: check for TensorIterator
-    return False
+    return True
 
 def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
@@ -688,8 +769,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
             kwargs, dtype=self.dtype, device_type=self.device_type, run_symbolic_meta=False
         )
 
-aten = torch.ops.aten
-
 # these always fail
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
@@ -854,6 +933,55 @@ meta_dispatch_device_skips['cuda'] = {
     aten.miopen_batch_norm.default: {f32},
 }
 
+def get_strided_args(args):
+
+    def get_strided_variants(t, include_storage_offset=False):
+        variants = []
+
+        # contiguous
+        variants.append(t)
+
+        # transposed
+        if t.ndim > 1:
+            perm = list(reversed(range(t.ndim)))
+            transposed = torch.empty(
+                t.shape[::-1], device=t.device, dtype=t.dtype, requires_grad=t.requires_grad
+            ).permute(perm).copy_(t)
+            variants.append(transposed)
+
+        # nondense
+        if t.ndim > 0:
+            nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
+            variants.append(nondense)
+
+        # channel_last
+        if t.ndim == 4:
+            variants.append(t.contiguous(memory_format=torch.channels_last))
+
+        # channel_last_3d
+        if t.ndim == 5:
+            variants.append(t.contiguous(memory_format=torch.channels_last_3d))
+
+        # storage_offset
+        if include_storage_offset:
+            buffer = torch.empty(t.numel() + 1, device=t.device, dtype=t.dtype, requires_grad=t.requires_grad)
+            buffer = buffer.as_strided(t.shape, t.stride(), storage_offset=1)
+            buffer.copy_(t)
+            variants.append(buffer)
+
+        return variants
+
+    strided_args = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor) and not arg.is_sparse_csr and arg.is_contiguous():
+            strided_arg_variants = get_strided_variants(arg)
+        else:
+            strided_arg_variants = [arg]
+        strided_args.append(strided_arg_variants)
+
+    for result in itertools.product(*strided_args):
+        yield result
+
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase
     device: torch.device
@@ -947,7 +1075,7 @@ class TestMeta(TestCase):
             with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=True):
                 expected = func(*args, **kwargs)
 
-    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace):
+    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
         if inplace:
             func = op.get_inplace()
             if not func:
@@ -966,14 +1094,21 @@ class TestMeta(TestCase):
             if inplace and sample_input.broadcasts_input:
                 continue
 
-            args = [sample_input.input] + list(sample_input.args)
+            sample_args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=symbolic_meta):
-                expected = func(*args, **kwargs)
+            if all_stride_variants and sum(isinstance(arg, torch.Tensor) for arg in sample_args) <= 5:
+                # test inputs <= 5 tensors to avoid combinatorial explosion
+                strided_args = get_strided_args(sample_args)
+            else:
+                strided_args = [sample_args]
 
-                if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
-                    func(*args, **kwargs, out=expected)
+            for args in strided_args:
+                with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=symbolic_meta):
+                    expected = func(*args, **kwargs)
+
+                    if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
+                        func(*args, **kwargs, out=expected)
 
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -1006,6 +1141,26 @@ class TestMeta(TestCase):
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    # only test one dtype, as output stride behavior is the same for all dtypes
+    @ops(op_db, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    # Only test on CUDA, as CUDA kernel's stride is the reference
+    @onlyCUDA
+    def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
+        self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False, all_stride_variants=True)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    # only test one dtype, as output stride behavior is the same for all dtypes
+    @ops(op_db, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    # Only test on CUDA, as CUDA kernel's stride is the reference
+    @onlyCUDA
+    def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):
+        self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True, all_stride_variants=True)
+
 
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
@@ -1026,66 +1181,6 @@ class TestMeta(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
-
-    def get_stride_variants(self, t):
-        results = []
-
-        # contiguous
-        results.append(t)
-
-        # transposed
-        if t.ndim > 1:
-            perm = list(reversed(range(t.ndim)))
-            transposed = torch.empty(t.shape[::-1], device=t.device, dtype=t.dtype).permute(perm).copy_(t)
-            results.append(transposed)
-
-        # nondense
-        nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
-        results.append(nondense)
-
-        return results
-
-    @onlyCUDA
-    def test_index_add_stride(self, device):
-        to_meta = MetaConverter()
-
-        x = torch.ones(5, 3, device=device)
-        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float, device=device)
-        index = torch.tensor([0, 4, 2], device=device)
-
-        xs = self.get_stride_variants(x)
-        ts = self.get_stride_variants(t)
-
-        for x, t in itertools.product(xs, ts):
-            args = (x, 0, index, t)
-            meta_args = tree_map(to_meta, args)
-
-            r = torch.ops.aten.index_add(*args)
-            meta_r = torch.ops.aten.index_add(*meta_args)
-
-            self.assertEqual(r.size(), meta_r.size())
-            self.assertEqual(r.stride(), meta_r.stride())
-
-    @onlyCUDA
-    def test_index_put_stride(self, device):
-        to_meta = MetaConverter()
-
-        x = torch.rand(5, 5, device=device)
-        t = torch.rand(5, device=device)
-        index = torch.tensor([True, False, True, True, False], device=device)
-
-        xs = self.get_stride_variants(x)
-        ts = self.get_stride_variants(t)
-
-        for x, t in itertools.product(xs, ts):
-            args = (x, [index], t)
-            meta_args = tree_map(to_meta, args)
-
-            r = torch.ops.aten.index_put(*args)
-            meta_r = torch.ops.aten.index_put(*meta_args)
-
-            self.assertEqual(r.size(), meta_r.size())
-            self.assertEqual(r.stride(), meta_r.stride())
 
     def test_map_location_deserialize(self):
         import io
