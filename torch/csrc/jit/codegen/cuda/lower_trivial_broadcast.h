@@ -35,6 +35,9 @@ class TORCH_CUDA_CU_API ConcretizedBroadcastDomains : private IterVisitor {
   //! Is a domain concretized to multiple concrete domains?
   bool maybeNonUniquelyConcretized(IterDomain* id) const;
 
+  //! Return all domains id is concretized to, if concretized
+  std::unordered_set<IterDomain*> allConcretizedDomains(IterDomain* id) const;
+
  private:
   using IterVisitor::handle;
 

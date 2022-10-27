@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 
 #include <deque>
@@ -52,6 +53,13 @@ namespace cuda {
 // IdMappingMode::EXACT
 //   Don't map any broadcast axes to non-broadcast axes
 //   Do not forward through any broadcast IDs
+// IdMappingMode::AlmostExact
+//   Forward through broadcast axes, but not through to a non-broadcast axis
+//     i.e. id{b1*i0}, id{i0} are mapped
+//          id{i1*i0}, id{i0} are not mapped (this part is the difference from
+//          PERMISSIVE)
+//   Forward through split one axes, i.e. id{ceilDiv(i0, 1)}, id{i0} are mapped
+//
 class TORCH_CUDA_CU_API IterDomainGraph {
  public:
   IterDomainGraph(Fusion* fusion, bool allow_self_mapping = false);
@@ -61,6 +69,9 @@ class TORCH_CUDA_CU_API IterDomainGraph {
   }
   const DisjointSets<IterDomain*>& exactNodes() const {
     return exact_nodes_;
+  }
+  const DisjointSets<IterDomain*>& almostExactNodes() const {
+    return almost_exact_nodes_;
   }
   const DisjointSets<IterDomain*>& loopNodes() const {
     return loop_nodes_;
@@ -113,6 +124,7 @@ class TORCH_CUDA_CU_API IterDomainGraph {
 
   DisjointSets<IterDomain*> permissive_nodes_;
   DisjointSets<IterDomain*> exact_nodes_;
+  DisjointSets<IterDomain*> almost_exact_nodes_;
   DisjointSets<IterDomain*> loop_nodes_;
 
   // Consumers and producers is not symmetric like the other sets
@@ -247,6 +259,31 @@ class TORCH_CUDA_CU_API ComputeAtMap {
       IdMappingMode mode) const;
 
  private:
+  // Traverses through definitions of exact maps (unique_exact_definitions_) to
+  // input ID's from provided ID. Returns all the exact map concrete IDs of the
+  // exact sets that are inputs required to construct the exact concrete id of
+  // of_id.
+  VectorOfUniqueEntries<std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>>
+  getInputDisjointSetsOf(IterDomain* of_id, bool stop_at_rfactor = true);
+
+  // Traverses through definitions of exact maps (unique_exact_definitions_) to
+  // all input ID's from provided exact_sets. Returns all the exact map concrete
+  // IDs of all the exact sets that on the path to and including the inputs
+  // required to construct the exact concrete id of of_id.
+  VectorOfUniqueEntries<std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>>
+  getAllDisjointSetProducers(
+      const VectorOfUniqueEntries<
+          std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>>& exact_sets);
+
+  // Traverses through uses of exact maps (unique_exact_uses_) to
+  // all input ID's from provided exact_sets. Returns all the exact map concrete
+  // IDs of all the exact sets that on the path to and including the inputs
+  // required to construct the exact concrete id of of_id.
+  VectorOfUniqueEntries<std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>>
+  getAllDisjointSetConsumers(
+      const VectorOfUniqueEntries<
+          std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>>& exact_sets);
+
   // Build id_graph_
   void build(Fusion* fusion);
 
@@ -260,6 +297,11 @@ class TORCH_CUDA_CU_API ComputeAtMap {
 
   // Should be built once and never modified again.
   IterDomainGraph id_graph_;
+
+  // Used specifically for concrete ID computation
+  ConcretizedBroadcastDomains concretized_bcasts_;
+
+  // TODO: Remove
   TrivialReductionInfo trivial_reduction_info_;
 
   // Prevent needing to recompute concrete_id's in compute at map.

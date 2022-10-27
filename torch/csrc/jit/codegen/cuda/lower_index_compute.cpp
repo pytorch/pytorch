@@ -833,17 +833,13 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
       {consumer_tv->domain()->domain().begin(),
        consumer_tv->domain()->domain().end()});
 
-  // Indexable domains are the concrete id's we visited when
-  //  traversing the "reference" indexing pass.
-  std::unordered_map<IterDomain*, IterDomain*> initial_indexable_map;
-
-  // Map the concrete id indexing back to the producer or consumer tv
-  std::unordered_map<IterDomain*, IterDomain*> index_update_map;
+  // Want update map to be based on almost exact, but indexing is on exact, make
+  // a map from one space to the other.
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      almost_exact_2_target_ids;
 
   for (IterDomain* consumer_id :
        ir_utils::filterByType<IterDomain>(all_consumer_vals)) {
-    // Track the non-concrete id we were trying to bind index
-    //  to, whether from producer or consumer.
     auto target_id = consumer_id;
 
     // use mapped producer id when indexing producer
@@ -857,16 +853,51 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
       target_id = target_id_it->second;
     }
 
-    // Exact id will have to be pulled from consumer side as the
-    //  producer side are replayed ids.
-    auto exact_concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-        consumer_id, IdMappingMode::EXACT);
+    auto almost_exact_concrete_id =
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            consumer_id, IdMappingMode::ALMOSTEXACT);
 
-    index_update_map[exact_concrete_id] = target_id;
+    auto almost_exact_2_target_ids_it =
+        almost_exact_2_target_ids.find(almost_exact_concrete_id);
+    if (almost_exact_2_target_ids_it == almost_exact_2_target_ids.end()) {
+      almost_exact_2_target_ids_it =
+          almost_exact_2_target_ids
+              .emplace(
+                  almost_exact_concrete_id,
+                  VectorOfUniqueEntries<IterDomain*>())
+              .first;
+    }
+    auto& mapped_dims = almost_exact_2_target_ids_it->second;
+    mapped_dims.pushBack(target_id);
+  }
 
-    // Keep track of concrete id's that were used for indexing.
-    if (indexing.indexMap().count(exact_concrete_id)) {
-      initial_indexable_map[exact_concrete_id] = exact_concrete_id;
+  // Map the concrete id indexing back to the producer or consumer tv
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      index_update_map;
+  for (auto entry : indexing.indexMap()) {
+    auto ref_exact_id = entry.first;
+    auto almost_exact_concrete_id =
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            ref_exact_id, IdMappingMode::ALMOSTEXACT);
+
+    if (almost_exact_2_target_ids.find(almost_exact_concrete_id) ==
+        almost_exact_2_target_ids.end()) {
+      continue;
+    }
+
+    auto consumer_ids = almost_exact_2_target_ids.at(almost_exact_concrete_id);
+
+    for (auto consumer_id : consumer_ids) {
+      auto index_update_map_it = index_update_map.find(ref_exact_id);
+      if (index_update_map_it == index_update_map.end()) {
+        index_update_map_it =
+            index_update_map
+                .emplace(std::make_pair(
+                    ref_exact_id, VectorOfUniqueEntries<IterDomain*>()))
+                .first;
+      }
+      auto& mapped_dims = index_update_map_it->second;
+      mapped_dims.pushBack(consumer_id);
     }
   }
 
@@ -932,9 +963,6 @@ IndexFromIdGraph getPredicateIndexingFromIdGraph(
 
   indexing.run(loop_indexing);
 
-  // Map the concrete id indexing back to consumer tv
-  std::unordered_map<IterDomain*, IterDomain*> index_update_map;
-
   // First collect all iterdomains in consumer transform history.
   auto all_consumer_vals = DependencyCheck::getAllValsBetween(
       {consumer_tv->getMaybeRFactorDomain().begin(),
@@ -942,13 +970,59 @@ IndexFromIdGraph getPredicateIndexingFromIdGraph(
       {consumer_tv->domain()->domain().begin(),
        consumer_tv->domain()->domain().end()});
 
+  // Want update map to be based on almost exact, but indexing is on exact, make
+  // a map from one space to the other.
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      almost_exact_2_consumer_ids;
+
   for (IterDomain* consumer_id :
        ir_utils::filterByType<IterDomain>(all_consumer_vals)) {
-    // Track the non-concrete id we were trying to bind index
-    //  to, whether from producer or consumer.
-    auto exact_concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-        consumer_id, IdMappingMode::EXACT);
-    index_update_map[exact_concrete_id] = consumer_id;
+    auto almost_exact_concrete_id =
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            consumer_id, IdMappingMode::ALMOSTEXACT);
+
+    auto almost_exact_2_consumer_ids_it =
+        almost_exact_2_consumer_ids.find(almost_exact_concrete_id);
+    if (almost_exact_2_consumer_ids_it == almost_exact_2_consumer_ids.end()) {
+      almost_exact_2_consumer_ids_it =
+          almost_exact_2_consumer_ids
+              .emplace(std::make_pair(
+                  almost_exact_concrete_id,
+                  VectorOfUniqueEntries<IterDomain*>()))
+              .first;
+    }
+    auto& mapped_dims = almost_exact_2_consumer_ids_it->second;
+    mapped_dims.pushBack(consumer_id);
+  }
+
+  // Map the concrete id indexing back to the consumer tv
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      index_update_map;
+  for (auto entry : indexing.indexMap()) {
+    auto ref_exact_id = entry.first;
+    auto almost_exact_concrete_id =
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            ref_exact_id, IdMappingMode::ALMOSTEXACT);
+
+    if (almost_exact_2_consumer_ids.find(almost_exact_concrete_id) ==
+        almost_exact_2_consumer_ids.end()) {
+      continue;
+    }
+    auto consumer_ids =
+        almost_exact_2_consumer_ids.at(almost_exact_concrete_id);
+
+    for (auto consumer_id : consumer_ids) {
+      auto index_update_map_it = index_update_map.find(ref_exact_id);
+      if (index_update_map_it == index_update_map.end()) {
+        index_update_map_it =
+            index_update_map
+                .emplace(std::make_pair(
+                    ref_exact_id, VectorOfUniqueEntries<IterDomain*>()))
+                .first;
+      }
+      auto& mapped_dims = index_update_map_it->second;
+      mapped_dims.pushBack(consumer_id);
+    }
   }
 
   // No contiguity info is used in the predicate indexing pass, the predicate

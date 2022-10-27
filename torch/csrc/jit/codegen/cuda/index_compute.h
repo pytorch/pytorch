@@ -211,7 +211,8 @@ class IndexCompute : public BackwardVisitor {
   // returns a new IndexCompute ready to be used.
   IndexCompute updateIndexCompute(
       const TensorDomain* new_td,
-      const std::unordered_map<IterDomain*, IterDomain*>& id_map,
+      const std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>&
+          id_map,
       const ContigIDs& contig_finder) const;
 
   // Interface to run index traversal through loop indexing analysis result to

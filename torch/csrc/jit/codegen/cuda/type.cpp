@@ -792,10 +792,12 @@ static const char* memory_type2string(MemoryType t) {
 
 static const char* id_map_mode_type2string(IdMappingMode t) {
   switch (t) {
-    case IdMappingMode::PERMISSIVE:
-      return "permissive";
     case IdMappingMode::EXACT:
       return "exact";
+    case IdMappingMode::ALMOSTEXACT:
+      return "almost_exact";
+    case IdMappingMode::PERMISSIVE:
+      return "permissive";
     case IdMappingMode::LOOP:
       return "loop";
     default:

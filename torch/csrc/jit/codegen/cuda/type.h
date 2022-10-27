@@ -322,12 +322,13 @@ enum class IterType {
 };
 
 // Used for Iteration Domain mapping modes in ComputeAtMap
-enum class IdMappingMode { PERMISSIVE, EXACT, LOOP };
+enum class IdMappingMode { EXACT, ALMOSTEXACT, LOOP, PERMISSIVE };
 
-static constexpr std::array<IdMappingMode, 3> kIdMappingModes = {
-    IdMappingMode::PERMISSIVE,
+static constexpr std::array<IdMappingMode, 4> kIdMappingModes = {
     IdMappingMode::EXACT,
-    IdMappingMode::LOOP};
+    IdMappingMode::ALMOSTEXACT,
+    IdMappingMode::LOOP,
+    IdMappingMode::PERMISSIVE};
 
 // Used to annotate the special memory intrinsics that a loadstore
 //  op will be lowered to.

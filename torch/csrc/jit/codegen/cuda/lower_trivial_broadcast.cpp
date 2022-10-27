@@ -27,19 +27,25 @@ ConcretizedBroadcastDomains::ConcretizedBroadcastDomains(Fusion* fusion) {
 }
 
 bool ConcretizedBroadcastDomains::isConcretized(IterDomain* id) const {
-  auto it = broadcast_to_concrete_map_.find(id);
-  return it != broadcast_to_concrete_map_.end();
+  return allConcretizedDomains(id).size() >= 1;
 }
 
 bool ConcretizedBroadcastDomains::isUniquelyConcretized(IterDomain* id) const {
-  auto it = broadcast_to_concrete_map_.find(id);
-  return it != broadcast_to_concrete_map_.end() && it->second.size() == 1;
+  return allConcretizedDomains(id).size() == 1;
 }
 
 bool ConcretizedBroadcastDomains::maybeNonUniquelyConcretized(
     IterDomain* id) const {
+  return allConcretizedDomains(id).size() > 1;
+}
+
+std::unordered_set<IterDomain*> ConcretizedBroadcastDomains::
+    allConcretizedDomains(IterDomain* id) const {
   auto it = broadcast_to_concrete_map_.find(id);
-  return it != broadcast_to_concrete_map_.end() && it->second.size() > 1;
+  if (it != broadcast_to_concrete_map_.end()) {
+    return it->second;
+  }
+  return {};
 }
 
 void ConcretizedBroadcastDomains::handle(BroadcastOp* bop) {

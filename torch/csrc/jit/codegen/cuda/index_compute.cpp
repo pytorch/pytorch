@@ -784,7 +784,8 @@ bool IndexCompute::isZero(IterDomain* id) const {
 
 IndexCompute IndexCompute::updateIndexCompute(
     const TensorDomain* new_td,
-    const std::unordered_map<IterDomain*, IterDomain*>& id_map,
+    const std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>&
+        id_map,
     const ContigIDs& contig_finder) const {
   FUSER_PERF_SCOPE("GpuLower::Lower::updateIndexCompute");
 
@@ -796,25 +797,26 @@ IndexCompute IndexCompute::updateIndexCompute(
 
   for (auto id_entry : id_map) {
     IterDomain* prev_id = id_entry.first;
-    IterDomain* new_id = id_entry.second;
+    auto new_ids = id_entry.second;
+    for (auto new_id : new_ids.vector()) {
+      if (index_map_.find(prev_id) != index_map_.end()) {
+        updated_index_map[new_id] = index_map_.at(prev_id);
+      }
 
-    if (index_map_.find(prev_id) != index_map_.end()) {
-      updated_index_map[new_id] = index_map_.at(prev_id);
-    }
+      updated_extent_map[new_id] = getExtent(prev_id);
 
-    updated_extent_map[new_id] = getExtent(prev_id);
+      if (zero_domains_.find(prev_id) != zero_domains_.end()) {
+        updated_zero_domains.emplace(new_id);
+      }
 
-    if (zero_domains_.find(prev_id) != zero_domains_.end()) {
-      updated_zero_domains.emplace(new_id);
-    }
+      if (zero_merged_in_.find(prev_id) != zero_merged_in_.end()) {
+        updated_zero_merged_in.emplace(new_id);
+      }
 
-    if (zero_merged_in_.find(prev_id) != zero_merged_in_.end()) {
-      updated_zero_merged_in.emplace(new_id);
-    }
-
-    auto halo_extent_it = halo_extent_map_.find(prev_id);
-    if (halo_extent_it != halo_extent_map_.end()) {
-      updated_halo_extent_map[new_id] = halo_extent_it->second;
+      auto halo_extent_it = halo_extent_map_.find(prev_id);
+      if (halo_extent_it != halo_extent_map_.end()) {
+        updated_halo_extent_map[new_id] = halo_extent_it->second;
+      }
     }
   }
 
@@ -2106,6 +2108,13 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
       continue;
     }
 
+    std::stringstream error_msg_loops;
+    if (index_map.find(root_dom[i]) == index_map.end()) {
+      for (auto loop : loops) {
+        error_msg_loops << " " << loop->iter_domain()->toString();
+      }
+    }
+
     TORCH_INTERNAL_ASSERT(
         index_map.find(root_dom[i]) != index_map.end(),
         "Couldn't find root mapping for ",
@@ -2113,7 +2122,9 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
         " dim: ",
         i,
         " id: ",
-        root_dom[i]->toString());
+        root_dom[i]->toString(),
+        ", loops: ",
+        error_msg_loops.str());
 
     auto root_ind_i = index_map.at(root_dom[i]);
     if (root_ind_i->isZeroInt()) {
