@@ -57,8 +57,6 @@ class XNNGraph {
   // Makes a pass through the graph and throws if any ops are unsupported
   void checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph);
 
-
-
  public:
   XNNGraph() : _subgraph_ptr(nullptr) {
     xnn_status status = xnn_initialize(/*allocator =*/nullptr);
@@ -76,7 +74,7 @@ class XNNGraph {
       std::shared_ptr<torch::jit::Graph>& graph,
       std::vector<c10::IValue> example_inputs);
 
-    void runGraphOnInputs(
+  void runGraphOnInputs(
       std::vector<at::Tensor> tensor_inputs,
       std::vector<at::Tensor> tensor_outputs);
 };
