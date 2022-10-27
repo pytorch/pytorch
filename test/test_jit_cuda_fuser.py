@@ -3366,6 +3366,7 @@ class TestCudaFuser(JitTestCase):
             training, track_running_stats = training_and_track
             self._test_batch_norm_impl_index_helper(2, 1, 1, affine, track_running_stats, training)
 
+    @skipIfRocm
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
