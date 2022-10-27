@@ -33,7 +33,6 @@ from ._utils import (
     p_assert,
 )
 
-
 __all__ = [
     "FlatParameter",
     "FlatParamHandle",
@@ -212,6 +211,13 @@ class FlatParameter(nn.Parameter):
         _shared_params (Optional[List[nn.Parameter]]): The original shared
             parameter variables if ``use_orig_params=True`` and ``None``
             otherwise.
+        _tensors (Optional[List[Optional[Tensor]]]): This saves the ``Tensor``
+            views created in the forward and tracked by autograd when
+            ``use_orig_params=True`` and is ``None`` otherwise. This is to
+            preserve those ``Tensor`` variables for the backward to ensure that
+            the ``FlatParameter`` 's ``AccumulateGrad`` object does not change
+            in which case the post-backward hook does not run. This is relevant
+            for cases like reentrant activation checkpointing.
         _is_grad_none (Optional[List[bool]]): A mask over the original
             parameters' gradients indicating if it is logically ``None`` or not
             if ``use_orig_params=True`` and ``None`` otherwise. This is needed
@@ -273,10 +279,14 @@ class FlatParameter(nn.Parameter):
             self._is_grad_none: Optional[List[bool]] = [
                 False for _ in range(len(params))
             ]
+            self._tensors: Optional[List[Optional[Tensor]]] = [
+                None for _ in range(len(self._params))
+            ]
         else:
             self._params = None
             self._shared_params = None
             self._is_grad_none = None
+            self._tensors = None
         self._unpadded_unsharded_size = self.size()
         _set_fsdp_flattened(self)
 
@@ -835,11 +845,15 @@ class FlatParamHandle:
             unsharded_size
         )  # this `.view()` is not autograd visible
         in_forward = self._training_state == HandleTrainingState.FORWARD
+        in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
         if self._use_orig_params:
-            # NOTE: When not in the forward, `as_params=True` suffices since we
-            # only need to restore the tensor *values* for backward computation
-            # and do not fresh `Tensor` views.
-            self._use_unsharded_views(as_params=(not in_forward))
+            # We use `Tensor` views in the forward so that they are tracked by
+            # autograd. We use them in the pre-backward as well to support
+            # reentrant activation checkpointing, which needs the views to be
+            # tracked by autograd in the backward pass's recomputed forward.
+            self._use_unsharded_views(
+                as_params=(not in_forward and not in_pre_backward)
+            )
         elif in_forward:
             self._use_unsharded_views(as_params=False)
 
@@ -903,7 +917,9 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-        dist.all_gather_into_tensor(padded_unsharded_grad, sharded_grad, self.process_group)
+        dist.all_gather_into_tensor(
+            padded_unsharded_grad, sharded_grad, self.process_group
+        )
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[: unsharded_size.numel()].view(
             unsharded_size
@@ -1198,8 +1214,27 @@ class FlatParamHandle:
                 param.data = view
             elif as_params:
                 module.register_parameter(param_name, nn.Parameter(view))
-            else:
-                setattr(module, param_name, view)
+            else:  # `as_params=False`
+                param_var: Tensor = view
+                if self._use_orig_params:
+                    if self._training_state == HandleTrainingState.FORWARD:
+                        assert self.flat_param._tensors is not None
+                        # Save the `Tensor` for the pre-backward
+                        self.flat_param._tensors[i] = view  # save for pre-backward
+                    elif self._training_state == HandleTrainingState.BACKWARD_PRE:
+                        # Use the saved `Tensor` variable from the forward to
+                        # preserve the autograd graph so that the post-backward
+                        # hook fires (e.g. for reentrant AC)
+                        assert self.flat_param._tensors is not None  # mypy
+                        tensor = self.flat_param._tensors[i]
+                        p_assert(
+                            tensor is not None,
+                            "Expects `Tensor` to have been saved in forward",
+                        )
+                        tensor.data = view  # type: ignore[union-attr]
+                        assert tensor is not None  # mypy
+                        param_var = tensor
+                setattr(module, param_name, param_var)
         for i, (
             param_name,
             module,
@@ -1341,6 +1376,11 @@ class FlatParamHandle:
             setattr(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
             param.data = prim_param  # could be both empty and non-empty
+        if self._training_state == HandleTrainingState.BACKWARD_POST:
+            assert self.flat_param._tensors is not None  # mypy
+            # Clear the saved `Tensor`s since they are unneeded now
+            for i in range(len(self.flat_param._tensors)):
+                self.flat_param._tensors[i] = None  # type: ignore[index]
 
     @torch.no_grad()
     def _use_sharded_grad_views(self) -> None:
@@ -1466,7 +1506,8 @@ class FlatParamHandle:
                 # memory and owns the gradient storage, so it will never
                 # require gradient writeback.
                 flat_param_grad = (
-                    flat_param.grad if self.uses_sharded_strategy or not self._config.offload_params
+                    flat_param.grad
+                    if self.uses_sharded_strategy or not self._config.offload_params
                     else flat_param._cpu_grad  # type: ignore[attr-defined]
                 )
                 needs_grad_writeback = flat_param_grad is None or not _same_storage(
