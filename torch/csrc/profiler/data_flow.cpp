@@ -51,7 +51,8 @@ struct RawTensors {
     }
   }
 
-  void operator()(auto&) {}
+  template <typename T>
+  void operator()(T&) {}
 
   std::vector<RawTensorInfo> tensors_;
 };
