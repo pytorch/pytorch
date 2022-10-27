@@ -71,7 +71,7 @@ double SymFloat::guard_float(const char* file, int64_t line) const {
   if (!is_symbolic()) {
     return data_;
   }
-  SymFloatNode a = toSymFloatNodeImpl();
+  SymNode a = toSymNodeImpl();
   return a->guard_float(file, line);
 }
 
