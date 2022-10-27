@@ -553,10 +553,10 @@ class FakeTensorConverterTest(TestCase):
         converter = FakeTensorConverter()
         x_conv = converter(mode, x)
         self.assertEqual(len(converter.tensor_memo), 1)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 1)
+        x_conv2 = converter(mode, x)
+        assert x_conv2 is x_conv
         del x
         self.assertEqual(len(converter.tensor_memo), 0)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 0)
 
     def test_no_active_mode(self):
         with FakeTensorMode() as mode:

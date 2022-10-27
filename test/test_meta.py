@@ -170,9 +170,10 @@ class TestMetaConverter(TestCase):
         m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
+        r = []
         for i in range(4):
             li.append(torch.rand([i]))
-            m(li[-1])
+            r.append(m(li[-1]))
         self.assertEqual(len(m.tensor_memo), 4)
         del li
         self.assertEqual(len(m.tensor_memo), 0)
