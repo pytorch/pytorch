@@ -9,12 +9,19 @@ from copy import deepcopy
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+    apply_activation_checkpointing,
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.distributed.fsdp import (
     CPUOffload,
     FlatParameter,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.fsdp.fully_sharded_data_parallel import FSDP_WRAPPED_MODULE
 from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -488,6 +495,81 @@ class TestFSDPMisc(FSDPTest):
             _assert_module_states(
                 fsdp, process_group=self.process_group, assert_fn=self.assertEqual
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_change_wrapped_module_after_ctor(self):
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq1 = nn.Sequential(
+                    nn.Linear(5, 5),
+                    nn.Linear(5, 5),
+                )
+                self.seq2 = nn.Sequential(nn.Linear(5, 5))
+                self.lin = nn.Linear(5, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.lin(self.relu(self.seq2(self.relu(self.seq1(x)))))
+
+        def get_fsdp_model():
+            fsdp_kwargs = {"use_orig_params": False}
+            model = Model().cuda()
+            model.seq1 = FSDP(model.seq1, **fsdp_kwargs)
+            model.seq2[0] = FSDP(model.seq2[0], **fsdp_kwargs)
+            model = FSDP(model, **fsdp_kwargs)
+            return model
+
+        # Wrap with `CheckpointWrapper` *after* FSDP construction
+        model = get_fsdp_model()
+        non_reentrant_wrapper = functools.partial(
+            checkpoint_wrapper,
+            offload_to_cpu=False,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+        )
+        check_fn = lambda submodule: isinstance(submodule, nn.Linear)
+        apply_activation_checkpointing(
+            model,
+            checkpoint_wrapper_fn=non_reentrant_wrapper,
+            check_fn=check_fn,
+        )
+
+        # Check that `seq2[0]` only has a single `FlatParameter` registered and
+        # that it has the `CheckpointWrapper` prefix in its FQN since it was
+        # registered to the `Linear` wrapped module in the FSDP constructor and
+        # only wrapped with `CheckpointWrapper` after
+        seq2_0_named_params = list(model.seq2[0].named_parameters())
+        self.assertEqual(len(seq2_0_named_params), 1)
+        self.assertTrue(type(seq2_0_named_params[0][1]) is FlatParameter)
+        self.assertTrue(_CHECKPOINT_PREFIX in seq2_0_named_params[0][0])
+
+        # Trigger the re-registration via `_lazy_init()`, and check for a
+        # warning, which is only emitted for DETAIL
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The FSDP wrapped module changed from Linear.*to CheckpointWrapper",
+        ):
+            model._lazy_init()
+
+        # Check that now the `FlatParameter` is registered to the
+        # `CheckpointWrapper`, which is now the new wrapped module
+        seq2_0_named_params = list(model.seq2[0].named_parameters())
+        self.assertEqual(len(seq2_0_named_params), 1)
+        self.assertTrue(type(seq2_0_named_params[0][1]) is FlatParameter)
+        self.assertFalse(_CHECKPOINT_PREFIX in seq2_0_named_params[0][0])
+        self.assertFalse(isinstance(model.seq2[0].module, nn.Linear))
+
+        # Check that replacing a module *after* FSDP construction errors
+        model = get_fsdp_model()
+        # NOTE: Setting `model.seq2[0].module = nn.Linear(5, 5)` does not
+        # save to the FSDP instance's `module` attribute, meaning that it would
+        # not actually change the wrapped module, so we use `setattr()` like in
+        # `_recursive_wrap()`.
+        setattr(model.seq2[0], FSDP_WRAPPED_MODULE, nn.Linear(5, 5))
+        with self.assertRaisesRegex(RuntimeError, "are invalid behavior"):
+            model._lazy_init()
 
 
 instantiate_parametrized_tests(TestFSDPMisc)
