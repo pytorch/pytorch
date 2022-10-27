@@ -268,7 +268,7 @@ def apply_activation_checkpointing(
     # TODO: Importing inside function to avoid circular import issue between FSDP and
     # checkpoint_wrapper. This can be resolved once wrap() APIs are decoupled from FSDP code.
     from torch.distributed.fsdp.wrap import _recursive_wrap, lambda_auto_wrap_policy
-    return _recursive_wrap(
+    _recursive_wrap(
         module=model,
         auto_wrap_policy=partial(lambda_auto_wrap_policy, lambda_fn=check_fn),
         wrapper_cls=checkpoint_wrapper_fn,
