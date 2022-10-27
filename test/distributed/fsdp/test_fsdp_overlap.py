@@ -11,15 +11,12 @@ from torch import distributed as dist
 from torch.cuda import Event
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-)
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     get_cycles_per_ms,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
