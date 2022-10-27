@@ -1889,6 +1889,8 @@ class FullyShardedDataParallel(nn.Module):
                 # (e.g. applying the activation checkpointing wrapper) and
                 # if so, de-register the `FlatParameter` from the old
                 # wrapped module and register it to the new wrapped module
+                # NOTE: The `FlatParameter`'s FQN metadata is not updated, so
+                # any added wrappers must clean their prefixes from FQNs.
                 flat_param = fsdp_module._handles[0].flat_param
                 target_submodule = None
                 target_name = None
