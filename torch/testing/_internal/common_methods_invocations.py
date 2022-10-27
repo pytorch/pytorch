@@ -17125,7 +17125,7 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # # https://github.com/pytorch/pytorch/issues/70904
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.skip("Skipped some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
