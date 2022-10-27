@@ -46,6 +46,7 @@ from torch.distributed.fsdp._init_utils import (
     _init_process_group_state,
     _init_runtime_state,
     _init_state_dict_state,
+    _init_streams,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
@@ -764,7 +765,7 @@ class FullyShardedDataParallel(nn.Module):
         # will set `_is_root=False` for the non-root instances
         self._is_root = True
         self._assert_state(TrainingState.IDLE)
-        self._init_streams()
+        _init_streams(self)
         self._cast_buffers(recurse=True)
         for handle in self._handles:
             self._init_param_attributes(handle)
@@ -907,21 +908,6 @@ class FullyShardedDataParallel(nn.Module):
         # Track whether the `FlatParameter`'s post-backward hook has been
         # called for validation in `_wait_for_post_backward()`
         p._post_backward_called = False
-
-    def _init_streams(self) -> None:
-        """Initializes CUDA streams for overlapping data transfer and
-        computation. This should only be called on the root FSDP instance."""
-        assert self._is_root
-        assert torch.cuda.is_available()
-        # Stream for unshard logic, including allocating the all-gather
-        # destination tensors and the all-gathers themselves.
-        self._streams["unshard"] = torch.cuda.Stream()
-        # Stream for overlapping gradient reduction with the backward pass
-        # gradient computation.
-        self._streams["post_backward"] = torch.cuda.Stream()
-        # Stream for pre-unshard logic, namely allocations and writes for
-        # CPU offloading (H2D copy) and mixed precision (low precision cast).
-        self._streams["pre_unshard"] = torch.cuda.Stream()
 
     @staticmethod
     def set_state_dict_type(
