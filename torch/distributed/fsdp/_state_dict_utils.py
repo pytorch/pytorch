@@ -18,7 +18,11 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed.utils import _replace_by_prefix
 
-from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
+from ._fsdp_extensions import (
+    _ext_chunk_tensor,
+    _ext_pre_load_state_dict_transform,
+    _extensions as _user_extensions,
+)
 from .flat_param import FlatParamHandle
 
 
@@ -283,6 +287,7 @@ def _sharded_pre_load_state_dict_hook(
 
     nonsharded_tensors = []
     shared_fqns = [fqn for fqn, _, _ in module._shared_param_fqns]
+    loaded_shapes = []
     for fqn, _, _ in module._param_fqns:
         full_fqn = f"{prefix}{FSDP.FSDP_PREFIX}{fqn}"
         param = state_dict.pop(full_fqn)
@@ -290,6 +295,7 @@ def _sharded_pre_load_state_dict_hook(
             continue
         # All-gather the param (ShardedTensor)
         param, shards = _ext_pre_load_state_dict_transform(param)
+        loaded_shapes.append(param.size())
         assert len(shards) < 2, (
             "Expects 0 or 1 shard per rank "
             f"but got {len(shards)} shards on rank {module.rank}."
@@ -328,6 +334,11 @@ def _sharded_pre_load_state_dict_hook(
         module.world_size,
     )
     loaded_flat_tensor.to(flat_param.device)
+    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, flat_param._shapes)), (
+        f"The original shapes in FSDP are {flat_param._shapes}. "
+        f"The loaded shapes are {loaded_shapes}. "
+        f"FSDP extension is {'NOT' if _user_extensions is None else ''} None."
+    )
     assert flat_param.numel() == loaded_flat_tensor.numel(), (
         f"The loaded local chunk has different numel({loaded_flat_tensor.numel()}) "
         f"from the local chunk {flat_param.numel()}."
