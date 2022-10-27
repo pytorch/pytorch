@@ -73,8 +73,6 @@ class TracerBase:
 
         node = self.create_node(kind, target, args_, kwargs_, name, type_expr,
                                 parent_module=parent_module)
-        print(f"Created proxy for node type {kind} target {target} name"
-              f" {name} parent mod {parent_module}")
 
         if not proxy_factory_fn:
             proxy = self.proxy(node)

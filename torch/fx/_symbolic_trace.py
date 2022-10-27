@@ -446,17 +446,12 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        ret_mod = self.root_module_name
         self.module_call_stack.append(module_qualified_name)
-        print(f"Calling fwd for mod {module_qualified_name} args {args}")
         if not self.is_leaf_module(m, module_qualified_name):
             ret_val = forward(*args, **kwargs)
         else:
             ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
         self.module_call_stack.pop()
-        if len(self.module_call_stack):
-            ret_mod = self.module_call_stack[-1]
-        print(f"Returned to module mod {ret_mod}")
         return ret_val
 
     @compatibility(is_backward_compatible=False)
