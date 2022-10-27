@@ -41,7 +41,6 @@ __all__ = [
     "quantize_qat",
     "convert",
     "swap_module",
-    "_get_observer_dict",
 ]
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
