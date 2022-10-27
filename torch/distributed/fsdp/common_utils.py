@@ -115,3 +115,19 @@ class MixedPrecision:
     reduce_dtype: Optional[torch.dtype] = None
     buffer_dtype: Optional[torch.dtype] = None
     keep_low_precision_grads: bool = False
+
+
+@dataclass
+class CPUOffload:
+    """
+    This configures CPU offloading.
+
+    Attributes:
+        offload_params (bool): This specifies whether to offload parameters to
+            CPU when not involved in computation. If enabled, this implicitly
+            offloads gradients to CPU as well. This is to support the optimizer
+            step, which requires parameters and gradients to be on the same
+            device.
+    """
+
+    offload_params: bool = False
