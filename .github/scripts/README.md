@@ -36,7 +36,7 @@ New generated binary workflows can be added in the `.github/scripts/generate_ci_
 examples from that script in order to add the workflow to the stream that is relevant to what you particularly
 care about.
 
-Different parameters can be used to acheive different goals, i.e. running jobs on a cron, running only on trunk, etc.
+Different parameters can be used to achieve different goals, i.e. running jobs on a cron, running only on trunk, etc.
 
 #### ciflow (trunk)
 
