@@ -43,10 +43,10 @@ One could directly call `torchbench.py`, `huggingface.py` or `timm_models.py` wi
 
 **Inference Commands**
 * TorchScript (with TorchDynamo capture) NVFuser Inference - `python benchmarks/dynamo/torchbench.py -dcuda -n100 --speedup-dynamo-ts --performance`
-* TorchInductor CUDA Graphs Inference - `python benchmarks/dynamo/torchbench.py -dcuda --inductor-settings --float32 -n50 --inductor --performance`
+* TorchInductor CUDA Graphs Inference - `python benchmarks/dynamo/torchbench.py -dcuda --float32 -n50 --inductor --performance`
 
 **Training Commands**
-* Torchscript (with TorchDynamo capture) NVFuser Training - `python benchmarks/dynamo/torchbench.py --float32 -dcuda --training --nvfuser --speedup-dynamo-ts --use-eval-mode --performance`
-* TorchInductor CUDA Graphs Training - `python benchmarks/dynamo/torchbench.py --float32 -dcuda --training --inductor --use-eval-mode --performance`
+* Torchscript (with TorchDynamo capture) NVFuser Training - `python benchmarks/dynamo/torchbench.py --float32 -dcuda --training --nvfuser --speedup-dynamo-ts --performance`
+* TorchInductor CUDA Graphs Training - `python benchmarks/dynamo/torchbench.py --float32 -dcuda --training --inductor --performance`
 
 Above commands are for torchbench models. You can simply replace `torchbench.py` with `huggingface.py` for HF models, and `timm_model.py` for TIMM models.
