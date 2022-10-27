@@ -12453,7 +12453,9 @@ Example::
 
 .. note::
     See also :func:`torch.nonzero`.
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
