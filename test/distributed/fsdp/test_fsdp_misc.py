@@ -21,7 +21,10 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.fully_sharded_data_parallel import FSDP_WRAPPED_MODULE
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    FLAT_PARAM,
+    FSDP_WRAPPED_MODULE,
+)
 from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -498,6 +501,10 @@ class TestFSDPMisc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_change_wrapped_module_after_ctor(self):
+        """
+        Tests changing an FSDP instance's wrapped module after the FSDP
+        constructor.
+        """
         dist.set_debug_level(dist.DebugLevel.DETAIL)
 
         class Model(nn.Module):
@@ -563,11 +570,17 @@ class TestFSDPMisc(FSDPTest):
 
         # Check that replacing a module *after* FSDP construction errors
         model = get_fsdp_model()
-        # NOTE: Setting `model.seq2[0].module = nn.Linear(5, 5)` does not
-        # save to the FSDP instance's `module` attribute, meaning that it would
-        # not actually change the wrapped module, so we use `setattr()` like in
-        # `_recursive_wrap()`.
-        setattr(model.seq2[0], FSDP_WRAPPED_MODULE, nn.Linear(5, 5))
+        # NOTE: Setting `model.seq2[0].module = nn.Linear(3, 3)` does not save
+        # to the FSDP instance's `module` attribute since `module` is a
+        # property, meaning that it would not actually change the wrapped
+        # module, so we use `setattr()` like in `_recursive_wrap()`.
+        setattr(model.seq2[0], FSDP_WRAPPED_MODULE, nn.Linear(3, 3))
+        with self.assertRaisesRegex(RuntimeError, "are invalid behavior"):
+            model._lazy_init()
+
+        # Check that deleting the `FlatParameter` errors
+        model = get_fsdp_model()
+        delattr(model.seq2[0].module, FLAT_PARAM)
         with self.assertRaisesRegex(RuntimeError, "are invalid behavior"):
             model._lazy_init()
 

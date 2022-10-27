@@ -1906,14 +1906,16 @@ class FullyShardedDataParallel(nn.Module):
                     if fsdp_module._debug_level == dist.DebugLevel.DETAIL:
                         warnings.warn(
                             "The FSDP wrapped module changed from "
-                            f"{target_submodule} to {fsdp_module.module}"
+                            f"{target_submodule} to {fsdp_module.module} on "
+                            f"rank {fsdp_module.rank}. {fsdp_module}"
                         )
                     target_submodule._parameters.pop(target_name)  # de-register
                 elif target_submodule is None:
                     raise RuntimeError(
                         "Either the FSDP wrapped module was removed from "
                         "the model or its `FlatParameter` was manually "
-                        "de-registered. Both of these are invalid behavior."
+                        f"de-registered on rank {fsdp_module.rank}. Both of "
+                        f"these are invalid behavior. {fsdp_module}"
                     )
                 if target_submodule is not fsdp_module.module:
                     fsdp_module._register_flat_param()
