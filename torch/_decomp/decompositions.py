@@ -1073,7 +1073,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten.split_with_sizes, disable_meta=True)
+@register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -1087,7 +1087,7 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.split.Tensor, disable_meta=True)
+@register_decomposition(aten.split.Tensor)
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -1131,7 +1131,7 @@ def normalize(input, norm_dims, eps):
     return out, mean, rstd
 
 
-@register_decomposition(aten.native_group_norm.default, disable_meta=True)
+@register_decomposition(aten.native_group_norm.default)
 def native_group_norm(
     input: Tensor,
     weight: Optional[Tensor],
@@ -1460,7 +1460,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
+@register_decomposition([aten.detach, aten.lift, aten.lift_fresh])
 def nop_decomposition(x):
     return aten.alias(x)
 
@@ -1626,7 +1626,7 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten._adaptive_avg_pool2d, disable_meta=True)
+@register_decomposition(aten._adaptive_avg_pool2d)
 @pw_cast_for_opmath
 def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     # Preconditions
@@ -1888,7 +1888,7 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
 
 
-@register_decomposition([aten._reshape_alias, aten._unsafe_view], disable_meta=True)
+@register_decomposition([aten._reshape_alias, aten._unsafe_view])
 def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
@@ -2154,7 +2154,7 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot, disable_meta=True)
+@register_decomposition(aten.dot)
 @out_wrapper()
 @pw_cast_for_opmath
 def dot(self, other):
