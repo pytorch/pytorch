@@ -180,6 +180,22 @@ def enable_flash_sdp(enabled: bool):
     """
     torch._C._set_sdp_use_flash(enabled)
 
+def mem_efficient_sdp_enabled():
+    r"""
+    .. warning:: This flag is experimental and subject to change.
+
+    Returns whether memory efficient sdp is enabled or not.
+    """
+    return torch._C._get_mem_efficient_sdp_enabled()
+
+
+def enable_mem_efficient_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is experimental and subject to change.
+
+    Enables or disables memory efficient sdp.
+    """
+    torch._C._set_sdp_use_mem_efficient(enabled)
 
 def math_sdp_enabled():
     r"""
@@ -200,7 +216,7 @@ def enable_math_sdp(enabled: bool):
 
 
 @contextlib.contextmanager
-def sdp_kernel(enable_flash: bool = True, enable_math: bool = True):
+def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_efficient: bool = True):
     r"""
     .. warning:: This flag is experimental and subject to change.
 
@@ -208,15 +224,18 @@ def sdp_kernel(enable_flash: bool = True, enable_math: bool = True):
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
     previous_flash: bool = flash_sdp_enabled()
+    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
     previous_math: bool = math_sdp_enabled()
     try:
         enable_flash_sdp(enable_flash)
+        enable_mem_efficient_sdp(enable_mem_efficient)
         enable_math_sdp(enable_math)
         yield{}
     except RuntimeError as err:
         raise err
     finally:
         enable_flash_sdp(previous_flash)
+        enable_mem_efficient_sdp(previous_mem_efficient)
         enable_math_sdp(previous_math)
 
 cufft_plan_cache = cuFFTPlanCacheManager()
