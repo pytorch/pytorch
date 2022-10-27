@@ -9,19 +9,20 @@ import textwrap
 import uuid
 from collections import Counter
 from importlib import import_module
+from tempfile import TemporaryFile
 
 import torch
 import torch.fx as fx
 
 from . import config
 from .optimizations.backends import register_backend
-from .utils import clone_inputs
+from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
 
 
 def minifier_dir():
-    path = config.repro_dir
+    path = os.path.join(get_debug_dir(), "minifier")
     if path is None:
         path = f"/tmp/minifier_{getpass.getuser()}"
     if not os.path.exists(path):
@@ -212,6 +213,8 @@ def dump_compiler_graph_state(gm, args, compiler_name):
 
 
 def save_graph_repro(fd, gm, args, compiler_name):
+    if "inductor" in compiler_name:
+        fd.write(f"import {config.inductor_import}.overrides\n")
     fd.write(generate_compiler_repro_string(gm, args))
     fd.write(COMPILER_REPRO_OPTIONS[compiler_name][0])
     if "_accuracy" in compiler_name:
@@ -228,7 +231,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
             textwrap.dedent(
                 f"""
                 compiled = {COMPILER_REPRO_OPTIONS[compiler_name][1]}(mod, args)
-                compiled(*args)
+                compiled(args)
                 """
             )
         )
@@ -237,7 +240,7 @@ def save_graph_repro(fd, gm, args, compiler_name):
 def isolate_fails(fx_g, args, compiler_name: str, env=None):
     if env is None:
         env = {}
-    subdir = f"{minifier_dir()}/isolate"
+    subdir = os.path.join(os.getcwd(), "isolate")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     file_name = os.path.join(subdir, f"{str(uuid.uuid4())[:5]}.py")
@@ -263,16 +266,20 @@ def isolate_fails(fx_g, args, compiler_name: str, env=None):
         )
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
+    stdout, stderr = TemporaryFile(), TemporaryFile()
     p = subprocess.Popen(
         ["python", file_name],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout,
+        stderr=stderr,
         env=new_env,
     )
-    out, err = p.communicate()
+    p.wait()
+
     if p.returncode != 0:
-        print(textwrap.indent(out.decode("utf-8"), prefix=">>  "))
-        print(textwrap.indent(err.decode("utf-8"), prefix=">>  "))
+        stdout.seek(0)
+        stderr.seek(0)
+        print(textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "))
+        print(textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "))
         return True
     return False
 
@@ -293,7 +300,7 @@ def inductor_fails(fx_g, args, check_str=None):
 
     try:
         compile_mod = compile_fx_inner(fx_g, args)
-        compile_mod(*args)
+        compile_mod(args)
     except Exception as e:
         if check_str is not None and check_str not in repr(e):
             return False
@@ -319,13 +326,17 @@ def nvfuser_fails(fx_g, args, check_str=None):
 
 
 def inductor_accuracy_fails(fx_g, args, check_str=None):
-    from torchinductor.compile_fx import compile_fx_inner
+    from torch._inductor.compile_fx import compile_fx_inner
 
     return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
 
+def get_minifier_repro_path():
+    return os.path.join(minifier_dir(), "minifier_launcher.py")
+
+
 def helper_for_dump_minify(contents):
-    minified_repro_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+    minified_repro_path = get_minifier_repro_path()
     log.warning(f"Writing minified repro to {minified_repro_path}")
     try:
         with open(minified_repro_path, "w") as fd:
@@ -333,15 +344,6 @@ def helper_for_dump_minify(contents):
     except OSError as e:
         log.exception(e)
         raise NotImplementedError("Could not write to {minified_repro_path}")
-
-    local_path = os.path.join(config.base_dir, "minifier_launcher.py")
-    try:
-        shutil.copyfile(minified_repro_path, local_path)
-        log.warning(
-            f"Copying minified repro from {minified_repro_path} to {local_path} for convenience"
-        )
-    except OSError:
-        log.warning(f"Don't have write permissions for {local_path}")
 
 
 def dump_to_minify(gm, args, compiler_name: str):
@@ -382,10 +384,13 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
 
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
+        from torch._subclasses import FakeTensorMode
+
         orig_graph = copy.deepcopy(gm.graph)
         assert config.repro_after in ("dynamo", "aot", None)
+        inner_compiled_fn = None
 
-        def deferred_for_real_inputs(*real_inputs):
+        def deferred_for_real_inputs(real_inputs):
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
@@ -393,6 +398,15 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
             should be called with real tensors. Therefore, the actual invocation
             is deffered.
             """
+            # Avoid re-compiling when we call the compiled function twice. This happens
+            # when we run the model inference or training in a for loop like here
+            # https://github.com/pytorch/torchdynamo/issues/1687#issuecomment-1280040633
+            nonlocal inner_compiled_fn
+            # Copy the tensor attrs like shape, stride etc by converting to Fake Tensor
+            # because inductor clears the tensor list in its codegen. And example_inputs
+            # are available only for the first invocation.
+            fake_mode = FakeTensorMode()
+            copy_tensor_attrs = [fake_mode.from_tensor(x) for x in real_inputs]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
@@ -404,43 +418,50 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                if inner_compiled_fn is None:
+                    inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                 if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
                     log.warning("Accuracy failed for the AOT Autograd graph")
                     dump_compiler_graph_state(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     dump_to_minify(
                         fx.GraphModule(gm, orig_graph),
-                        real_inputs,
+                        copy_tensor_attrs,
                         f"{compiler_name}_accuracy",
                     )
                     raise ValueError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return compiled_fn(*real_inputs)
+                    return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiler_fn - which is either aot_autograd or inductor
                     # with fake inputs
-                    compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
+                    if inner_compiled_fn is None:
+                        inner_compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
                     # Call the compiled function with real inputs
-                    return compiled_fn(*real_inputs)
+                    return inner_compiled_fn(real_inputs)
                 except Exception as e:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            copy_tensor_attrs,
+                            compiler_name,
                         )
                     elif config.repro_level == 2:
                         dump_to_minify(
-                            fx.GraphModule(gm, orig_graph), real_inputs, compiler_name
+                            fx.GraphModule(gm, orig_graph),
+                            copy_tensor_attrs,
+                            compiler_name,
                         )
                     raise e
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
+            compiled_fn._boxed_call = True
         else:
             compiled_fn = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -453,6 +474,8 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
+    from functorch._src.aot_autograd import make_boxed_func
+
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
@@ -465,7 +488,14 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
-    out = gm(*args)
+
+    # TorchInductor returned callable expects lists. So, boxing the call.
+    if not hasattr(gm, "_boxed_call") and hasattr(gm, "named_parameters"):
+        orig_named_parameters = gm.named_parameters
+        gm = make_boxed_func(gm)
+        gm.named_parameters = orig_named_parameters
+
+    out = gm(args)
     if only_fwd:
         return out
     if requires_bwd_pass(out):
@@ -570,10 +600,11 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     """
     Saves the repro to a repro.py file
     """
-    subdir = os.path.join(minifier_dir())
+    curdir = os.getcwd()
+    subdir = os.path.join(os.getcwd(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    file_name = os.path.join(subdir, f"{len(gm.graph.nodes)}.py")
+    file_name = os.path.join(subdir, f"minified_{len(gm.graph.nodes)}_nodes.py")
     log.warning(f"Writing checkpoint with {len(gm.graph.nodes)} nodes to {file_name}")
 
     model_str = NNModuleToString.convert(gm)
@@ -583,18 +614,9 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
                 model_str, args, compiler_name, check_accuracy
             )
         )
-    latest_repro = os.path.join(subdir, "repro.py")
+    latest_repro = os.path.join(curdir, "repro.py")
     log.warning(f"Copying {file_name} to {latest_repro} for convenience")
     shutil.copyfile(file_name, latest_repro)
-
-    local_path = os.path.join(config.base_dir, "repro.py")
-    try:
-        shutil.copyfile(file_name, local_path)
-        log.warning(
-            f"Copying minified repro from {file_name} to {local_path} for convenience"
-        )
-    except OSError:
-        log.warning("No write permissions for {local_path}")
 
 
 # TODO - Commented because we are assuming that nn.Modules can be safely repr'd
@@ -718,8 +740,6 @@ from {config.dynamo_import}.debug_utils import run_fwd_maybe_bwd
 from {config.dynamo_import}.optimizations.backends import BACKENDS
 from {config.dynamo_import}.testing import rand_strided
 
-{config.dynamo_import}.config.repro_dir = \"{minifier_dir()}\"
-
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
 
@@ -755,8 +775,6 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     def debug_wrapper(gm, example_inputs, **kwargs):
         assert config.repro_after in ("dynamo", "aot", None)
         if config.repro_after == "dynamo":
-            # Ensure that we fail when backend fails
-            config.raise_on_backend_error = True
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
 
@@ -775,7 +793,7 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
             else:
                 try:
                     compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
-                    run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+                    run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
                         "Compiled Fx GraphModule failed with following error. Setting up minifier."
@@ -794,7 +812,9 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError("Issue deteced. Repro at minifier_launcher.py.")
+                    raise ValueError(
+                        f"Issue detected. Repro at {get_minifier_repro_path()}."
+                    )
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -815,7 +835,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
-        run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+        run_fwd_maybe_bwd(compiled_gm, example_inputs)
         raise ValueError("No issue was detected")
     except Exception as exc:
         orig_failure = str(exc)
@@ -845,10 +865,10 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
-    from torchdynamo.optimizations.backends import BACKENDS
+    from torch._dynamo.optimizations.backends import BACKENDS
 
     if compiler_name == "inductor":
-        from torchinductor.compile_fx import compile_fx
+        from torch._inductor.compile_fx import compile_fx
 
         compiler_fn = compile_fx
     else:

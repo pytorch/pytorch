@@ -3,12 +3,13 @@ from unittest.mock import patch
 
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
-class ExportTests(torch._dynamo.testing.TestCase):
+class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
     # They all take a func, run it with eager, then export it, then compare
@@ -1421,8 +1422,47 @@ class ExportTests(torch._dynamo.testing.TestCase):
                 f, (torch.randn(5)), aten_graph=False, tracing_mode="symbolic"
             )
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
+    def test_export_with_module_layer(self):
+        from functorch.experimental.cond import cond
+
+        def true_fn(layer, val):
+            return layer(val) * torch.tensor(2)
+
+        def false_fn(layer, val):
+            return layer(val) * torch.tensor(-1)
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, pred, x):
+                return cond(pred, true_fn, false_fn, [self.linear, x])
+
+        mod = Module()
+        x = torch.randn([3, 3])
+        pred = torch.tensor(x[0][0].item() < 0)
+        real_result = mod.forward(pred, x)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(mod.forward, pred, x)
+        out_graph = exported[0]
+
+        dynamo_result = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+        # New X, just to show we did not specialize
+        x = x * -1
+        pred = torch.tensor(x[0][0].item() < 0)
+        real_result_2 = mod.forward(pred, x)
+        dynamo_result_2 = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result_2, dynamo_result_2))
+
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()

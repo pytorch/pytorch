@@ -153,7 +153,7 @@ class ExperimentalConfigWrapper {
     // do not trace CPU or GPU events.
     bool cupti_range_profiler = config_.profiler_metrics.size() > 0;
     if (cupti_range_profiler &&
-        activities.count(torch::profiler::impl::ActivityType::CPU)) {
+        activities.count(torch::autograd::profiler::ActivityType::CPU)) {
       LOG(WARNING)
           << "Cannot run range profiler with CPU activities, please only"
           << " use CUDA activity type";
@@ -211,10 +211,10 @@ void prepareTrace(
   }
 
   std::set<libkineto::ActivityType> k_activities;
-  if (activities.count(torch::profiler::impl::ActivityType::CPU)) {
+  if (activities.count(torch::autograd::profiler::ActivityType::CPU)) {
     k_activities.insert(cpuTypes.begin(), cpuTypes.end());
   }
-  if (activities.count(torch::profiler::impl::ActivityType::CUDA)) {
+  if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
   }
 

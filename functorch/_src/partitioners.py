@@ -1,4 +1,4 @@
-from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 import torch
 import torch.fx as fx
 import operator
@@ -187,8 +187,7 @@ def _prod(x):
         s *= i
     return s
 
-
-def _size_of(metadata):
+def _tensor_nbytes(numel, dtype):
     sizes = {
         torch.float: 4,
         torch.float16: 2,
@@ -203,7 +202,12 @@ def _size_of(metadata):
         torch.uint8: 1,
         torch.bool: 1,
     }
+    if dtype not in sizes:
+        raise NotImplementedError("Don't know the size of dtype ", dtype)
 
+    return numel * sizes[dtype]
+
+def _size_of(node: fx.Node) -> int:
     def to_size_hint(s):
         if isinstance(s, torch.SymIntNode):
             py_s = s.get_pyobj()
@@ -211,13 +215,26 @@ def _size_of(metadata):
         assert isinstance(s, int)
         return s
 
-    numel = _prod(map(to_size_hint, metadata.shape))
-    dtype = metadata.dtype
+    if 'val' in node.meta:
+        val = node.meta['val']
+        if isinstance(val, py_sym_types):
+            return 1
+        elif isinstance(val, (list, tuple)):
+            return sum(_tensor_nbytes(to_size_hint(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
+        elif isinstance(val, torch.Tensor):
+            return _tensor_nbytes(to_size_hint(val.numel()), val.dtype)
 
-    if dtype not in sizes:
-        raise NotImplementedError("Don't know the size of dtype ", dtype)
+        raise RuntimeError(f"Unknown metadata type {type(val)}")
 
-    return numel * sizes[dtype]
+    # Only needed since we don't always trace with fake tensors.
+    if 'tensor_meta' in node.meta:
+        metadata = node.meta['tensor_meta']
+        numel = _prod(map(to_size_hint, metadata.shape))
+        dtype = metadata.dtype
+    else:
+        return 0
+
+    return _tensor_nbytes(numel, dtype)
 
 
 # Used for some investigative purposes
@@ -332,11 +349,6 @@ def min_cut_rematerialization_partition(
 
     AGGRESSIVE_RECOMPUTATION = False
 
-    def _maybe_size_of(node):
-        if 'tensor_meta' in node.meta:
-            return _size_of(node.meta['tensor_meta'])
-        return 0
-
     def ban_recomputation(node):
         if AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
@@ -347,14 +359,14 @@ def min_cut_rematerialization_partition(
                 return True
             if node.target == operator.getitem:
                 return False
-            if compiler == "inductor" and node.dist_from_bw > 4:
+            if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+                return False
+            if compiler == "inductor" and node.dist_from_bw > 3:
                 return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
-            if 'tensor_meta' not in node.meta:
-                return False
-            input_tensors_size = sum(_maybe_size_of(i) for i in node.args if isinstance(i, fx.Node))
-            output_size = _size_of(node.meta['tensor_meta'])
+            input_tensors_size = sum(_size_of(i) for i in node.args if isinstance(i, fx.Node))
+            output_size = _size_of(node)
             return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
@@ -366,8 +378,8 @@ def min_cut_rematerialization_partition(
 
         return not all(is_fusible(node, user) for user in node.users)
 
-    def get_node_weight(node):
-        mem_sz = _size_of(node.meta['tensor_meta'])
+    def get_node_weight(node) -> int:
+        mem_sz = _size_of(node)
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
@@ -397,10 +409,12 @@ def min_cut_rematerialization_partition(
         if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
+        # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
+        is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
+                              ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
         if is_sym_node(node):
             weight = 1
-        # TODO(whc) try changing this to isTensor(node.meta['val'])?
-        elif 'tensor_meta' not in node.meta:
+        elif is_non_tensor_node:
             weight = math.inf
         else:
             weight = get_node_weight(node)
@@ -431,13 +445,7 @@ def min_cut_rematerialization_partition(
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
     fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes)
     if AOT_PARTITIONER_DEBUG:
-        def node_size(node):
-            if 'tensor_meta' in node.meta:
-                return _size_of(node.meta['tensor_meta'])
-            else:
-                assert is_sym_node(node)
-                return 1
-        print("Theoretical Activations Stored: ", sum([node_size(i) for i in saved_values]) / 1e9)
+        print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
         bw_module_nodes = set([node.name for node in bw_module.graph.nodes if node.op == 'call_function'])
         remat_nodes = fw_module_nodes & bw_module_nodes
@@ -446,7 +454,7 @@ def min_cut_rematerialization_partition(
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, '_overloadpacket'):
                 counts[str(node.target._overloadpacket)] += 1
-        print("# nodes rematerialized: ", len(remat_nodes))
+        print(f"# remat/fw/bw: {len(remat_nodes)}/{len(fw_module_nodes)}/{len(bw_module_nodes)}")
         print("Count of Ops Rematerialized: ", sorted(counts.items(), key=lambda x: x[1], reverse=True))
     return fw_module, bw_module
 

@@ -17,7 +17,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
-from . import config, convert_frame, logging as torchdynamo_logging, skipfiles, utils
+from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .optimizations.distributed import DDPOptimizer
@@ -76,11 +76,6 @@ def innermost_fn(fn):
         unaltered_fn = unaltered_fn._torchdynamo_orig_callable
         assert callable(unaltered_fn)
     return unaltered_fn
-
-
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
 
 
 class _TorchDynamoContext:
@@ -154,9 +149,6 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if self.first_ctx:
-                _step_logger()(logging.INFO, "torchdynamo begin tracing")
-
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
@@ -166,8 +158,6 @@ class _TorchDynamoContext:
             finally:
                 set_eval_frame(prior)
                 backend_ctx.__exit__(None, None, None)
-                if self.first_ctx:
-                    _step_logger()(logging.INFO, "torchdynamo done tracing")
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -234,7 +224,7 @@ def catch_errors_wrapper(callback):
                 return None
             if config.optimize_ddp:
                 ddp_module = DistributedDataParallel._get_active_ddp_module()
-                if ddp_module and frame.f_code.co_name == "forward":
+                if ddp_module:
                     with compile_lock:
                         ddp_optimizer = DDPOptimizer(
                             bucket_bytes_cap=ddp_module.bucket_bytes_cap,
@@ -385,7 +375,7 @@ def optimize(
     )
 
 
-@patch("torchdynamo.symbolic_convert.explain", True)
+@patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
     from . import reset
