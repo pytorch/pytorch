@@ -336,7 +336,7 @@ class TensorVariable(VariableTracker):
             from . import UserDefinedObjectVariable
 
             return UserDefinedObjectVariable(example_value)
-        elif isinstance(example_value, torch.SymIntNode):
+        elif isinstance(example_value, (torch.SymIntNode, torch.SymFloatNode)):
             proxy.node.meta["example_value"] = example_value
             return cls(proxy, **options)
         else:
