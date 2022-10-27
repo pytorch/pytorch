@@ -118,12 +118,12 @@ jobs:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7-no-ops
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
 
-  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
-    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
+  pytorch-linux-focal-py3-clang7-android-ndk-r19c-build:
+    name: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
     uses: ./.github/workflows/_android-full-build-test.yml
     with:
-      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
+      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
 
   linux-bionic-py3_7-clang9-slow-build:
     name: linux-bionic-py3.7-clang9-slow
