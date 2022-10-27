@@ -1447,23 +1447,17 @@ TEST(TestSymInt, AddSymbolicInt) {
 }
 
 #ifndef C10_MOBILE
-TEST(TestSymInt, TestIntrusive) {
-  auto a = c10::make_intrusive<c10::SymNodeImpl>();
-  auto b = c10::make_intrusive<c10::SymNodeImpl>();
-  ASSERT_EQ(a.use_count(), 1);
-  ASSERT_EQ(b.use_count(), 1);
-  auto as = c10::SymInt(a);
-  auto bs = c10::SymInt(b);
-  ASSERT_EQ(a.use_count(), 2);
-  ASSERT_EQ(b.use_count(), 2);
-  as = bs;
-  ASSERT_EQ(a.use_count(), 1);
-  ASSERT_EQ(b.use_count(), 3);
-}
-
 class TestSymNodeImpl : public c10::SymNodeImpl {
  public:
   explicit TestSymNodeImpl(int64_t i) : i_(i) {}
+
+  bool is_int() override {
+    return true;
+  };
+
+  bool is_float() override {
+    return false;
+  };
 
   bool bool_() override {
     return static_cast<bool>(i_);
