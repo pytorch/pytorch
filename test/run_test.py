@@ -170,6 +170,7 @@ USE_PYTEST_LIST = [
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
     "test_deploy",
+    "distributed/test_c10d_error_logger.py"
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -304,6 +305,20 @@ CORE_TEST_LIST = [
     "test_ops_jit",
     "test_torch"
 ]
+
+# A list of distributed tests that run on multiple backends, i.e. gloo, nccl. These backends are spread out
+# among all available shards to speed up the test. The list of backends are copied from the tests themselves
+DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS = {
+    "distributed/test_distributed_spawn": [
+        "gloo",
+        "nccl",
+        "ucc",
+    ],
+    "distributed/algorithms/quantization/test_quantization": [
+        "gloo",
+        "nccl",
+    ],
+}
 
 # if a test file takes longer than 5 min, we add it to TARGET_DET_LIST
 SLOW_TEST_THRESHOLD = 300
@@ -520,11 +535,25 @@ def test_distributed(test_module, test_directory, options):
     ) == 0 and sys.version_info < (3, 9)
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
+
+    if options.shard:
+        which_shard, num_shards = options.shard
+    else:
+        which_shard = num_shards = 1
+    # Round-robin all backends to different shards
+    backend_to_shard = {backend: i % num_shards + 1
+                        for i, backend in enumerate(DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS[test_module])}
+    print_to_stderr(f"Map different backends to different shards for {test_module}: {backend_to_shard}")
+
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
         if sys.platform == "win32" and backend != "gloo":
             continue
         if backend == "mpi" and not mpi_available:
+            continue
+        # Default to the first shard if seeing an unrecognized backend
+        if which_shard != backend_to_shard.get(backend, 1):
+            print_to_stderr(f"Shard {which_shard}: {backend} should be run in {backend_to_shard.get(backend, 1)}")
             continue
         for with_init_file in {True, False}:
             if sys.platform == "win32" and not with_init_file:
@@ -534,8 +563,8 @@ def test_distributed(test_module, test_directory, options):
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
-                    "Running distributed tests for the {} backend {}".format(
-                        backend, with_init
+                    "Running distributed tests for the {} backend {} in shard {} of {}".format(
+                        backend, with_init, which_shard, num_shards
                     )
                 )
             old_environ = dict(os.environ)
@@ -670,11 +699,19 @@ def run_doctests(test_module, test_directory, options):
 
 
 def print_log_file(test: str, file_path: str, failed: bool) -> None:
+    num_lines = sum(1 for _ in open(file_path, 'rb'))
+    n = 100
     with open(file_path, "r") as f:
         print_to_stderr("")
         if failed:
-            print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
-            print_to_stderr(f.read())
+            if n < num_lines:
+                print_to_stderr(f"Expand the folded group to see the beginning of the log file of {test}")
+                print_to_stderr(f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})")
+                for _ in range(num_lines - n):
+                    print_to_stderr(next(f).rstrip())
+                print_to_stderr("##[endgroup]")
+            for _ in range(min(n, num_lines)):
+                print_to_stderr(next(f).rstrip())
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         else:
             print_to_stderr(f"Expand the folded group to see the log file of {test}")
@@ -978,7 +1015,9 @@ def get_selected_tests(options):
 
     if options.distributed_tests:
         selected_tests = list(
-            filter(lambda test_name: test_name in DISTRIBUTED_TESTS, selected_tests)
+            filter(lambda test_name: (test_name in DISTRIBUTED_TESTS and
+                                      test_name not in DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS),
+                   selected_tests)
         )
 
     # Filter to only run core tests when --core option is specified
@@ -988,7 +1027,7 @@ def get_selected_tests(options):
         )
 
     if options.functorch:
-        selected_tests = FUNCTORCH_TESTS
+        selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
     else:
         # Exclude all functorch tests otherwise
         options.exclude.extend(FUNCTORCH_TESTS)
@@ -1032,7 +1071,11 @@ def get_selected_tests(options):
 
         # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
         # This below code should be removed once this issue is solved
-        if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
+        if (
+            torch.version.cuda is not None and
+            LooseVersion(torch.version.cuda) >= "11.5" and
+            LooseVersion(torch.version.cuda) <= "11.6"
+        ):
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
@@ -1087,6 +1130,11 @@ def get_selected_tests(options):
     if not torch._C.has_lapack:
         selected_tests = exclude_tests(TESTS_REQUIRING_LAPACK, selected_tests,
                                        "PyTorch is built without LAPACK support.")
+
+    if options.distributed_tests:
+        # Run distributed tests with multiple backends across all shards, one per backend
+        selected_tests.extend(DISTRIBUTED_TESTS_WITH_MULTIPLE_BACKENDS.keys())
+        selected_tests.reverse()
 
     return selected_tests
 
