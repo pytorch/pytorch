@@ -2198,6 +2198,19 @@ class CommonTemplate:
             rtol=3e-05,
         )
 
+    def test_pow3(self):
+        # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
+        def fn(x):
+            z = torch.tensor(.123, device="cuda")
+            w = z + x
+            return torch.pow(w, .5)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        input = torch.rand(())
+        self.assertTrue(same(opt(input), fn(input)))
+
+
+
     def test_glu(self):
         def fn(x):
             return aten.glu(x, -1), aten.glu(x, 1), aten.glu(x, 2)
