@@ -702,9 +702,7 @@ class DistributedDataParallel(Module, Joinable):
             # Create a module with ReplicatedTensor without copying tensors. Avoid
             # registering '_replicated_tensor_module' as a submodule by directly
             # adding to self.__dict__.
-            from torch.nn.parallel._replicated_tensor_ddp_interop import (
-                _replicate_module,
-            )
+            from ._replicated_tensor_ddp_interop import _replicate_module
 
             self.__dict__["_replicated_tensor_module"] = _replicate_module(
                 self.module, self.process_group
