@@ -315,6 +315,16 @@ class TestMPS(TestCase):
         self.assertEqual(output_cpu, output_mps)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    def test_trace(self):
+        M_cpu = torch.randn(3,3)
+        M_mps = M_cpu.detach().clone().to("mps")
+
+        output_cpu = torch.trace(M_cpu)
+        output_mps = torch.trace(M_mps)
+
+        self.assertEqual(output_cpu, output_mps)
+        self.assertEqual(output_cpu.size(), output_mps.size())
+
     def test_addbmm(self):
         M_cpu = torch.randn(3, 5)
         batch1_cpu = torch.randn(10, 3, 4)

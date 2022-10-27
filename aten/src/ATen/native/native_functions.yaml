@@ -7758,6 +7758,7 @@
   dispatch:
     CPU: trace_cpu
     CUDA: trace_cuda
+    MPS: trace_mps_out
   autogen: trace.out
 
 - func: trace_backward(Tensor grad, SymInt[] sizes) -> Tensor
