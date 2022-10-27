@@ -7,6 +7,8 @@ import random
 
 import warnings
 warnings.filterwarnings("ignore")
+
+
 class CompositeMHA(torch.nn.Module):
     def __init__(self, num_heads, in_proj_weight, in_proj_bias, out_proj):
         super().__init__()
@@ -133,7 +135,8 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    headers = ["max_sequence_len", "num_heads", "embed_dimension", "pt_time", "cp_time", "speedup", "dtype", "enable_math", "enable_flash"]
+    headers = ["max_sequence_len", "num_heads", "embed_dimension", "pt_time",
+               "cp_time", "speedup", "dtype", "enable_math", "enable_flash"]
     writer = csv.DictWriter(sys.stdout, headers)
     writer.writeheader()
 
@@ -142,9 +145,12 @@ def main():
 
     for (enable_math, enable_flash) in [(False, True), (True, False), (True, True)]:
         for num_heads, max_seq_len in itertools.product([2, 4, 8, 16, 32], [64, 128, 256]):
-            run_timing(iters, batch_size, 1024, num_heads, max_seq_len, pad_percentage, enable_math, enable_flash, writer)
-            run_timing(iters, batch_size, 1024, num_heads, max_seq_len, pad_percentage, enable_math, enable_flash, writer)
-            run_timing(iters, batch_size, 1024, num_heads, max_seq_len, pad_percentage, enable_math, enable_flash, writer)
+            run_timing(iters, batch_size, 1024, num_heads, max_seq_len,
+                       pad_percentage, enable_math, enable_flash, writer)
+            run_timing(iters, batch_size, 1024, num_heads, max_seq_len,
+                       pad_percentage, enable_math, enable_flash, writer)
+            run_timing(iters, batch_size, 1024, num_heads, max_seq_len,
+                       pad_percentage, enable_math, enable_flash, writer)
 
 
 if __name__ == "__main__":
