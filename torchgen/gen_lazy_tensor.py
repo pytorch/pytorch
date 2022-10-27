@@ -23,7 +23,7 @@ import torchgen.dest as dest
 
 from torchgen.api.lazy import setValueT
 from torchgen.api.types import BaseCppType
-from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR, GenLazyNativeFuncDefinition
+from torchgen.dest.lazy_ir import GenLazyIR, GenLazyNativeFuncDefinition, GenTSLazyIR
 from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 
 from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
@@ -201,7 +201,9 @@ class default_args:
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
     shape_class: str = "torch::lazy::Shape"
     lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
-    native_func_definition_generator: Type[GenLazyNativeFuncDefinition] = GenLazyNativeFuncDefinition
+    native_func_definition_generator: Type[
+        GenLazyNativeFuncDefinition
+    ] = GenLazyNativeFuncDefinition
     backend_name: str = "TorchScript"
 
 
@@ -275,7 +277,9 @@ def main() -> None:
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:
         lazy_ir_generator = GenTSLazyIR
-    native_func_definition_generator: Type[GenLazyNativeFuncDefinition] = default_args.native_func_definition_generator
+    native_func_definition_generator: Type[
+        GenLazyNativeFuncDefinition
+    ] = default_args.native_func_definition_generator
 
     run_gen_lazy_tensor(
         aten_path,
@@ -308,7 +312,9 @@ def run_gen_lazy_tensor(
     shape_inference_hdr: str = default_args.shape_inference_hdr,
     shape_class: str = default_args.shape_class,
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
-    native_func_definition_generator: Type[GenLazyNativeFuncDefinition] = GenLazyNativeFuncDefinition,
+    native_func_definition_generator: Type[
+        GenLazyNativeFuncDefinition
+    ] = GenLazyNativeFuncDefinition,
     # build_in_tree is true for TS backend and affects include paths
     build_in_tree: bool = False,
     # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
