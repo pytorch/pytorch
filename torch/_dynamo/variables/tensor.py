@@ -19,6 +19,7 @@ if fake_tensors_available:
     )
     from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
+from torch._dispatch.python import enable_python_dispatcher
 import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._pytree import tree_map
@@ -115,16 +116,13 @@ def _get_fake_value(node, tx):
         if not is_lazy_module(nnmodule):
             nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
-    def context():
-        return tx.fake_mode
-
     if op == "call_module" and is_lazy_module(nnmodule):
         assert nnmodule is not None
         # In the case of a lazy module, we want to run
         # the pre-hooks which initialize it
         nnmodule(*args, **kwargs)
     try:
-        with context():
+        with tx.fake_mode, enable_python_dispatcher():
             return wrap_fake_exception(
                 lambda: _run_node(tx.output, node, args, kwargs, nnmodule)
             )
