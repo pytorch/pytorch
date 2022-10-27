@@ -35,9 +35,14 @@ if torch.distributed.rpc.is_available():
 
 from torch._utils import _get_device_index
 
-from ..modules import Module
-from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
-from .scatter_gather import gather, scatter_kwargs  # noqa: F401
+from torch.nn.modules import Module
+from torch.nn.parallel._replicated_tensor_ddp_utils import (
+    _ddp_with_replicated_tensor_enabled,
+)
+from torch.nn.parallel.scatter_gather import (
+    gather,
+    scatter_kwargs,
+)  # noqa: F401
 
 __all__ = ["DistributedDataParallel"]
 
