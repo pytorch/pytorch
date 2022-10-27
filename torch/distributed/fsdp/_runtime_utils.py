@@ -140,6 +140,101 @@ def _pre_forward(
 
 
 @no_type_check
+def _post_forward(
+    state: _State,
+    handles: List[FlatParamHandle],
+    reshard_fn: Callable,
+    module: nn.Module,
+    input: Any,
+    output: Any,
+) -> Any:
+    """
+    Runs the post-forward logic. This includes an opportunity to reshard
+    currently unsharded parameters such as those used in the current forward
+    and registering pre-backward hooks on the forward outputs.
+
+    Args:
+        handles (List[FlatParamHandle]): Handles giving the parameters used in
+            the current forward.
+        reshard_fn (Optional[Callable]): A callable to reshard any currently
+            unsharded parameters (e.g. from the current forward) or ``None`` to
+            not do any resharding.
+        module (nn.Module): Unused; expected by the hook signature.
+        input (Any): Unused; exepcted by the hook signature.
+        output (Any): Forward pass output; pre-backward hooks are registered on
+            the tensors that require gradients in this output.
+
+    Postcondition: Each ``FlatParameter`` 's data points to the sharded
+    flattened parameter.
+    """
+    state._exec_order_data.record_post_forward(handles)
+    if reshard_fn is not None:
+        reshard_fn()
+    # Register pre-backward hooks to unshard the flattened parameters
+    # for the gradient computation (if needed)
+    output = _register_pre_backward_hooks(state, output, handles)
+    state.training_state = TrainingState.IDLE
+    for handle in handles:
+        handle._training_state = HandleTrainingState.IDLE
+    return output
+
+
+@no_type_check
+def _pre_backward_hook(
+    state: _State,
+    _handles: List[FlatParamHandle],
+    *unused: Any,
+) -> Any:
+    """Prepares ``_handles`` 's ``FlatParameter`` s for gradient computation."""
+    _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
+    # Only run the pre-backward hook once per group of handles involved in the
+    # same module forward computation
+    if _handles_key and state._ran_pre_backward_hook.get(_handles_key, False):
+        return
+
+    with torch.autograd.profiler.record_function(
+        "FullyShardedDataParallel._pre_backward_hook"
+    ):
+        # Queue the post-backward callback once for the root FSDP instance to
+        # attach it to the outermost backward graph task so that it is called
+        # after all backward calls complete
+        if state._is_root and not state._post_backward_callback_queued:
+            state._queue_wait_for_post_backward()
+            # TODO: Use temporary hack to get all handles
+            all_handles = (
+                state._fsdp_handles(state)
+                if isinstance(state, nn.Module)  # `FullyShardedDataParallel`
+                else state._handles
+            )
+            _clear_grads_if_needed(all_handles)
+        elif _handles_key:
+            _assert_in_training_states(state, [TrainingState.IDLE])
+        state.training_state = TrainingState.FORWARD_BACKWARD
+        # Queueing the post-backward callback is the only logic that is not
+        # per-handle in the pre-backward hook, so we can return early here if
+        # there are no handles.
+        if not _handles_key:
+            return
+        for handle in _handles:
+            handle._training_state = HandleTrainingState.BACKWARD_PRE
+
+        # If the handles have been prefetched, this `_unshard()` simply
+        # switches to using the unsharded parameter
+        _unshard(
+            state, _handles, state._streams["unshard"], state._streams["pre_unshard"]
+        )
+        torch.cuda.current_stream().wait_stream(state._streams["unshard"])
+
+        # Set this to `False` to ensure that a mistargeted prefetch does not
+        # actually unshard these handles
+        state._needs_pre_backward_unshard[_handles_key] = False
+        _prefetch_handles(state, _handles_key)
+        for handle in _handles:
+            handle.prepare_gradient_for_backward()
+        state._ran_pre_backward_hook[_handles_key] = True
+
+
+@no_type_check
 @torch.no_grad()
 def _post_backward_hook(
     state: _State,
@@ -435,6 +530,44 @@ def _get_training_state(
         f"Expects uniform training state but got {training_states}",
     )
     return next(iter(training_states))
+
+
+@no_type_check
+def _register_pre_backward_hooks(
+    state: _State,
+    outputs: Any,
+    handles: List[FlatParamHandle],
+) -> None:
+    """
+    Registers pre-backward hooks on the tensors that require gradients in the
+    forward pass outputs ``outputs``, which were computed using the
+    ``FlatParameter`` s of ``handles``.
+
+    Returns:
+        Forward pass outputs with pre-backward hooks registered to tensors that
+        require gradients.
+    """
+    # If there is no gradient computation, then there is no need for
+    # pre-backward logic
+    if not torch.is_grad_enabled():
+        return outputs
+    if state._is_root:
+        state._post_backward_callback_queued = False  # only defined on the root
+
+    handles_key = tuple(handles)
+    if handles_key:
+        # Since these handles' `FlatParameter`s participated in a forward, we
+        # conservatively assume that they will be used in the backward
+        state._needs_pre_backward_unshard[handles_key] = False
+        state._ran_pre_backward_hook[handles_key] = False
+
+    def _register_hook(t: torch.Tensor) -> torch.Tensor:
+        if t.requires_grad:
+            t.register_hook(functools.partial(_pre_backward_hook, state, handles))
+            state._needs_pre_backward_unshard[handles_key] = True
+        return t
+
+    return _apply_to_tensors(_register_hook, outputs)
 
 
 def _register_post_backward_hooks(
