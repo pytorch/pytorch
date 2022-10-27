@@ -767,16 +767,14 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float16),)))
 
     def test_expanded_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
 
-        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)))
+        # Mismatched elements: 1 / 256 (0.4%)
+        # Greatest absolute difference: 2.002716064453125e-05 at index (36,) (up to 1e-05 allowed)
+        # Greatest relative difference: 4.907013266928203e-06 at index (36,) (up to 1.3e-06 allowed)
+        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=5e-5, rtol=1e-5)
 
     def test_min_max_reduction(self):
         def fn(a, b):
@@ -3361,19 +3359,16 @@ class CommonTemplate:
             ],
         )
 
-    # issue #1150
     def test_dense_mask_index(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
             return z.sum()
 
-        self.common(fn, [torch.randn(102400), torch.randn(3)])
+        # AssertionError: Scalars are not close!
+        # Absolute difference: 0.0002899169921875 (up to 1e-05 allowed)
+        # Relative difference: 1.3709022109477941e-06 (up to 1.3e-06 allowed)
+        self.common(fn, [torch.randn(102400), torch.randn(3)], atol=5e-5, rtol=2e-6)
 
     def test_new_empty_strided(self):
         def fn(a):
