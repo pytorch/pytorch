@@ -852,7 +852,7 @@ def _make_elementwise_binary_reference(
     has_out=True,
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
-    supports_both_python_scalar=False,
+    supports_two_python_scalars=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"),
@@ -873,7 +873,7 @@ def _make_elementwise_binary_reference(
             )
 
         if (
-            not supports_both_python_scalar
+            not supports_two_python_scalars
             and isinstance(a, Number)
             and isinstance(b, Number)
         ):
@@ -1183,7 +1183,7 @@ floor_divide = _make_elementwise_binary_reference(
     _floor_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.floor_divide,
-    supports_both_python_scalar=True,
+    supports_two_python_scalars=True,
 )
 
 
@@ -1458,7 +1458,7 @@ minimum = _make_elementwise_binary_reference(
 mul = _make_elementwise_binary_reference(
     prims.mul,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    supports_both_python_scalar=True,
+    supports_two_python_scalars=True,
 )
 
 # TODO: add docstring
@@ -1537,7 +1537,7 @@ true_divide = _make_elementwise_binary_reference(
     prims.div,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
-    supports_both_python_scalar=True,
+    supports_two_python_scalars=True,
 )
 
 
@@ -1581,7 +1581,7 @@ trunc_divide = _make_elementwise_binary_reference(
     _trunc_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # CompositeImplicitAutograd
-    supports_both_python_scalar=True,
+    supports_two_python_scalars=True,
 )
 
 #
