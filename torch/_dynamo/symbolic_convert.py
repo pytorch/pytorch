@@ -81,7 +81,7 @@ from .variables.misc import (
     WithExitFunctionVariable,
 )
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
+from .variables.tensor import DynamicShapeVariable, TensorVariable
 from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedVariable
 
@@ -129,7 +129,10 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)
                 self.jump(inst)
-        elif isinstance(value, TensorVariable) and self.should_compile_partial_graph():
+        elif (
+            isinstance(value, (TensorVariable, DynamicShapeVariable))
+            and self.should_compile_partial_graph()
+        ):
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
             self.output.compile_subgraph(
@@ -696,6 +699,7 @@ class InstructionTranslatorBase(object):
                 left,
                 (
                     TensorVariable,
+                    DynamicShapeVariable,
                     NNModuleVariable,
                     BaseListVariable,
                     UserDefinedVariable,
@@ -714,16 +718,6 @@ class InstructionTranslatorBase(object):
                 )
             )
         elif (
-            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
-        ) and op in supported_tensors:
-            self.push(
-                TensorVariable.create(
-                    self,
-                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
-                    **options,
-                )
-            )
-        elif (
             left.is_python_constant()
             and right.is_python_constant()
             and op in supported_any
@@ -734,6 +728,28 @@ class InstructionTranslatorBase(object):
                     supported_any[op](
                         left.as_python_constant(), right.as_python_constant()
                     ),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, TensorVariable) or isinstance(right, TensorVariable)
+        ) and op in supported_tensors:
+            self.push(
+                TensorVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    **options,
+                )
+            )
+        elif (
+            isinstance(left, DynamicShapeVariable)
+            or isinstance(right, DynamicShapeVariable)
+        ) and op in supported_tensors:
+            self.push(
+                DynamicShapeVariable.create(
+                    self,
+                    supported_tensors[op](left.as_proxy(), right.as_proxy()),
+                    dyn_shape=None,
                     **options,
                 )
             )

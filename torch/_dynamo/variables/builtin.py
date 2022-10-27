@@ -350,7 +350,13 @@ class BuiltinVariable(VariableTracker):
                 ),
                 **options,
             )
-
+        if any([isinstance(x, DynamicShapeVariable) for x in args]) or any(
+            [isinstance(x, DynamicShapeVariable) for x in kwargs.values()]
+        ):
+            proxy = tx.output.create_proxy(
+                "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
+            )
+            return DynamicShapeVariable.create(tx, proxy, None, **options)
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, a, b):
@@ -434,7 +440,13 @@ class BuiltinVariable(VariableTracker):
                 return variables.ConstantVariable(max(a.value, b.value))
             else:
                 return variables.ConstantVariable(min(a.value, b.value))
+        elif isinstance(a, DynamicShapeVariable) or isinstance(b, DynamicShapeVariable):
+            proxy = tx.output.create_proxy(
+                "call_function", self.fn, *proxy_args_kwargs([a, b], {})
+            )
+            return DynamicShapeVariable.create(tx, proxy, None)
         else:
+
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max

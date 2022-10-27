@@ -6,7 +6,7 @@ import inspect
 import re
 import types
 from abc import ABCMeta
-from typing import Any, List
+from typing import Any, List, Union
 
 import numpy as np
 from functorch.experimental.ops import PyOperator
@@ -187,6 +187,8 @@ class VariableBuilder:
 
     def _wrap(self, value):
         make_guards = self.make_guards
+        if istype(value, (torch.SymIntNode, torch.SymFloatNode)):
+            return self.wrap_sym(value)
         if istensor(value):
             return self.wrap_tensor(value)
         elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
@@ -488,6 +490,26 @@ class VariableBuilder:
                 if self.source.base.base.base.base.local_name in self.tx.f_locals.keys()
                 else True
             )
+        )
+
+    def wrap_sym(self, value: Union[torch.SymIntNode, torch.SymFloatNode]):
+        if not is_constant_source(self.get_source()):
+            self.tx.output.graphargs.append(GraphArg(self.get_source(), value, False))
+        if is_constant_source(self.get_source()):
+            return self.tx.output.register_attr_or_module(
+                value,
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                source=None,
+                dyn_shape=value
+                # shape Guards live their own rich life via shape_env
+            )
+        return DynamicShapeVariable.create(
+            tx=self.tx,
+            proxy=self.tx.output.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+            ),
+            dyn_shape=value
+            # shape Guards live their own rich life via shape_env
         )
 
     def wrap_tensor(self, value: torch.Tensor):

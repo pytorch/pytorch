@@ -8,6 +8,7 @@ try:
         test_functions,
         test_misc,
         test_modules,
+        test_no_fake_tensors,
         test_repros,
         test_subgraphs,
         test_unspec,
@@ -17,6 +18,7 @@ except ImportError:
     import test_functions
     import test_misc
     import test_modules
+    import test_no_fake_tensors
     import test_repros
     import test_subgraphs
     import test_unspec
@@ -102,6 +104,11 @@ unittest.expectedFailure(
     # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
 )
 
+unittest.expectedFailure(
+    DynamicShapesReproTests.test_maml_item_capture_dynamic_shapes
+    # Cannot call numel() on tensor with symbolic sizes/strides
+)
+
 # DynamicShapesMiscTests
 unittest.expectedFailure(
     DynamicShapesMiscTests.test_unsupported_fake_tensor_dynamic_shapes
@@ -135,11 +142,6 @@ unittest.expectedFailure(
     # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
 )
 
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_call_fn_with_non_const_inputs_safe_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
 
 # DynamicShapesExportTests
 unittest.expectedFailure(
@@ -157,16 +159,6 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesExportTests.test_export_with_stack_trace_dynamic_shapes
 )
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_permute_dupe_and_bypass_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_zeroes_in_new_shape_scalar_out_permute_dynamic_shapes
-)
-
 
 # DynamicShapesSubGraphTests
 unittest.expectedFailure(

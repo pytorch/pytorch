@@ -512,10 +512,14 @@ class DynamoGuardPrinter(StrPrinter):
             return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()[{tensor_ref.idx}]"
         return f"{id_to_name_map[tensor_ref.ref_id]}.{tensor_ref.kind}()"
 
-    def __init__(self, expr_to_tensor_ref, id_to_name_map):
+    def __init__(
+        self, expr_to_tensor_ref, id_to_name_map, shape_env, intermediary_symbols
+    ):
         super().__init__()
         self.expr_to_tensor_ref = expr_to_tensor_ref
         self.id_to_name_map = id_to_name_map
+        self.shape_env = shape_env
+        self.intermediary_symbols = intermediary_symbols
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.core.symbol.Symbol)
@@ -523,7 +527,18 @@ class DynamoGuardPrinter(StrPrinter):
             return "0"
         if expr == 1:
             return "1"
-        assert expr in self.expr_to_tensor_ref, f"Unknown expression {expr}"
+        if expr not in self.expr_to_tensor_ref:
+            # Please keep these 2 lines here for debugging
+            # if expr not in self.intermediary_symbols:
+            # log.warning(f"DROPPING GUARD SYMBOL: {expr}")
+            # This is an intermediary symbol with no tensor association, skip it
+            # If we did not make the symbol, it came from something dynamo does not know about
+            # So either: (A) skipping the guard is safe because something else (like module id check)
+            # Cover it. This happens for things like channel in/out on conv2d,
+            # Where changing those will break
+            # other guards - or (B) it is not and we made a mistake, hence the warning above.
+            return f"{self.shape_env.var_to_val[expr]}"
+        # f"Unknown expression {expr}"
         refs = self.expr_to_tensor_ref[expr]
         if len(refs) == 0:
             return super()._print_Symbol(expr)
@@ -607,7 +622,12 @@ class CheckFunctionManager:
             return None
 
         expr_to_tensor_ref = {}
-        guard_printer = DynamoGuardPrinter(expr_to_tensor_ref, id_to_name_map)
+        guard_printer = DynamoGuardPrinter(
+            expr_to_tensor_ref,
+            id_to_name_map,
+            self.output_graph.shape_env,
+            self.output_graph.intermediary_symbols,
+        )
 
         # tensor_check_names is the primary tensor association mechanism in dynamo.
         # All other guards installations are driven off of it, so these ones will too.
@@ -643,7 +663,6 @@ class CheckFunctionManager:
 
             if len(equality_candidates) > 1:
                 equality_expr = " == ".join(equality_candidates)
-                # breakpoint()
                 finished_expressions.append(equality_expr)
 
         # Redundant with code_parts, but allows us to wrap it with parens nicely.

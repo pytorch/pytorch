@@ -6,7 +6,7 @@ import operator
 import re
 import traceback
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.nn
 from torch import fx
@@ -30,6 +30,7 @@ from .utils import (
 from .variables.builder import VariableBuilder
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    DynamicShapeVariable,
     TensorVariable,
     UnspecializedNumpyVariable,
     UnspecializedPythonVariable,
@@ -107,6 +108,7 @@ class OutputGraph(fx.Tracer):
         self.unspec_variable_map = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
         self.tensor_id_to_sym_shape_ref = {}
+        self.intermediary_symbols = {}
 
     @property
     def output(self):
@@ -194,14 +196,16 @@ class OutputGraph(fx.Tracer):
                 name,
             )
 
-    def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
-        if is_dynamic_nn_module(mod):
-            return variables.UnspecializedNNModuleVariable(mod, **options)
+    def register_attr_or_module(
+        self, target: Union[torch.nn.Module, torch.Tensor, Any], *names, **options
+    ):
+        if is_dynamic_nn_module(target):
+            return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         options["guards"] = set(options.get("guards", []))
         source: Source = options.get("source", None)
-        if isinstance(mod, torch.Tensor):
+        if isinstance(target, torch.Tensor):
             if source:
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
@@ -209,28 +213,39 @@ class OutputGraph(fx.Tracer):
                 return TensorVariable.create(
                     self,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
-                    example_value=mod,
+                    example_value=target,
                     **options,
                 )
 
-        elif isinstance(mod, torch.nn.Module):
-            assert isinstance(mod, torch.nn.Module)
+        elif isinstance(target, torch.nn.Module):
+            assert isinstance(target, torch.nn.Module)
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
-                return NNModuleVariable(type(mod), module_key, **options)
+                return NNModuleVariable(type(target), module_key, **options)
+
+        elif isinstance(target, torch.SymIntNode):
+            self.intermediary_symbols.update({target.get_pyobj().expr: ""})
+
+            def wrap_name(module_key):
+                return DynamicShapeVariable.create(
+                    self,
+                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    dyn_shape=target,
+                    **options,
+                )
 
         else:
 
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
-                self.root_globals[module_key] = mod
+                self.root_globals[module_key] = target
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
-                    mod
+                    target
                 )
 
         for k, v in self.nn_modules.items():
-            if v is mod:
+            if v is target:
                 # it already exists
                 return wrap_name(k)
 
@@ -246,7 +261,7 @@ class OutputGraph(fx.Tracer):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                self.nn_modules[name] = mod
+                self.nn_modules[name] = target
                 return wrap_name(name)
             name = f"{base}_{i}"
 
