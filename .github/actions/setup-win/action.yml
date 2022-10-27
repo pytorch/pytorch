@@ -57,8 +57,7 @@ runs:
     - name: Setup Python3
       uses: actions/setup-python@v4
       with:
-        python-version: '3.x'
-        check-latest: false
+        python-version: "3.x"
         cache: pip
         cache-dependency-path: |
           **/requirements.txt

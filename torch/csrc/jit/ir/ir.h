@@ -7,10 +7,10 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/Export.h>
+#include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/schema_info.h>
 
-#include <ATen/Utils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/enum_type.h>
@@ -177,7 +177,7 @@ struct Wrap {
 };
 
 struct Value {
-  AT_DISALLOW_COPY_AND_ASSIGN(Value);
+  TH_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node* node_, size_t offset_);
 
  private:
@@ -310,7 +310,7 @@ struct Value {
 };
 
 struct TORCH_API Node {
-  AT_DISALLOW_COPY_AND_ASSIGN(Node);
+  TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
   friend struct Block;
   friend struct Value;
@@ -1015,7 +1015,7 @@ struct Block {
   friend struct Node;
   friend struct Graph;
 
-  AT_DISALLOW_COPY_AND_ASSIGN(Block);
+  TH_DISALLOW_COPY_AND_ASSIGN(Block);
   TORCH_API Block(Graph* graph_, Node* node_);
 
   at::ArrayRef<Value*> inputs() {
@@ -1164,7 +1164,7 @@ struct Block {
 };
 
 struct Graph {
-  AT_DISALLOW_COPY_AND_ASSIGN(Graph);
+  TH_DISALLOW_COPY_AND_ASSIGN(Graph);
   friend struct Node;
   friend struct Value;
   friend struct Block;

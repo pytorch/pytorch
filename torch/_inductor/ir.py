@@ -688,6 +688,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
+                    assert len(index) <= 1
                     return 0
 
             else:
@@ -3136,17 +3137,9 @@ class Convolution(ExternKernelAlloc):
             ):
                 valid_cudnn = True
 
-            # TODO - We cannot use strides to identify if a tensor is
-            # channels-last for 1x1 kernels. Incorrectly identifying the
-            # channels last configuration leads to a dramatic increase in
-            # compilation time. Unfortuantely, this breaks the channels last
-            # support.
-            # valid_device = x.get_device().type == "cpu" or (
-            #     x.get_device().type == "cuda" and valid_cudnn
-            # )
-
-            valid_device = x.get_device().type == "cpu"
-
+            valid_device = x.get_device().type == "cpu" or (
+                x.get_device().type == "cuda" and valid_cudnn
+            )
             if (
                 valid_device
                 and len(x.get_size()) == 4

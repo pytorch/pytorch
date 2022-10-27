@@ -712,7 +712,7 @@ class {module_name}(torch.nn.Module):
         return GraphModule(self, self.graph)
 
     @compatibility(is_backward_compatible=False)
-    def print_readable(self, print_output=True):
+    def print_readable(self):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
@@ -729,10 +729,7 @@ class {module_name}(torch.nn.Module):
         submodule_code = "\n".join(submodule_code_list)
         submodule_code = _addindent(submodule_code, 4)
 
-        output = module_code + submodule_code
-        if print_output:
-            print(module_code + submodule_code)
-        return output
+        print(module_code + submodule_code)
 
     def __str__(self) -> str:
         orig_str = super().__str__()

@@ -1340,8 +1340,7 @@ class InstructionTranslatorBase(object):
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True,
-                shape_env=output.shape_env,
+                throw_on_data_dependent_ops=True
             ) as fake_mode:
                 pass
             self._fake_mode = fake_mode
