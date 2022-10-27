@@ -72,7 +72,7 @@ def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                compute_nvfuser_symbolic_shape(arg.size()),
+                compute_symbolic_shape(arg.size()),
                 compute_contiguity(arg.size(), arg.stride()),
                 getnvFuserDtype(arg.dtype),
                 arg.is_cpu,  # type: ignore[attr-defined]
