@@ -331,8 +331,6 @@ def run_gen_lazy_tensor(
     lazy_tensor_ptr: str = "LazyTensorPtr",
     get_device_fn: str = "torch::lazy::GetBackendDevice",
 ) -> None:
-    print("WONJOO: at gen_lazy_tensor.py")
-
     lv_tokens = lazy_value_class.split("::")
     lv_class = lv_tokens[-1]
     lv_ns = "::".join(lv_tokens[:-1])
