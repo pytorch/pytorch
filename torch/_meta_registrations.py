@@ -1105,7 +1105,7 @@ def meta_relu_(self):
 
 @register_meta(aten.index_put.default)
 def meta_index_put(self, indices, values, accumulate=False):
-    return self.new_empty(self.size())
+    return torch.empty_like(self)
 
 
 @register_meta(aten.masked_fill_.Scalar)
@@ -1635,6 +1635,9 @@ def activate_meta():
     for op_overload, fn in meta_candidates.items():
         assert isinstance(op_overload, OpOverload)
 
+        # register python meta kernel to python dispatcher
+        op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
+
         if torch._C._dispatch_has_kernel_for_dispatch_key(
             op_overload.name(), "CompositeImplicitAutograd"
         ):
@@ -1671,7 +1674,7 @@ def activate_meta():
             _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
             # register python meta kernel to python dispatcher
-            op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
+            # op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
             # add python meta function to active_meta_table
             active_meta_table[op_overload] = fn

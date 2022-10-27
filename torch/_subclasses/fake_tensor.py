@@ -220,7 +220,7 @@ class FakeTensorConverter(object):
             warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
             grad_not_none = t.grad is not None
         if grad_not_none:
-            out.grad = self.from_real_tensor(fake_mode, t.grad)
+            out.grad = self.from_real_tensor(fake_mode, t.grad, shape_env=shape_env)
         self.set_tensor_memo(t, out)
         return out
 
@@ -739,11 +739,15 @@ class FakeTensorMode(TorchDispatchMode):
             if r is not NotImplemented:
                 return r
 
+        from torch._meta_registrations import active_meta_table
+
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
+            from torch._decomp import meta_table as meta_table
+
             with no_dispatch():
                 if func == aten.size.default:
                     sys.stderr.write(
@@ -752,8 +756,6 @@ class FakeTensorMode(TorchDispatchMode):
                     )
                     # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
                     return None
-
-            from torch._meta_registrations import active_meta_table
 
             with self:
                 if func in active_meta_table:
