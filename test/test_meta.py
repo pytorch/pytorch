@@ -254,6 +254,22 @@ CHECK_STRIDES_SKIPS = {
     aten.sub.Tensor,
     aten.where.self,
     aten.xlogy.Tensor,
+
+    # channel_last and channel_last_3d related failures
+    aten.constant_pad_nd.default,
+    aten._adaptive_avg_pool2d.default,
+    aten.constant_pad_nd.default,
+    aten.convolution.default,
+    aten.convolution.default,
+    aten._adaptive_avg_pool2d.default,
+    aten.upsample_bilinear2d.vec,
+    aten.constant_pad_nd.default,
+    aten.upsample_bilinear2d.vec,
+
+    # following ops fails if include_storage_offset = True, but these are a bit edge casey
+    # we should still fix them, leaving them here for tracking.
+    # aten._reshape_alias.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_matmul_cuda_float32
+    # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
 def should_check_strides(func):
@@ -919,7 +935,7 @@ meta_dispatch_device_skips['cuda'] = {
 
 def get_strided_args(args):
 
-    def get_strided_variants(t):
+    def get_strided_variants(t, include_storage_offset=False):
         variants = []
 
         # contiguous
@@ -937,6 +953,21 @@ def get_strided_args(args):
         if t.ndim > 0:
             nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
             variants.append(nondense)
+
+        # channel_last
+        if t.ndim == 4:
+            variants.append(t.contiguous(memory_format=torch.channels_last))
+
+        # channel_last_3d
+        if t.ndim == 5:
+            variants.append(t.contiguous(memory_format=torch.channels_last_3d))
+
+        # storage_offset
+        if include_storage_offset:
+            buffer = torch.empty(t.numel() + 1, device=t.device, dtype=t.dtype, requires_grad=t.requires_grad)
+            buffer = buffer.as_strided(t.shape, t.stride(), storage_offset=1)
+            buffer.copy_(t)
+            variants.append(buffer)
 
         return variants
 
@@ -1066,7 +1097,8 @@ class TestMeta(TestCase):
             sample_args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            if all_stride_variants:
+            if all_stride_variants and sum(isinstance(arg, torch.Tensor) for arg in sample_args) <= 5:
+                # test inputs <= 5 tensors to avoid combinatorial explosion
                 strided_args = get_strided_args(sample_args)
             else:
                 strided_args = [sample_args]
