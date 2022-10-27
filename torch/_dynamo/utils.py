@@ -25,6 +25,7 @@ from functools import lru_cache
 from typing import Any, Dict
 
 import numpy as np
+import sympy
 
 import torch
 from torch import fx
@@ -666,6 +667,43 @@ try:
         UnsupportedFakeTensorException,
     )
 
+    def make_fake_tensor(e, fake_mode, tx=None):
+        fake_tensor = fake_mode.from_tensor(
+            e, static_shapes=config.dynamic_shapes is False
+        )
+        if tx is not None:
+            from torch._dynamo.guards import TensorReference
+
+            def _record(tensor_ref):
+                if tensor_ref.ref_id not in tx.output.tensor_id_to_sym_shape_ref:
+                    tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id] = set()
+                tx.output.tensor_id_to_sym_shape_ref[tensor_ref.ref_id].add(tensor_ref)
+
+            def _extract(symbol):
+                if isinstance(symbol, int):
+                    return None
+                sym_expr = symbol.get_pyobj().expr
+                if not isinstance(sym_expr, sympy.Symbol):
+                    return None
+                return sym_expr
+
+            def _record_ref(e, index, symbol, kind):
+                sym_expr = _extract(symbol)
+                if sym_expr:
+                    tensor_ref = TensorReference(id(e), kind, index, sym_expr)
+                    _record(tensor_ref)
+
+            for index, symbol in enumerate(fake_tensor.size()):
+                _record_ref(e, index, symbol, "size")
+
+            for index, symbol in enumerate(fake_tensor.stride()):
+                _record_ref(e, index, symbol, "stride")
+
+            offset = fake_tensor.storage_offset()
+            _record_ref(e, None, offset, "storage_offset")
+
+        return fake_tensor
+
     def wrap_fake_exception(fn):
         try:
             return fn()
@@ -678,7 +716,13 @@ try:
 
     def wrap_to_fake_tensor(e, fake_mode):
         if type(e) in (torch.Tensor, torch.nn.Parameter):
-            return wrap_fake_exception(lambda: fake_mode.from_tensor(e))
+            return wrap_fake_exception(lambda: make_fake_tensor(e, fake_mode))
+        else:
+            return e
+
+    def wrap_to_fake_tensor_and_record(e, tx):
+        if type(e) in (torch.Tensor, torch.nn.Parameter):
+            return wrap_fake_exception(lambda: make_fake_tensor(e, tx.fake_mode, tx))
         else:
             return e
 
@@ -931,35 +975,13 @@ class CompileProfiler:
         return rpt
 
 
-class DebugDir:
-    def __init__(self):
-        self.num_setup_calls = 0
-        self.debug_path = None
-
-    def setup(self):
-        assert self.num_setup_calls >= 0
-        if self.num_setup_calls == 0:
-            debug_root = config.debug_dir_root
-            dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
-            self.debug_path = os.path.join(debug_root, dir_name)
-
-        self.num_setup_calls += 1
-
-    def clear(self):
-        assert self.num_setup_calls >= 0
-        if self.num_setup_calls == 1:
-            self.debug_path = None
-
-        self.num_setup_calls -= 1
-        assert self.num_setup_calls >= 0
-
-    def get(self):
-        assert self.debug_path is not None
-        return self.debug_path
-
-
-debug_dir = DebugDir()
+# return same dir unless user changes config between calls
+@functools.lru_cache(None)
+def _get_debug_dir(root_dir):
+    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    return os.path.join(root_dir, dir_name)
 
 
 def get_debug_dir():
-    return debug_dir.get()
+    debug_root = config.debug_dir_root
+    return _get_debug_dir(debug_root)
