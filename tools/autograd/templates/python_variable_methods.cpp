@@ -240,12 +240,7 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    if (jit::tracer::isTracing()) {
      return wrap(jit::tracer::getNumelOf(self_));
    } else {
-     auto si = self_.sym_numel();
-     if (si.is_symbolic()) {
-       return py::cast(si.toSymIntNodeImpl()).release().ptr();
-     } else {
-       return THPUtils_packInt64(si.as_int_unchecked());
-     }
+     return py::cast(self_.sym_numel()).release().ptr();
    }
    END_HANDLE_TH_ERRORS
 }
