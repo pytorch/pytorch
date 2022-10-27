@@ -199,7 +199,7 @@ NestedTensor and any constraints they have.
    :func:`torch.add`; "Supports elementwise addition of two nested tensors.
    Supports addition of a scalar to a nested tensor."
    :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors.
-   Supports multipication of a nested tensor by a scalar."
+   Supports multiplication of a nested tensor by a scalar."
    :func:`torch.select`; "Supports selecting along ``dim=0`` only (analogously ``nt[i]``)."
    :func:`torch.clone`; "Behavior is the same as on regular tensors."
    :func:`torch.detach`; "Behavior is the same as on regular tensors."
