@@ -153,10 +153,6 @@ dynamo_import = __name__.replace(".config", "")
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = dynamo_import.replace("dynamo", "inductor")
 
-# If true, error with a better message if we symbolically trace over a
-# dynamo-optimized function. If false, silently suppress dynamo.
-error_on_nested_fx_trace = True
-
 # root folder of the project
 if "torch." in dynamo_import:
     base_dir = dirname(dirname(dirname(abspath(__file__))))
