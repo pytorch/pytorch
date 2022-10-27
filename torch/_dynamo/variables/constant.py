@@ -82,16 +82,6 @@ class ConstantVariable(VariableTracker):
             ).call_method(tx, name, args, kwargs)
 
         if any([isinstance(x, DynamicShapeVariable) for x in args]):
-            if isinstance(
-                self.value, int
-            ):  # TODO(voz): support other kinds of symbolics
-                sym = tx.output.shape_env.create_symintnode(
-                    tx.output.shape_env.create_symbol(self.value)
-                )
-                dyn_shape = tx.output.register_attr_or_module(
-                    sym, f"sym_shape_{self.value}", source=self.source
-                )
-                return dyn_shape.call_method(tx, name, args, kwargs)
             # Unfortunate constant
             return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
         try:
