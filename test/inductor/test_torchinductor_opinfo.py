@@ -731,7 +731,9 @@ def report_percent_passing_ops():
     total = len(op_db)
     all_skips = [
         inductor_skips,
+        inductor_all_skips,
         inductor_expected_failures_single_sample,
+        inductor_expected_failures_all_sample,
         inductor_should_fail_with_exception,
     ]
     excluded_cuda_keys = list(
