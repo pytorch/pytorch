@@ -16,7 +16,12 @@ Summary of source tree:
 
 - [Introduction](#introduction)
   - [Motivation](#motivation)
+    - [Diagnostics as documentation](#diagnostics-as-documentation)
+    - [Different context and background](#different-context-and-background)
+    - [Machine parsable](#machine-parsable)
   - [Design](#design)
+    - [Adopting SARIF for diagnostic structure](#adopting-sarif-for-diagnostic-structure)
+    - [Single source of truth for diagnostic rules](#single-source-of-truth-for-diagnostic-rules)
 - [Internal Details](#internal-details)
   - [Rules](#rules)
   - [Infrastructure](#infrastructure)
