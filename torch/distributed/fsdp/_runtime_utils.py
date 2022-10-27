@@ -1,4 +1,5 @@
 import functools
+import warnings
 from typing import Any, Callable, List, no_type_check, Optional, Tuple
 
 import torch
@@ -23,6 +24,97 @@ from torch.distributed.fsdp.flat_param import (
     HandleTrainingState,
 )
 from torch.distributed.utils import _to_kwargs
+
+
+@no_type_check
+def _lazy_init(
+    state: _State,
+    root_module: nn.Module,
+) -> _State:
+    """
+    Performs initialization lazily, typically right before the first forward
+    pass. The laziness is needed to ensure that the parameter device/dtype and
+    the FSDP hierarchy have finalized. This method's actual logic only runs on
+    the root FSDP instance, which performs initialization for all non-root FSDP
+    instances to avoid partial initialization.
+
+    For the non-composable code path, ``state`` and ``root_module`` should be
+    the same, namely the FSDP instance itself.
+    """
+    if state._is_root is not None:
+        return  # no-op: already lazily initialized
+    if not torch.cuda.is_available():
+        # Allow the FSDP constructor to run even without CUDA but check this
+        # once we start real execution
+        raise RuntimeError("FSDP does not support CPU only execution")
+    # The following logic is only run on the root FSDP instance since it will
+    # set `_is_root=False` for the non-root instances
+    state._is_root = True
+    _assert_in_training_states(state, [TrainingState.IDLE])
+    _init_streams(state)
+    buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(state, root_module)
+    _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
+    for handle in state._handles:
+        handle.init_flat_param_attributes()
+    state._exec_order_data.init(state, state.process_group)
+    if _is_composable(state):
+        # Return early since there is no need to share data structures
+        return state
+    # Initialize non-root FSDP instances and share attributes from the root to
+    # non-root instances
+    assert state is root_module
+    inconsistent_limit_all_gathers = False
+    for fsdp_module in state.fsdp_modules(root_module):
+        if fsdp_module is root_module:
+            continue
+        # Relax the assert for non-root FSDP instances in case the nested
+        # initialized module is wrapped again in FSDP later (e.g. after
+        # training to run inference)
+        p_assert(
+            fsdp_module._is_root is None or not fsdp_module._is_root,
+            "Non-root FSDP instance's `_is_root` should not have been "
+            "set yet or should have been set to `False`",
+        )
+        fsdp_module._is_root = False
+        fsdp_module._streams = state._streams
+        fsdp_module._exec_order_data = state._exec_order_data
+        if fsdp_module.limit_all_gathers != state.limit_all_gathers:
+            # Prefer the root's value
+            inconsistent_limit_all_gathers = True
+            fsdp_module.limit_all_gathers = state.limit_all_gathers
+        fsdp_module._free_event_queue = state._free_event_queue
+        fsdp_module._handles_prefetched = state._handles_prefetched
+        fsdp_module._needs_pre_backward_unshard = state._needs_pre_backward_unshard
+        for handle in fsdp_module._handles:
+            handle.init_flat_param_attributes()
+    if inconsistent_limit_all_gathers:
+        warnings.warn(
+            "Found inconsistent `limit_all_gathers` values across FSDP "
+            f"instances on rank {state.rank}. Using the root FSDP's value of "
+            f"{state.limit_all_gathers} for all instances."
+        )
+    return state
+
+
+@no_type_check
+def _init_streams(
+    state: _State,
+) -> _State:
+    """
+    Initializes CUDA streams for overlapping communication, computation, and
+    data transfers. The streams should be shared across FSDP instances.
+    """
+    assert state._is_root
+    assert torch.cuda.is_available()
+    # Stream for unshard logic, including allocating the all-gather destination
+    # tensors and the all-gathers themselves.
+    state._streams["unshard"] = torch.cuda.Stream()
+    # Stream for overlapping gradient reduction with the backward pass gradient
+    # computation.
+    state._streams["post_backward"] = torch.cuda.Stream()
+    # Stream for pre-unshard logic, namely allocations and writes for CPU
+    # offloading (H2D copy) and mixed precision (low precision cast).
+    state._streams["pre_unshard"] = torch.cuda.Stream()
 
 
 @no_type_check
