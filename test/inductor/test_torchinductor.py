@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import itertools
 import os
 import random
 import sys
@@ -19,6 +20,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -54,6 +56,9 @@ except (ImportError, AssertionError) as e:
 
 HAS_CPU = False
 try:
+    if IS_FBCODE:
+        raise torch._inductor.exc.CppCompileError
+
     from subprocess import CalledProcessError
 
     from torch._inductor.codecache import CppCodeCache
@@ -410,13 +415,6 @@ class SweepInputs2:
                 cls.gen_template(name1, name2)
 
 
-class SweepInputsCpuTest(SweepInputs2, TestCase):
-    gen = InputGen(10, "cpu")
-
-
-SweepInputsCpuTest.populate()
-
-
 class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
@@ -720,6 +718,17 @@ class CommonTemplate:
             return (a.sum(), a.max(), a.min(), a.argmax())
 
         self.common(fn, (torch.full((4,), float("-inf")),))
+
+    def test_reduction4(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
+        def fn(a):
+            return (a.argmax(-1), a.argmin(-1))
+
+        inputs = (torch.ones(128), torch.ones(4, 4, 1))
+        for i in inputs:
+            self.common(fn, (i,))
 
     @patch.object(config, "dynamic_shapes", False)
     def test_unroll_small_reduction(self):
@@ -1283,6 +1292,65 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    # For gpu path, there has a accurcy issue,
+    # see https://github.com/pytorch/pytorch/issues/87745.
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_unary(self):
+        def _unary_list():
+            unary_list = [
+                torch.nn.ReLU(),
+                torch.nn.Sigmoid(),
+                torch.nn.Tanh(),
+                torch.nn.Hardswish(),
+                torch.nn.LeakyReLU(0.1, inplace=False),
+                torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
+                torch.nn.GELU(approximate="none"),
+                torch.nn.GELU(approximate="tanh"),
+            ]
+            return unary_list
+
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        options = itertools.product(
+            _unary_list(),
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            test_memory_format,
+        )
+
+        for (
+            unary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 112, 112)
+            mod = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                unary_fn,
+            ).eval()
+
+            # TODO: add bf16 test for cpu path?
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            self.common(
+                mod,
+                (v,),
+            )
 
     def test_gather1(self):
         def fn(a, b):
@@ -4015,6 +4083,11 @@ class CommonTemplate:
 
 
 if HAS_CPU:
+
+    class SweepInputsCpuTest(SweepInputs2, TestCase):
+        gen = InputGen(10, "cpu")
+
+    SweepInputsCpuTest.populate()
 
     class CpuTests(TestCase):
         common = check_model

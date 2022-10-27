@@ -1,37 +1,50 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import sys
 from copy import deepcopy
 from functools import partial
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel as FSDP,
-    CPUOffload,
-)
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     offload_wrapper,
 )
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    CPUOffload,
+    FullyShardedDataParallel as FSDP,
 )
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-    _maybe_wrap_fsdp,
-)
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest
 from torch.testing._internal.common_utils import (
-    run_tests,
-    parametrize,
     instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
 
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
+if TEST_WITH_DEV_DBG_ASAN:
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+
 _save_on_cpu_called = False
+
+
 def get_patched_save_on_cpu():
-    orig_save_on_cpu = torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
+    orig_save_on_cpu = (
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
+    )
 
     def patched_save_on_cpu(*args, **kwargs):
         global _save_on_cpu_called
@@ -40,14 +53,22 @@ def get_patched_save_on_cpu():
 
     return patched_save_on_cpu
 
+
 @contextlib.contextmanager
 def patch_save_on_cpu(new_save_on_cpu):
-    orig_save_on_cpu = torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
-    torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = new_save_on_cpu
+    orig_save_on_cpu = (
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
+    )
+    torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = (
+        new_save_on_cpu
+    )
     try:
         yield
     finally:
-        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = orig_save_on_cpu
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = (
+            orig_save_on_cpu
+        )
+
 
 class TestFSDPCheckpoint(FSDPTest):
     class SequentialModule(nn.Module):
@@ -127,7 +148,8 @@ class TestFSDPCheckpoint(FSDPTest):
         fsdp_kwargs = {"cpu_offload": cpu_offload, "use_orig_params": use_orig_params}
         ckpt_sequential_wrapped_fsdp = wrapper_to_use(
             TestFSDPCheckpoint.SequentialModule(
-                wrap_fsdp=True, **fsdp_kwargs,
+                wrap_fsdp=True,
+                **fsdp_kwargs,
             ),
         )
         # Test FSDP(checkpoint(layer1)), FSDP(checkpoint(layer2)), ....
@@ -139,7 +161,8 @@ class TestFSDPCheckpoint(FSDPTest):
         )
 
         baseline = TestFSDPCheckpoint.SequentialModule(
-            wrap_fsdp=True, **fsdp_kwargs,
+            wrap_fsdp=True,
+            **fsdp_kwargs,
         )
 
         # note that reentrant-based checkpointing requires inputs to have grad
@@ -207,7 +230,9 @@ class TestFSDPCheckpoint(FSDPTest):
             # note that reentrant-based checkpointing requires inputs to have grad
             # flag set.
 
-            inp = torch.randn(10, 3, device=torch.cuda.current_device(), requires_grad=True)
+            inp = torch.randn(
+                10, 3, device=torch.cuda.current_device(), requires_grad=True
+            )
 
             models = [
                 fsdp_only_seq,
@@ -221,7 +246,9 @@ class TestFSDPCheckpoint(FSDPTest):
                 losses = []
                 outputs = []
                 for m in models:
-                    check_offload = m != fsdp_only_seq and i == 0 and offload_activations
+                    check_offload = (
+                        m != fsdp_only_seq and i == 0 and offload_activations
+                    )
                     if m == fsdp_call_checkpoint:
                         # _save_on_cpu should not be called yet
                         self.assertFalse(_save_on_cpu_called)
@@ -248,6 +275,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 self._verify_parity(losses, outputs, models)
 
         dist.barrier()
+
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
 

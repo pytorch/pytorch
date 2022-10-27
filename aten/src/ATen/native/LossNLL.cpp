@@ -656,7 +656,7 @@ Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
-  return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
+  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, ignore_index));
 }
 
 Tensor nll_loss_nd_symint(
