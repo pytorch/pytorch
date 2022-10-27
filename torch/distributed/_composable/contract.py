@@ -15,6 +15,10 @@ class _StateKey:
         return True if isinstance(other, str) else id(self) < id(other)
 
 
+class _State:
+    pass
+
+
 state_key = _StateKey()
 
 
@@ -24,6 +28,11 @@ def contract(func):
     argument of the function must be an :class:`nn.Module` instance. The
     decorator verifies that the wrapped function does not modify parameter,
     buffer or sub-module fully-qualified names (FQN).
+
+    When a function ``func`` is decorated by ``@contract``, a
+    ``.state(module: nn.Module)`` method will be installed to the decorated
+    function. Then you can retrieve and modify the state on a module by calling
+    ``func.state(module)``.
 
     Example::
         >>> import torch.nn as nn
@@ -38,12 +47,14 @@ def contract(func):
         >>>         return self.l2(self.l1(x))
         >>>
         >>> @contract
-        >>> def my_noop_feature(module: nn.Module) -> nn.Module:
+        >>> def my_feature(module: nn.Module) -> nn.Module:
+        >>>     my_feature.state(module).some_state = "any value"
         >>>     return module
         >>>
         >>> model = MyModel()
-        >>> my_noop_feature(model.l1)
-        >>> my_noop_feature(model.l2)
+        >>> my_feature(model.l1)
+        >>> assert my_feature.state(model.l1).some_state == "any value"
+        >>> my_feature(model.l2)
         >>> model(torch.randn(2, 10)).sum().backward()
     """
 
@@ -60,7 +71,7 @@ def contract(func):
             f"module once. {func} has already been applied to the following "
             f"module.\n{module}"
         )
-        all_state.setdefault(func, {})
+        all_state.setdefault(func, _State())
 
         orig_named_params = OrderedDict(module.named_parameters())
         orig_named_buffers = OrderedDict(
@@ -126,13 +137,9 @@ def contract(func):
 
         return updated
 
-    def get_state(module: nn.Module, key: Any) -> Any:
-        return get_all_state(module).get(func).get(key, None)
+    def get_state(module: nn.Module) -> _State:
+        return get_all_state(module).get(func)
 
-    def set_state(module: nn.Module, key: Any, value: Any) -> None:
-        get_all_state(module).setdefault(func, {})[key] = value
-
-    wrapper.get_state = get_state
-    wrapper.set_state = set_state
+    wrapper.state = get_state
 
     return wrapper
