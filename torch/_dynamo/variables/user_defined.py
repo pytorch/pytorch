@@ -68,7 +68,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return variables.ListVariable(subs_as_vars, **options)
 
-        return super().call_method(tx, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
