@@ -194,34 +194,3 @@ TEST(TestScalar, TestFormatting) {
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
   ASSERT_EQ("4", format(Scalar(Scalar(4).toSymInt())));
 }
-
-TEST(TestSymInt, Basic) {
-  Scalar foo;
-  auto a_impl = c10::make_intrusive<c10::SymIntNodeImpl>();
-  foo = Scalar(a_impl->toSymInt());
-  ASSERT_EQ(a_impl.use_count(), 2);
-  Scalar bar{foo};
-  ASSERT_EQ(a_impl.use_count(), 3);
-  auto baz = bar;
-  ASSERT_EQ(a_impl.use_count(), 4);
-  auto foo2 = std::move(bar);
-  ASSERT_EQ(a_impl.use_count(), 4);
-  ASSERT_TRUE(foo2.isSymInt());
-  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-  ASSERT_TRUE(bar.isIntegral(false));
-  foo2 = SymInt(4);
-  ASSERT_FALSE(foo2.isSymInt());
-  ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
-  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
-  foo2 = foo2;
-  ASSERT_FALSE(foo2.isSymInt());
-  ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
-
-  ASSERT_EQ(a_impl.use_count(), 3);
-
-  ASSERT_THROW(foo.to<double>(), c10::Error);
-
-  Scalar int_s = 3;
-  TORCH_CHECK(int_s.toSymInt().expect_int(), 3);
-
-}

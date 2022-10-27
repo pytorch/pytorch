@@ -562,7 +562,7 @@ public:
   IValue(c10::SymInt i) {
     if (i.is_symbolic()) {
       tag = Tag::SymInt;
-      payload.u.as_intrusive_ptr = i.toSymIntNodeImpl().release();
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
     } else {
       tag = Tag::Int;
       payload.u.as_int = i.as_int_unchecked();
@@ -578,7 +578,7 @@ public:
   IValue(c10::SymFloat i) {
     if (i.is_symbolic()) {
       tag = Tag::SymFloat;
-      payload.u.as_intrusive_ptr = i.toSymFloatNodeImpl().release();
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
     } else {
       tag = Tag::Double;
       payload.u.as_double = i.as_float_unchecked();
@@ -812,10 +812,10 @@ public:
     // for both SymFloat and double
     if (s.isSymInt()) {
       tag = Tag::SymInt;
-      payload.u.as_intrusive_ptr = s.toSymInt().toSymIntNodeImpl().release();
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymNodeImpl().release();
     } else if (s.isSymFloat()) {
       tag = Tag::SymFloat;
-      payload.u.as_intrusive_ptr = s.toSymFloat().toSymFloatNodeImpl().release();
+      payload.u.as_intrusive_ptr = s.toSymFloat().toSymNodeImpl().release();
     } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();

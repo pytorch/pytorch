@@ -439,7 +439,7 @@ command = [
     """--error-description=\
         This line has an isinstance call that directly refers to \
         int or float.  This is error-prone because you may also \
-        have wanted to allow SymIntNode or SymFloatNode in your test.  \
+        have wanted to allow SymInt or SymFloat in your test.  \
         To suppress this lint, use an appropriate type alias defined \
         in torch._prims_common; use IntLike/FloatLike when you would accept \
         both regular and symbolic numbers, Dim for ints representing \
