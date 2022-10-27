@@ -39,10 +39,10 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
+    _init_buffer_state,
     _init_core_state,
-    _init_ignored_modules_and_params,
-    _init_module_and_device_state,
-    _init_param_handle_from_params,
+    _init_ignored_module_states,
+    _init_param_handle_from_module,
     _init_prefetching_state,
     _init_process_group_state,
     _init_runtime_state,
@@ -457,8 +457,7 @@ class FullyShardedDataParallel(nn.Module):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
 
-        _init_ignored_modules_and_params(self, module, ignored_modules)
-
+        _init_ignored_module_states(self, module, ignored_modules)
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
                 "module": module,
@@ -501,26 +500,26 @@ class FullyShardedDataParallel(nn.Module):
             backward_prefetch_limit,
             forward_prefetch_limit,
         )
-        _init_module_and_device_state(
+        _init_runtime_state(self)
+        _init_prefetching_state(self)
+        _init_buffer_state(self, module)
+        _init_param_handle_from_module(
             self,
             module,
             device_id,
             param_init_fn,
             sync_module_states,
+            FullyShardedDataParallel,
         )
-        _init_prefetching_state(self)
-        _init_runtime_state(self)
         self._fsdp_wrapped_module = module
-        _init_param_handle_from_params(self, self._managed_params, module)
         if not use_orig_params:
             _check_orig_params_flattened(self, self._ignored_params)
             self._register_flat_param()
 
-        # TODO (revisit): I explicitly delete these because we do want to keep
-        # references to these from FSDP. I only added them to the state for
+        # TODO (revisit): I explicitly delete this because we do want to keep
+        # references to these from FSDP. I only added it to the state for
         # convenience in this refactoring.
         delattr(self, "_ignored_params")
-        delattr(self, "_managed_params")
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks

@@ -1,8 +1,9 @@
 import collections
 import functools
 import warnings
-from typing import Any, Callable, Deque, Dict, List, Set
+from typing import Any, Callable, Deque, Dict, List, Set, Tuple
 
+import torch
 import torch.nn as nn
 from torch.distributed.fsdp._utils import (
     _contains_batchnorm,
@@ -57,19 +58,29 @@ def _auto_wrap(
     _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
 
 
-def _get_params_per_wrapped_module(
+def _get_submodule_to_states(
     root_module: nn.Module,
     auto_wrap_policy: Callable,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
-) -> List[List[nn.Parameter]]:
+) -> Dict[
+    nn.Module, Tuple[List[nn.Parameter], List[torch.Tensor], List[str], List[str]]
+]:
     """
-    Returns the parameters per wrapped module according to the given auto wrap
-    policy and ignored modules/parameters without actually performing any
-    explicit module wrapping.
+    Returns a mapping from submodule to its parameters, buffers, parameter
+    names, and buffer names, where each entry logically represents a wrapping
+    according to the given auto wrap policy and ignored modules/parameters.
+    However, this method does not actually perform any explicit module
+    wrapping.
+
+    The mapping values are aligned to module tree boundaries, meaning that they
+    are exactly the parameters of the subtree rooted at the corresponding
+    submodule key. Sibling submodules cannot be grouped together. Each
+    parameter and each buffer in the module tree appears exactly once in the
+    returned dict. The returned dict is ordered by increasing tree depth.
     """
     # Record the modules to wrap without actually wrapping
-    wrapped_modules: List[nn.Module] = []
+    wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
     wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
     _recursive_wrap(
         root_module,
@@ -83,8 +94,9 @@ def _get_params_per_wrapped_module(
     if root_module not in wrapped_modules:
         wrapped_modules.append(root_module)
 
-    params_per_wrapped_module: List[List[nn.Parameter]] = []
+    submodule_to_states = collections.OrderedDict()
     visited_params = set()
+    visited_buffers = set()
     # Constructing `wrapped_modules` with `_recursive_wrap()` orders the
     # modules following a post-order traversal. We record parameters in
     # `params_per_wrapped_module` using a reverse post-ordering, which is a
@@ -92,24 +104,33 @@ def _get_params_per_wrapped_module(
     # grouped with its lowest common ancestor module's parameters.
     wrapped_modules.reverse()
     wrapped_modules_set = set(wrapped_modules)
-    for module_to_wrap in wrapped_modules:
+    for submodule in wrapped_modules:
         # Perform a BFS from `module_to_wrap` and record all untraversed
         # parameters that are not already associated with another module in
         # `wrapped_modules`.
-        queue: Deque[nn.Module] = collections.deque()
-        queue.append(module_to_wrap)
+        queue: Deque[Tuple[nn.Module, str]] = collections.deque()
+        queue.append((submodule, ""))
         params: List[nn.Parameter] = []
+        param_names: List[str] = []
+        buffers: List[torch.Tensor] = []
+        buffer_names: List[str] = []
         while len(queue) > 0:
-            module = queue.popleft()
-            for param in module.parameters(recurse=False):
+            module, prefix = queue.popleft()
+            for param_name, param in module.named_parameters(recurse=False):
                 if param not in visited_params:
                     params.append(param)
                     visited_params.add(param)
-            for child_module in module.children():
+                    param_names.append(prefix + param_name)
+            for buffer_name, buffer in module.named_buffers(recurse=False):
+                if buffer not in visited_buffers:
+                    buffers.append(buffer)
+                    visited_buffers.add(buffer)
+                    buffer_names.append(prefix + buffer_name)
+            for child_module_name, child_module in module.named_children():
                 if child_module not in wrapped_modules_set:
-                    queue.append(child_module)
-        params_per_wrapped_module.append(params)
-    return params_per_wrapped_module
+                    queue.append((child_module, prefix + child_module_name + "."))
+        submodule_to_states[submodule] = (params, buffers, param_names, buffer_names)
+    return submodule_to_states
 
 
 def _record_module_wrapper_cls(
