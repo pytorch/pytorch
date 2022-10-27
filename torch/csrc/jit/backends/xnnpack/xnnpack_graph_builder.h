@@ -83,6 +83,8 @@ class XNNGraph {
       std::vector<at::Tensor> tensor_outputs);
 
   std::string serializedXNNGraph();
+
+  std::vector<std::vector<long>> getGraphOutputShapes();
 };
 
 } // namespace delegate
