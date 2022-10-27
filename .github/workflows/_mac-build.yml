@@ -91,6 +91,7 @@ jobs:
         run: |
           # Install dependencies
           brew install libomp
+          brew link --force libomp
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -130,7 +131,7 @@ jobs:
           zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json
 
       - name: Store PyTorch Build Artifacts on GHA
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
@@ -139,7 +140,7 @@ jobs:
           path: artifacts.zip
 
       - name: Upload sccache stats to GHA
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         # Only if sccache is installed, see above
         if: ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && steps.build.outcome != 'skipped' }}
         with:

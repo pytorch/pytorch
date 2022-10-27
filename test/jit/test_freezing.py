@@ -2678,6 +2678,34 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager.make_prediction(inp), optimized_mod.make_prediction(inp))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_numel_less_than_size_with_padding(self):
+
+        with set_default_dtype(torch.float):
+            class MyModule(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv1 = nn.Conv2d(
+                        1, 2, kernel_size=(2, 4), stride=2, padding=2, dilation=(2, 1),
+                    )
+
+                def forward(self, i0):
+                    x = self.conv1(i0)
+                    o0 = torch.max(x, i0)
+                    o1 = torch.clip(x, -1.5, 1.5)
+                    return o0, o1
+
+
+            i0 = torch.zeros((1, 1, 1, 2), dtype=torch.float32)
+            mod = MyModule()
+            out = mod(i0)
+
+            exported = torch.jit.trace(mod, [i0])
+            exported = torch.jit.optimize_for_inference(exported)
+
+            eout = exported(i0)
+            self.assertTrue(all(torch.allclose(x, y) for x, y in zip(out, eout)))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_incompatible_perf_formats(self):
         with set_default_dtype(torch.float):
             class Mod(nn.Module):

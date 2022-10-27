@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h> // For c10::overflows
 
 #include <ATen/native/vulkan/api/Common.h>

@@ -18,9 +18,11 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #ifndef USE_ROCM
+#ifndef _WIN32
 #include <cutlass/gemm/device/default_gemm_configuration.h>
 #include <cutlass/gemm/device/gemm_grouped.h>
 #include <cutlass/gemm/kernel/default_gemm_grouped.h>
+#endif
 #endif
 
 #include <ATen/NestedTensorImpl.h>
@@ -463,6 +465,7 @@ template void add_padding_kernelLauncher<c10::Half>(
 namespace {
 
 #ifndef USE_ROCM
+#ifndef _WIN32
 template <typename scalar_t>
 void gemm_grouped_cuda_internal(
     const std::vector<int64_t>& lda,
@@ -592,6 +595,7 @@ void gemm_grouped_cuda_internal(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 #endif
+#endif
 
 } // namespace
 
@@ -639,7 +643,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   std::vector<int64_t> ldb;
   std::vector<int64_t> ldd;
 #ifndef USE_ROCM
+#ifndef _WIN32
   std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
+#endif
 #endif
   bool all_row_major = true;
   for (int64_t i = 0; i < ntensors; i++) {
@@ -664,8 +670,10 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
     output_offsets.push_back(out_numel);
     out_numel += self_size0 * mat2_size1;
 #ifndef USE_ROCM
+#ifndef _WIN32
     gemm_sizes.push_back(
         cutlass::gemm::GemmCoord(self_size0, mat2_size1, self_size1));
+#endif
 #endif
     lda.push_back(self_strides[i][0]);
     ldb.push_back(mat2_strides[i][0]);
@@ -682,6 +690,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   at::Device device = output.device();
 
 #ifndef USE_ROCM
+#ifndef _WIN32
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
   if (is_sm8x && all_row_major) {
@@ -712,6 +721,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       return output;
     }
   }
+#endif
 #endif
   std::vector<Tensor> output_unbind = output.unbind();
   for (int64_t i = 0; i < ntensors; i++) {

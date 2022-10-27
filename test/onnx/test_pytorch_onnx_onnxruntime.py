@@ -6855,6 +6855,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(trilModelwithNegDiagonal(), (x))
 
+        class trilModelWithDiagonalInput(torch.nn.Module):
+            def forward(self, x, diagnonal: int):
+                return torch.tril(x, diagonal=diagnonal)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelWithDiagonalInput(), (x, 5))
+
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_triu(self):
         class triuModel(torch.nn.Module):
@@ -6871,12 +6878,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(triuModelwithDiagonal(), (x))
 
-        class trilModelwithNegDiagonal(torch.nn.Module):
+        class triuModelwithNegDiagonal(torch.nn.Module):
             def forward(self, x):
-                return torch.tril(x, diagonal=-1)
+                return torch.triu(x, diagonal=-1)
 
         x = torch.randn(2, 3, 4)
-        self.run_test(trilModelwithNegDiagonal(), (x))
+        self.run_test(triuModelwithNegDiagonal(), (x))
+
+        class triuModelWithDiagonalInput(torch.nn.Module):
+            def forward(self, x, diagnonal: int):
+                return torch.triu(x, diagonal=diagnonal)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(triuModelWithDiagonalInput(), (x, 5))
 
     def test_mish(self):
         class MishModel(torch.nn.Module):
@@ -7422,6 +7436,27 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(2, 2, 4, 4)
         self.run_test(Pad(), (x, pad))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_circular(self):
+        class PadModel(torch.nn.Module):
+            def forward(self, x):
+                out = torch.nn.functional.pad(x, (1, 2, 1, 2), mode="circular")
+                return out
+
+        x = torch.randn(2, 3, 3, 4)
+        self.run_test(PadModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_circular_negative(self):
+        # Test for different pad integer types
+        class PadModel(torch.nn.Module):
+            def forward(self, x):
+                out = torch.nn.functional.pad(x, (-1, -2), mode="circular")
+                return out
+
+        x = torch.randn(2, 3, 6)
+        self.run_test(PadModel(), (x))
 
     @skipIfUnsupportedMaxOpsetVersion(10)
     @skipScriptTest()  # TODO: the logic in symbolic_opset9 doesn't handle script
@@ -9075,7 +9110,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"output_1": [1]},
         )
 
-    @skipScriptTest(min_opset_version=11)  # dynamic split support addded in 11
+    @skipScriptTest(
+        skip_before_opset_version=11, reason="dynamic split support addded in 11"
+    )
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
@@ -11377,7 +11414,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M_ToDeviceDtype(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipScriptTest()
     def test_fill(self):
         class FillModule(torch.nn.Module):
             def forward(self, x, filled_value: int):
@@ -11386,6 +11422,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn((4, 5, 6))
         filled_value = 7
         self.run_test(FillModule(), (x, filled_value))
+
+        class FillFloatModule(torch.nn.Module):
+            def forward(self, x, filled_value: float):
+                return x.fill_(filled_value)
+
+        x = torch.randn((4, 5, 6))
+        filled_value = 7.5
+        self.run_test(FillFloatModule(), (x, filled_value))
 
         class FillScalarModule(torch.nn.Module):
             def forward(self, x):
@@ -11808,6 +11852,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         bias = torch.arange(33).to(torch.float) - 16
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv1d_relu(self):
+        model = torch.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(33, 16, 3), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 32)
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
@@ -12473,6 +12531,33 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
         self.run_test(LerpModel(), torch.rand(5, 4, 3))
+
+    @common_utils.parametrize("input_dtype", [torch.cfloat, torch.float])
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_print_tensor_within_torch_nn_module(self, input_dtype: torch.dtype):
+        class PrintTensorOnMyModel(torch.nn.Module):
+            def forward(self, x):
+                # 'print' has side effect calling 'resolve_conj' and 'resolve_neg'.
+                x_firsts = x[:, 0]
+                print(f"x_firsts: {x_firsts}")
+                # 'tolist' has side effect calling 'resolve_conj' and 'resolve_neg'.
+                # Annotation added to pass torch script.
+                _: List[float] = x.tolist()
+                return x_firsts
+
+        m = PrintTensorOnMyModel()
+        x = torch.randn(10, 5, dtype=input_dtype)
+        if input_dtype == torch.cfloat:
+            with self.assertRaises(RuntimeError):
+                self.run_test(
+                    m,
+                    x,
+                )
+        else:
+            self.run_test(
+                m,
+                x,
+            )
 
     # Cannot export with older opsets because of "ConstantFill" op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime

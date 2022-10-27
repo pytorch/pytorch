@@ -72,7 +72,7 @@ def as_nested_tensor(tensor_list: List[Tensor], dtype: Optional[DType] = None, d
         >>> nt = torch.nested.as_nested_tensor([a, b])
         >>> nt.is_leaf
         False
-        >>> fake_grad = torch.nested_tensor([torch.ones_like(a), torch.zeros_like(b)])
+        >>> fake_grad = torch.nested.nested_tensor([torch.ones_like(a), torch.zeros_like(b)])
         >>> nt.backward(fake_grad)
         >>> a.grad
         tensor([1., 1., 1.])
