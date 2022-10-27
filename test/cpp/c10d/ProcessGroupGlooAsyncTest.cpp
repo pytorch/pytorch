@@ -106,7 +106,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
-    for (unsigned i = 0; i < gpu_tensors.size(); i++) {
+    for (const auto i : c10::irange(gpu_tensors.size())) {
       outputs[i] = gpu_tensors[i].cpu();
     }
 

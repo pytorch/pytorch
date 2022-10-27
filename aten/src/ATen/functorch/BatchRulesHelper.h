@@ -15,6 +15,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/VmapGeneratedPlumbing.h>
+#include <c10/util/irange.h>
 
 // This file contains helper functions for batching rules.
 
@@ -459,7 +460,7 @@ inline VmapDimVector range(int64_t start, int64_t stop) {
   TORCH_INTERNAL_ASSERT(stop >= start);
   VmapDimVector dims;
   dims.reserve(stop - start);
-  for (int64_t i = start; i < stop; i++) {
+  for (const auto i : c10::irange(start, stop)) {
     dims.emplace_back(i);
   }
   return dims;

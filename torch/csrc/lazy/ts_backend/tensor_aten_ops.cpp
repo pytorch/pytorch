@@ -2,6 +2,7 @@
 
 #include <ATen/InferSize.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
@@ -41,7 +42,7 @@ std::vector<int64_t> GetExpandDimensions(
     std::vector<int64_t> dimensions) {
   TORCH_CHECK_GE(dimensions.size(), shape.dim()) << shape;
   int64_t base = dimensions.size() - shape.dim();
-  for (size_t i = 0; i < shape.dim(); ++i) {
+  for (const auto i : c10::irange(shape.dim())) {
     if (dimensions[base + i] == -1) {
       dimensions[base + i] = shape.size(i);
     }

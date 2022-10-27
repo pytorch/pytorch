@@ -7,6 +7,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -76,7 +77,7 @@ struct sha1 {
     get_digest(digest);
 
     std::ostringstream buf;
-    for (int i = 0; i < 5; ++i) {
+    for (const auto i : c10::irange(5)) {
       buf << std::hex << std::setfill('0') << std::setw(8) << digest[i];
     }
 
@@ -91,14 +92,14 @@ struct sha1 {
   void process_block_impl() {
     unsigned int w[80];
 
-    for (std::size_t i = 0; i < 16; ++i) {
+    for (const auto i : c10::irange(16)) {
       w[i] = (block_[i * 4 + 0] << 24);
       w[i] |= (block_[i * 4 + 1] << 16);
       w[i] |= (block_[i * 4 + 2] << 8);
       w[i] |= (block_[i * 4 + 3]);
     }
 
-    for (std::size_t i = 16; i < 80; ++i) {
+    for (const auto i : c10::irange(16, 80)) {
       w[i] = left_rotate((w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]), 1);
     }
 
@@ -108,7 +109,7 @@ struct sha1 {
     unsigned int d = h_[3];
     unsigned int e = h_[4];
 
-    for (std::size_t i = 0; i < 80; ++i) {
+    for (const auto i : c10::irange(80)) {
       unsigned int f;
       unsigned int k;
 

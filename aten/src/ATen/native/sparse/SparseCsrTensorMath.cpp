@@ -950,7 +950,7 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
                             // There is no point in parallelizing the following for-loop
                             // because about 99.3% of the computation time is spent in the
                             // at::_unique call above.
-                            for (int64_t i=0; i<numel; i++) {
+                            for (const auto i : c10::irange(numel)) {
                               index_t col = columns_map_ptr[i];
                               scalar_t val = values_ptr[i];
                               new_values_ptr[col] = rop(new_values_ptr[col], val);
@@ -1027,7 +1027,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     index_t* row_map_ptr = row_map.data_ptr<index_t>();
     int64_t nnz = 0;
     new_crow_indices_ptr[0] = 0;
-    for(int64_t i=0; i<nrows; i++) {
+    for (const auto i : c10::irange(nrows)) {
       if (crow_indices_ptr[i] != crow_indices_ptr[i + 1]) {
         row_map_ptr[i] = nnz;
         nnz++;
@@ -1094,7 +1094,7 @@ In [4]: %timeit torch.sum(t.values())
                                        rop.identity(),
                                        [&](int64_t i_start, int64_t i_end, scalar_t identity) {
                                          scalar_t res = identity;
-                                         for (int64_t i=i_start; i<i_end; i++) {
+                                         for (const auto i : c10::irange(i_start, i_end)) {
                                            scalar_t val = values_ptr[i];
                                            res = rop(res, val);
                                          }

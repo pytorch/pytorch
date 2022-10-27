@@ -6,6 +6,7 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 #include "c10/util/irange.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 

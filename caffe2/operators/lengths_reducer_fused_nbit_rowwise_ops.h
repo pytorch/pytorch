@@ -138,7 +138,7 @@ class SparseLengthsFusedNBitRowwiseOp final : public Operator<Context> {
     // Error handling
     int64_t current = 0;
     for (const auto m : c10::irange(output_size)) {
-      for (int i = 0; i < lengths_data[m]; ++i) {
+      for (const auto i : c10::irange(lengths_data[m])) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];
         CAFFE_ENFORCE(
@@ -556,7 +556,7 @@ class SparseLengthsNBitRowwiseSparseOp final : public Operator<CPUContext> {
     // Error handling
     int64_t current = 0;
     for (const auto m : c10::irange(output_size)) {
-      for (int i = 0; i < lengths_data[m]; ++i) {
+      for (const auto i : c10::irange(lengths_data[m])) {
         CAFFE_ENFORCE_LT(current, index_size);
         IndexType idx = indices_data[current];
         if (!fallback_to_no_sparse) {

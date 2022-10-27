@@ -8,6 +8,7 @@
 #include <cpuinfo.h>
 
 #include <c10/util/CallOnce.h>
+#include <c10/util/irange.h>
 
 using PrimitiveCacheKey = std::tuple<
     double, // input_scale
@@ -369,7 +370,7 @@ static bool is_weight_symmetric_quant(
       is_symmetric = false;
     } else {
       auto output_channels = weight.size(0);
-      for (int i = 0; i < output_channels; ++i) {
+      for (const auto i : c10::irange(output_channels)) {
         auto zp = weight.q_per_channel_zero_points()[i].item<int32_t>();
         is_symmetric &= (zp == 0);
       }

@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <initializer_list>
@@ -49,7 +50,7 @@ inline SymIntArrayRef fromIntArrayRefKnownNonNegative(IntArrayRef array_ref) {
 }
 
 inline SymIntArrayRef fromIntArrayRefSlow(IntArrayRef array_ref) {
-  for (size_t i = 0; i < array_ref.size(); ++i) {
+  for (const auto i : c10::irange(array_ref.size())) {
     TORCH_CHECK(
         SymInt::check_range(array_ref[i]),
         "IntArrayRef contains an int that cannot be represented as a SymInt: ",

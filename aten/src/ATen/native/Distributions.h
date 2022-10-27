@@ -18,6 +18,7 @@
 #define compat_log1p c10::cuda::compat::log1p
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
+#include <c10/util/irange.h>
 #define compat_exp c10::hip::compat::exp
 #define compat_ceil c10::hip::compat::ceil
 #define compat_floor c10::hip::compat::floor

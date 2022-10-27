@@ -103,7 +103,7 @@ void fillTensor(
   tensor->Resize(shape);
   CAFFE_ENFORCE_EQ(data.size(), tensor->numel());
   auto ptr = tensor->mutable_data<T>();
-  for (int i = 0; i < tensor->numel(); ++i) {
+  for (const auto i : c10::irange(tensor->numel())) {
     ptr[i] = data[i];
   }
 }
@@ -137,7 +137,7 @@ void constantFillTensor(
     TensorCPU* tensor) {
   tensor->Resize(shape);
   auto ptr = tensor->mutable_data<T>();
-  for (int i = 0; i < tensor->numel(); ++i) {
+  for (const auto i : c10::irange(tensor->numel())) {
     ptr[i] = data;
   }
 }

@@ -302,7 +302,7 @@ class ShmTicketMutex : public ShmProcessMutex<ShmTicketMutex<T>> {
     for (;;) {
       int spintime =
           (slot - this->header_->now.load(std::memory_order_relaxed)) * delay_;
-      for (int i = 0; i < spintime; i++) {
+      for (const auto i : c10::irange(spintime)) {
         // Empty loop
         __asm__ __volatile__("");
       }

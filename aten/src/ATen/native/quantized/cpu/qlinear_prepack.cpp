@@ -229,7 +229,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   } else if (qtype == c10::kPerChannelAffine) {
     wgt_zero_points.resize(N);
     wgt_scales.resize(N);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       wgt_zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
       TORCH_CHECK(
           wgt_zero_points[i] == 0,

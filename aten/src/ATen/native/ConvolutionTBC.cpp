@@ -79,34 +79,31 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   auto outputPlanes = weight_size[2];
   auto kw = weight.sizes()[0];
   auto olen = input_size[0] - kw + 1 + pad * 2;
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  int real_pad = (olen - ilen + kw - 1) / 2;
+  auto real_pad = (olen - ilen + kw - 1) / 2;
 
   Tensor dInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  for (int k = 0; k < kw; k++) {
-    int iShift = std::max(0, k - real_pad);
-    int oShift = std::max(0, real_pad - k);
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    int t = std::min(ilen + real_pad - k, olen) - oShift;
+  for (const auto k : c10::irange(kw)) {
+    const auto iShift = std::max(0L, k - real_pad);
+    const auto oShift = std::max(0L, real_pad - k);
+    const auto t = std::min(ilen + real_pad - k, olen) - oShift;
     // dOutput * T(weight) -> dInput
     if (t > 0) {
-      auto dO = dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
-      auto dI = dInput.narrow(0, iShift, t).view({t * batchSize, inputPlanes});
+      const auto dO = dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
+      const auto dI = dInput.narrow(0, iShift, t).view({t * batchSize, inputPlanes});
       dI.addmm_(dO, weight[k].t());
     }
   }
 
   Tensor dWeight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  for (int k = 0; k < kw; k++) {
-    int iShift = std::max(0, k - real_pad);
-    int oShift = std::max(0, real_pad - k);
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    int t = std::min(ilen + real_pad - k, olen) - oShift;
+  for (const auto k : c10::irange(kw)) {
+    const auto iShift = std::max(0L, k - real_pad);
+    const auto oShift = std::max(0L, real_pad - k);
+    const auto t = std::min(ilen + real_pad - k, olen) - oShift;
     // T(input) * dOutput -> dWeight
     if (t > 0) {
-      auto dW = dWeight[k];
-      auto dO = dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
-      auto I = input.narrow(0, iShift, t).view({t * batchSize, inputPlanes}).t();
+      const auto dW = dWeight[k];
+      const auto dO = dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
+      const auto I = input.narrow(0, iShift, t).view({t * batchSize, inputPlanes}).t();
       dW.addmm_(I, dO);
     }
   }

@@ -10,6 +10,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/jiterator_macros.h>
@@ -89,7 +90,7 @@ jiterator_also_stringify_as(jiterator_code(
     b0 = array[0];
     b1 = 0;
 
-    for (int i = 1; i < len; ++i) {
+    for (const auto i : c10::irange(1, len)) {
       b2 = b1;
       b1 = b0;
       b0 = x * b1 - b2 + array[i];
@@ -292,7 +293,7 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
   s -= half * b;
   a = one;
   k = zero;
-  for (int i = 0; i < 12; i++) {
+  for (const auto i : c10::irange(12)) {
     a *= x + k;
     b /= w;
     t = a * b / A[i];
@@ -342,7 +343,7 @@ static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
     result -= (c10::pi<double> * c10::pi<double>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
-  for (int i = 0; i < 6; ++i) {
+  for (C10_UNUSED const auto i : c10::irange(6)) {
     result += 1 / (x * x);
     x += 1;
   }
@@ -360,7 +361,7 @@ static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
     result -= (c10::pi<float> * c10::pi<float>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
-  for (int i = 0; i < 6; ++i) {
+  for (C10_UNUSED const auto i : c10::irange(6)) {
     result += 1 / (x * x);
     x += 1;
   }
@@ -1271,7 +1272,7 @@ chbevl(const T x, const T array[], size_t len) {
   b0 = array[0];
   b1 = static_cast<T>(0.0);
 
-  for (size_t i = 1; i < len; ++i) {
+  for (const auto i : c10::irange(1, len)) {
     b2 = b1;
     b1 = b0;
     b0 = x * b1 - b2 + array[i];
@@ -3063,7 +3064,7 @@ static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (const auto k : c10::irange(1, n)) {
         r = x * q - k * p;
         p = q;
         q = r;
@@ -3099,7 +3100,7 @@ static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     T q = T(1.0) - x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (const auto k : c10::irange(1, n)) {
         r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3139,7 +3140,7 @@ static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (const auto k : c10::irange(1, n)) {
         r = ((k + k + 1) * x * q - k * p) / (k + 1);
         p = q;
         q = r;

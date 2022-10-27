@@ -232,7 +232,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   if (orig_dim == 0) {
     // each scalar must be contiguous
     // if there is blanck memory between underlying scalars
-    for (int64_t i = 0; i < ntensors; i++) {
+    for (const auto i : c10::irange(ntensors)) {
       if (offsets[i] != i) {
         return false;
       }
@@ -243,7 +243,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
     // if any underlying tensor is noncontiguous
     const int64_t *sizemat_ptr = sizemat.data_ptr<int64_t>(),
                   *stridemat_ptr = stridemat.data_ptr<int64_t>();
-    for (int64_t i = 0; i < ntensors; i++) {
+    for (C10_UNUSED const auto i : c10::irange(ntensors)) {
       if (stridemat_ptr[orig_dim - 1] != 1) {
         return false;
       }
@@ -263,7 +263,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
     }
     sizemat_ptr = sizemat.data_ptr<int64_t>();
     stridemat_ptr = stridemat.data_ptr<int64_t>();
-    for (int64_t i = 1; i < ntensors; i++) {
+    for (const auto i : c10::irange(1, ntensors)) {
       if (offsets[i] != offsets[i - 1] + *sizemat_ptr * *stridemat_ptr) {
         return false;
       }

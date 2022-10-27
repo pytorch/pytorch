@@ -5,6 +5,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 #include "c10/util/irange.h"
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <vector>
@@ -72,7 +73,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
 
     int32_t offset = 0;
     for (const auto c : c10::irange(cols)) {
-      for (int r = 0; r < lengths_vec[c]; r++) {
+      for (const auto r : c10::irange(lengths_vec[c])) {
         auto input_offset = Forward ? (offset + r) : (r * cols + c);
         auto output_offset = Forward ? (r * cols + c) : (offset + r);
         context_.CopyItemsSameDevice(

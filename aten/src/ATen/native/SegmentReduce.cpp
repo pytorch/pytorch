@@ -57,7 +57,7 @@ void _segment_reduce_lengths_cpu_kernel1(
   // outer_offset is the size of the outer dimensions of output (before axis)
   // inner_offset is the size of the inner dimensions of output (after axis)
   int64_t outer_offset = 1, inner_offset = 1;
-  for (int64_t d = 0; d < axis; d++)
+  for (const auto d : c10::irange(axis))
       outer_offset *= output.size(d);
   for (int64_t d = axis + 1; d < output.dim(); d++)
       inner_offset *= output.size(d);
@@ -211,7 +211,7 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
   // outer_offset is the size of the outer dimensions of output (before axis)
   // inner_offset is the size of the inner dimensions of output (after axis)
   int64_t outer_offset = 1, inner_offset = 1;
-  for (int64_t d = 0; d < axis; d++)
+  for (const auto d : c10::irange(axis))
       outer_offset *= output_contig.size(d);
   for (int64_t d = axis + 1; d < output_contig.dim(); d++)
       inner_offset *= output_contig.size(d);

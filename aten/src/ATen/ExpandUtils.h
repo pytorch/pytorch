@@ -454,7 +454,7 @@ inline Tensor _sum_to(
   for (const auto i : c10::irange(leading_dims)) {
     reduce_dims.push_back(i);
   }
-  for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
+  for (const auto i : c10::irange(leading_dims, sizes.size())) {
     if (shape[i - leading_dims] == 1 && sizes[i] != 1) {
       reduce_dims.push_back(i);
     }

@@ -5,6 +5,7 @@
 #endif
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+#include <c10/util/irange.h>
 #endif
 
 namespace ao {
@@ -46,13 +47,13 @@ ao::sparse::BCSR pack_bcsr(
   rowBPtr.push_back(0);
   int64_t nnzb = 0;
   int64_t rowBlocks = (R + RB - 1) / RB;
-  for (int64_t i = 0; i < rowBlocks; ++i) {
+  for (const auto i : c10::irange(rowBlocks)) {
     int64_t curCols = C;
     int64_t curColBlocks = (curCols + CB - 1) / CB;
-    for (int64_t j = 0; j < curColBlocks; ++j) {
+    for (const auto j : c10::irange(curColBlocks)) {
       // is the whole block zero?
       bool isCurrentBlockNonZero = false;
-      for (int64_t ib = 0; ib < RB; ++ib) {
+      for (const auto ib : c10::irange(RB)) {
         // break if already found a non-zero element or
         // out of bounds
         if (isCurrentBlockNonZero || (i * RB + ib) >= R) {
@@ -61,7 +62,7 @@ ao::sparse::BCSR pack_bcsr(
         const int64_t curr_row = i * RB + ib;
         const int8_t curr_row_zero_point =
             qscheme_per_tensor ? zero_points[0] : zero_points[curr_row];
-        for (int64_t jb = 0; jb < CB; ++jb) {
+        for (const auto jb : c10::irange(CB)) {
           // within bound?
           if ((j * CB + jb) >= C) {
             continue;
@@ -74,8 +75,8 @@ ao::sparse::BCSR pack_bcsr(
         }
       }
       if (isCurrentBlockNonZero) {
-        for (int64_t ib = 0; ib < RB; ++ib) {
-          for (int64_t jb = 0; jb < CB; ++jb) {
+        for (const auto ib : c10::irange(RB)) {
+          for (const auto jb : c10::irange(CB)) {
             if ((i * RB + ib) >= R || (j * CB + jb) >= C) {
               // zero fill
               values.push_back(0);

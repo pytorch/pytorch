@@ -9,6 +9,7 @@
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
+#include <c10/util/irange.h>
 #include <list>
 #include <mutex>
 #include <type_traits>
@@ -555,7 +556,7 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
     // stuck on C++14 rather than C++17, but we could do a backport
     // similar to folly::launder if needed.)
     runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
-    for (size_t ii = 0; ii < num_boxed_args; ++ii) {
+    for (const auto ii : c10::irange(num_boxed_args)) {
       reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
     }
   } else {

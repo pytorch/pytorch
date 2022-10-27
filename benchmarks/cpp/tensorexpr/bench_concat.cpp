@@ -52,7 +52,7 @@ class ConcatBench : public benchmark::Fixture {
     size_t num_dims = 2;
 
     std::vector<BufHandle> inputs;
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       inputs.emplace_back(BufHandle(
           "input" + std::to_string(i),
           {input_sizes_[i][0], input_sizes_[i][1]},
@@ -114,7 +114,7 @@ class ConcatBench : public benchmark::Fixture {
     std::vector<BufHandle> inputs;
     std::vector<StmtPtr> for_stmts(num_inputs);
     int cumulative_input_sizes = 0;
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       inputs.emplace_back(BufHandle(
           "input" + std::to_string(i),
           {input_sizes_[i][0], input_sizes_[i][1]},

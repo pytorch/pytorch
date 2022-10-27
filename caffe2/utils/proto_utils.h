@@ -295,7 +295,7 @@ class C10_EXPORT ArgumentHelper {
     auto it = CAFFE2_ARG_MAP_FIND(arg_map_, name);
     CAFFE_ENFORCE(it != arg_map_.end(), "Cannot find parameter named ", name);
     std::vector<MessageType> messages(it->second.strings_size());
-    for (int i = 0; i < messages.size(); ++i) {
+    for (const auto i : c10::irange(messages.size())) {
       CAFFE_ENFORCE(
           messages[i].ParseFromString(it->second.strings(i)),
           "Failed to parse content from the string");

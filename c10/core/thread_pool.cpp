@@ -1,4 +1,5 @@
 #include <c10/core/thread_pool.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -12,7 +13,7 @@ ThreadPool::ThreadPool(
       available_(threads_.size()),
       total_(threads_.size()),
       numa_node_id_(numa_node_id) {
-  for (std::size_t i = 0; i < threads_.size(); ++i) {
+  for (const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread([this, i, init_thread]() {
       if (init_thread) {
         init_thread();

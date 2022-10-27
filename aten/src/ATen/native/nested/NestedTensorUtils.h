@@ -6,6 +6,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -247,7 +248,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
     // Some NestedNodes wrap regular Tensors, some NestedTensors and some other
     // types.
     std::vector<A> result;
-    for (size_t i = 0; i < degree; i++) {
+    for (const auto i : c10::irange(degree)) {
       std::tuple<Args...> children = c10::guts::tuple_map(
           std::forward_as_tuple(nested_node...), [&i](auto a) {
             static_assert(

@@ -9,6 +9,7 @@
 #include <ATen/native/xnnpack/Pooling.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/util/irange.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -253,7 +254,7 @@ TEST(TestXNNPackOps, TestConvolution2dMultiThreaded) {
       std::unique_lock<std::mutex> g(lock);
       cond.notify_all();
     }
-    for (int64_t i = 0; i < 30; i++) {
+    for (const auto i : c10::irange(30)) {
       context->run(input_tensor);
     }
     return context->run(input_tensor);

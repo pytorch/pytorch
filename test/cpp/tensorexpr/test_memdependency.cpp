@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -413,7 +414,7 @@ TEST(MemDependency, BoundSubtractMultiDim) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0U; i < x.size(); ++i) {
+    for (const auto i : c10::irange(0U, x.size())) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }
@@ -477,7 +478,7 @@ TEST(MemDependency, BoundSubtractMultiDimSymbolic) {
     if (x.size() != y.size()) {
       return false;
     }
-    for (auto i = 0U; i < x.size(); ++i) {
+    for (const auto i : c10::irange(0U, x.size())) {
       if (!indexBoundsEquals(x[i], y[i])) {
         return false;
       }
@@ -633,7 +634,7 @@ TEST(MemDependency, MemDependencyCheckerLoop) {
   MemDependencyChecker analyzer;
 
   /*
-   * for (int x = 0; x < 10; ++x) {
+   * for (const auto x : c10::irange(10)) {
    *   A[x] = x;
    * }
    * B[0] = A[0] + 1;
@@ -675,7 +676,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
 
   /*
    * A[0] = 0;
-   * for (int x = 0; x < 10; ++x) {
+   * for (const auto x : c10::irange(10)) {
    *   A[0] = A[x] + 1;
    * }
    * B[0] = A[0];
@@ -732,7 +733,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduceExpanded) {
 
   /*
    * A[0] = 0;
-   * for (int x = 0; x < 10; ++x) {
+   * for (const auto x : c10::irange(10)) {
    *   A[0] = A[x] + 1;
    * }
    * B[0] = A[0];
@@ -784,7 +785,7 @@ TEST(MemDependency, MemDependencyCheckerInputsOutputs) {
 
   // Here's a Relu.
   /*
-   * for (int x = 0; x < 10; ++x) {
+   * for (const auto x : c10::irange(10)) {
    *   B[x] = Max(A[x], 0);
    * }
    */
@@ -836,7 +837,7 @@ TEST(MemDependency, MemDependencyCheckerOutputDoesntDepend) {
 
   // Here's a dumb Relu.
   /*
-   * for (int x = 0; x < 10; ++x) {
+   * for (const auto x : c10::irange(10)) {
    *   B[x] = Max(x, 0);
    * }
    */
@@ -878,16 +879,16 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   analyzer.allowLoopExecutionOrderAnalysis();
 
   /*
-   * for (int x = 1; x < 10; ++x) {
+   * for (const auto x : c10::irange(1, 10)) {
    *   B[x] = A[x];
    * }
-   * for (int x = 1; x < 9; ++x) {
+   * for (const auto x : c10::irange(1, 9)) {
    *   B[x] = B[x] * 2;
    * }
-   * for (int x = 3; x < 4; ++x) {
+   * for (const auto x : c10::irange(3, 4)) {
    *   C[x] = A[x];
    * }
-   * for (int x = 0; x < 10; ++x) {
+   * for (const auto x : c10::irange(10)) {
    *   C[x] = B[x];
    * }
    */
@@ -1059,19 +1060,19 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   analyzer.allowLoopExecutionOrderAnalysis();
 
   /*
-   * for (int x = 1; x < 10; x++) {
+   * for (const auto x : c10::irange(1, 10)) {
    *   A[x] = A[x - 1];
    * }
-   * for (int x = 0; x < 9; x++) {
+   * for (const auto x : c10::irange(9)) {
    *   A[x] = A[x + 1];
    * }
-   * for (int x = 0; x < 9; x++) {
+   * for (const auto x : c10::irange(9)) {
    *   A[9 - x] = A[8 - x];
    * }
-   * for (int x = 0; x < 10; x++) {
+   * for (const auto x : c10::irange(10)) {
    *   A[x] = A[9 - x];
    * }
-   * for (int x = 0; x < 10; x++) {
+   * for (const auto x : c10::irange(10)) {
    *   B[x] = A[x];
    * }
    */
@@ -1244,7 +1245,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   };
 
   {
-    /* for (int y = 0; y < 10; y++) {
+    /* for (const auto y : c10::irange(10)) {
      *   A[y] = (A[y]) + 1;
      * } */
 
@@ -1263,7 +1264,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int y = 0; y < 10; y++) {
+    /* for (const auto y : c10::irange(10)) {
      *   A[y + 1] = (A[y + 1]) + 1;
      * }
      */
@@ -1284,7 +1285,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[0] = (A[0]) + x;
      * }
      */
@@ -1303,7 +1304,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[0] = (B[0]) + x;
      * }
      */
@@ -1323,7 +1324,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[y] = (A[y]) + x;
      * }
      */
@@ -1342,7 +1343,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x] = A[x + 1];
      * }
      */
@@ -1361,7 +1362,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x] = A[x + 1];
      * }
      */
@@ -1379,7 +1380,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 1; x < 10; x++) {
+    /* for (const auto x : c10::irange(1, 10)) {
      *   A[x] = A[x - 1];
      * }
      */
@@ -1394,7 +1395,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 1; x < 10; x++) {
+    /* for (const auto x : c10::irange(1, 10)) {
      *   A[x] = A[x - 1];
      * }
      */
@@ -1412,7 +1413,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 9; x++) {
+    /* for (const auto x : c10::irange(9)) {
      *   A[9 - x] = A[8 - x];
      * }
      */
@@ -1437,7 +1438,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 9; x++) {
+    /* for (const auto x : c10::irange(9)) {
      *   A[8 - x] = A[9 - x];
      * }
      */
@@ -1459,7 +1460,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 9; x++) {
+    /* for (const auto x : c10::irange(9)) {
      *   A[9 - x] = A[8 - x];
      * }
      */
@@ -1480,7 +1481,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 3; x < 10; x++) {
+    /* for (const auto x : c10::irange(3, 10)) {
      *   A[x - 2] = A[x - 1];
      * }
      */
@@ -1500,7 +1501,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 2];
      * }
      */
@@ -1519,7 +1520,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 2 + 1];
      * }
      */
@@ -1541,7 +1542,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 2 - 1];
      * }
      */
@@ -1557,7 +1558,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 2 + 2];
      * }
      */
@@ -1573,7 +1574,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 2 - 2];
      * }
      */
@@ -1589,7 +1590,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 2 + 7];
      * }
      */
@@ -1605,7 +1606,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 2 + 4];
      * }
      */
@@ -1620,7 +1621,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 6] = A[x * 6 + 5];
      * }
      */
@@ -1637,7 +1638,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 6];
      * }
      */
@@ -1654,7 +1655,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 4] = A[x * 2];
      * }
      */
@@ -1670,7 +1671,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 6 + 1];
      * }
      */
@@ -1687,7 +1688,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 6 + 4];
      * }
      */
@@ -1703,7 +1704,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2 + 3] = A[x * 6];
      * }
      */
@@ -1719,7 +1720,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[x * 3 + 1];
      * }
      */
@@ -1734,7 +1735,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x] = A[x + 10];
      * }
      */
@@ -1750,7 +1751,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x] = A[9 - x];
      * }
      */
@@ -1765,7 +1766,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x * 2] = A[19 - x * 2];
      * }
      */
@@ -1783,7 +1784,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x / 2] = A[x / 2];
      * }
      */
@@ -1799,7 +1800,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x / 2] = A[x / 2] + 1;
      * }
      */
@@ -1814,7 +1815,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   A[x % 2] = A[x % 2];
      * }
      */
@@ -1833,7 +1834,7 @@ TEST(MemDependency, MemDependencyCheckerLoopSelfDependency) {
   }
 
   {
-    /* for (int x = y; x < z; x++) {
+    /* for (const auto x : c10::irange(y, z)) {
      *   A[x] = A[x + 1];
      * }
      */
@@ -1929,7 +1930,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   using namespace analysis;
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[x];
      * }
      * if (y<5 ? 1 : 0) {
@@ -1962,15 +1963,15 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[x];
      * }
      * if (y<5 ? 1 : 0) {
-     *   for (int x = 0; x < 10; x++) {
+     *   for (const auto x : c10::irange(10)) {
      *     C[x] = B[x];
      *   }
      * } else {
-     *   for (int x = 0; x < 10; x++) {
+     *   for (const auto x : c10::irange(10)) {
      *     C[x] = (B[x]) + 1;
      *   }
      * }
@@ -2007,11 +2008,11 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[x];
      * }
      * if (y<5 ? 1 : 0) {
-     *   for (int x = 0; x < 10; x++) {
+     *   for (const auto x : c10::irange(10)) {
      *     C[x] = (B[x]) + 1;
      *   }
      * }
@@ -2044,12 +2045,12 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[x];
      * }
      * if (y<5 ? 1 : 0) {
      * } else {
-     *   for (int x = 0; x < 10; x++) {
+     *   for (const auto x : c10::irange(10)) {
      *     C[x] = (B[x]) + 1;
      *   }
      * }
@@ -2082,7 +2083,7 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsCond) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[x];
      * }
      * if (C[0]<5 ? 1 : 0) {
@@ -2124,7 +2125,7 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
   using namespace analysis;
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[x];
      * }
      * C[0] = (y < 5 ? (B[0]) + 1 : (B[1]) + 1;
@@ -2163,7 +2164,7 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[x];
      * }
      * C[0] = (y < 5 ? (B[0]) + 1 : 42;
@@ -2192,7 +2193,7 @@ TEST(MemDependency, MemDependencyCheckerIfThenElse) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = (x < 5 ? B[x] : A[x];
      * }
      */
@@ -2231,7 +2232,7 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
   using namespace analysis;
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   B[x] = A[x];
      * }
      * B[5] = 100;
@@ -2256,10 +2257,10 @@ TEST(MemDependency, MemDependencyCheckerCutLoop) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   B[x] = A[x];
      * }
-     * for (int x = 4; x < 7; x++) {
+     * for (const auto x : c10::irange(4, 7)) {
      *   B[x] = B[x] + 3;
      * }
      * B[5] = 100;
@@ -2321,7 +2322,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   };
 
   {
-    /* for (int x = 0; x < B[0]; x++) {
+    /* for (const auto x : c10::irange(B[0])) {
      *   C[x] = A[x];
      * }
      */
@@ -2359,7 +2360,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   }
 
   {
-    /* for (int x = B[0]; x < B[1]; x++) {
+    /* for (const auto x : c10::irange(B[0], B[1])) {
      *   C[x] = A[x];
      * }
      */
@@ -2404,7 +2405,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[x] = A[B[x]];
      * }
      */
@@ -2449,7 +2450,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[B[x]] = A[x];
      * }
      */
@@ -2493,7 +2494,7 @@ TEST(MemDependency, MemDependencyCheckerDynamicShapes) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
+    /* for (const auto x : c10::irange(10)) {
      *   C[B[A[x]]] = x;
      * }
      */
@@ -2565,9 +2566,9 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
   };
 
   {
-    /* for (int x = 0; x < 10; x++) {
-     *   for (int y = 0; y < 9; y++) {
-     *     for (int z = 0; z < 12; z++) {
+    /* for (const auto x : c10::irange(10)) {
+     *   for (const auto y : c10::irange(9)) {
+     *     for (const auto z : c10::irange(12)) {
      *       B[x, y, z] = A[x, y, z];
      *     }
      *   }
@@ -2611,9 +2612,9 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
   }
 
   {
-    /* for (int x = 0; x < 5; x++) {
-     *   for (int y = 0; y < 5; y++) {
-     *     for (int z = 0; z < 5; z++) {
+    /* for (const auto x : c10::irange(5)) {
+     *   for (const auto y : c10::irange(5)) {
+     *     for (const auto z : c10::irange(5)) {
      *       B[x, y, z] = A[x, y, z];
      *     }
      *   }
@@ -2655,8 +2656,8 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
-     *   for (int y = 0; y < 12; y++) {
+    /* for (const auto x : c10::irange(10)) {
+     *   for (const auto y : c10::irange(12)) {
      *     B[x, 0, y] = A[x, 0, y];
      *   }
      * }
@@ -2693,9 +2694,9 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
   }
 
   {
-    /* for (int x = 0; x < 10; x++) {
-     *   for (int y = 0; y < 100; y++) {
-     *     for (int z = 0; z < 12; z++) {
+    /* for (const auto x : c10::irange(10)) {
+     *   for (const auto y : c10::irange(100)) {
+     *     for (const auto z : c10::irange(12)) {
      *       B[x, 0, z] = (A[x, 0, z]) + (C[x, z]);
      *     }
      *   }
@@ -2754,9 +2755,9 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
   }
 
   {
-    /* for (int x = 0; x < 9; x++) {
-     *   for (int y = 0; y < 10; y++) {
-     *     for (int z = 0; z < 12; z++) {
+    /* for (const auto x : c10::irange(9)) {
+     *   for (const auto y : c10::irange(10)) {
+     *     for (const auto z : c10::irange(12)) {
      *       B[x, 0, 0] = (B[x, y, z]) + (A[x, y, z]);
      *     }
      *   }
@@ -2814,16 +2815,16 @@ TEST(MemDependency, MemDependencyCheckerMultiDim) {
 TEST(MemDependency, MemDependencyCheckerComputeAPI) {
   using namespace analysis;
 
-  /* for (int m = 0; m < 4; m++) {
-   *   for (int n = 0; n < 5; n++) {
-   *     for (int k = 0; k < 6; k++) {
+  /* for (const auto m : c10::irange(4)) {
+   *   for (const auto n : c10::irange(5)) {
+   *     for (const auto k : c10::irange(6)) {
    *       broadcast_add[m, n, k] = (a[m, n]) + (b[n, k]);
    *     }
    *   }
    * }
-   * for (int m_1 = 0; m_1 < 4; m_1++) {
-   *   for (int n_1 = 0; n_1 < 5; n_1++) {
-   *     for (int k_1 = 0; k_1 < 6; k_1++) {
+   * for (const auto m_1 : c10::irange(4)) {
+   *   for (const auto n_1 : c10::irange(5)) {
+   *     for (const auto k_1 : c10::irange(6)) {
    *       d[m_1, n_1, k_1] = (broadcast_add(m_1, n_1, k_1)) + float(1);
    *     }
    *   }
@@ -2865,9 +2866,9 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
 TEST(MemDependency, MemDependencyCheckerComputeInline) {
   using namespace analysis;
 
-  /* for (int m = 0; m < 4; m++) {
-   *   for (int n = 0; n < 5; n++) {
-   *     for (int k = 0; k < 6; k++) {
+  /* for (const auto m : c10::irange(4)) {
+   *   for (const auto n : c10::irange(5)) {
+   *     for (const auto k : c10::irange(6)) {
    *       d[m, n, k] = ((a[m, n]) + (b[n, k])) + float(1);
    *     }
    *   }
@@ -2937,7 +2938,7 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
 
   ASSERT_EQ(history_before.size(), history_after.size());
 
-  for (size_t i = 0; i < history_before.size(); ++i) {
+  for (const auto i : c10::irange(history_before.size())) {
     ASSERT_EQ(history_before[i]->type(), history_after[i]->type());
     ASSERT_EQ(history_before[i]->var(), history_after[i]->var());
     ASSERT_EQ(
@@ -2984,7 +2985,7 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
 
   ASSERT_EQ(history_before.size(), history_after.size());
 
-  for (size_t i = 0; i < history_before.size(); ++i) {
+  for (const auto i : c10::irange(history_before.size())) {
     ASSERT_EQ(history_before[i]->type(), history_after[i]->type());
     ASSERT_EQ(history_before[i]->var(), history_after[i]->var());
     ASSERT_EQ(
@@ -3002,17 +3003,17 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
 
 TEST(MemDependency, MemDependencyCheckerComputeReduce) {
   using namespace analysis;
-  /* for (int l2 = 0; l2 < 2; l2++) {
-   *   for (int n1 = 0; n1 < 3; n1++) {
-   *     for (int m1 = 0; m1 < 6; m1++) {
+  /* for (const auto l2 : c10::irange(2)) {
+   *   for (const auto n1 : c10::irange(3)) {
+   *     for (const auto m1 : c10::irange(6)) {
    *       scale[l2, n1, m1] = (b[l2, n1, m1]) * (a[l2, n1, m1]);
    *     }
    *   }
    * }
-   * for (int l1 = 0; l1 < 2; l1++) {
+   * for (const auto l1 : c10::irange(2)) {
    *   sum[l1] = float(0);
-   *   for (int n1_1 = 0; n1_1 < 3; n1_1++) {
-   *     for (int m1_1 = 0; m1_1 < 6; m1_1++) {
+   *   for (const auto n1_1 : c10::irange(3)) {
+   *     for (const auto m1_1 : c10::irange(6)) {
    *       sum[l1] = ReduceOp(sum, (sum[l1]) + (scale(l1, n1_1, m1_1)),
    *                    out_args={l1}, reduce_args={n1, m1});
    *     }
@@ -3185,7 +3186,7 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
 
     ASSERT_EQ(history_before.size(), history_after.size());
 
-    for (size_t i = 0; i < history_before.size(); ++i) {
+    for (const auto i : c10::irange(history_before.size())) {
       ASSERT_EQ(history_before[i]->type(), history_after[i]->type());
       ASSERT_EQ(history_before[i]->var(), history_after[i]->var());
 

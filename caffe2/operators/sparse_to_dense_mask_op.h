@@ -157,7 +157,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     int64_t offset = 0;
     for (const auto r : c10::irange(rows)) {
       bool skippedSparseIndex = false;
-      for (int c = 0; c < lengths_vec[r]; c++) {
+      for (const auto c : c10::irange(lengths_vec[r])) {
         const auto sparse_index = sparse_indices_vec[offset + c];
         if (sparse_index < 0 ||
             sparse_index >= std::numeric_limits<TInd>::max()) {

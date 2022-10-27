@@ -323,7 +323,7 @@ class ConstantFillOp final : public FillerOp<Context> {
         InputSize(), 2, "constant fill string from tensor is not supported");
     auto value = this->template GetSingleArgument<std::string>("value", "");
     auto* data = output->template mutable_data<std::string>();
-    for (int i = 0; i < output->numel(); ++i) {
+    for (const auto i : c10::irange(output->numel())) {
       data[i] = value;
     }
     return true;

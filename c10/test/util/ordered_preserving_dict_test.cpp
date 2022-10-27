@@ -235,7 +235,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
 
   // Check order
   it = map.begin();
-  for (std::size_t i = 0; i < nb_values; i++) {
+  for (const auto i : c10::irange(nb_values)) {
     if (i >= 10 && i < 220) {
       continue;
     }

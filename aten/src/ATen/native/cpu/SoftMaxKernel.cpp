@@ -272,7 +272,7 @@ inline void _vec_softmax_backward(
         std::unique_ptr<scalar_t[]> buffer(new scalar_t[CHUNK_SIZE]);
         scalar_t* tmp_sum_data = buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -289,7 +289,7 @@ inline void _vec_softmax_backward(
           }
 
           // compute sum of grad_output * output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             scalar_t* grad_output_ptr = grad_output_data_base + offset;
@@ -309,7 +309,7 @@ inline void _vec_softmax_backward(
           }
 
           // compute output * (grad_output - sum)
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             scalar_t* grad_output_ptr = grad_output_data_base + offset;
@@ -364,7 +364,7 @@ inline void _vec_softmax_backward<BFloat16>(
             new float[dim_size * CHUNK_SIZE]);
         float* output_buffer_data = output_buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -382,7 +382,7 @@ inline void _vec_softmax_backward<BFloat16>(
           }
 
           // compute sum of grad_output * output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             BFloat16* grad_output_ptr = grad_output_data_base + offset;
@@ -426,7 +426,7 @@ inline void _vec_softmax_backward<BFloat16>(
           }
 
           // compute output * (grad_output - sum)
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             BFloat16* grad_input_ptr = grad_input_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
@@ -483,7 +483,7 @@ inline void _vec_log_softmax_backward(
         std::unique_ptr<scalar_t[]> buffer(new scalar_t[CHUNK_SIZE]);
         scalar_t* tmp_sum_data = buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -500,7 +500,7 @@ inline void _vec_log_softmax_backward(
           }
 
           // compute sum of grad_output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             scalar_t* grad_output_ptr = grad_output_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
@@ -518,7 +518,7 @@ inline void _vec_log_softmax_backward(
           }
 
           // compute grad_output - output.exp() * sum
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             scalar_t* grad_output_ptr = grad_output_data_base + offset;
@@ -570,7 +570,7 @@ inline void _vec_log_softmax_backward<BFloat16>(
             new float[dim_size * CHUNK_SIZE]);
         float* grad_output_buffer_data = grad_output_buffer.get();
 
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / num_chunks;
           int64_t k = i % num_chunks;
           int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -588,7 +588,7 @@ inline void _vec_log_softmax_backward<BFloat16>(
           }
 
           // compute sum of grad_output
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             BFloat16* grad_output_ptr = grad_output_data_base +
                 outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
@@ -621,7 +621,7 @@ inline void _vec_log_softmax_backward<BFloat16>(
           }
 
           // compute grad_output - output.exp() * sum
-          for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+          for (const auto dim_idx : c10::irange(dim_size)) {
             int64_t offset = outer_idx * outer_stride + dim_idx * inner_size +
                 inner_idx_begin;
             BFloat16* output_ptr = output_data_base + offset;
@@ -895,7 +895,7 @@ inline void _vec_logsoftmax(
     scalar_t* input_max_data = buffer.get();
     scalar_t* tmp_sum_data = buffer.get() + CHUNK_SIZE;
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t outer_idx = i / num_chunks;
       int64_t k = i % num_chunks;
       int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -915,7 +915,7 @@ inline void _vec_logsoftmax(
       }
 
       // compute max
-      for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+      for (const auto dim_idx : c10::irange(dim_size)) {
         scalar_t* input_ptr = input_data_base + outer_idx * dim_size * inner_size
             + dim_idx * inner_size + inner_idx_begin;
 
@@ -934,7 +934,7 @@ inline void _vec_logsoftmax(
       }
 
       // compute sum of (x - max).exp()
-      for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+      for (const auto dim_idx : c10::irange(dim_size)) {
         scalar_t* input_ptr = input_data_base + outer_idx * dim_size * inner_size
             + dim_idx * inner_size + inner_idx_begin;
 
@@ -957,7 +957,7 @@ inline void _vec_logsoftmax(
       vec::map([](Vec x) { return x.log(); }, tmp_sum_data, tmp_sum_data, size);
 
       // compute x - max - sum
-      for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+      for (const auto dim_idx : c10::irange(dim_size)) {
         int64_t offset = outer_idx * dim_size * inner_size + dim_idx * inner_size + inner_idx_begin;
         scalar_t* input_ptr = input_data_base + offset;
         scalar_t* output_ptr = output_data_base + offset;
@@ -1003,7 +1003,7 @@ inline void _vec_logsoftmax<BFloat16>(
     float* input_buffer_data = input_buffer.get();
 
     // init
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t outer_idx = i / num_chunks;
       int64_t k = i % num_chunks;
       int64_t inner_idx_begin = k * CHUNK_SIZE;
@@ -1024,7 +1024,7 @@ inline void _vec_logsoftmax<BFloat16>(
       }
 
       // compute max
-      for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+      for (const auto dim_idx : c10::irange(dim_size)) {
         BFloat16* input_ptr = input_data_base + outer_idx * dim_size * inner_size
             + dim_idx * inner_size + inner_idx_begin;
         float* input_buffer_ptr = input_buffer_data + dim_idx * CHUNK_SIZE;
@@ -1054,7 +1054,7 @@ inline void _vec_logsoftmax<BFloat16>(
       }
 
       // compute sum of (x - max).exp()
-      for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+      for (const auto dim_idx : c10::irange(dim_size)) {
         float* input_buffer_ptr = input_buffer_data + dim_idx * CHUNK_SIZE;
 
         int64_t d2 = 0;
@@ -1081,7 +1081,7 @@ inline void _vec_logsoftmax<BFloat16>(
       vec::map([](fVec x) { return x.log(); }, tmp_sum_data, tmp_sum_data, size);
 
       // compute x - max - sum
-      for (int64_t dim_idx = 0; dim_idx < dim_size; dim_idx++) {
+      for (const auto dim_idx : c10::irange(dim_size)) {
         float* input_buffer_ptr = input_buffer_data + dim_idx * CHUNK_SIZE;
         BFloat16* output_ptr = output_data_base + outer_idx * dim_size * inner_size
             + dim_idx * inner_size + inner_idx_begin;

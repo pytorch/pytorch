@@ -2,6 +2,7 @@
 
 #include <ATen/code_template.h>
 #include <c10/core/DeviceType.h>
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -687,7 +688,7 @@ TEST(DynamicShapes, MultiThreadedExecution) {
     // TensorExprKernel are not changing any state.
     constexpr size_t kNumThreads = 4;
     std::vector<std::thread> threads;
-    for (size_t id = 0; id < kNumThreads; ++id) {
+    for (const auto id : c10::irange(kNumThreads)) {
       threads.emplace_back(run_kernel, id + 5, id + 20);
     }
     for (auto& t : threads) {

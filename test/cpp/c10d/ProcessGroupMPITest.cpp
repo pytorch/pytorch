@@ -77,7 +77,7 @@ void testAllreduce(int iter = 1000) {
   for (const auto i : c10::irange(iter)) {
     const auto expected = worldSize * i;
     auto data = outputTensors[i][0].data_ptr<float>();
-    for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
+    for (const auto j : c10::irange(outputTensors[i][0].numel())) {
       if (data[j] != expected) {
         TORCH_CHECK(false, "BOOM!");
       }
@@ -109,7 +109,7 @@ void testBroadcast(int iter = 10000) {
   for (const auto i : c10::irange(iter)) {
     const auto expected = i;
     auto data = outputTensors[i][0].data_ptr<float>();
-    for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
+    for (const auto j : c10::irange(outputTensors[i][0].numel())) {
       if (data[j] != expected) {
         TORCH_CHECK(false, "BOOM!");
       }
@@ -139,7 +139,7 @@ void testReduce(int iter = 10000) {
     for (const auto i : c10::irange(iter)) {
       const auto expected = worldSize * i;
       auto data = outputTensors[i][0].data_ptr<float>();
-      for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
+      for (const auto j : c10::irange(outputTensors[i][0].numel())) {
         if (data[j] != expected) {
           TORCH_CHECK(false, "BOOM!");
         }
@@ -178,7 +178,7 @@ void testAllgather(int iter = 10000) {
     for (const auto j : c10::irange(worldSize)) {
       const auto expected = i * j;
       auto data = outputTensors[i][j].data_ptr<float>();
-      for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
+      for (const auto k : c10::irange(outputTensors[i][j].numel())) {
         if (data[k] != expected) {
           TORCH_CHECK(false, "BOOM!");
         }
@@ -221,7 +221,7 @@ void testGather(int iter = 10000) {
       for (const auto j : c10::irange(worldSize)) {
         const auto expected = i * j;
         auto data = outputTensors[i][j].data_ptr<float>();
-        for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
+        for (const auto k : c10::irange(outputTensors[i][j].numel())) {
           if (data[k] != expected) {
             TORCH_CHECK(false, "BOOM!");
           }
@@ -270,7 +270,7 @@ void testScatter(int iter = 1) {
     for (const auto j : c10::irange(worldSize)) {
       const auto expected = i * j;
       auto data = outputTensors[i][0].data_ptr<float>();
-      for (auto k = 0; k < outputTensors[i][0].numel(); ++k) {
+      for (const auto k : c10::irange(outputTensors[i][0].numel())) {
         if (data[k] != expected) {
           TORCH_CHECK(false, "BOOM!");
         }
@@ -330,7 +330,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     }
     const auto expected = i;
     auto data = outputTensors[i][0].data_ptr<float>();
-    for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
+    for (const auto j : c10::irange(outputTensors[i][0].numel())) {
       if (data[j] != expected) {
         TORCH_CHECK(false, "BOOM!");
       }

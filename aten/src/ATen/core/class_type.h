@@ -5,6 +5,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -302,7 +303,7 @@ struct TORCH_API ClassType : public NamedType {
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_, is_module());
     AT_ASSERT(numAttributes() == contained_types.size());
-    for(size_t i = 0; i < attributes_.size(); ++i) {
+    for (const auto i : c10::irange(attributes_.size())) {
       AT_ASSERT(attributes_[i].getType()->isSubtypeOf(*contained_types[i]));
       ptr->addAttribute(attributes_[i].getName(), std::move(contained_types[i]));
     }

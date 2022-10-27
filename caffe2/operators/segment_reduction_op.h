@@ -312,7 +312,7 @@ class AbstractReduceFrontOrBackOp : public Operator<Context> {
 
     typename Reducer::Meta ctx(FirstDim);
     ctx.observeInput(0, data, num_reduce_dims_);
-    for (int i = 1; i < Reducer::kInputCount; ++i) {
+    for (const auto i : c10::irange(1, Reducer::kInputCount)) {
       auto& aux_in = Input(i);
       ctx.observeInput(i, aux_in, num_reduce_dims_);
     }
@@ -380,7 +380,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
 
     typename ReducerGradient::Meta ctx(reduction_grad, 0, FirstDim);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (const auto i : c10::irange(ReducerGradient::originalInputs().size())) {
       auto& aux_in = Input(i);
       ctx.observeOriginalInput(
           ReducerGradient::originalInputs()[i],
@@ -643,7 +643,7 @@ class AbstractSortedSegmentOp : public Operator<Context> {
     // metaprogramming
     typename Reducer::Meta ctx;
     ctx.observeInput(0, dataInput, 1);
-    for (int i = 1; i < Reducer::kInputCount; ++i) {
+    for (const auto i : c10::irange(1, Reducer::kInputCount)) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           N,
@@ -746,7 +746,7 @@ class AbstractSortedSegmentGradientOp : public Operator<Context> {
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (const auto i : c10::irange(ReducerGradient::originalInputs().size())) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           N,
@@ -1047,7 +1047,7 @@ class AbstractUnsortedSegmentOp : public Operator<Context> {
     // metaprogramming
     typename Reducer::Meta ctx;
     ctx.observeInput(0, data, 1);
-    for (int i = 1; i < Reducer::kInputCount; ++i) {
+    for (const auto i : c10::irange(1, Reducer::kInputCount)) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           N,
@@ -1162,7 +1162,7 @@ class AbstractUnsortedSegmentGradientOp : public Operator<Context> {
 
     typename ReducerGradient::Meta ctx(segment_grads, 1);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (const auto i : c10::irange(ReducerGradient::originalInputs().size())) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           N,
@@ -1436,7 +1436,7 @@ class AbstractLengthsOp : public Operator<Context> {
 
     typename Reducer::Meta ctx;
     ctx.observeInput(0, dataInput, 1);
-    for (int i = 1; i < Reducer::kInputCount; ++i) {
+    for (const auto i : c10::irange(1, Reducer::kInputCount)) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE(
           dataToReduceSize == aux_in.size(0),
@@ -1557,7 +1557,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
     }
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
-    for (auto i = 0U; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (const auto i : c10::irange(0U, ReducerGradient::originalInputs().size())) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           reducedDataSize,
@@ -1660,7 +1660,7 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (const auto i : c10::irange(ReducerGradient::originalInputs().size())) {
       int aux_num = ReducerGradient::originalInputs()[i];
       auto& aux_in = Input(i);
       auto* aux_grad = aux_num < OutputSize() ? Output(aux_num) : nullptr;
@@ -1762,7 +1762,7 @@ class AbstractLengthsWithMainInputAndForwardOutputGradientOp
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (const auto i : c10::irange(ReducerGradient::originalInputs().size())) {
       int aux_num = ReducerGradient::originalInputs()[i];
       auto& aux_in = Input(i);
       auto* aux_grad = aux_num < OutputSize() ? Output(aux_num) : nullptr;
@@ -1928,7 +1928,7 @@ segments, i.e. len(*LENGTHS*).
           for (int d : in[Reducer::kInputCount].dims()) {
             output.add_dims(d);
           }
-          for (int j = 1; j < in[0].dims_size(); j++) {
+          for (const auto j : c10::irange(1, in[0].dims_size())) {
             output.add_dims(in[0].dims(j));
           }
           output.set_data_type(in[0].data_type());

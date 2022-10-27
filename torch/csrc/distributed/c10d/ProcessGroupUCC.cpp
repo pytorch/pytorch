@@ -1,5 +1,7 @@
 #ifdef USE_C10D_UCC
 
+
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -370,7 +372,7 @@ std::shared_ptr<Comm> Comm::get_comm(
         reinterpret_cast<uint8_t*>(&id) + sizeof(id));
     oob->store->set(group_id + std::to_string(oob->rank), val);
   } else {
-    for (int i = 1; i < oob->size; i++) {
+    for (const auto i : c10::irange(1, oob->size)) {
       remote_comm_id = oob->store->get(group_id + std::to_string(i));
       oob->store->deleteKey(group_id + std::to_string(i));
       // Find the highest id.
@@ -833,7 +835,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
 
   if (tensor.device().is_cpu() || torch_ucc_config.use_allgatherv) {
     AllgathervWorkData* data = new AllgathervWorkData(size_);
-    for (int i = 0; i < size_; i++) {
+    for (const auto i : c10::irange(size_)) {
       data->recv_lengths[i] = tensor.element_size() * tensor.numel();
       data->recv_offsets[i] = (uint64_t)outputTensors[0][i].data_ptr();
     }
@@ -868,7 +870,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
   } else {
     WorkData* data = new WorkData();
     std::vector<at::Tensor> flat_output(outputTensors.size());
-    for (size_t i = 0; i < outputTensors.size(); i++) {
+    for (const auto i : c10::irange(outputTensors.size())) {
       TORCH_CHECK(
           outputTensors[i].size() == outputTensors.size() * size_,
           "Tensor output list is not valid for the number of participants");
@@ -895,9 +897,9 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
       bool isCuda = outputTensors[0][0].device().is_cuda();
       ;
 #endif
-      for (size_t i = 0; i < outputTensors.size(); i++) {
+      for (const auto i : c10::irange(outputTensors.size())) {
         auto inumel = inputTensors[i].numel();
-        for (size_t j = 0; j < outputTensors[i].size(); j++) {
+        for (const auto j : c10::irange(outputTensors[i].size())) {
           TORCH_CHECK(
               (outputTensors[i][j].numel() == inumel),
               "Tensor operand counts must be same");
@@ -1272,7 +1274,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::gather(
     }
     outputs = outputTensors[0];
 
-    for (int i = 0; i < size_; i++) {
+    for (const auto i : c10::irange(size_)) {
       data->recv_lengths[i] =
           (uint64_t)(outputs[i].element_size() * outputs[i].numel());
       data->recv_offsets[i] = (uint64_t)outputs[i].data_ptr();
@@ -1358,7 +1360,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
   initComm(inputTensors[0][0].device());
   auto data = std::make_unique<WorkData>();
   std::vector<at::Tensor> flat_input(inputTensors.size());
-  for (size_t i = 0; i < inputTensors.size(); i++) {
+  for (const auto i : c10::irange(inputTensors.size())) {
     TORCH_CHECK(
         inputTensors[i].size() == inputTensors.size() * size_,
         "Tensor input list is not valid for the number of participants");
@@ -1390,9 +1392,9 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
 #ifdef USE_CUDA
     bool isCuda = inputTensors[0][0].device().is_cuda();
 #endif
-    for (size_t i = 0; i < isize; i++) {
+    for (const auto i : c10::irange(isize)) {
       auto onumel = outputTensors[i].numel();
-      for (size_t j = 0; j < inputTensors[i].size(); j++) {
+      for (const auto j : c10::irange(inputTensors[i].size())) {
         TORCH_CHECK(
             (inputTensors[i][j].numel() == onumel),
             "Tensor operand counts must be same");
@@ -1455,7 +1457,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::scatter(
               ", same as size of the process group."));
     }
 
-    for (int i = 0; i < size_; i++) {
+    for (const auto i : c10::irange(size_)) {
       data->send_lengths[i] = (uint64_t)tensor.element_size() * tensor.numel();
       data->send_offsets[i] = (uint64_t)inputTensors[0][i].data_ptr();
     }

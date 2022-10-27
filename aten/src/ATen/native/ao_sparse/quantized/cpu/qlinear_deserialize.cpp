@@ -5,6 +5,7 @@
 #endif
 #ifdef USE_PYTORCH_QNNPACK
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+#include <c10/util/irange.h>
 #endif
 
 namespace ao {
@@ -52,7 +53,7 @@ void unpack_bcsr(
   if (qscheme_per_tensor) {
     memset(dst, zero_points[0], R * C * sizeof(int8_t));
   } else {
-    for (int64_t i = 0; i < R; i++) {
+    for (const auto i : c10::irange(R)) {
       memset(dst + i * C, zero_points[i], C * sizeof(int8_t));
     }
   }
@@ -60,12 +61,12 @@ void unpack_bcsr(
   const std::vector<int32_t>& row_indices = std::get<1>(bcsr);
   const std::vector<int32_t>& col_indices = std::get<2>(bcsr);
   int64_t rowBlocks = (R + RB - 1) / RB;
-  for (int64_t i = 0; i < rowBlocks; ++i) {
+  for (const auto i : c10::irange(rowBlocks)) {
     // For the current tile, rowBPtr starts from currentTileIdx
     for (int64_t r = row_indices[i]; r < row_indices[i + 1]; ++r) {
       int64_t curColIdx = col_indices[r];
-      for (int64_t ib = 0; ib < RB; ++ib) {
-        for (int64_t jb = 0; jb < CB; ++jb) {
+      for (const auto ib : c10::irange(RB)) {
+        for (const auto jb : c10::irange(CB)) {
           // Are we within bounds of destination matrix?
           if ((i * RB + ib) < R && (curColIdx * CB + jb) < C) {
             dst[(i * RB + ib) * ld + curColIdx * CB + jb] =

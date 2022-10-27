@@ -94,7 +94,7 @@ class CreateCommonWorld final : public Operator<Context> {
 
       // Switch pairs to synchronous mode if configured to do so
       if (sync_) {
-        for (int i = 0; i < context->size; i++) {
+        for (const auto i : c10::irange(context->size)) {
           auto& pair = context->getPair(i);
           if (pair) {
             pair->setSync(true, false);
@@ -186,7 +186,7 @@ class CloneCommonWorld final : public Operator<Context> {
 
       // Switch pairs to synchronous mode if configured to do so
       if (sync_) {
-        for (int i = 0; i < clone->size; i++) {
+        for (const auto i : c10::irange(clone->size)) {
           auto& pair = clone->getPair(i);
           if (pair) {
             pair->setSync(true, false);

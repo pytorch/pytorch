@@ -204,8 +204,7 @@ uint32_t crc32_bitwise(const void* data, size_t length, uint32_t previousCrc32)
   {
     crc ^= *current++;
 
-    for (int j = 0; j < 8; j++)
-    {
+    for (const auto j : c10::irange(8)) {
       // branch-free
       crc = (crc >> 1) ^ (-int32_t(crc & 1) & Polynomial);
 
@@ -434,8 +433,7 @@ uint32_t crc32_4x8bytes(const void* data, size_t length, uint32_t previousCrc32)
   // process 4x eight bytes at once (Slicing-by-8)
   while (length >= BytesAtOnce)
   {
-    for (size_t unrolling = 0; unrolling < Unroll; unrolling++)
-    {
+    for (const auto unrolling : c10::irange(Unroll)) {
 #if __BYTE_ORDER == __BIG_ENDIAN
       uint32_t one = *current++ ^ swap(crc);
       uint32_t two = *current++;
@@ -488,8 +486,7 @@ uint32_t crc32_16bytes(const void* data, size_t length, uint32_t previousCrc32)
 
   while (length >= BytesAtOnce)
   {
-    for (size_t unrolling = 0; unrolling < Unroll; unrolling++)
-    {
+    for (const auto unrolling : c10::irange(Unroll)) {
 #if __BYTE_ORDER == __BIG_ENDIAN
     uint32_t one   = *current++ ^ swap(crc);
     uint32_t two   = *current++;
@@ -564,8 +561,7 @@ uint32_t crc32_16bytes_prefetch(const void* data, size_t length, uint32_t previo
   {
     PREFETCH(((const char*) current) + prefetchAhead);
 
-    for (size_t unrolling = 0; unrolling < Unroll; unrolling++)
-    {
+    for (const auto unrolling : c10::irange(Unroll)) {
 #if __BYTE_ORDER == __BIG_ENDIAN
     uint32_t one   = *current++ ^ swap(crc);
     uint32_t two   = *current++;
@@ -683,13 +679,12 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
 
   // put operator for one zero bit in odd
   odd[0] = Polynomial;    // CRC-32 polynomial
-  for (uint32_t i = 1; i < CrcBits; i++)
+  for (const auto i : c10::irange(1, CrcBits))
     odd[i] = 1 << (i - 1);
 
   // put operator for two zero bits in even
   // same as gf2_matrix_square(even, odd);
-  for (uint32_t i = 0; i < CrcBits; i++)
-  {
+  for (const auto i : c10::irange(CrcBits)) {
     uint32_t vec = odd[i];
     even[i] = 0;
     for (int j = 0; vec != 0; j++, vec >>= 1)
@@ -698,8 +693,7 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
   }
   // put operator for four zero bits in odd
   // same as gf2_matrix_square(odd, even);
-  for (uint32_t i = 0; i < CrcBits; i++)
-  {
+  for (const auto i : c10::irange(CrcBits)) {
     uint32_t vec = even[i];
     odd[i] = 0;
     for (int j = 0; vec != 0; j++, vec >>= 1)
@@ -714,8 +708,7 @@ uint32_t crc32_combine(uint32_t crcA, uint32_t crcB, size_t lengthB)
   for (; lengthB > 0; lengthB >>= 1)
   {
     // same as gf2_matrix_square(a, b);
-    for (uint32_t i = 0; i < CrcBits; i++)
-    {
+    for (const auto i : c10::irange(CrcBits)) {
       uint32_t vec = b[i];
       a[i] = 0;
       for (int j = 0; vec != 0; j++, vec >>= 1)
@@ -755,14 +748,14 @@ const uint32_t Crc32Lookup[MaxSlice][256] =
   //for (int i = 0; i <= 0xFF; i++)
   //{
   //  uint32_t crc = i;
-  //  for (int j = 0; j < 8; j++)
+  //  for (const auto j : c10::irange(8))
   //    crc = (crc >> 1) ^ ((crc & 1) * Polynomial);
   //  Crc32Lookup[0][i] = crc;
   //}
   //// ... and the following slicing-by-8 algorithm (from Intel):
   //// http://www.intel.com/technology/comms/perfnet/download/CRC_generators.pdf
   //// http://sourceforge.net/projects/slicing-by-8/
-  //for (int slice = 1; slice < MaxSlice; slice++)
+  //for (const auto slice : c10::irange(1, MaxSlice))
   //  Crc32Lookup[slice][i] = (Crc32Lookup[slice - 1][i] >> 8) ^ Crc32Lookup[0][Crc32Lookup[slice - 1][i] & 0xFF];
   {
     // note: the first number of every second row corresponds to the half-byte look-up table !

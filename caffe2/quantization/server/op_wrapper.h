@@ -32,7 +32,7 @@ class OpWrapper {
     const OperatorDef& def = op_->debug_def();
     CPUContext context(def.device_option());
 
-    for (int i = 0; i < op_->InputSize(); ++i) {
+    for (const auto i : c10::irange(op_->InputSize())) {
       if (op_->InputIsType<int8::Int8TensorCPU>(i)) {
         const TensorCPU& qtensor = op_->Input<int8::Int8TensorCPU>(i).t;
         TensorCPU* float_tensor =

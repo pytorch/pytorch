@@ -100,8 +100,8 @@ static void imageYUV420CenterCropToFloatBuffer(
     int wr = outOffset;
     int wg = wr + channelSize;
     int wb = wg + channelSize;
-    for (int y = 0; y < tensorHeight; y++) {
-      for (int x = 0; x < tensorWidth; x++) {
+    for (const auto y : c10::irange(tensorHeight)) {
+      for (const auto x : c10::irange(tensorWidth)) {
         xBeforeRtn = cropXAdd + cropXMult * (int)(x * scale);
         yBeforeRtn = cropYAdd + cropYMult * (int)(y * scale);
         yIdx = yBeforeRtn * yRowStride + xBeforeRtn * yPixelStride;
@@ -127,8 +127,8 @@ static void imageYUV420CenterCropToFloatBuffer(
     }
   } else if (memoryFormatCode == kMemoryFormatChannelsLast) {
     int wc = outOffset;
-    for (int y = 0; y < tensorHeight; y++) {
-      for (int x = 0; x < tensorWidth; x++) {
+    for (const auto y : c10::irange(tensorHeight)) {
+      for (const auto x : c10::irange(tensorWidth)) {
         xBeforeRtn = cropXAdd + cropXMult * (int)(x * scale);
         yBeforeRtn = cropYAdd + cropYMult * (int)(y * scale);
         yIdx = yBeforeRtn * yRowStride + xBeforeRtn * yPixelStride;

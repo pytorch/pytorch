@@ -16,6 +16,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
+#include <c10/util/irange.h>
 
 // This file contains functorch's Python bindings.
 
@@ -110,7 +111,7 @@ static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
   }
   VmapDimVector permutation;
   permutation.reserve(logical_dim);
-  for (int64_t dim = 0; dim < logical_dim; dim++) {
+  for (const auto dim : c10::irange(logical_dim)) {
     if (dim == src) {
       continue;
     }

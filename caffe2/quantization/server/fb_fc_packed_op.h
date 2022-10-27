@@ -92,7 +92,7 @@ class FbFCPackedOperator final : public Operator<Context> {
     if (!W->packed()) {
       if (!packed_w_) {
         std::vector<float> src_mat(W->matSize());
-        for (int i = 0; i < W->matSize(); ++i) {
+        for (const auto i : c10::irange(W->matSize())) {
           src_mat[i] =
             fbgemm::cpu_half2float(W->pmat()[i]);
         }

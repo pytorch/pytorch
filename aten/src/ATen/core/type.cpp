@@ -81,7 +81,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       if (has_valid_strides_info &&
           type_verbosity() >= TypeVerbosity::TypeAndStride) {
         out << ", strides=[";
-        for (size_t i = 0; i < *ndim; ++i) {
+        for (const auto i : c10::irange(*ndim)) {
           if (i > 0) {
             out << ", ";
           }
@@ -141,7 +141,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "NamedTuple";
     }
     out << "(";
-    for(size_t i = 0; i < tup->elements().size(); ++i) {
+    for (const auto i : c10::irange(tup->elements().size())) {
       if(i > 0)
         out << ", ";
       if (tup->schema()) {
@@ -376,7 +376,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
       return c10::nullopt;
     }
     std::vector<TypePtr> elements;
-    for (size_t i = 0; i < tuple1->elements().size(); i++) {
+    for (const auto i : c10::irange(tuple1->elements().size())) {
       if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_union)) {
         elements.push_back(*std::move(elem));
       } else {
@@ -508,7 +508,7 @@ MatchTypeReturn matchTypeVariables(
       if (tp_formal->elements().size() != tp_actual->elements().size()) {
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
-      for (size_t i = 0; i < tp_formal->elements().size(); ++i) {
+      for (const auto i : c10::irange(tp_formal->elements().size())) {
         auto result = matchTypeVariables(
             tp_formal->elements()[i], tp_actual->elements()[i], type_env);
         if (!result.success()) {
@@ -709,7 +709,7 @@ TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& 
   std::vector<Argument> arguments;
   arguments.reserve(field_names.size());
   auto min_default_idx = field_names.size() - field_defaults.size();
-  for (size_t i = 0; i < field_names.size(); ++i) {
+  for (const auto i : c10::irange(field_names.size())) {
     if (i < min_default_idx) {
       Argument arg{
           /*name=*/std::string{field_names[i]},
@@ -817,7 +817,7 @@ bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
       return false;
     }
 
-    for (size_t i = 0; i < args_lhs.size(); ++i) {
+    for (const auto i : c10::irange(args_lhs.size())) {
       if (args_lhs[i].name() != args_rhs[i].name()) {
         return false;
       }
@@ -865,7 +865,7 @@ std::string TupleType::str() const {
     ss << name()->qualifiedName();
   } else {
     ss << "(";
-    for(size_t i = 0; i < elements().size(); ++i) {
+    for (const auto i : c10::irange(elements().size())) {
       if(i > 0)
         ss << ", ";
       ss << elements()[i]->str();
@@ -886,7 +886,7 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
       // https://docs.python.org/3/library/typing.html#typing.Tuple
       ss << "()";
     } else {
-      for (size_t i = 0; i < elements().size(); ++i) {
+      for (const auto i : c10::irange(elements().size())) {
         if (i > 0)
           ss << ", ";
         ss << elements()[i]->annotation_str(printer);

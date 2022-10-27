@@ -9,6 +9,7 @@
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 #include "c10/util/irange.h"
+#include <c10/util/irange.h>
 
 C10_DECLARE_bool(caffe2_rnn_executor);
 
@@ -472,12 +473,12 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   void renameOpInputOutput(std::string from_name, std::string to_name) {
     for (const auto j : c10::irange(stepNetDef_.op_size())) {
       auto* op = stepNetDef_.mutable_op(j);
-      for (int i = 0; i < op->input_size(); i++) {
+      for (const auto i : c10::irange(op->input_size())) {
         if (op->input(i) == from_name) {
           op->set_input(i, to_name);
         }
       }
-      for (int i = 0; i < op->output_size(); i++) {
+      for (const auto i : c10::irange(op->output_size())) {
         if (op->output(i) == from_name) {
           op->set_output(i, to_name);
         }

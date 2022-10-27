@@ -3091,7 +3091,7 @@ Tensor prelu_backward_weight_jvp(
       reduction_dims.push_back(1);
     }
     // reduce over dims which are >= 2.
-    for (int64_t i = 2; i < ndim; ++i) {
+    for (const auto i : c10::irange(2, ndim)) {
       reduction_dims.push_back(i);
     }
   }

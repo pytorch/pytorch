@@ -50,6 +50,7 @@
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/values_native.h>
 #include <ATen/ops/_validate_compressed_sparse_indices.h>
+#include <c10/util/irange.h>
 #endif
 
 namespace at {
@@ -157,7 +158,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
       batchsize, ")");
 
   // A tensor constitutes of full blocks, 3.1
-  for (int i=0; i<block_ndim; i++) {
+  for (const auto i : c10::irange(block_ndim)) {
       TORCH_CHECK(size[batch_ndim + i] % blocksize[i] == 0,
                   "tensor shape[", batch_ndim + i, "] (=", size[batch_ndim + i],
                   ") must be divisible with blocksize[", i, "] (=", blocksize[i],
@@ -374,7 +375,7 @@ DimVector _estimate_sparse_compressed_tensor_size(
         size.push_back(plain_dim_size * blocksize[0]);
         size.push_back(compressed_dim_size * blocksize[1]);
       });
-  for (int i=0; i<dense_ndim; i++) {
+  for (const auto i : c10::irange(dense_ndim)) {
     int64_t j = batch_ndim + 1 + block_ndim + i;
     size.push_back((j < values.dim() ? values.size(j) : 1));
   }

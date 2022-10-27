@@ -1,5 +1,6 @@
 #include <test/cpp/lazy/test_lazy_ops_util.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
@@ -141,7 +142,7 @@ void TestBackward(
   std::vector<torch::Tensor> xinput_vars;
   std::vector<torch::Tensor> inputs_w_grad;
   std::vector<torch::Tensor> xinputs_w_grad;
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     const torch::Tensor& input = inputs[i];
     if (input.defined()) {
       torch::Tensor oinput =
@@ -172,7 +173,7 @@ void TestBackward(
     // Check grad of sum(outs) w.r.t inputs_w_grad.
     torch::Tensor sum = torch::zeros_like(outs[0]).sum();
     torch::Tensor xsum = torch::zeros_like(xouts[0]).sum();
-    for (size_t i = 0; i < outs.size(); ++i) {
+    for (const auto i : c10::irange(outs.size())) {
       if (outs[i].requires_grad()) {
         sum += outs[i].sum();
         xsum += xouts[i].sum();
@@ -194,7 +195,7 @@ void TestBackward(
         /*retain_graph=*/c10::nullopt,
         /*create_graph=*/create_graph,
         /*allow_unused=*/true);
-    for (size_t i = 0; i < outs.size(); ++i) {
+    for (const auto i : c10::irange(outs.size())) {
       ASSERT_EQ(outs[i].defined(), xouts[i].defined());
       if (outs[i].defined()) {
         AllClose(outs[i], xouts[i], rtol, atol);

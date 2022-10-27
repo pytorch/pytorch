@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/metrics.h>
@@ -48,7 +49,7 @@ std::vector<at::Tensor> to_eager(
   std::vector<at::Tensor> eager_tensors(tensors.size());
   std::vector<at::Tensor> valid_tensors;
   std::vector<bool> to_translate(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     const at::Tensor& tensor = tensors[i];
     // Explicitly handling undefined tensors here instead of letting `_to_eager`
     // handle it. Otherwise, we'd need to require all backends with their own
@@ -77,7 +78,7 @@ std::vector<c10::optional<at::Tensor>> to_eager(
   std::vector<c10::optional<at::Tensor>> eager_tensors(tensors.size());
   std::vector<at::Tensor> valid_tensors;
   std::vector<bool> to_translate(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     const c10::optional<at::Tensor>& tensor = tensors[i];
     // Explicitly handling undefined tensors here instead of letting `_to_eager`
     // handle it. Otherwise, we'd need to require all backends with their own
@@ -221,7 +222,7 @@ void ts_eager_fallback(
 
   // Step 1: Convert all non-eager tensor inputs into eager tensors and put them
   // on the stack at the correct indices.
-  for (int64_t idx = 0; idx < arguments.size(); ++idx) {
+  for (const auto idx : c10::irange(arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       tensor_args.push_back(ivalue.toTensor());
@@ -246,7 +247,7 @@ void ts_eager_fallback(
   // CPU together.
   auto eager_tensors = to_eager(tensor_args, device_type);
 
-  for (auto i = 0; i < tensor_args_indices.size(); ++i) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto idx = tensor_args_indices[i];
     (*stack)[arguments_begin + idx] = c10::IValue(eager_tensors[i]);
   }
@@ -257,7 +258,7 @@ void ts_eager_fallback(
   // Step 3: We need to take special care to handle mutable aliases properly:
   // If any input tensors are mutable aliases, we need to directly copy the
   // updated data on the eager tensors back to the original inputs.
-  for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto tensor_idx = tensor_args_indices[i];
     const auto alias_info = schema_args[tensor_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
@@ -288,7 +289,7 @@ void ts_eager_fallback(
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  for (int64_t idx = 0; idx < returns.size(); ++idx) {
+  for (const auto idx : c10::irange(returns.size())) {
     if (returns[idx].isTensor()) {
       const auto& return_tens = returns[idx].toTensor();
       if (return_tens.defined()) {
@@ -299,7 +300,7 @@ void ts_eager_fallback(
           bool found_alias = false;
           // We could store some extra metadata on the function schema to avoid
           // the loop here if we need to improve perf.
-          for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
+          for (const auto i : c10::irange(tensor_args_indices.size())) {
             auto input_tensor_idx = tensor_args_indices[i];
             const auto& input_tensor = eager_tensors[i];
             const auto input_alias_info =

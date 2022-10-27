@@ -1593,7 +1593,7 @@ TORCH_IMPL_FUNC(scatter_add)
         index_coords_sizes,
         at::TensorOptions().dtype(at::ScalarType::Long).device(self.device()));
 
-      for (int64_t dim_other = 0; dim_other < self.dim(); dim_other++) {
+      for (const auto dim_other : c10::irange(self.dim())) {
         if (dim_other == dim) {
           continue;
         }

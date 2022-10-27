@@ -42,7 +42,7 @@ class CopyRowsToTensorOp : public Operator<Context> {
     CAFFE_ENFORCE(
         IsInputOutputAlias(0, 0), "Input 0 and Output 0 should be alias.");
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (size_t i = 0; i < indices.sizes()[0]; ++i) {
+    for (const auto i : c10::irange(indices.sizes()[0])) {
       std::memcpy(
           output_data + indices_data[i] * tensor_width,
           row_data,

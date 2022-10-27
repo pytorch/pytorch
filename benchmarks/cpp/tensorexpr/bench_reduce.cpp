@@ -202,9 +202,9 @@ static void reduce1d_native_tiled(at::Tensor& A, at::Tensor& B) {
   }
 
   int tile_count = size / kChunkSize / kTileSize;
-  for (int i = 0; i < tile_count; i++) {
+  for (const auto i : c10::irange(tile_count)) {
 #pragma unroll
-    for (int j = 0; j < kTileSize; j++) {
+    for (const auto j : c10::irange(kTileSize)) {
       float* p = pA + (i * kTileSize + j) * kChunkSize;
       __m256 data = _mm256_loadu_ps(p);
       t[j] = _mm256_add_ps(t[j], data);

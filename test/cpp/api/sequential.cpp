@@ -343,7 +343,7 @@ TEST_F(SequentialTest, IsCloneable) {
       std::dynamic_pointer_cast<SequentialImpl>(sequential->clone());
   ASSERT_EQ(sequential->size(), clone->size());
 
-  for (size_t i = 0; i < sequential->size(); ++i) {
+  for (const auto i : c10::irange(sequential->size())) {
     // The modules should be the same kind (type).
     ASSERT_EQ(sequential[i]->name(), clone[i]->name());
     // But not pointer-equal (distinct objects).

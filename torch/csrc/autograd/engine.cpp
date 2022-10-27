@@ -717,8 +717,7 @@ void GraphTask::exec_post_processing() {
 
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (size_t i = 0; i < final_callbacks_.size(); ++i) {
+    for (const auto i : c10::irange(final_callbacks_.size())) {
       cb_lock.unlock();
       final_callbacks_[i]();
       cb_lock.lock();

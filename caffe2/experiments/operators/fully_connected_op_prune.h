@@ -18,6 +18,7 @@
 #define CAFFE2_OPERATORS_FULLY_CONNECTED_OP_PRUNE_H_
 
 #include <c10/util/Logging.h>
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
@@ -71,8 +72,8 @@ void MaskMatrix<float, CPUContext>(
     int M,
     int N) {
   int offset = 0;
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       mat[offset] = mask[offset] ? mat[offset] : 0;
       offset++;
     }
@@ -114,8 +115,8 @@ int MatrixCompare_LT<float>(
     int N) {
   int seq_len = 0;
   int offset = 0;
-  for (int i = 0; i < M; ++i) {
-    for (int j = 0; j < N; ++j) {
+  for (const auto i : c10::irange(M)) {
+    for (const auto j : c10::irange(N)) {
       if (mat[offset] != 0 && (mat[offset] < thres && mat[offset] > -thres)) {
         mask_seq[seq_len++] = static_cast<float>(offset);
       }

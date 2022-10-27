@@ -4,6 +4,7 @@
 #ifdef USE_RUY_QMATMUL
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/RuyUtils.h>
+#include <c10/util/irange.h>
 #include <ruy/ruy.h>
 #endif
 
@@ -139,7 +140,7 @@ Tensor qmatmul(
       const underlying_t* qb_subtensor = qb_data + begin * qb_stride;
       underlying_t* out_subtensor = out_data + begin * out_stride;
 
-      for (int64_t i = begin; i < end; i++) {
+      for (C10_UNUSED const auto i : c10::irange(begin, end)) {
         qa_matrix.set_data(qa_subtensor);
         qb_matrix.set_data(qb_subtensor);
         out_matrix.set_data(out_subtensor);

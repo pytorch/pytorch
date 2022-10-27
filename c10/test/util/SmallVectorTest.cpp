@@ -12,6 +12,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 #include <stdarg.h>
 #include <list>
@@ -181,7 +182,7 @@ class SmallVectorTestBase : public testing::Test {
 
     va_list ap;
     va_start(ap, size);
-    for (size_t i = 0; i < size; ++i) {
+    for (const auto i : c10::irange(size)) {
       int value = va_arg(ap, int);
       EXPECT_EQ(value, v[i].getValue());
     }
@@ -383,7 +384,7 @@ TYPED_TEST(SmallVectorTest, OverflowTest) {
 
   // Test size and values.
   EXPECT_EQ(10u, this->theVector.size());
-  for (int i = 0; i < 10; ++i) {
+  for (const auto i : c10::irange(10)) {
     EXPECT_EQ(i + 1, this->theVector[i].getValue());
   }
 
@@ -840,8 +841,9 @@ TYPED_TEST(DualSmallVectorsTest, MoveAssignment) {
   SCOPED_TRACE("MoveAssignTest-DualVectorTypes");
 
   // Set up our vector with four elements.
-  for (unsigned I = 0; I < 4; ++I)
+  for (const auto I : c10::irange(4)) {
     this->otherVector.push_back(Constructable(I));
+  }
 
   const Constructable* OrigDataPtr = this->otherVector.data();
 

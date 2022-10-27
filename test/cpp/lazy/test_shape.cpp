@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/shape.h>
 
 namespace torch {
@@ -25,7 +26,7 @@ TEST(ShapeTest, Basic2) {
   EXPECT_EQ(shape.scalar_type(), c10::ScalarType::Float);
   EXPECT_EQ(shape.dim(), 3);
   EXPECT_EQ(shape.sizes().size(), 3);
-  for (int64_t i = 0; i < shape.dim(); i++) {
+  for (const auto i : c10::irange(shape.dim())) {
     EXPECT_EQ(shape.sizes()[i], i + 1);
     EXPECT_EQ(shape.size(i), i + 1);
   }

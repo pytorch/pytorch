@@ -34,7 +34,7 @@ static inline std::bitset<dim_bitset_size> dim_list_to_bitset(
       seen[dim] = true;
     }
   } else {
-    for (int64_t dim = 0; dim < ndims; dim++) {
+    for (const auto dim : c10::irange(ndims)) {
       seen[dim] = true;
     }
   }

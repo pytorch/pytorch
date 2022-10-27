@@ -50,7 +50,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
 
   int kernel_dims_size = 1;
-  for (std::size_t i = 0; i < kernel_.size(); ++i) {
+  for (const auto i : c10::irange(kernel_.size())) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + image_ndim + 2), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }
@@ -394,7 +394,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   ConvPoolOpBase<Context>::ComputePads(input_image_dims);
 
   int kernel_dims_size = 1;
-  for (std::size_t i = 0; i < kernel_.size(); ++i) {
+  for (const auto i : c10::irange(kernel_.size())) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + image_ndim + 2), kernel_[i]);
     kernel_dims_size *= kernel_[i];
   }

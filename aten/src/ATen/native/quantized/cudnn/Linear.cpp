@@ -19,6 +19,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/irange.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
 
@@ -67,10 +68,10 @@ void setLinearParams(
   params->dataType = CUDNN_DATA_INT32;
   params->input_dim = input.dim();
   params->memory_format = input.suggest_memory_format();
-  for (int i = 0; i < params->input_dim; ++i) {
+  for (const auto i : c10::irange(params->input_dim)) {
     params->input_size[i] = input.sizes()[i];
   }
-  for (int i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     params->weight_size[i] = weight.sizes()[i];
   }
   params->deterministic = deterministic;

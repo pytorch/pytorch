@@ -102,7 +102,7 @@ class ConvPoolDNNLowPOpBase : public ConvPoolOpBase<CPUContext> {
     float* ref = float_tensor->template mutable_data<float>();
     if (followed_by_ == "Relu" || debug_def().type() == "ConvRelu" ||
         debug_def().type() == "Int8ConvRelu") {
-      for (int i = 0; i < OutputTensorCPU_(0)->numel(); ++i) {
+      for (const auto i : c10::irange(OutputTensorCPU_(0)->numel())) {
         ref[i] = std::max(0.f, ref[i]);
       }
     }

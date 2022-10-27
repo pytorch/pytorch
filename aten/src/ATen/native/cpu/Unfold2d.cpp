@@ -135,14 +135,14 @@ static void unfolded2d_acc_channels_last(
     int64_t output_height,
     int64_t output_width) {
 
-  for (int64_t y = 0; y < output_height; y++) {
-    for (int64_t x = 0; x < output_width; x++) {
+  for (const auto y : c10::irange(output_height)) {
+    for (const auto x : c10::irange(output_width)) {
       scalar_t* src = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
       scalar_t* dst = input_data;
 
       if (padW > 0 || padH > 0) {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH - padH + kh;
             int64_t ix = x * dW - padW + kw;
             if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
@@ -157,8 +157,8 @@ static void unfolded2d_acc_channels_last(
           }
         }
       } else {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH + kh;
             int64_t ix = x * dW + kw;
             scalar_t* dst_slice = dst + iy * input_width * n_input_plane + ix * n_input_plane;
@@ -359,8 +359,8 @@ static void unfolded2d_copy_channels_last(
       scalar_t* src = input_data;
 
       if (padW > 0 || padH > 0) {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH - padH + kh;
             int64_t ix = x * dW - padW + kw;
             if (iy < 0 || iy >= input_height || ix < 0 || ix >= input_width) {
@@ -375,8 +375,8 @@ static void unfolded2d_copy_channels_last(
           }
         }
       } else {
-        for (int64_t kh = 0; kh < kH; kh++) {
-          for (int64_t kw = 0; kw < kW; kw++) {
+        for (const auto kh : c10::irange(kH)) {
+          for (const auto kw : c10::irange(kW)) {
             int64_t iy = y * dH + kh;
             int64_t ix = x * dW + kw;
             memcpy(dst + kh * kW * n_input_plane + kw * n_input_plane,

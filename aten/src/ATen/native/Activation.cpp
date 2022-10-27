@@ -787,7 +787,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     int64_t input_ndim = self.dim();
     reduce_dims.push_back(0);
     if (input_ndim > 2) {
-      for(int64_t i = 2; i < input_ndim; i++) reduce_dims.push_back(i);
+      for (const auto i : c10::irange(2, input_ndim))reduce_dims.push_back(i);
     }
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }

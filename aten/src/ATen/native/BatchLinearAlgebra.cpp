@@ -2961,17 +2961,17 @@ static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tens
   auto real_vectors_data = real_vectors.data_ptr<scalar_t>();
   auto values_data = complex_values.data_ptr<c10::complex<scalar_t>>();
 
-  for (auto b = decltype(batch_size){0}; b < batch_size; b++) {
+  for (const auto b : c10::irange(decltype(batch_size){0}, batch_size)) {
     scalar_t* vecs = &real_vectors_data[b * matrix_stride];
     c10::complex<scalar_t>* res = &result_data[b * matrix_stride];
     c10::complex<scalar_t>* vals = &values_data[b * n];
     for (auto j = decltype(n){0}; j < n; j++) {
       if (vals[j].imag() == 0.0) {  // eigenvalue is real, then v(j) = VR(:,j)
-        for (auto i = decltype(n){0}; i < n; i++) {
+        for (const auto i : c10::irange(decltype(n){0}, n)) {
           res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i], 0);
         }
       } else {
-        for (auto i = decltype(n){0}; i < n; i++) {
+        for (const auto i : c10::irange(decltype(n){0}, n)) {
           res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i],  vecs[(j+1) * n + i]);      // v(j)   = VR(:,j) + i*VR(:,j+1)
           res[(j+1) * n + i] = c10::complex<scalar_t>(vecs[j * n + i], -vecs[(j+1) * n + i]);  // v(j+1) = VR(:,j) - i*VR(:,j+1)
         }

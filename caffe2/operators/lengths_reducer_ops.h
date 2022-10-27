@@ -195,7 +195,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
 
     int64_t current = 0;
     for (const auto m : c10::irange(M)) {
-      for (int i = 0; i < lengths[m]; ++i) {
+      for (const auto i : c10::irange(lengths[m])) {
         CAFFE_ENFORCE_LT(
             current,
             indices_size,

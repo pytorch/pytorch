@@ -3,6 +3,7 @@
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -57,7 +58,7 @@ struct CPUValueSelectionIntersectionKernel {
                   const auto* ptr_rhs_values_bytes = data[3];
                   const auto* ptr_rhs_select_idx_bytes = data[4];
 
-                  for (int64_t i = 0; i < n; ++i) {
+                  for (C10_UNUSED const auto i : c10::irange(n)) {
                     // Exctract data
                     auto* RESTRICT ptr_res_values = reinterpret_cast<scalar_t*>(ptr_res_values_bytes);
                     const auto* ptr_lhs_values = reinterpret_cast<const scalar_t*>(ptr_lhs_values_bytes);

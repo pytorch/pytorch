@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
@@ -25,7 +26,7 @@ TEST(Ops, Sum) {
   constexpr int N = 16;
   std::vector<IntList> testDims = {{0}, {1}, {0, 1}};
   std::vector<std::vector<ExprHandle>> outputShapes = {{N}, {M}, {}};
-  for (unsigned idx = 0; idx < testDims.size(); idx++) {
+  for (const auto idx : c10::irange(testDims.size())) {
     const auto& dims = testDims[idx];
     const auto& outShape = outputShapes[idx];
 
@@ -56,7 +57,7 @@ TEST(Ops, ChannelsLastSum) {
 
   std::vector<std::vector<ExprHandle>> outputShapes = {
       {B, C, D, E}, {A, C, D, E}, {C, D, E}};
-  for (unsigned idx = 0; idx < testDims.size(); idx++) {
+  for (const auto idx : c10::irange(testDims.size())) {
     const auto& dims = testDims[idx];
     const auto& outShape = outputShapes[idx];
 

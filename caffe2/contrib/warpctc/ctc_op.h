@@ -96,7 +96,7 @@ class CTCOp final : public Operator<Context> {
     if (is_test_ && labels.size(0) == 0) {
       // compute_ctc_loss doesn't handle empty labels well
       T* costsData = costs->template mutable_data<T>();
-      for (int i = 0; i < costs->numel(); ++i) {
+      for (const auto i : c10::irange(costs->numel())) {
         costsData[i] = 0;
       }
       return true;

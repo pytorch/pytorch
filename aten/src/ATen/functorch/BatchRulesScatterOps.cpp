@@ -12,6 +12,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
+#include <c10/util/irange.h>
 
 
 namespace at { namespace functorch {
@@ -86,7 +87,7 @@ std::vector<optional<Tensor>> batchIndices(
   int64_t maxLogicalRank = get_max_index_logical_dim(indices, indices_bdims);
   bool indices_batched = any_has_value(indices_bdims);
 
-  for (size_t i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto index = indices[i];
     if (index.has_value() && index->numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
@@ -632,7 +633,7 @@ std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
     batch_size = get_bdim_size2(self, self_bdim, values, values_bdim);
   } else {
     // one or more of the indices is batched.
-    for (size_t i = 0; i < indices.size(); i++) {
+    for (const auto i : c10::irange(indices.size())) {
       if (indices_bdims[i] && indices[i].has_value()) {
         batch_size = indices[i].value().size(*indices_bdims[i]);
         break;

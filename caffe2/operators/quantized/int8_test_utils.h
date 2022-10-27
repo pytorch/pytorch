@@ -30,7 +30,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> q(
   std::mt19937 gen(rd());
   std::uniform_int_distribution<uint32_t> dis{
       0, std::numeric_limits<uint8_t>::max()};
-  for (auto i = 0; i < r->t.numel(); ++i) {
+  for (const auto i : c10::irange(r->t.numel())) {
     r->t.mutable_data<uint8_t>()[i] = dis(gen);
   }
   return r;
@@ -46,7 +46,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> biasq(
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_real_distribution<float> dis(-1, 1);
-  for (auto i = 0; i < r->t.numel(); ++i) {
+  for (const auto i : c10::irange(r->t.numel())) {
     r->t.mutable_data<int32_t>()[i] =
         static_cast<int32_t>(dis(gen) / scale + r->zero_point);
   }
@@ -56,7 +56,7 @@ inline std::unique_ptr<int8::Int8TensorCPU> biasq(
 inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
   auto r = std::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
-  for (auto i = 0; i < r->numel(); ++i) {
+  for (const auto i : c10::irange(r->numel())) {
     r->mutable_data<float>()[i] =
         (static_cast<int32_t>(XQ.t.data<uint8_t>()[i]) - XQ.zero_point) *
         XQ.scale;
@@ -67,7 +67,7 @@ inline std::unique_ptr<TensorCPU> dq(const int8::Int8TensorCPU& XQ) {
 inline std::unique_ptr<TensorCPU> biasdq(const int8::Int8TensorCPU& XQ) {
   auto r = std::make_unique<Tensor>(CPU);
   r->Resize(XQ.t.sizes());
-  for (auto i = 0; i < r->numel(); ++i) {
+  for (const auto i : c10::irange(r->numel())) {
     r->mutable_data<float>()[i] =
         (XQ.t.data<int32_t>()[i] - XQ.zero_point) * XQ.scale;
   }

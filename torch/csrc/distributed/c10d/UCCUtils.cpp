@@ -1,5 +1,7 @@
 #ifdef USE_C10D_UCC
 
+
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 
@@ -46,12 +48,12 @@ ucc_status_t oob_allgather_test(void* req) {
   TORCH_CHECK(info != nullptr);
 
   try {
-    for (int r = 0; r < info->size; r++) {
+    for (const auto r : c10::irange(info->size)) {
       if (!info->store->check({info->getKey(kTeamRank + std::to_string(r))})) {
         return UCC_INPROGRESS;
       }
     }
-    for (int r = 0; r < info->size; r++) {
+    for (const auto r : c10::irange(info->size)) {
       std::vector<uint8_t> data =
           info->store->get(info->getKey(kTeamRank + std::to_string(r)));
       memcpy(

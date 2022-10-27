@@ -1,4 +1,5 @@
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/ts_backend/ts_backend_impl.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
@@ -35,7 +36,7 @@ void TSLoweringContext::Lower(const Node* node) {
     TSOpVector ops = tsnode->Lower(function_, this);
     CHECK(!ops.empty()) << "Failed to lower: " << *node;
     TORCH_CHECK_EQ(node->num_outputs(), ops.size());
-    for (size_t i = 0; i < ops.size(); ++i) {
+    for (const auto i : c10::irange(ops.size())) {
       AssignOutputOp(torch::lazy::Output(node, i), ops[i]);
     }
   } else {

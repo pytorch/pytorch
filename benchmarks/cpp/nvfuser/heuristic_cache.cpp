@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -28,10 +29,10 @@ static auto getLayerBackwardNormRuntime(
   const size_t kOuterNumDims = kM - kN;
 
   std::vector<int64_t> outer_shape;
-  for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
+  for (const auto idx : c10::irange(kOuterNumDims)) {
     outer_shape.push_back(shape[idx]);
   }
-  for (size_t idx = kOuterNumDims; idx < kM; ++idx) {
+  for (const auto idx : c10::irange(kOuterNumDims, kM)) {
     outer_shape.push_back(1);
   }
 

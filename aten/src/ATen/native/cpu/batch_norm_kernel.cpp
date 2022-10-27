@@ -734,7 +734,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
     for (const auto c : c10::irange(begin, end)) {
       float sum_val = float(0);
       fVec sum_fvec = fVec(float(0));
-      for (int64_t n = 0; n < n_batch; n++) {
+      for (const auto n : c10::irange(n_batch)) {
         const BFloat16* input_ptr = input_data + n * n_channel * image_size + c * image_size;
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
@@ -756,7 +756,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
       float var_val = float(0);
       fVec var_fvec = fVec(float(0));
       fVec mean_fvec = fVec(mean_val);
-      for (int64_t n = 0; n < n_batch; n++) {
+      for (const auto n : c10::irange(n_batch)) {
         const BFloat16* input_ptr = input_data + n * n_channel * image_size + c * image_size;
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {

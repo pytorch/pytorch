@@ -10,6 +10,7 @@
 
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace functorch {
@@ -43,7 +44,7 @@ void TensorWrapper::refreshMetadata() {
   auto strides = value_.strides();
   storage_offset_ = value_.storage_offset();
   sizes_and_strides_.resize(value_.dim());
-  for (int64_t i = 0; i < dim; i++) {
+  for (const auto i : c10::irange(dim)) {
     sizes_and_strides_.size_at_unchecked(i) = sizes[i];
     sizes_and_strides_.stride_at_unchecked(i) = strides[i];
   }

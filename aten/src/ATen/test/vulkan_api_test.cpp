@@ -41,7 +41,7 @@ bool checkHardShrink(
 
   float abs_clamp_thresh = std::abs(clamp_thresh);
 
-  for (int i = 0; i < ref.numel(); ++i) {
+  for (const auto i : c10::irange(ref.numel())) {
     float ref_val = ref_ptr[i];
     float out_val = out_ptr[i];
 
@@ -79,7 +79,7 @@ bool checkThreshold(
   float out_max = out.abs().max().item<float>();
   float max_val = std::fmax(ref_max, out_max);
 
-  for (int i = 0; i < ref.numel(); ++i) {
+  for (const auto i : c10::irange(ref.numel())) {
     float ref_val = ref_ptr[i];
     float out_val = out_ptr[i];
 
@@ -3910,7 +3910,7 @@ TEST_F(VulkanAPITest, gru_success) {
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
-  for (int i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     if (i == 0) {
       weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {
@@ -3979,7 +3979,7 @@ TEST_F(VulkanAPITest, gru_mclareninputs_success) {
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
-  for (int i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     if (i == 0) {
       weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {
@@ -4044,7 +4044,7 @@ TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
-  for (int i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     if (i == 0) {
       weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {
@@ -4139,7 +4139,7 @@ TEST_F(VulkanAPITest, gru_prepack_success) {
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
-  for (int i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     if (i == 0) {
       weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {
@@ -4210,7 +4210,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
-  for (int i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     if (i == 0) {
       weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {
@@ -4386,7 +4386,7 @@ TEST_F(VulkanAPITest, lstm_success) {
   c10::List<at::Tensor> weight_hh_l; // shape (4 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (4 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (4 * hidden_size)
-  for (int l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     if (l == 0) {
       weight_ih_l.emplace_back(at::rand({4 * hidden_size, input_size}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {
@@ -4466,7 +4466,7 @@ TEST_F(VulkanAPITest, lstm_mclareninputs_success) {
   c10::List<at::Tensor> weight_hh_l; // shape (4 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (4 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (4 * hidden_size)
-  for (int l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     if (l == 0) {
       weight_ih_l.emplace_back(at::rand({4 * hidden_size, input_size}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {
@@ -4542,7 +4542,7 @@ TEST_F(VulkanAPITest, lstm_prepack_success) {
   c10::List<at::Tensor> weight_hh_l; // shape (4 * hidden_size, hidden_size)
   c10::List<at::Tensor> bias_ih_l;   // shape (4 * hidden_size)
   c10::List<at::Tensor> bias_hh_l;   // shape (4 * hidden_size)
-  for (int l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     if (l == 0) {
       weight_ih_l.emplace_back(at::rand({4 * hidden_size, input_size}, at::device(at::kCPU).dtype(at::kFloat)));
     } else {

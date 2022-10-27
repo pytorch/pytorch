@@ -99,24 +99,24 @@ struct CollectiveFingerPrint {
       sizes.reserve(num_tensors);
 
       // 3. Tensor dtypes
-      for (int i = 0; i < num_tensors; i++) {
+      for (const auto i : c10::irange(num_tensors)) {
         dtypes.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 4. Device types
-      for (int i = 0; i < num_tensors; i++) {
+      for (const auto i : c10::irange(num_tensors)) {
         device_types.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 5. Tensor shapes
-      for (int i = 0; i < num_tensors; i++) {
+      for (const auto i : c10::irange(num_tensors)) {
         // 5a. Shape size
         int size = serialized_tensor[index].item<int>();
         index++;
         // 5b. Shape
         auto shapeVec = std::vector<int64_t>();
         shapeVec.reserve(size);
-        for (int j = 0; j < size; j++) {
+        for (const auto j : c10::irange(size)) {
           shapeVec.push_back(serialized_tensor[index].item<int64_t>());
           index++;
         }
@@ -153,7 +153,7 @@ struct CollectiveFingerPrint {
     for (const auto i : c10::irange(output_tensors.size())) {
       const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
       const at::Tensor reference_tensor = tensors_to_verify[i];
-      for (int rank = 0; rank < gathered_tensors.size(); rank++) {
+      for (const auto rank : c10::irange(gathered_tensors.size())) {
         const auto& rank_tensor = gathered_tensors[rank];
         if (!rank_tensor.equal(reference_tensor)) {
           CollectiveFingerPrint rank_fingerprint =

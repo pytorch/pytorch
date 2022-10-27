@@ -384,7 +384,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         "Per Channel Quantization is currently disabled for transposed conv");
     wgt_zero_points.resize(output_channels);
     wgt_scales.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+    for (const auto i : c10::irange(output_channels)) {
       wgt_zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
       TORCH_CHECK(
           wgt_zero_points[i]==0,

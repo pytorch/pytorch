@@ -607,7 +607,7 @@ static void _append_subgraph(
 
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
-  for (size_t i = 0; i < node->inputs().size(); ++i) {
+  for (const auto i : c10::irange(node->inputs().size())) {
     auto subgraph_input = subgraph->addInput();
     subgraph_input->copyMetadata(node->inputs().at(i));
     value_map[node->inputs().at(i)] = subgraph_input;
@@ -625,7 +625,7 @@ static void _append_subgraph(
     torch::jit::Node* node = *it;
     auto* clone_node =
         subgraph->insertNode(subgraph->createClone(node, value_map_func));
-    for (size_t i = 0; i < node->outputs().size(); ++i) {
+    for (const auto i : c10::irange(node->outputs().size())) {
       value_map[node->outputs()[i]] = clone_node->outputs()[i];
       auto trace_it = std::find(
           trace_outputs.begin(), trace_outputs.end(), node->outputs()[i]);

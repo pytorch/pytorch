@@ -216,7 +216,7 @@ TEST_F(ModuleListTest, IsCloneable) {
   ModuleList clone = std::dynamic_pointer_cast<ModuleListImpl>(list->clone());
   ASSERT_EQ(list->size(), clone->size());
 
-  for (size_t i = 0; i < list->size(); ++i) {
+  for (const auto i : c10::irange(list->size())) {
     // The modules should be the same kind (type).
     ASSERT_EQ(list[i]->name(), clone[i]->name());
     // But not pointer-equal (distinct objects).

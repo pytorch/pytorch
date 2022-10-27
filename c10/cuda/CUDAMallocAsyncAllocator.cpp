@@ -469,7 +469,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void emptyCache(void) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
-    for (int dev = 0; dev < device_count; dev++) {
+    for (const auto dev : c10::irange(device_count)) {
       if (devs_initialized_flags[dev]) {
         CUDAGuard g(dev);
 

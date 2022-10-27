@@ -7,6 +7,7 @@
 #include <ATen/ATen.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/BatchRulesHelper.h>
+#include <c10/util/irange.h>
 
 // This file contains batching rules for random operations. These are different
 // from our regular batching rules: regular batching rules get registered to the
@@ -118,7 +119,7 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
   if (randomness == RandomnessType::Different) {
     std::vector<at::Tensor> stackedList(batch_size);
     stackedList.reserve(batch_size);
-    for (int64_t idx = 0; idx < batch_size; ++idx) {
+    for (const auto idx : c10::irange(batch_size)) {
       // since this is done in a loop, need to pass by reference for generator to update
       stackedList[idx] = Func(n, extra_args...);
     }

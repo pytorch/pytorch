@@ -24,9 +24,9 @@ TEST(BufLiveRange, SingleRangeLine) {
 
   // Construct Stmt:
   // {
-  //   for (int i = 0; i < 32; i++) {
+  //   for (const auto i : c10::irange(32)) {
   //     a[i] = 0;
-  //     for (int j = 0; j < 32; j++) {
+  //     for (const auto j : c10::irange(32)) {
   //       a[i] = (a[i]) + (b[i, j]);
   //     }
   //   }
@@ -52,13 +52,13 @@ TEST(BufLiveRange, MulRangeLine) {
 
   // Construct Stmt:
   // {
-  //   for (int i = 0; i < 32; i++) {
+  //   for (const auto i : c10::irange(32)) {
   //     if (i<10 ? 1 : 0) {
   //       a[i] = i + i;
   //       b[i] = i * i;
   //     }
   //   }
-  //   for (int i = 0; i < 32; i++) {
+  //   for (const auto i : c10::irange(32)) {
   //     if (i>10 ? 1 : 0) {
   //       a[i] = i * i;
   //       b[i] = i + i;
@@ -125,27 +125,27 @@ TEST(MemPlanning, MemReuseWithTypeCast) {
   // different: 'E' type quint8 < 'gemm' type float. We'll reuse 'gemm' for 'E'
   // with typecasting.
   //{
-  //  for (int i = 0; i < 4; i++) {
-  //    for (int i_1 = 0; i_1 < 4; i_1++) {
+  //  for (const auto i : c10::irange(4)) {
+  //    for (const auto i_1 : c10::irange(4)) {
   //      gemm[i, i_1] = float(0);
-  //      for (int i_2 = 0; i_2 < 4; i_2++) {
+  //      for (const auto i_2 : c10::irange(4)) {
   //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2,
   //        i_1]), reduce_args={i_2});
   //      }
   //    }
   //  }
-  //  for (int i_3 = 0; i_3 < 4; i_3++) {
-  //    for (int i_4 = 0; i_4 < 4; i_4++) {
+  //  for (const auto i_3 : c10::irange(4)) {
+  //    for (const auto i_4 : c10::irange(4)) {
   //      relu[i_3, i_4] = (gemm[i_3, i_4])<0.f ? 0.f : (gemm[i_3, i_4]);
   //    }
   //  }
-  //  for (int i_5 = 0; i_5 < 4; i_5++) {
-  //    for (int i_6 = 0; i_6 < 4; i_6++) {
+  //  for (const auto i_5 : c10::irange(4)) {
+  //    for (const auto i_6 : c10::irange(4)) {
   //      E[i_5, i_6] = quint8((relu[i_5, i_6]) + (relu[i_5, i_6]));
   //    }
   //  }
-  //  for (int i_7 = 0; i_7 < 4; i_7++) {
-  //    for (int i_8 = 0; i_8 < 4; i_8++) {
+  //  for (const auto i_7 : c10::irange(4)) {
+  //    for (const auto i_8 : c10::irange(4)) {
   //      F[i_7, i_8] = E[i_7, i_8];
   //    }
   //  }
@@ -237,28 +237,28 @@ TEST(MemPlanning, NoMemReuseForLargerType) {
   // different: 'E' type float > 'gemm' type int16. We won't reuse 'gemm' for
   // 'E'.
   //{
-  //  for (int i = 0; i < 4; i++) {
-  //    for (int i_1 = 0; i_1 < 4; i_1++) {
+  //  for (const auto i : c10::irange(4)) {
+  //    for (const auto i_1 : c10::irange(4)) {
   //      gemm[i, i_1] = int16_t(0);
-  //      for (int i_2 = 0; i_2 < 4; i_2++) {
+  //      for (const auto i_2 : c10::irange(4)) {
   //        gemm[i, i_1] = ReduceOp((gemm[i, i_1]) + (A[i, i_2]) * (B[i_2,
   //        i_1]), reduce_args={i_2});
   //      }
   //    }
   //  }
-  //  for (int i_3 = 0; i_3 < 4; i_3++) {
-  //    for (int i_4 = 0; i_4 < 4; i_4++) {
+  //  for (const auto i_3 : c10::irange(4)) {
+  //    for (const auto i_4 : c10::irange(4)) {
   //      relu[i_3, i_4] = (gemm[i_3, i_4])<int16_t(0) ? int16_t(0) : (gemm[i_3,
   //      i_4]);
   //    }
   //  }
-  //  for (int i_5 = 0; i_5 < 4; i_5++) {
-  //    for (int i_6 = 0; i_6 < 4; i_6++) {
+  //  for (const auto i_5 : c10::irange(4)) {
+  //    for (const auto i_6 : c10::irange(4)) {
   //      E[i_5, i_6] = float((relu[i_5, i_6]) + (relu[i_5, i_6]));
   //    }
   //  }
-  //  for (int i_7 = 0; i_7 < 4; i_7++) {
-  //    for (int i_8 = 0; i_8 < 4; i_8++) {
+  //  for (const auto i_7 : c10::irange(4)) {
+  //    for (const auto i_8 : c10::irange(4)) {
   //      F[i_7, i_8] = E[i_7, i_8];
   //    }
   //  }
@@ -350,28 +350,28 @@ TEST(MemPlanning, SameBufSizeMemReuse) {
   // add [2, 3] Buffer 'gemm' and 'add' are the same size; we'll reuse 'gemm'
   // for 'add'.
   //{
-  //  for (int M = 0; M < 1024; M++) {
-  //    for (int N = 0; N < 1024; N++) {
+  //  for (const auto M : c10::irange(1024)) {
+  //    for (const auto N : c10::irange(1024)) {
   //      gemm[M, N] = float(0);
-  //      for (int K = 0; K < 2048; K++) {
+  //      for (const auto K : c10::irange(2048)) {
   //        gemm[M, N] = ReduceOp((gemm[M, N]) + (A[M, K]) * (B[K, N]),
   //        reduce_args={K});
   //      }
   //    }
   //  }
-  //  for (int M_1 = 0; M_1 < 1024; M_1++) {
-  //    for (int N_1 = 0; N_1 < 1024; N_1++) {
+  //  for (const auto M_1 : c10::irange(1024)) {
+  //    for (const auto N_1 : c10::irange(1024)) {
   //      relu[M_1, N_1] = (gemm[M_1, N_1])<float(0) ? float(0) : (gemm[M_1,
   //      N_1]);
   //    }
   //  }
-  //  for (int M_2 = 0; M_2 < 1024; M_2++) {
-  //    for (int N_2 = 0; N_2 < 1024; N_2++) {
+  //  for (const auto M_2 : c10::irange(1024)) {
+  //    for (const auto N_2 : c10::irange(1024)) {
   //      add[M_2, N_2] = (relu[M_2, N_2]) + (relu[M_2, N_2]);
   //    }
   //  }
-  //  for (int M_3 = 0; M_3 < 1024; M_3++) {
-  //    for (int N_3 = 0; N_3 < 1024; N_3++) {
+  //  for (const auto M_3 : c10::irange(1024)) {
+  //    for (const auto N_3 : c10::irange(1024)) {
   //      mul[M_3, N_3] = (add[M_3, N_3]) * (add[M_3, N_3]);
   //    }
   //  }
@@ -443,33 +443,33 @@ TEST(MemPlanning, SameBufSizeMultiMemReuses) {
   // add [2, 3], mul [3, 4] Buffer 'gemm', 'relu, ''add' and 'mul' are the same
   // size; we'll reuse 'gemm' for 'add', and reuse 'relu' for 'mul'
   //{
-  //  for (int M = 0; M < 1024; M++) {
-  //    for (int N = 0; N < 1024; N++) {
+  //  for (const auto M : c10::irange(1024)) {
+  //    for (const auto N : c10::irange(1024)) {
   //      gemm[M, N] = float(0);
-  //      for (int K = 0; K < 2048; K++) {
+  //      for (const auto K : c10::irange(2048)) {
   //        gemm[M, N] = ReduceOp((gemm[M, N]) + (A[M, K]) * (B[K, N]),
   //        reduce_args={K});
   //      }
   //    }
   //  }
-  //  for (int M_1 = 0; M_1 < 1024; M_1++) {
-  //    for (int N_1 = 0; N_1 < 1024; N_1++) {
+  //  for (const auto M_1 : c10::irange(1024)) {
+  //    for (const auto N_1 : c10::irange(1024)) {
   //      relu[M_1, N_1] = (gemm[M_1, N_1])<float(0) ? float(0) : (gemm[M_1,
   //      N_1]);
   //    }
   //  }
-  //  for (int M_2 = 0; M_2 < 1024; M_2++) {
-  //    for (int N_2 = 0; N_2 < 1024; N_2++) {
+  //  for (const auto M_2 : c10::irange(1024)) {
+  //    for (const auto N_2 : c10::irange(1024)) {
   //      add[M_2, N_2] = (relu[M_2, N_2]) + (relu[M_2, N_2]);
   //    }
   //  }
-  //  for (int M_3 = 0; M_3 < 1024; M_3++) {
-  //    for (int N_3 = 0; N_3 < 1024; N_3++) {
+  //  for (const auto M_3 : c10::irange(1024)) {
+  //    for (const auto N_3 : c10::irange(1024)) {
   //      mul[M_3, N_3] = (add[M_3, N_3]) * (add[M_3, N_3]);
   //    }
   //  }
-  //  for (int M_4 = 0; M_4 < 1024; M_4++) {
-  //    for (int N_4 = 0; N_4 < 1024; N_4++) {
+  //  for (const auto M_4 : c10::irange(1024)) {
+  //    for (const auto N_4 : c10::irange(1024)) {
   //      sub[M_4, N_4] = (mul[M_4, N_4]) - (add[M_4, N_4]);
   //    }
   //  }
@@ -548,38 +548,38 @@ TEST(MemPlanning, SameBufSizeMultiMemReusesOfOneBuf) {
   // 'sub' are the same size; we'll reuse 'gemm' for 'add', reuse 'relu' for
   // 'mul', and reuse 'gemm' for 'sub'.
   //{
-  //  for (int M = 0; M < 1024; M++) {
-  //    for (int N = 0; N < 1024; N++) {
+  //  for (const auto M : c10::irange(1024)) {
+  //    for (const auto N : c10::irange(1024)) {
   //      gemm[M, N] = float(0);
-  //      for (int K = 0; K < 2048; K++) {
+  //      for (const auto K : c10::irange(2048)) {
   //        gemm[M, N] = ReduceOp((gemm[M, N]) + (A[M, K]) * (B[K, N]),
   //        reduce_args={K});
   //      }
   //    }
   //  }
-  //  for (int M_1 = 0; M_1 < 1024; M_1++) {
-  //    for (int N_1 = 0; N_1 < 1024; N_1++) {
+  //  for (const auto M_1 : c10::irange(1024)) {
+  //    for (const auto N_1 : c10::irange(1024)) {
   //      relu[M_1, N_1] = (gemm[M_1, N_1])<float(0) ? float(0) : (gemm[M_1,
   //      N_1]);
   //    }
   //  }
-  //  for (int M_2 = 0; M_2 < 1024; M_2++) {
-  //    for (int N_2 = 0; N_2 < 1024; N_2++) {
+  //  for (const auto M_2 : c10::irange(1024)) {
+  //    for (const auto N_2 : c10::irange(1024)) {
   //      add[M_2, N_2] = (relu[M_2, N_2]) + (relu[M_2, N_2]);
   //    }
   //  }
-  //  for (int M_3 = 0; M_3 < 1024; M_3++) {
-  //    for (int N_3 = 0; N_3 < 1024; N_3++) {
+  //  for (const auto M_3 : c10::irange(1024)) {
+  //    for (const auto N_3 : c10::irange(1024)) {
   //      mul[M_3, N_3] = (add[M_3, N_3]) * (add[M_3, N_3]);
   //    }
   //  }
-  //  for (int M_4 = 0; M_4 < 1024; M_4++) {
-  //    for (int N_4 = 0; N_4 < 1024; N_4++) {
+  //  for (const auto M_4 : c10::irange(1024)) {
+  //    for (const auto N_4 : c10::irange(1024)) {
   //      sub[M_4, N_4] = (mul[M_4, N_4]) - float(1);
   //    }
   //  }
-  //  for (int M_5 = 0; M_5 < 1024; M_5++) {
-  //    for (int N_5 = 0; N_5 < 1024; N_5++) {
+  //  for (const auto M_5 : c10::irange(1024)) {
+  //    for (const auto N_5 : c10::irange(1024)) {
   //      div[M_5, N_5] = (sub[M_5, N_5]) / float(2);
   //    }
   //  }
@@ -649,28 +649,28 @@ TEST(MemPlanning, SmallerBufSizeNonMemReuse) {
   // add [2, 3] We do not reuse buffer 'gemm' for 'add' because the size of
   // buffer 'gemm' is smaller.
   //{
-  //  for (int M = 0; M < 1024; M++) {
-  //    for (int N = 0; N < 1024; N++) {
+  //  for (const auto M : c10::irange(1024)) {
+  //    for (const auto N : c10::irange(1024)) {
   //      gemm[M, N] = float(0);
-  //      for (int K = 0; K < 2048; K++) {
+  //      for (const auto K : c10::irange(2048)) {
   //        gemm[M, N] = ReduceOp((gemm[M, N]) + (A[M, K]) * (B[K, N]),
   //        reduce_args={K});
   //      }
   //    }
   //  }
-  //  for (int M_1 = 0; M_1 < 1024; M_1++) {
-  //    for (int N_1 = 0; N_1 < 1024; N_1++) {
+  //  for (const auto M_1 : c10::irange(1024)) {
+  //    for (const auto N_1 : c10::irange(1024)) {
   //      relu[M_1, N_1] = (gemm[M_1, N_1])<float(0) ? float(0) : (gemm[M_1,
   //      N_1]);
   //    }
   //  }
-  //  for (int EM = 0; EM < 2048; EM++) {
-  //    for (int EN = 0; EN < 2048; EN++) {
+  //  for (const auto EM : c10::irange(2048)) {
+  //    for (const auto EN : c10::irange(2048)) {
   //      add[EM, EN] = (relu[EM / 2, EN / 2]) + (relu[EM / 2, EN / 2]);
   //    }
   //  }
-  //  for (int FM = 0; FM < 2048; FM++) {
-  //    for (int FN = 0; FN < 2048; FN++) {
+  //  for (const auto FM : c10::irange(2048)) {
+  //    for (const auto FN : c10::irange(2048)) {
   //      mul[FM, FN] = (add[FM, FN]) * (add[FM, FN]);
   //    }
   //  }

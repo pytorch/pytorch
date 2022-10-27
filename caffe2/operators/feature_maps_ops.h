@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "c10/util/irange.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -493,8 +494,7 @@ class MergeMultiScalarFeatureTensorsOp : public Operator<Context> {
         const T* inValuesData =
             Input(kNumTensorsPerInput * inputIndex + 2).template data<T>();
         outLengthsData[exampleIndex] += inLengthsData[exampleIndex];
-        for (int featureIndex = 0; featureIndex < inLengthsData[exampleIndex];
-             ++featureIndex) {
+        for (const auto featureIndex : c10::irange(inLengthsData[exampleIndex])) {
           CAFFE_ENFORCE_LT(outKeysOffset, totalNumFeatures);
           CAFFE_ENFORCE_LT(
               inKeysOffset_[inputIndex], Input(inputKeysBlobIdx).numel());
@@ -637,8 +637,7 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
         const auto& inValuesValues =
             Input(kNumTensorsPerInput * inputIndex + 3);
         outLengthsData[exampleIndex] += inLengthsData[exampleIndex];
-        for (int featureIndex = 0; featureIndex < inLengthsData[exampleIndex];
-             ++featureIndex) {
+        for (const auto featureIndex : c10::irange(inLengthsData[exampleIndex])) {
           outKeysData[outKeysOffset] = inKeysData[inKeysOffset_[inputIndex]];
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
@@ -739,8 +738,7 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
         const auto& inValuesValues =
             Input(kNumTensorsPerInput * inputIndex + 4);
         outLengthsData[exampleIndex] += inLengthsData[exampleIndex];
-        for (int featureIndex = 0; featureIndex < inLengthsData[exampleIndex];
-             ++featureIndex) {
+        for (const auto featureIndex : c10::irange(inLengthsData[exampleIndex])) {
           outKeysData[outKeysOffset] = inKeysData[inKeysOffset_[inputIndex]];
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
@@ -822,9 +820,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
             Input(kNumTensorsPerInput * inputIndex + 1)
                 .template data<int32_t>();
         int valuesLengthCopy = 0;
-        for (int valuesLengthIndex = 0;
-             valuesLengthIndex < inLengthsData[exampleIndex];
-             ++valuesLengthIndex) {
+        for (const auto valuesLengthIndex : c10::irange(inLengthsData[exampleIndex])) {
           valuesLengthCopy += inValuesLengthsData
               [outValuesLengthOffset[inputIndex] + valuesLengthIndex];
         }

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -189,18 +190,18 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   // Make sure the outputs match pytorch outputs
   LSTM model(2, 2);
   for (auto& v : model->parameters()) {
-    float size = v.numel();
+    const auto size = v.numel();
     auto p = static_cast<float*>(v.storage().data());
-    for (size_t i = 0; i < size; i++) {
-      p[i] = i / size;
+    for (const auto i : c10::irange(size)) {
+      p[i] = i / static_cast<double>(size);
     }
   }
 
   auto x = torch::empty({3, 4, 2}, torch::requires_grad());
-  float size = x.numel();
+  const auto size = x.numel();
   auto p = static_cast<float*>(x.storage().data());
-  for (size_t i = 0; i < size; i++) {
-    p[i] = (size - i) / size;
+  for (const auto i : c10::irange(size)) {
+    p[i] = (size - i) / static_cast<double>(size);
   }
 
   auto out = model->forward(x);
@@ -251,7 +252,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
       1.5329,
       1.0931,
       1.4911};
-  for (size_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     ASSERT_LT(std::abs(flat[i].item<float>() - h_out[i]), 1e-3);
   }
 }
@@ -473,7 +474,7 @@ void BidirectionalGRUReverseForward(bool cuda) {
   ASSERT_EQ(
       std::get<0>(bi_output).size(0), std::get<0>(reverse_output).size(0));
   auto size = std::get<0>(bi_output).size(0);
-  for (int i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     ASSERT_EQ(
         std::get<0>(bi_output)[i][0][1].item<float>(),
         std::get<0>(reverse_output)[size - 1 - i][0][0].item<float>());
@@ -528,7 +529,7 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
   ASSERT_EQ(
       std::get<0>(bi_output).size(0), std::get<0>(reverse_output).size(0));
   auto size = std::get<0>(bi_output).size(0);
-  for (int i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     ASSERT_EQ(
         std::get<0>(bi_output)[i][0][1].item<float>(),
         std::get<0>(reverse_output)[size - 1 - i][0][0].item<float>());
@@ -590,13 +591,13 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
 
   // Assert that the output and state are equal on CPU and CUDA
   ASSERT_EQ(std::get<0>(output_cpu).dim(), std::get<0>(output_cuda).dim());
-  for (int i = 0; i < std::get<0>(output_cpu).dim(); i++) {
+  for (const auto i : c10::irange(std::get<0>(output_cpu).dim())) {
     ASSERT_EQ(
         std::get<0>(output_cpu).size(i), std::get<0>(output_cuda).size(i));
   }
-  for (int i = 0; i < std::get<0>(output_cpu).size(0); i++) {
-    for (int j = 0; j < std::get<0>(output_cpu).size(1); j++) {
-      for (int k = 0; k < std::get<0>(output_cpu).size(2); k++) {
+  for (const auto i : c10::irange(std::get<0>(output_cpu).size(0))) {
+    for (const auto j : c10::irange(std::get<0>(output_cpu).size(1))) {
+      for (const auto k : c10::irange(std::get<0>(output_cpu).size(2))) {
         ASSERT_NEAR(
             std::get<0>(output_cpu)[i][j][k].item<float>(),
             std::get<0>(output_cuda)[i][j][k].item<float>(),
@@ -644,13 +645,13 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
 
   // Assert that the output and state are equal on CPU and CUDA
   ASSERT_EQ(std::get<0>(output_cpu).dim(), std::get<0>(output_cuda).dim());
-  for (int i = 0; i < std::get<0>(output_cpu).dim(); i++) {
+  for (const auto i : c10::irange(std::get<0>(output_cpu).dim())) {
     ASSERT_EQ(
         std::get<0>(output_cpu).size(i), std::get<0>(output_cuda).size(i));
   }
-  for (int i = 0; i < std::get<0>(output_cpu).size(0); i++) {
-    for (int j = 0; j < std::get<0>(output_cpu).size(1); j++) {
-      for (int k = 0; k < std::get<0>(output_cpu).size(2); k++) {
+  for (const auto i : c10::irange(std::get<0>(output_cpu).size(0))) {
+    for (const auto j : c10::irange(std::get<0>(output_cpu).size(1))) {
+      for (const auto k : c10::irange(std::get<0>(output_cpu).size(2))) {
         ASSERT_NEAR(
             std::get<0>(output_cpu)[i][j][k].item<float>(),
             std::get<0>(output_cuda)[i][j][k].item<float>(),
@@ -701,13 +702,13 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
 
   // Assert that the output and state are equal on CPU and CUDA
   ASSERT_EQ(std::get<0>(output_cpu).dim(), std::get<0>(output_cuda).dim());
-  for (int i = 0; i < std::get<0>(output_cpu).dim(); i++) {
+  for (const auto i : c10::irange(std::get<0>(output_cpu).dim())) {
     ASSERT_EQ(
         std::get<0>(output_cpu).size(i), std::get<0>(output_cuda).size(i));
   }
-  for (int i = 0; i < std::get<0>(output_cpu).size(0); i++) {
-    for (int j = 0; j < std::get<0>(output_cpu).size(1); j++) {
-      for (int k = 0; k < std::get<0>(output_cpu).size(2); k++) {
+  for (const auto i : c10::irange(std::get<0>(output_cpu).size(0))) {
+    for (const auto j : c10::irange(std::get<0>(output_cpu).size(1))) {
+      for (const auto k : c10::irange(std::get<0>(output_cpu).size(2))) {
         ASSERT_NEAR(
             std::get<0>(output_cpu)[i][j][k].item<float>(),
             std::get<0>(output_cuda)[i][j][k].item<float>(),

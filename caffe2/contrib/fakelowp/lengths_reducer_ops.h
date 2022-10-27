@@ -99,7 +99,7 @@ class SparseLengthsReductionFakeFp16Op final : public Operator<CPUContext> {
       if (current + lengths[m] > index_size) {
         return false;
       }
-      for (int i = 0; i < lengths[m]; ++i) {
+      for (const auto i : c10::irange(lengths[m])) {
         int64_t idx = indices[current];
         if (idx < 0 || idx >= data_size) {
           return false;

@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/core/op_registration/op_registration.h>
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <torch/csrc/autograd/FunctionsManual.h>
@@ -89,7 +90,7 @@ TEST(AutogradAPITests, GradNonLeafTest) {
   Variable y = torch::randn({2, 2}, torch::requires_grad());
   Variable grad_output = torch::ones({2, 2});
 
-  for (int i = 0; i < 5; ++i) {
+  for (const auto i : c10::irange(5)) {
     auto res = simple_fn(x, y);
     auto input_grads = grad({res}, {x}, {grad_output}, {}, true);
 

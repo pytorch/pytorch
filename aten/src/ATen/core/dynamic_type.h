@@ -5,6 +5,7 @@
 
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 
@@ -189,7 +190,7 @@ class DynamicType : public SharedType {
     if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }
-    for (size_t i = 0; i < arguments_.elems.size(); i++) {
+    for (const auto i : c10::irange(arguments_.elems.size())) {
       if (!f(arguments_.elems[i], other.arguments_.elems[i])) {
         return false;
       }

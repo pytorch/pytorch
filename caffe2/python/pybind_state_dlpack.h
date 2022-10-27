@@ -93,7 +93,7 @@ class DLPackWrapper {
 
     std::vector<int64_t> dims;
     dims.reserve(dlTensor->ndim);
-    for (int idx = 0; idx < dlTensor->ndim; ++idx) {
+    for (const auto idx : c10::irange(dlTensor->ndim)) {
       dims.push_back(dlTensor->shape[idx]);
     }
 

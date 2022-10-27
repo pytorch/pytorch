@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
@@ -19,7 +20,7 @@ static void setupFusion(Fusion* fusion) {
   FusionGuard fg(fusion);
 
   TensorView* tvs[16];
-  for (size_t i = 0; i < 16; i++) {
+  for (const auto i : c10::irange(16)) {
     tvs[i] = makeContigTensor(2, DataType::Float);
     fusion->addInput(tvs[i]);
   }

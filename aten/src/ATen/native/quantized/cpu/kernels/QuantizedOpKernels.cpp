@@ -156,7 +156,7 @@ Tensor qcat_nhwc_kernel(
               auto float_values = inp_vec.dequantize(
                   curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
               Vec::float_vec_return_type retvals;
-              for (int i = 0; i < Vec::float_num_vecs(); ++i) {
+              for (const auto i : c10::irange(Vec::float_num_vecs())) {
                 if (ReLUFused) {
                   retvals[i] =
                       vec::maximum(float_values[i], Vectorized<float>(0.0f));
@@ -184,7 +184,7 @@ Tensor qcat_nhwc_kernel(
             auto float_values = inp_vec.dequantize(
                 curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
             Vec::float_vec_return_type retvals;
-            for (int i = 0; i < vec_num; ++i) {
+            for (const auto i : c10::irange(vec_num)) {
               if (ReLUFused) {
                 retvals[i] =
                     vec::maximum(float_values[i], Vectorized<float>(0.0f));
@@ -399,7 +399,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   alignas(64) int32_t temp[8];
   int overflow_threshold = 262144; // 2147483647(max of int32)/(256*256)*8 = 262144
   int loop = len / overflow_threshold + 1;
-  for(int j=0; j<=loop; j++){
+  for (const auto j : c10::irange(loop+1)) {
     for (; ((i < overflow_threshold * j) && (i < len / 16 * 16)); i += 16) {
       // (i15, ..., i0)
       __m128i src_epu8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
@@ -428,7 +428,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
   alignas(64) int32_t temp[16];
   int overflow_threshold = 262144; // 2147483647(max of int32)/(512*512)*8 = 262144
   int loop = len / overflow_threshold + 1;
-  for(int j=0; j<=loop; j++){
+  for (const auto j : c10::irange(=loop)) {
     for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
       // (i31, ..., i0)
       __m256i src_epu8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
@@ -475,7 +475,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int overflow_threshold = 1048576; //2147483647/(128*128)*8 = 1048576
   int loop = len / overflow_threshold + 1;
 
-  for(int j=0; j<=loop; j++){
+  for (const auto j : c10::irange(loop+1)) {
     for (; ((i < overflow_threshold * j) && (i < len / 16 * 16)); i += 16) {
       // (i15, ..., i0)
       __m128i src_epi8 = _mm_loadu_si128(reinterpret_cast<__m128i const*>(A + i));
@@ -508,7 +508,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
   int overflow_threshold = 1048576; //2147483647/(256*256)*8 = 1048576
   int loop = len / overflow_threshold + 1;
 
-  for(int j=0; j<=loop; j++){
+  for (const auto j : c10::irange(=loop)) {
     for (; ((i < overflow_threshold * j) && (i < len / 32 * 32)); i += 32) {
       // (i31, ..., i0)
       __m256i src_epi8 = _mm256_loadu_si256(reinterpret_cast<__m256i const*>(A + i));
@@ -2768,7 +2768,7 @@ void quantized_normalize_kernel(
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
               int validDqvecLen = (kNonVecRemInChannel - 1) / fVec::size() + 1;
-              for (int i = 0; i < validDqvecLen; ++i) {
+              for (const auto i : c10::irange(validDqvecLen)) {
                 auto &dq = dqXVec[i];
                 dq =
                   (dq - layer_mean_div_scale_xVec) *
@@ -2834,7 +2834,7 @@ void qmean_inner_dim_kernel(
   for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
     M *= in_dims[i];
   }
-  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(num_dims_to_squeeze)) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;
@@ -2884,7 +2884,7 @@ void qstd_inner_dim_kernel(
   for (size_t i = 0; i < in_dims.size() - num_dims_to_squeeze; ++i) {
     M *= in_dims[i];
   }
-  for (size_t i = 0; i < num_dims_to_squeeze; ++i) {
+  for (const auto i : c10::irange(num_dims_to_squeeze)) {
     auto idx = out_dims.size() - 1 - i;
     N *= out_dims[idx];
     out_dims[idx] = 1;
@@ -3059,7 +3059,7 @@ void quantized_groupnorm_nhwc_kernel(
               auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
-              for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+              for (const auto fvecIdx : c10::irange(dqXVec.size())) {
                 auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
                 dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -3106,7 +3106,7 @@ void quantized_groupnorm_nhwc_kernel(
           float* rstd_ptr = mean_ptr + C;
           scalar_t* X_ptr = X_data + nhwIdx * C;
           scalar_t::underlying* X_ptr_underlying = reinterpret_cast<scalar_t::underlying*>(X_ptr);
-          for (int chIdx = 0; chIdx < C; ++chIdx) {
+          for (const auto chIdx : c10::irange(C)) {
             auto x = X_ptr_underlying[chIdx];
             mean_ptr[chIdx] += x;
             rstd_ptr[chIdx] += x * x;
@@ -3183,7 +3183,7 @@ void quantized_groupnorm_nhwc_kernel(
             auto qXVec = qVec::loadu(X_ptr + vecStartIdx);
             auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                   x_fake_scale_zp_neg_premul_vec);
-            for (size_t fvecIdx = 0; fvecIdx < dqXVec.size(); ++fvecIdx) {
+            for (const auto fvecIdx : c10::irange(dqXVec.size())) {
               auto scaleVec = fVec::loadu(scale_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               auto biasVec = fVec::loadu(bias_ptr + vecStartIdx + fvecIdx * kFloatVLen);
               dqXVec[fvecIdx] = dqXVec[fvecIdx] * scaleVec + biasVec;
@@ -3448,7 +3448,7 @@ void dequantize_tensor_arm(
     const int64_t N,
     const float scale,
     const int32_t zero_point) {
-  for (int i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     out[i] = dequantize_val<T>(scale, zero_point, in[i]);
   }
 }

@@ -17,6 +17,7 @@
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 #include <memory>
 #include "arena.h"
 #include "python_variable_simple.h"
@@ -382,7 +383,7 @@ static PyObject* DimList_repr(DimList* self) {
     if (self->is_bound()) {
         size_t size = self->dims_.size();
         py::tuple t(size);
-        for(size_t i = 0; i < size; ++i) {
+        for (const auto i : c10::irange(size)) {
             t.set(i, self->dims_[i]);
         }
         return py::repr(t).release();
@@ -571,7 +572,7 @@ static int DimList_init(DimList *self, PyObject *args, PyObject *kwds) {
             std::vector<py::obj<Dim>> dims;
             size_t size = s.size();
             dims.reserve(size);
-            for (size_t i = 0; i < size; ++i) {
+            for (const auto i : c10::irange(size)) {
                 auto r = s[i];
                 if (py::is_int(r)) {
                     dims.emplace_back(Dim::create(py::unicode_from_format("%S%i", self->name_.ptr(), (int)i),  py::to_int(r)));
@@ -1561,7 +1562,7 @@ static PyObject* _dims(PyObject *self,
         return genobject(0).release();
     }
     py::tuple result(specified_ndims);
-    for (int i = 0; i < specified_ndims; ++i) {
+    for (const auto i : c10::irange(specified_ndims)) {
         result.set(i, genobject(i));
     }
     return result.release();

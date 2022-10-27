@@ -48,7 +48,7 @@ auto sum(int64_t N, Func f) {
   for (; i < N; ++i) {
     partial_sums[0] += f(i);
   }
-  for (int k = 1; k < ilp_factor; ++k) {
+  for (const auto k : c10::irange(1, ilp_factor)) {
     partial_sums[0] += partial_sums[k];
   }
   return partial_sums[0];

@@ -17,6 +17,7 @@
 #include <ATen/ops/quantize_per_tensor.h>             // for quantize_per_te...
 #include <ATen/ops/std.h>
 #include <ATen/ops/zeros_like_ops.h>
+#include <c10/util/irange.h>
 #endif
 
 namespace at {
@@ -37,7 +38,7 @@ inline bool is_innnermost_dim(
   maybe_wrap_dims(dims, ndim);
   std::sort(dims.begin(), dims.end(), std::greater<int64_t>());
   bool is_innermost = dims.empty() || dims[0] == ndim - 1;
-  for (size_t i = 1; i < dims.size(); ++i) {
+  for (const auto i : c10::irange(1, dims.size())) {
     is_innermost = is_innermost && (dims[i] == dims[i-1] - 1);
   }
   return is_innermost;

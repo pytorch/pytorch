@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <type_traits>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
@@ -325,7 +326,7 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
   int64_t offset_constant = (tensor_offsets[1] - tensor_offsets[0]) /
       tensor_size_ptr[0] * tensor_stride_ptr[0];
 
-  for (int64_t i = 2; i < n_tensors; i++) {
+  for (const auto i : c10::irange(2, n_tensors)) {
     int64_t current_offset_constant =
         (tensor_offsets[i] - tensor_offsets[i - 1]) /
         tensor_size_ptr[(i - 1) * tensor_stride_0] *

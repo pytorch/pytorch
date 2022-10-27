@@ -16,6 +16,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -54,7 +55,7 @@ void setAddParams(
   params->device_id = at::cuda::current_device();
   params->input_dim = input_a.dim();
   params->memory_format = input_a.suggest_memory_format();
-  for (int i = 0; i < params->input_dim; ++i) {
+  for (const auto i : c10::irange(params->input_dim)) {
     params->input_a_size[i] = input_a.sizes()[i];
     params->input_b_size[i] = input_b.sizes()[i];
   }

@@ -11,6 +11,7 @@
 #include <ATen/ops/sigmoid.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/tanh.h>
+#include <c10/util/irange.h>
 #endif
 
 namespace at {
@@ -101,7 +102,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm_input(
   h_n_list.reserve(num_layers);
   c_n_list.reserve(num_layers);
 
-  for (int64_t l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     // extract each hidden state and squeeze into 2D dim
     auto h = at::slice(hx_vk, 0, l, l + 1, 1);
     h = h.reshape({h.size(0) * h.size(1), h.size(2)});
@@ -185,7 +186,7 @@ pack_lstm_linear_op_contexts(
   std::vector<c10::intrusive_ptr<LinearPackedContext>> linear_op_contexts;
   linear_op_contexts.reserve(num_layers * 8);
 
-  for (int64_t l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     const auto& w_ih = params_cpu[l * 4];
     const auto& w_hh = params_cpu[l * 4 + 1];
     const auto& b_ih = params_cpu[l * 4 + 2];
@@ -294,7 +295,7 @@ const c10::impl::GenericList LstmPackedContext::unpack() const {
             .toTensor());
   }
   unpacked_lstm_context.emplace_back(params_cpu);
-  for (int64_t i = 1; i < 7; ++i) {
+  for (const auto i : c10::irange(1, 7)) {
     unpacked_lstm_context.emplace_back(get_val(i));
   }
 
@@ -360,7 +361,7 @@ std::tuple<Tensor, Tensor, Tensor> run_lstm_context(
   h_n_list.reserve(num_layers);
   c_n_list.reserve(num_layers);
 
-  for (int64_t l = 0; l < num_layers; ++l) {
+  for (const auto l : c10::irange(num_layers)) {
     // extract each hidden state and squeeze into 2D dim
     auto h = at::slice(hx_vk, 0, l, l + 1, 1);
     h = h.reshape({h.size(0) * h.size(1), h.size(2)});

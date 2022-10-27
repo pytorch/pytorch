@@ -271,7 +271,7 @@ static void norm_kernel_tensor_iterator_impl(
             norm_two_reduce_step(acc_vec, data_vec);
           }
           acc_vec.store(buffer);
-          for (int j = 1; j < fVec::size(); j++) {
+          for (const auto j : c10::irange(1, fVec::size())) {
             buffer[0] = buffer[0] + buffer[j];
           }
           for (; d < size; d++) {
@@ -460,7 +460,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
         scalar_t* self_data = (scalar_t*)self_data_bytes;
 
         arg_t acc = arg_t(lower_bound<scalar_t>(), 0);
-        for (int64_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           acc = op.reduce(acc, self_data[i], i);
         }
         result_data[0] = acc.second;
@@ -484,7 +484,7 @@ static void argmin_kernel_impl(TensorIterator &iter) {
         scalar_t* self_data = (scalar_t*)self_data_bytes;
 
         arg_t acc = arg_t(upper_bound<scalar_t>(), 0);
-        for (int64_t i = 0; i < size; i++) {
+        for (const auto i : c10::irange(size)) {
           acc = op.reduce(acc, self_data[i], i);
         }
         result_data[0] = acc.second;

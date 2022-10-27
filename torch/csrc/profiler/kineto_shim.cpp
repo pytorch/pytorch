@@ -7,6 +7,7 @@
 #endif
 
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace profiler {
@@ -175,7 +176,7 @@ class ExperimentalConfigWrapper {
     configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
              << "CUPTI_PROFILER_METRICS=";
 
-    for (int i = 0; i < num_metrics; i++) {
+    for (const auto i : c10::irange(num_metrics)) {
       configss << config_.profiler_metrics[i];
       if (num_metrics > 1 && i < (num_metrics - 1)) {
         configss << ",";

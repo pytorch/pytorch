@@ -12,6 +12,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <c10/util/irange.h>
 
 #include <tuple>
 
@@ -430,7 +431,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
     TORCH_CHECK(
         (int64_t)output_size_.size() == ret_val.dim(),
         "Length of output_size does not match NestedTensor dims. Broadcasting is not supported.");
-    for (int64_t i = 0; i < (int64_t)ret_val.dim(); i++) {
+    for (const auto i : c10::irange((int64_t)ret_val.dim())) {
       TORCH_CHECK(
           output_size_[i] >= ret_val.size(i),
           "Value in output_size is less than NestedTensor padded size. Truncation is not supported.");
@@ -675,9 +676,9 @@ Tensor NestedTensor_sum_dim_CPU(
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      for (auto j = 0; j < segments; j++) {
+      for (C10_UNUSED const auto j : c10::irange(segments)) {
         scalar_t res = 0;
-        for (auto k = 0; k < segment_length; k++) {
+        for (C10_UNUSED const auto k : c10::irange(segment_length)) {
           res += input_data[in_idx];
           in_idx += 1;
         }
@@ -797,7 +798,7 @@ Tensor softmax_nested(
   //       2. cannot dispatch in multi-thread (in this case at::_softmax_out)
   std::vector<Tensor> input_unbind = input.unbind(),
       output_unbind = output.unbind();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     at::_softmax_out(
         output_unbind[i],
         input_unbind[i],
@@ -837,7 +838,7 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
   int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     const IntArrayRef& self_shape = self_sizes[i],
         & mat2_shape = mat2_sizes[i];
     const int64_t& self_size0 = self_shape[0], & self_size1 = self_shape[1],
@@ -859,7 +860,7 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   //       useful resource: `aten/src/ATen/native/cpu/LinearAlgebra.cpp/bmm_out_or_baddbmm_`
   //                        `aten/src/ATen/native/cuda/Blas.cpp/baddbmm_out_cuda_impl`
   std::vector<Tensor> output_unbind = output.unbind();
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     at::mm_out(output_unbind[i],
                self_buffer.as_strided(self_sizes[i], self_strides[i], self_offsets[i]),
                mat2_buffer.as_strided(mat2_sizes[i], mat2_strides[i], mat2_offsets[i]));
@@ -889,7 +890,7 @@ matmul_nested_helper(
   Tensor sizemat = at::empty({ntensors, ndims}, sizemat_op);
   int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
   int64_t numel = 0;
-  for (int64_t i = 0; i < ntensors; i++) {
+  for (const auto i : c10::irange(ntensors)) {
     const IntArrayRef& self_size = self_sizes[i],
         & mat2_size = mat2_sizes[i];
     int64_t& batch_size = batch_sizes[i];
@@ -1002,7 +1003,7 @@ Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& 
   // TODO: this is to reproduce function_result_ptr->opt_sizes_
   //       if an accessor is provided in the future, can replace this
   std::vector<int64_t> sizes;
-  for (int64_t i = 0; i < function_result_ptr->dim(); i++) {
+  for (const auto i : c10::irange(function_result_ptr->dim())) {
     c10::optional<int64_t> opt_size = function_result_ptr->opt_size(i);
     if (opt_size.has_value()) {
       sizes.push_back(*opt_size);
@@ -1136,7 +1137,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
       stridemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op);
   int64_t* sizemat_reshaped_ptr = sizemat_reshaped.data_ptr<int64_t>(),
       * stridemat_reshaped_ptr = stridemat_reshaped.data_ptr<int64_t>();
-  for (int64_t itensor = 0; itensor < ntensors; itensor++) {
+  for (const auto itensor : c10::irange(ntensors)) {
     const IntArrayRef& size = sizes[itensor],
         & stride = strides[itensor];
     // compute reshaped size
@@ -1147,7 +1148,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     if (ndims_underlying < ndims_underlying_reshaped) {
       int64_t numel = 1, numel_reshaped = 1;
       // replace negative sizes for old dimensions with old sizes
-      for (int64_t idim = 0; idim < ndims_underlying; idim++) {
+      for (const auto idim : c10::irange(ndims_underlying)) {
         int64_t& size_reshaped = size_reshaped_vector[idim];
         TORCH_CHECK(size_reshaped >= -1, "invalid shape dimension ", size_reshaped);
         if (size_reshaped == -1) {
@@ -1160,7 +1161,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
       }
       // infer negative size for new dimension
       int64_t infer_index = -1;
-      for (int64_t idim = ndims_underlying; idim < ndims_underlying_reshaped; idim++) {
+      for (const auto idim : c10::irange(ndims_underlying, ndims_underlying_reshaped)) {
         const int64_t& size_reshaped = size_reshaped_vector[idim];
         if (size_reshaped >= 0) {
           numel_reshaped *= size_reshaped;
@@ -1187,7 +1188,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     // all negative sizes can be replaced
     else {
       int64_t numel = 1, numel_reshaped = 1;
-      for (int64_t idim = 0; idim < ndims_underlying_reshaped; idim++) {
+      for (const auto idim : c10::irange(ndims_underlying_reshaped)) {
         int64_t& size_reshaped = size_reshaped_vector[idim];
         TORCH_CHECK(size_reshaped >= -1, "invalid shape dimension ", size_reshaped);
         if (size_reshaped == -1) {
@@ -1196,7 +1197,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
         numel *= size[idim];
         numel_reshaped *= size_reshaped;
       }
-      for (int64_t idim = ndims_underlying_reshaped; idim < ndims_underlying; idim++) {
+      for (const auto idim : c10::irange(ndims_underlying_reshaped, ndims_underlying)) {
         numel *= size[idim];
       }
       TORCH_CHECK(
@@ -1211,7 +1212,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     if (opt_stride_reshaped.has_value()) {
       const IntArrayRef& stride_reshaped = *opt_stride_reshaped;
       // fill reshaped size and stride into sizemat and stridemat
-      for (int64_t idim = 0; idim < ndims_underlying_reshaped; idim++) {
+      for (const auto idim : c10::irange(ndims_underlying_reshaped)) {
         sizemat_reshaped_ptr[idim] = size_reshaped[idim];
         stridemat_reshaped_ptr[idim] = stride_reshaped[idim];
       }
@@ -1222,7 +1223,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     else {
       viewable = false;
       // fill reshaped size into sizemat
-      for (int64_t idim = 0; idim < ndims_underlying_reshaped; idim++) {
+      for (const auto idim : c10::irange(ndims_underlying_reshaped)) {
         sizemat_reshaped_ptr[idim] = size_reshaped[idim];
       }
       sizemat_reshaped_ptr += ndims_underlying_reshaped;
@@ -1362,7 +1363,7 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   // TODO: this is to reproduce other_ptr->opt_sizes_
   //       if an accessor is provided in the future, can replace this
   std::vector<int64_t> sizes;
-  for (int64_t i = 0; i < other_ptr->dim(); i++) {
+  for (const auto i : c10::irange(other_ptr->dim())) {
     c10::optional<int64_t> opt_size = other_ptr->opt_size(i);
     if (opt_size.has_value()) {
       sizes.push_back(*opt_size);

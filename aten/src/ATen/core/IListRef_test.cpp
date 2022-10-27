@@ -1,6 +1,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/core/Tensor.h>
+#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <iterator>
@@ -10,7 +11,7 @@ using namespace c10;
 static std::vector<at::Tensor> get_tensor_vector() {
   std::vector<at::Tensor> tensors;
   const size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE; i++) {
+  for (const auto i : c10::irange(SIZE)) {
     tensors.emplace_back(at::empty({0}));
   }
   return tensors;

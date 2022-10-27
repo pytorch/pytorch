@@ -40,7 +40,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       M % G, 0, "The number of output channels is not divisible by group.");
 
   int kernel_size = 1;
-  for (std::size_t i = 0; i < kernel_.size(); ++i) {
+  for (const auto i : c10::irange(kernel_.size())) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 2), kernel_[i]);
     kernel_size *= kernel_[i];
   }
@@ -215,7 +215,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       M % G, 0, "The number of output channels is not divisible by group.");
 
   int kernel_size = 1;
-  for (std::size_t i = 0; i < kernel_.size(); ++i) {
+  for (const auto i : c10::irange(kernel_.size())) {
     CAFFE_ENFORCE_EQ(filter.dim32(i + 1), kernel_[i]);
     kernel_size *= kernel_[i];
   }

@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <cassert>
 #include <climits>
@@ -301,8 +303,9 @@ T reverseBits(T Val) {
   unsigned char in[sizeof(Val)];
   unsigned char out[sizeof(Val)];
   std::memcpy(in, &Val, sizeof(Val));
-  for (unsigned i = 0; i < sizeof(Val); ++i)
+  for (const auto i : c10::irange(sizeof(Val))){
     out[(sizeof(Val) - i) - 1] = BitReverseTable256[in[i]];
+  }
   std::memcpy(&Val, out, sizeof(Val));
   return Val;
 }

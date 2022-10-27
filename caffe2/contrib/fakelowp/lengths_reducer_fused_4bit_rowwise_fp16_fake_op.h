@@ -97,7 +97,7 @@ class SparseLengthsFused4BitRowwiseFakeFP16Op final : public Operator<Context> {
         return false;
       }
 
-      for (int i = 0; i < lengths_data[m]; ++i) {
+      for (const auto i : c10::irange(lengths_data[m])) {
         int64_t idx = indices_data[current];
 
         int accIdx = 0;

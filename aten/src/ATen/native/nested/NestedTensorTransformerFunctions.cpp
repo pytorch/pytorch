@@ -8,6 +8,7 @@
 #include <c10/util/string_view.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -153,7 +154,7 @@ Tensor NestedTensor_softmax_dropout(const Tensor& self, const Tensor& query) {
 
   const auto max_seq_len = self.sizes()[2];
 
-  for (int64_t i = 0; i < num_tensors; i++) {
+  for (const auto i : c10::irange(num_tensors)) {
     auto seq_len = sizes.index({i, 0}).item<int64_t>();
     auto subseq = self.index(
         {i,

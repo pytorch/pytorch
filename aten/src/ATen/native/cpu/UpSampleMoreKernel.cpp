@@ -165,11 +165,11 @@ void cpu_upsample_nearest_backward_channels_last(
 
   auto loop3d = [&](int64_t begin, int64_t end) {
     for (const auto n : c10::irange(begin, end)) {
-      for (int64_t od = 0; od < output_depth; od++) {
+      for (const auto od : c10::irange(output_depth)) {
         int64_t id = nearest_idx_fn(od, input_depth, output_depth, scales[0]);
-        for (int64_t oh = 0; oh < output_height; oh++) {
+        for (const auto oh : c10::irange(output_height)) {
           int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[1]);
-          for (int64_t ow = 0; ow < output_width; ow++) {
+          for (const auto ow : c10::irange(output_width)) {
             int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[2]);
             scalar_t* grad_output_ptr = grad_output_data +
                 (n * output_depth * output_height * output_width +

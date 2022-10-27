@@ -1,6 +1,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
 #include <ATen/Functions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
@@ -238,7 +239,7 @@ torch::lazy::TSOpVector Narrow::Lower(
   const torch::lazy::Shape& input_shape = input.shape();
   TORCH_CHECK_EQ(sizes.size(), base_indices.size());
   TORCH_CHECK_EQ(input_shape.dim(), base_indices.size());
-  for (size_t dim = 0; dim < base_indices.size(); ++dim) {
+  for (const auto dim : c10::irange(base_indices.size())) {
     int64_t start = base_indices[dim];
     base = GenerateSlice(
         /*base=*/base,
@@ -260,7 +261,7 @@ torch::lazy::TSOpVector NarrowViewUpdate::Lower(
   const torch::lazy::Shape& source_shape = source_argument.shape();
   TORCH_CHECK_EQ(source_shape.dim(), base_indices.size());
   torch::jit::Value* base = dest;
-  for (size_t dim = 0; dim < base_indices.size(); ++dim) {
+  for (const auto dim : c10::irange(base_indices.size())) {
     int64_t start = base_indices[dim];
     base = GenerateSlice(
         /*base=*/base,

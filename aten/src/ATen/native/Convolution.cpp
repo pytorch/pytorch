@@ -2084,7 +2084,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         std::vector<Tensor> backend_grad_inputs(params.groups);
         std::vector<Tensor> backend_grad_weights(params.groups);
         std::vector<Tensor> backend_grad_biases(params.groups);
-        for (int g = 0; g < params.groups; ++g) {
+        for (const auto g : c10::irange(params.groups)) {
           auto grad_output_g = subtensor(grad_output, 1, params.groups, g);
           auto input_g = subtensor(input, 1, params.groups, g);
           auto weight_g = subtensor(weight, 0, params.groups, g);

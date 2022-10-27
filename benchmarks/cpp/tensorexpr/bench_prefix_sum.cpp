@@ -1,5 +1,6 @@
 #include <benchmark/benchmark.h>
 #include "ATen/Functions.h"
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -53,7 +54,7 @@ inline void Log(const __m256i& value) {
   const size_t n = sizeof(__m256i) / sizeof(T);
   T buffer[n];
   _mm256_storeu_si256((__m256i*)buffer, value);
-  for (int i = 0; i < n; i++)
+  for (const auto i : c10::irange(n))
     std::cout << buffer[n - i - 1] << " ";
   std::cout << std::endl;
 }
@@ -162,7 +163,7 @@ class PrefixSumBench : public benchmark::Fixture {
       auto input_data = input_.data_ptr<float>();
       auto output_data = output_.data_ptr<float>();
       float sum = 0.0f;
-      for (int i = 0; i < input_size_; ++i) {
+      for (const auto i : c10::irange(input_size_)) {
         sum = sum + input_data[i];
         output_data[i] = sum;
       }
@@ -176,7 +177,7 @@ class PrefixSumBench : public benchmark::Fixture {
       auto input_data = input_int_.data_ptr<int>();
       auto output_data = output_int_.data_ptr<int>();
       int sum = 0;
-      for (int i = 0; i < input_size_; ++i) {
+      for (const auto i : c10::irange(input_size_)) {
         sum = sum + input_data[i];
         output_data[i] = sum;
       }

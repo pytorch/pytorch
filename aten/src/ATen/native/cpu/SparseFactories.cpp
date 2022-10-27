@@ -7,6 +7,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -47,7 +48,7 @@ void _spdiags_kernel_cpu(
                 auto* data_read = (diagonals_ptr +
                                    diagonals_index_stride * diag_index +
                                    first_col * diagonals_read_stride);
-                for (int64_t i = 0; i < n_out; ++i) {
+                for (const auto i : c10::irange(n_out)) {
                   rows_start[i] = first_row + i;
                   cols_start[i] = first_col + i;
                   vals_start[i] = data_read[i * diagonals_read_stride];

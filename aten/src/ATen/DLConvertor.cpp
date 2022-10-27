@@ -1,5 +1,6 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
+#include <c10/util/irange.h>
 
 #include <iostream>
 #include <sstream>
@@ -219,7 +220,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   // gh-83069
   auto shape = src.sizes();
   auto strides = src.strides().vec();
-  for (int i=0; i<src.dim(); i++) {
+  for (const auto i : c10::irange(src.dim())) {
     if (shape[i] < 2) {
       strides[i] = 1;
     }

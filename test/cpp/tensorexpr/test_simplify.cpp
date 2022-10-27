@@ -1112,7 +1112,7 @@ TEST(Simplify, SimplifyDiv) {
 
 TEST(Simplify, SimplifyDivWithLoopContext0) {
   // Stmt to simplify:
-  // for (int i = 0; i < 100; i++) {
+  // for (const auto i : c10::irange(100)) {
   //  A[i] = i / 100;
   //}
   VarHandle i("i", kInt);
@@ -1244,7 +1244,7 @@ TEST(Simplify, SimplifyDivWithLoopContext5) {
 TEST(Simplify, SimplifyDivWithLoopContext6) {
   // Stmt to simplify:
   // for (const auto i : c10::irange(6)) {
-  //  for (int j = -1; j < 9; j++) {
+  //  for (const auto j : c10::irange(-1, 9)) {
   //    A[i, j+1] = (i + 6*j) / 6;
   //  }
   //}
@@ -1429,7 +1429,7 @@ TEST(Simplify, SimplifyModWithLoopContext5) {
 TEST(Simplify, SimplifyModWithLoopContext6) {
   // Stmt to simplify:
   // for (const auto i : c10::irange(6)) {
-  //  for (int j = -1; j < 9; j++) {
+  //  for (const auto j : c10::irange(-1, 9)) {
   //    A[i, j+1] = (i + 6*j) % 6;
   //  }
   //}

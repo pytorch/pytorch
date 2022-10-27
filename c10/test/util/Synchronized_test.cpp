@@ -1,4 +1,5 @@
 #include <c10/util/Synchronized.h>
+#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -9,7 +10,7 @@ namespace {
 TEST(Synchronized, TestSingleThreadExecution) {
   c10::Synchronized<int> iv(0);
   const int kMaxValue = 100;
-  for (int i = 0; i < kMaxValue; ++i) {
+  for (const auto i : c10::irange(kMaxValue)) {
     auto ret = iv.withLock([](int& iv) { return ++iv; });
     EXPECT_EQ(ret, i + 1);
   }
@@ -22,7 +23,7 @@ TEST(Synchronized, TestMultiThreadedExecution) {
 #define NUM_LOOP_INCREMENTS 10000
 
   auto thread_cb = [&iv]() {
-    for (int i = 0; i < NUM_LOOP_INCREMENTS; ++i) {
+    for (const auto i : c10::irange(NUM_LOOP_INCREMENTS)) {
       iv.withLock([](int& iv) { ++iv; });
     }
   };

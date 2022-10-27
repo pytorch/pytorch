@@ -950,7 +950,7 @@ void TensorImpl::ShareExternalPointer(
 void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
   dst.clear();
   dst.reserve(src.size());
-  for (size_t i = 0; i < src.size(); i++) {
+  for (const auto i : c10::irange(src.size())) {
     dst.emplace_back(src[i].clone());
   }
 }

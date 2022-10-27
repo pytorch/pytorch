@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -117,7 +118,7 @@ static void Baseline_LayerNorm_BWD(
       benchmark_state.range(0), benchmark_state.range(1)};
   const size_t kReductionAxis = 1;
   std::vector<int64_t> norm_shape;
-  for (auto idx = kReductionAxis; idx < input_shape.size(); ++idx) {
+  for (const auto idx : c10::irange(kReductionAxis, input_shape.size())) {
     norm_shape.push_back(input_shape[idx]);
   }
 

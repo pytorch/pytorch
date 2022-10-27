@@ -91,7 +91,7 @@ TEST(Expr, IsChannelsLastContiguous) {
                           int ndims, shapGenInfo shape_gen_info) -> shapeInfo {
     auto dims_expr_vec = dims_expr_vec_conf.at(ndims);
     std::vector<std::vector<ExprHandle>> strides_expr_vec;
-    for (size_t i = 0; i < strides_expr_vec.size(); i++) {
+    for (const auto i : c10::irange(strides_expr_vec.size())) {
       strides_expr_vec[i].resize(ndims);
     }
 
@@ -104,11 +104,11 @@ TEST(Expr, IsChannelsLastContiguous) {
     };
 
     auto stride_order_vec = shape_gen_info.at(ndims);
-    for (size_t i = 0; i < strides_expr_vec.size(); i++) {
+    for (const auto i : c10::irange(strides_expr_vec.size())) {
       auto stride_order = stride_order_vec[i];
 
       strides_expr_vec[i][stride_order[0]] = 1;
-      for (size_t j = 1; j < stride_order.size(); j++) {
+      for (const auto j : c10::irange(1, stride_order.size())) {
         auto cur_dim_idx = stride_order[j];
         auto adjacent_dim_idx = stride_order[j - 1];
 
@@ -133,36 +133,36 @@ TEST(Expr, IsChannelsLastContiguous) {
   };
 
   // channels-last contigous
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
-    for (size_t j = 0; j < shape_info.second.size(); j++) {
+    for (const auto j : c10::irange(shape_info.second.size())) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
       ASSERT_EQ(check_channels_last_fn(dims[i], buf_handle), true);
     }
   }
 
   // channels-last non-contigous
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     auto shape_info = shape_gen_fn(dims[i], channels_last_non_cont_shape_conf);
-    for (size_t j = 0; j < shape_info.second.size(); j++) {
+    for (const auto j : c10::irange(shape_info.second.size())) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
       ASSERT_EQ(check_channels_last_fn(dims[i], buf_handle), false);
     }
   }
 
   // contiguous
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     auto shape_info = shape_gen_fn(dims[i], cont_shape_conf);
-    for (size_t j = 0; j < shape_info.second.size(); j++) {
+    for (const auto j : c10::irange(shape_info.second.size())) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
       ASSERT_EQ(buf_handle.is_contiguous(), true);
     }
   }
 
   // non-contiguous
-  for (size_t i = 0; i < dims.size(); i++) {
+  for (const auto i : c10::irange(dims.size())) {
     auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
-    for (size_t j = 0; j < shape_info.second.size(); j++) {
+    for (const auto j : c10::irange(shape_info.second.size())) {
       BufHandle buf_handle("a", shape_info.first, shape_info.second[j], kFloat);
       ASSERT_EQ(buf_handle.is_contiguous(), false);
     }

@@ -406,7 +406,7 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_, is_module());
   AT_ASSERT(numAttributes() == refined_slots.size());
-  for (size_t i = 0; i < attributes_.size(); ++i) {
+  for (const auto i : c10::irange(attributes_.size())) {
     AT_ASSERT(refined_slots[i]->isSubtypeOf(*attributes_[i].getType()));
     ptr->addAttribute(attributes_[i].getName(), refined_slots[i], (attributes_[i].getKind() == AttributeKind::PARAMETER),
     (attributes_[i].getKind() == AttributeKind::BUFFER));
@@ -495,7 +495,7 @@ const std::vector<torch::jit::Function*>& ClassType::methods() const {
 
 void ClassType::checkNotExist(const std::string& name, const std::string& what) const {
   // Check no overlap with existing constants
-  for (size_t i = 0; i < constantNames_.size(); ++i) {
+  for (const auto i : c10::irange(constantNames_.size())) {
     TORCH_CHECK(
         name != constantNames_[i],
         "attempting to add ",
