@@ -1469,7 +1469,9 @@ def parse_args():
 
 def main(runner, original_dir=None):
     args = parse_args()
-    return maybe_fresh_cache(run, args.cold_start_latency)(runner, args, original_dir)
+    return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
+        runner, args, original_dir
+    )
 
 
 def run(runner, args, original_dir=None):
