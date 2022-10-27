@@ -124,6 +124,11 @@ def _init_core_state(
     backward_prefetch_limit: int,
     forward_prefetch_limit: int,
 ) -> _State:
+    # We clamp the strategy to `NO_SHARD` for world size of 1 since they are
+    # currently functionally equivalent. This may change if/when we integrate
+    # FSDP with MoE.
+    if state.world_size == 1:
+        sharding_strategy = ShardingStrategy.NO_SHARD
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
     state.cpu_offload = cpu_offload or CPUOffload()
