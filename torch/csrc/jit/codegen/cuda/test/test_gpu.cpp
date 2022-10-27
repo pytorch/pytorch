@@ -3816,6 +3816,10 @@ TEST_F(NVFuserTest, FusionRootMappingRepro1950_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionDetectSelfMappedDomains_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "Somehow it does not throw internally on V100"
+               << " See https://github.com/pytorch/pytorch/issues/86714";
+#endif
   if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
     GTEST_SKIP() << "Somehow it does not throw on sm_80+"
                  << " See https://github.com/pytorch/pytorch/issues/86714";
@@ -10908,6 +10912,10 @@ TEST_F(NVFuserTest, FusionLSTMCell_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
+#ifdef FBCODE_CAFFE2
+  GTEST_SKIP() << "Somehow it does not throw internally on V100"
+               << " See https://github.com/pytorch/pytorch/issues/86714";
+#endif
   if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
     GTEST_SKIP() << "Somehow it fails on sm_80+ GPUs"
                  << " See https://github.com/pytorch/pytorch/issues/86717";
