@@ -3,6 +3,7 @@ import copy
 import functools
 from typing import (
     Any,
+    cast,
     Dict,
     Iterable,
     Iterator,
@@ -12,18 +13,18 @@ from typing import (
     Sequence,
     Tuple,
     Union,
-    cast,
 )
 
 import torch
 import torch.distributed as dist
+
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
-from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 
 
 def sorted_items(dictionary: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
@@ -193,7 +194,7 @@ def _communicate_optim_state(
             # has the same shape as the sharded flattened parameter
             buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
             tensor_buffer = value.new_zeros(*buffer_size)
-            dist._all_gather_base(tensor_buffer, value, group=group)
+            dist.all_gather_into_tensor(tensor_buffer, value, group=group)
             torch.cuda.synchronize()
             if to_save:
                 unpadded_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
@@ -298,9 +299,9 @@ def _flatten_optim_state_dict(
     unflat_osd_state = unflat_osd["state"]
     for param, unflat_param_names in param_to_unflat_param_names.items():
         if isinstance(param, FlatParameter):  # flatten FSDP parameters' states
-            assert param in flat_param_to_fsdp_module, (
-                f"Check the `flat_param_to_fsdp_module` construction\nparam: {param}"
-            )
+            assert (
+                param in flat_param_to_fsdp_module
+            ), f"Check the `flat_param_to_fsdp_module` construction\nparam: {param}"
             fsdp_module = flat_param_to_fsdp_module[param]
             flat_state = _flatten_optim_state(
                 unflat_osd_state,
