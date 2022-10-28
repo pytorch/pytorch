@@ -222,6 +222,7 @@ __all__ = [
     "diag",
     "diagonal",
     "diagonal_copy",
+    "diagonal_scatter",
     "dsplit",
     "dstack",
     "expand",
@@ -2203,6 +2204,7 @@ def _dim_var_dispatch(dim=None, unbiased=None):
     return dim, unbiased
 
 
+@register_decomposition(torch.ops.aten.var)
 @out_wrapper()
 def var(
     a: TensorLikeType,
@@ -3280,7 +3282,10 @@ def index_add(
     *,
     alpha: NumberType = 1,
 ):
-    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
+    # index_add always returns a new contiguous tensor
+    return x.clone(memory_format=torch.contiguous_format).index_add_(
+        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+    )
 
 
 @register_decomposition(torch.ops.aten.index_select)
@@ -3498,6 +3503,26 @@ def diag(
         return torch.diagonal_copy(self, offset)
 
 
+@register_decomposition(torch.ops.aten.diagonal_scatter)
+@out_wrapper()
+def diagonal_scatter(
+    input: TensorLikeType,
+    src: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    out = input.clone()
+    diag = out.diagonal(offset, dim1, dim2)
+    check(
+        diag.shape == src.shape,
+        lambda: "expected src to have a size equal to the diagonal of the input."
+        f"Got {src.shape} for a diagonal of shape {diag.shape}",
+    )
+    copy_to(diag, src)
+    return out
+
+
 @register_decomposition(torch.ops.aten.diagonal)
 def diagonal(
     self: TensorLikeType,
@@ -3594,7 +3619,10 @@ def diag_embed(
     cond = a_range == b_range.unsqueeze(-1)
     cond_shape = [last_dim if i in (dim1, dim2) else 1 for i in range(len(t.shape))]
     cond = cond.reshape(cond_shape)
-    return utils.mask_tensor(cond, t)
+
+    # aten.diag_embed always returns a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return utils.mask_tensor(cond, t).contiguous()
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4517,10 +4545,14 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     if isinstance(value, Number):
-        return torch.where(mask, python_type(value), a)
+        r = torch.where(mask, python_type(value), a)
+    else:
+        assert isinstance(value, TensorLike)
+        r = torch.where(mask, prims.to_dtype(value, a.dtype), a)
 
-    assert isinstance(value, TensorLike)
-    return torch.where(mask, prims.to_dtype(value, a.dtype), a)
+    # aten.mask_fill always return a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return r.contiguous()
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4622,7 +4654,9 @@ def triu(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) >= diagonal
 
-    return utils.mask_tensor(mask, a)
+    # aten.triu always returns a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return utils.mask_tensor(mask, a).contiguous()
 
 
 @register_decomposition(torch.ops.aten.tril)
@@ -4637,7 +4671,9 @@ def tril(a: TensorLikeType, diagonal: int = 0) -> TensorLikeType:
         - torch.arange(h, device=a.device).unsqueeze(-1)
     ) <= diagonal
 
-    return utils.mask_tensor(mask, a)
+    # aten.tril always returns a new contiguous tensor
+    # contiguous() is needed to correctly model the output stride
+    return utils.mask_tensor(mask, a).contiguous()
 
 
 # This is based on get_tril_size in aten/src/ATen/native/TensorFactories.h
