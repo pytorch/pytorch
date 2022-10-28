@@ -1,3 +1,4 @@
+import warnings
 import weakref
 
 import torch
@@ -232,7 +233,9 @@ class MetaConverter:
                     # Fake up some autograd history.
                     if t.requires_grad:
                         r = callback(
-                            lambda: torch.empty_strided(sizes, strides, dtype=t.dtype, device="meta")
+                            lambda: torch.empty_strided(
+                                sizes, strides, dtype=t.dtype, device="meta"
+                            )
                         )
                         assert safe_is_leaf(
                             r
@@ -246,7 +249,9 @@ class MetaConverter:
                                 r = r.clone(memory_format=torch.preserve_format)
                     else:
                         r = callback(
-                            lambda: torch.empty_strided(sizes, strides, dtype=t.dtype, device="meta")
+                            lambda: torch.empty_strided(
+                                sizes, strides, dtype=t.dtype, device="meta"
+                            )
                         )
                         assert safe_is_leaf(
                             r
@@ -254,7 +259,11 @@ class MetaConverter:
 
                     s = t.storage().untyped()
                     swr = StorageWeakRef(s)
-                    if swr not in self.storage_memo and r.stride() == strides and r.storage_offset() == storage_offset:
+                    if (
+                        swr not in self.storage_memo
+                        and r.stride() == strides
+                        and r.storage_offset() == storage_offset
+                    ):
                         # You're normal and happy, install the fresh storage into the memo
                         self.storage_memo[swr] = r.storage().untyped()
                     else:
@@ -275,6 +284,11 @@ class MetaConverter:
                         with torch.no_grad():
                             r.set_(r_s, storage_offset, sizes, strides)
 
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+                    grad_not_none = t.grad is not None
+                if grad_not_none:
+                    r.grad = self.meta_tensor(t.grad, shape_env, callback)
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             self.set_tensor_memo(t, r)

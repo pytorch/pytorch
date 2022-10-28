@@ -2,7 +2,6 @@ import contextlib
 import functools
 import itertools
 import sys
-import warnings
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -232,12 +231,7 @@ class FakeTensorConverter(object):
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
             self.add_constant_storage_mapping(out)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
-            grad_not_none = t.grad is not None
-        if grad_not_none:
-            out.grad = self.from_real_tensor(fake_mode, t.grad, shape_env=shape_env)
-        self.set_tensor_memo(t, out)
+        # NB: meta_converter set the memo
         return out
 
     # If you specify the device, it MUST be a meta tensor.

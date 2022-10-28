@@ -76,6 +76,11 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m1.is_inference(), m2.is_inference())
         self.assertEqual(m1.is_conj(), m2.is_conj())
         self.assertEqual(m1.is_neg(), m2.is_neg())
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+            grad_not_none = m1.grad is not None
+        if grad_not_none:
+            self.assertMetadataMatches(m1.grad, m2.grad)
         if m1.is_sparse:
             self.assertEqual(m1.dense_dim(), m2.dense_dim())
             self.assertEqual(m1.sparse_dim(), m2.sparse_dim())
