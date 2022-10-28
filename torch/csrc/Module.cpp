@@ -514,6 +514,21 @@ PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setSDPUseMemEfficient(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseMemEfficient(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* userEnabledMemEfficientSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledMemEfficientSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -953,6 +968,14 @@ static PyMethodDef TorchMethods[] = {
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
+    {"_get_mem_efficient_sdp_enabled",
+     userEnabledMemEfficientSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_mem_efficient",
+     THPModule_setSDPUseMemEfficient,
+     METH_O,
+     nullptr},
     {"_get_math_sdp_enabled",
      THPModule_userEnabledMathSDP,
      METH_NOARGS,
