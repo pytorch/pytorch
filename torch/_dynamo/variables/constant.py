@@ -83,6 +83,9 @@ class ConstantVariable(VariableTracker):
             ).call_method(tx, name, args, kwargs)
 
         if any([isinstance(x, DynamicShapeVariable) for x in args]):
+            if name == "__add__":
+                assert len(args) == 1
+                return args[0].call_method(tx, name, [self], {})
             # Unfortunate constant
             return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
         try:
