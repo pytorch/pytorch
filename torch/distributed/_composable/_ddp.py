@@ -1059,9 +1059,6 @@ class DistributedDataParallel(Module, Joinable):
                 return module_to_run(*inputs, **kwargs)
 
     def pre_forward(self):
-        """
-        Called before forward pass. This is a no-op by default.
-        """
         with torch.autograd.profiler.record_function(
             "DistributedDataParallel.pre_forward"
         ):
@@ -1103,9 +1100,6 @@ class DistributedDataParallel(Module, Joinable):
                 )
 
     def post_forward(self, output):
-        """
-        Called after forward pass. This is a no-op by default.
-        """
         with torch.autograd.profiler.record_function(
             "DistributedDataParallel.post_forward"
         ):

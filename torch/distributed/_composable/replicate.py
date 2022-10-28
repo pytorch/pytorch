@@ -66,6 +66,7 @@ def replicate(
     *modules: nn.Module, dist_state: ReplicateState = _default_state
 ) -> None:
     r"""Replicates module(s)
+
     Args:
         modules (torch.nn.Module): modules to replicate
 
@@ -79,7 +80,15 @@ def replicate(
 def mark_root_module(
     module: nn.Module, dist_state: ReplicateState = _default_state
 ) -> None:
-    ...
+    r"""Mark the root module. Its sub-modules can be replicated.
+
+    Args:
+        modules (torch.nn.Module): root module
+
+    Example::
+        >>> module = nn.Linear(3, 3)
+        >>> replicate(module)
+    """
     module.register_forward_pre_hook(dist_state.root_module_forward_pre_hook)
     # TODO(@yhcharles): fix type error
     module.register_forward_hook(
