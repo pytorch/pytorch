@@ -56,7 +56,7 @@ class WeakTensorRefKey(object):
 class MetaConverter:
     def __init__(self):
         self.storage_memo = {}
-        self.tensor_memo = {}
+        self.tensor_memo: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
         self.maybe_storages_to_delete = []
         self.check_expired_frequency = 128
         self.check_expired_count = 0
