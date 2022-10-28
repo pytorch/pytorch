@@ -184,27 +184,6 @@ class SymNode:
         # guard occurred
         return float(self.shape_env.evaluate_expr(self.expr))
 
-    def sym_float(self):
-        if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(sym_float, (wrap_node(self),), {})
-            assert isinstance(r, (SymInt, SymFloat)), type(r)
-            return r.node
-        # TODO: consider constant prop here
-        # TODO: wrapping the expr with sympy.Float doesn't seem to work, why
-        # not?
-        return SymNode(self.expr, self.shape_env, float)
-
-    def sym_int(self):
-        raise NotImplementedError("sym_int NYI")
-        """
-        if SYM_FUNCTION_MODE:
-            return _handle_sym_dispatch(sym_int, (self,), {})
-        # TODO: consider constant prop here
-        # XXX: need to cast float to int in sympy; math.floor is wrong
-        # because negatives round to zero
-        return SymNode(self.expr, self.shape_env, int)
-        """
-
     def bool_(self):
         return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
 
@@ -258,6 +237,9 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
+def _nyi():
+    raise NotImplementedError()
+
 magic_methods = {
     **reflectable_magic_methods,
     'eq': lambda a, b: sympy.Eq(a, b),
@@ -265,6 +247,8 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
+    'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
+    'sym_int': lambda a: _nyi(),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -272,8 +256,9 @@ magic_methods = {
 }
 
 unary_magic_methods = {
+    'sym_float',
     'ceil',
-    'neg'
+    'neg',
 }
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
@@ -333,6 +318,8 @@ def _make_node_magic(method, func):
         out = sympy.expand(out)
         if method in ["ceil", "floor"]:
             pytype = int
+        elif method in ["sym_float"]:
+            pytype = float
         else:
             pytype = self.pytype
 
