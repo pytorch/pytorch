@@ -7,8 +7,9 @@ from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
+from . import config
 from .codegen.common import index_prevent_reordering
-from .utils import sympy_product, sympy_str, sympy_subs, VarRanges
+from .utils import sympy_product, sympy_str, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -35,8 +36,8 @@ class MemoryDep(typing.NamedTuple):
         ):
             c = canonicalization_prefix()
             size = (self.size[1], self.size[0])
-            s0 = sympy.Symbol(c + "0")
-            s1 = sympy.Symbol(c + "1")
+            s0 = sympy_symbol(c + "0")
+            s1 = sympy_symbol(c + "1")
             index = sympy_subs(self.index, {s0: s1})
             return MemoryDep(self.name, index, size)
         else:
@@ -146,6 +147,15 @@ class RecordLoadStore(V.MockHandler):  # type: ignore[name-defined]
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
 
+    # Truncate the expr str by a threshold to prevent it's too long
+    # and cause process hanging. The result is not used.
+    # https://github.com/pytorch/torchdynamo/issues/1352
+    @staticmethod
+    def truncate_expr(expr):
+        if len(expr) > config.realize_bytes_threshold:
+            expr = f"{expr[:config.realize_bytes_threshold]}..."
+        return expr
+
     def canonicalize(
         self, index: sympy.Expr
     ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:
@@ -198,7 +208,7 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     var_ranges: VarRanges = collections.OrderedDict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
-        v = sympy.Symbol(f"{prefix}{next(cnt)}")
+        v = sympy_symbol(f"{prefix}{next(cnt)}")
         var_ranges[v] = length
         return v
 

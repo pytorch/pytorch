@@ -1584,7 +1584,7 @@ See :func:`torch.diagonal_scatter`
 add_docstr_all(
     "as_strided_scatter",
     r"""
-as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(src, size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided_scatter`
 """,
