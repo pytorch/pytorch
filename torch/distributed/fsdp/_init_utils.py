@@ -49,7 +49,7 @@ from torch.utils.hooks import RemovableHandle
 
 _TORCHDISTX_AVAIL = True
 try:
-    from torchdistx import deferred_init, fake
+    from torchdistx import deferred_init, fake  # type: ignore[import]
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
