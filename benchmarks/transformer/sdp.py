@@ -107,12 +107,12 @@ def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, 
             pt_output, _ = pt(x, x, x, mask)
             cpt_output, _ = cpt(x, x, x, mask)
 
-            # First order sanity check. Not a replacement for rigorous tests.
-            if pt_output.is_nested and cpt_output.is_nested:
-                for a, b in zip(pt_output.unbind(), cpt_output.unbind()):
-                    assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
-            else:
-                assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
+            # # First order sanity check. Not a replacement for rigorous tests.
+            # if pt_output.is_nested and cpt_output.is_nested:
+            #     for a, b in zip(pt_output.unbind(), cpt_output.unbind()):
+            #         assert torch.allclose(a, b, atol=1e-3, rtol=1e-3)
+            # else:
+            #     assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
 
             pt_time = benchmark_torch_function(iters, npt, x, x, x, mask) * 1e3
             cp_time = benchmark_torch_function(iters, cpt, x, x, x, mask) * 1e3

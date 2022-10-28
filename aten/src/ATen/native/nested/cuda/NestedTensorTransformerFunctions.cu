@@ -735,12 +735,12 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       " but got: ",
       ntensors2,
       ".");
-  const Tensor &self_buffer = self_ptr->get_buffer(),
-               &mat2_buffer = mat2_ptr->get_buffer();
-  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr),
-                           mat2_sizes = NestedTensor_get_sizes(mat2_ptr),
-                           self_strides = NestedTensor_get_strides(self_ptr),
-                           mat2_strides = NestedTensor_get_strides(mat2_ptr);
+  const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
+  const Tensor &mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
+  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
+  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
+  std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
+  std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
   const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets();
   const std::vector<int64_t>& mat2_offsets = mat2_ptr->get_storage_offsets();
 
@@ -793,8 +793,8 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
     lda.push_back(self_strides[i][0]);
     ldb.push_back(mat2_strides[i][0]);
     ldd.push_back(mat2_size1);
-    a_offsets.push_back(a_numel);
-    b_offsets.push_back(b_numel);
+    a_offsets.push_back(self_offsets[i]);
+    b_offsets.push_back(mat2_offsets[i]);
     a_numel += self_size0 * self_strides[i][0];
     b_numel += mat2_size0 * mat2_strides[i][0];
     all_row_major = all_row_major && (self_strides[i][1] == 1);

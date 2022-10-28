@@ -951,9 +951,9 @@ matmul_nested_helper(
 }
 }
 
-Tensor matmul_with_bmm_nested(const Tensor& self_, const Tensor& mat2_) {
-  Tensor self = self_.contiguous();
-  Tensor mat2 = mat2_.contiguous();
+Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
+  // Tensor self = self_.contiguous();
+  // Tensor mat2 = mat2_.contiguous();
   // self [N, n_heads, *, head_dim]
   // mat2 [N, n_heads, head_dim, *]
   const auto self_ptr = get_nested_tensor_impl(self);
