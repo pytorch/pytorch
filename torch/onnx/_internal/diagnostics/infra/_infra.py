@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import FrozenSet, List, Optional, Sequence, Tuple, TypeVar
+from typing import FrozenSet, List, Optional, Sequence, Tuple, Type, TypeVar
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
@@ -112,11 +112,12 @@ class Rule:
 
 @dataclasses.dataclass
 class Location:
-    uri: str
-    message: str
+    uri: Optional[str] = None
     line: Optional[int] = None
+    message: Optional[str] = None
     start_column: Optional[int] = None
     end_column: Optional[int] = None
+    snippet: Optional[str] = None
 
     def sarif(self) -> sarif.Location:
         """Returns the SARIF representation of this location."""
@@ -126,48 +127,62 @@ class Location:
                 region=sarif.Region(
                     start_line=self.line,
                     start_column=self.start_column,
-                    end_line=self.line,
                     end_column=self.end_column,
+                    snippet=sarif.ArtifactContent(text=self.snippet),
                 ),
             ),
-            message=sarif.Message(text=self.message),
+            message=sarif.Message(text=self.message)
+            if self.message is not None
+            else None,
         )
 
 
 @dataclasses.dataclass
+class StackFrame:
+    location: Location
+
+    def sarif(self) -> sarif.StackFrame:
+        """Returns the SARIF representation of this stack frame."""
+        return sarif.StackFrame(location=self.location.sarif())
+
+
+@dataclasses.dataclass
 class Stack:
-    frame_locations: List[Location] = dataclasses.field(default_factory=list)
+    frames: List[StackFrame] = dataclasses.field(default_factory=list)
+    message: Optional[str] = None
 
     def sarif(self) -> sarif.Stack:
         """Returns the SARIF representation of this stack."""
         return sarif.Stack(
-            frames=[
-                sarif.StackFrame(location=loc.sarif()) for loc in self.frame_locations
-            ]
-        )
-
-    def add_frame(
-        self,
-        uri: str,
-        message: str,
-        line: Optional[int] = None,
-        start_column: Optional[int] = None,
-        end_column: Optional[int] = None,
-    ) -> None:
-        """Adds a frame to the stack."""
-        self.frame_locations.append(
-            Location(
-                uri=uri,
-                message=message,
-                line=line,
-                start_column=start_column,
-                end_column=end_column,
-            )
+            frames=[frame.sarif() for frame in self.frames],
+            message=sarif.Message(text=self.message)
+            if self.message is not None
+            else None,
         )
 
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
+
+
+@dataclasses.dataclass
+class Graph:
+    """A graph of diagnostics.
+
+    This class stores the string representation of a model graph.
+    The `nodes` and `edges` fields are unused in the current implementation.
+    """
+
+    graph_str: str
+    name: str
+    description: Optional[str] = None
+
+    def sarif(self) -> sarif.Graph:
+        """Returns the SARIF representation of this graph."""
+        return sarif.Graph(
+            description=sarif.Message(text=self.graph_str),
+            properties=PatchedPropertyBag(name=self.name, description=self.description),
+        )
 
 
 @dataclasses.dataclass
@@ -177,6 +192,7 @@ class Diagnostic:
     message: Optional[str] = None
     locations: List[Location] = dataclasses.field(default_factory=list)
     stacks: List[Stack] = dataclasses.field(default_factory=list)
+    graphs: List[Graph] = dataclasses.field(default_factory=list)
     additional_message: Optional[str] = None
     tags: List[Tag] = dataclasses.field(default_factory=list)
 
@@ -194,6 +210,7 @@ class Diagnostic:
         )
         sarif_result.locations = [location.sarif() for location in self.locations]
         sarif_result.stacks = [stack.sarif() for stack in self.stacks]
+        sarif_result.graphs = [graph.sarif() for graph in self.graphs]
         sarif_result.properties = sarif.PropertyBag(
             tags=[tag.value for tag in self.tags]
         )
@@ -207,6 +224,11 @@ class Diagnostic:
     def with_stack(self: _Diagnostic, stack: Stack) -> _Diagnostic:
         """Adds a stack to the diagnostic."""
         self.stacks.append(stack)
+        return self
+
+    def with_graph(self: _Diagnostic, graph: Graph) -> _Diagnostic:
+        """Adds a graph to the diagnostic."""
+        self.graphs.append(graph)
         return self
 
     def with_additional_message(self: _Diagnostic, message: str) -> _Diagnostic:
@@ -272,7 +294,8 @@ class DiagnosticContext:
     name: str
     version: str
     options: Optional[DiagnosticOptions] = None
-    _diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
+    diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
     _invocation: Invocation = dataclasses.field(init=False)
 
     def __enter__(self):
@@ -288,10 +311,10 @@ class DiagnosticContext:
                 driver=sarif.ToolComponent(
                     name=self.name,
                     version=self.version,
-                    rules=[diagnostic.rule.sarif() for diagnostic in self._diagnostics],
+                    rules=[diagnostic.rule.sarif() for diagnostic in self.diagnostics],
                 )
             ),
-            results=[diagnostic.sarif() for diagnostic in self._diagnostics],
+            results=[diagnostic.sarif() for diagnostic in self.diagnostics],
         )
 
     def add_diagnostic(self, diagnostic: Diagnostic) -> None:
@@ -301,7 +324,11 @@ class DiagnosticContext:
         Args:
             diagnostic: The diagnostic to add.
         """
-        self._diagnostics.append(diagnostic)
+        if not isinstance(diagnostic, self.diagnostic_type):
+            raise TypeError(
+                f"Expected diagnostic of type {self.diagnostic_type}, got {type(diagnostic)}"
+            )
+        self.diagnostics.append(diagnostic)
 
     def diagnose(
         self,
@@ -324,6 +351,6 @@ class DiagnosticContext:
         Raises:
             ValueError: If the rule is not supported by the tool.
         """
-        diagnostic = Diagnostic(rule, level, message, **kwargs)
+        diagnostic = self.diagnostic_type(rule, level, message, **kwargs)
         self.add_diagnostic(diagnostic)
         return diagnostic
