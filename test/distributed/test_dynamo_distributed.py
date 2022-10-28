@@ -40,7 +40,17 @@ class CheckSplitsCompiler:
         self.compiler_called += 1
         return gm
 
+class TestSanity(torch._dynamo.test_case.TestCase):
+    def test_is_ci_running_this_at_all(self):
+        print("first test worked")
+        self.assertTrue(True)
+
 @requires_nccl()
+class TestSanity2(torch._dynamo.test_case.TestCase):
+    def test_is_ci_running_this_at_all(self):
+        print("second test worked")
+        self.assertTrue(True)
+
 class TestDistributed(torch._dynamo.test_case.TestCase):
     """
     Test harness initializes dist process group
