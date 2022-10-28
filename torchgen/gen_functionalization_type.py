@@ -91,7 +91,7 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
     return self.reshape_symint(size);
   } else {
     auto output = at::_ops::view::call(self, size);
-    return output.clone();
+    return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 """
@@ -117,13 +117,13 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
 
     if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
         return_cloned_output = """\
-  return output.clone();"""
+  return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);"""
     else:
         # If the return type is a list, we need to clone each tensor in the list.
         return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
   for (const auto i : c10::irange(output.size())) {{
-    out_clone.push_back(output[i].clone());
+    out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
   }}
   return out_clone;"""
 
@@ -337,8 +337,11 @@ def emit_view_functionalization_body(
           return {reverse_lambda.inner_call()}
         }}
       );
+      auto compute_reference_meta =
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
-      {{
+      if (compute_reference_meta) {{
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
@@ -353,7 +356,9 @@ def emit_view_functionalization_body(
       // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
       // on a reference implementation here (instead of relying on the output from the forward lambda
       // having the correct stride info)
-      at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
+      if (compute_reference_meta) {{
+        at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
+      }}
       return {view_tensor_name};
     }}
 """
@@ -368,6 +373,9 @@ def emit_view_functionalization_body(
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+      auto compute_reference_meta =
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::XLABit) ||
+        {view_tensor_name}.key_set().has_backend(c10::BackendComponent::LazyBit);
       {return_type} reference_tensor_output;
       {{
         at::AutoDispatchSkipFunctionalize func_guard;
@@ -398,7 +406,9 @@ def emit_view_functionalization_body(
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
-      at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
+      if (compute_reference_meta) {{
+        at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
+      }}
       return out;
     }}
 """
