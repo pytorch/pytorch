@@ -335,7 +335,6 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
 
-
     out.emplace_back(Result::create(
         time_converter(event->start_time_), tid, kineto_info, std::move(e)));
   }
@@ -476,7 +475,8 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
     : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
   if (config_.experimental_config.performance_events.size()) {
-    perf_profiler_ = std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
+    perf_profiler_ =
+        std::make_unique<torch::profiler::impl::linux_perf::PerfProfiler>();
     perf_profiler_->Configure(config_.experimental_config.performance_events);
   }
 }
