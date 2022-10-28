@@ -757,7 +757,6 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
 
 
 def dump_to_minify_after_dynamo(gm, args, compiler_name):
-    # TODO could assign attributes of the gm to cuda/cpu instead of using hardcoded cpu()/cuda() on the whole model
     model_str = NNModuleToString.convert(gm)
 
     minifier_backend = "dynamo_minifier_backend"
