@@ -1671,6 +1671,7 @@ class FullyShardedDataParallel(nn.Module):
         else:
             # Unflatten the unsharded flattened parameters
             with contextlib.ExitStack() as stack:
+                # Invariant: rank == 0 or !rank0_only
                 for handle in self._handles:
                     if offload_to_cpu and handle.uses_sharded_strategy:
                         stack.enter_context(handle.to_cpu())
