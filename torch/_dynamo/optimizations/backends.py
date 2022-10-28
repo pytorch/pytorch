@@ -817,3 +817,23 @@ def fx2trt_compiler(gm: torch.fx.GraphModule, example_inputs):
             "FX2TRT conversion failed on the subgraph. Return GraphModule forward instead"
         )
         return gm.forward
+
+
+# Backend for testing only: causes compile error when relu is encountered in gm
+@register_backend
+def test_compiler_relu_compile_error(gm: torch.fx.GraphModule, example_inputs):
+    for node in gm.graph.nodes:
+        if node.target == torch.relu:
+            assert False, "relu found"
+    return gm
+
+# Backend for testing only: causes runtime error when relu is encountered in gm
+@register_backend
+def test_compiler_relu_runtime_error(gm: torch.fx.GraphModule, example_inputs):
+    def compiled_fn(*args, **kwargs):
+        for node in gm.graph.nodes:
+            if node.target == torch.relu:
+                assert False, "relu found"
+        return gm.forward(*args, **kwargs)
+
+    return compiled_fn
