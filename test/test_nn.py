@@ -14922,6 +14922,16 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
+        x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
+        out = torch.nn.functional.interpolate(x.to(memory_format=torch.channels_last), scale_factor=2, mode='nearest')
+        out_ref = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        del x
+        self.assertTrue(torch.allclose(out, out_ref))
+
     def _slow_masked_softmax(self, input, mask):
         exp = torch.exp(input)
         exp = exp * mask
