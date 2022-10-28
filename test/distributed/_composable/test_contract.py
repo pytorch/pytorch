@@ -93,6 +93,30 @@ class TestContract(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot modify FQNs"):
             wrap_module(model.seq1)
 
+    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
+    def test_state(self):
+        def check_and_update_state_hook(
+            module: nn.Module, inp: Tuple[torch.Tensor]
+        ) -> Tuple[torch.Tensor]:
+            self.assertEqual(api.state(module).dummy_state, 7)
+            api.state(module).dummy_state = 8
+            return inp
+
+        # FIXME: circular reference looks a bit weird. Shall we make .state a
+        # top-level API instead attached to contract API?
+        @contract
+        def api(module: nn.Module) -> nn.Module:
+            api.state(module).dummy_state = 7
+            module.register_forward_pre_hook(check_and_update_state_hook)
+            return module
+
+        model = ToyModel()
+        api(model.seq1)
+
+        self.assertEqual(api.state(model.seq1).dummy_state, 7)
+        model(torch.zeros(10, 10), torch.zeros(10, 10))
+        self.assertEqual(api.state(model.seq1).dummy_state, 8)
+
 
 if __name__ == "__main__":
     run_tests()
