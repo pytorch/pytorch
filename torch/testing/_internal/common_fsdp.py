@@ -14,11 +14,11 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     MixedPrecision,
     ShardingStrategy,
-    TrainingState_,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import (
@@ -884,7 +884,7 @@ class FSDPTest(MultiProcessTestCase):
                 model.load_state_dict(state_dict)
 
         if isinstance(model, FSDP):
-            model._assert_state(TrainingState_.IDLE)
+            model._assert_state(TrainingState.IDLE)
         return loss.detach()
 
     def _test_fsdp_parity(
