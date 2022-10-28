@@ -6,7 +6,8 @@
 #include <ATen/native/vulkan/api/Utils.h>
 
 #include <c10/core/ScalarType.h>
-#include <c10/util/hash.h>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/typeid.h>
 
 #include <stack>
 
@@ -385,11 +386,13 @@ class MemoryAllocator final {
   VmaAllocator allocator_;
 
  public:
-  VulkanImage create_image3d(
+  VulkanImage create_image(
       const VkExtent3D&,
+      const VkFormat,
+      const VkImageType,
+      const VkImageViewType,
       const VulkanImage::SamplerProperties&,
       const VkSampler,
-      const caffe2::TypeMeta dtype,
       const bool allow_transfer = false);
 
   VulkanBuffer create_storage_buffer(

@@ -320,6 +320,9 @@ class TorchVariable(VariableTracker):
             assert isinstance(args[0], TensorVariable)
 
             if config.fake_tensor_propagation:
+                unimplemented(
+                    "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
+                )
                 # In fake tensor case, this state doesn't matter, but
                 # it needs to be valid to not segfault. Pull a real tensor out.
                 # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
@@ -342,6 +345,24 @@ class TorchVariable(VariableTracker):
                     current_tx=tx,
                 ),
                 example_value=example_value,
+                **options,
+            )
+        elif (
+            self.value == torch.numel
+            and len(args) == 1
+            and isinstance(args[0], TensorVariable)
+            and len(kwargs) == 0
+        ):
+            # TODO(voz): This is rewritten as a call_method because
+            # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "numel",
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
                 **options,
             )
         else:
@@ -559,7 +580,7 @@ class TorchPyOperator(VariableTracker):
 
         def unwrap_real(arg):
             if isinstance(arg, TensorVariable):
-                return arg.as_proxy().node.meta["example_value"]
+                return arg.get_real_value()
             if isinstance(arg, UserFunctionVariable):
                 return arg.fn
             if isinstance(arg, NNModuleVariable):
