@@ -436,9 +436,8 @@ void dispatch_set_item(
 // indexing is needed, it calls C++ `at::indexing::dispatch_index_put_`.
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
-  if (py_value == nullptr) {
-    C10_THROW_ERROR(TypeError, "Tensor does not support deleting items");
-  }
+  TORCH_CHECK_TYPE(
+      py_value == nullptr, "Tensor does not support deleting items");
   if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
       (!THPVariable_CheckExact(py_value) &&
        check_has_torch_function(py_value))) {
@@ -448,11 +447,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
-      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
-      self_.layout() == kSparseBsc) {
-    C10_THROW_ERROR(TypeError, "Cannot assign to a sparse tensor");
-  }
+  TORCH_CHECK_TYPE(
+      self_.layout() == kSparse || self_.layout() == kSparseCsr ||
+          self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
+          self_.layout() == kSparseBsc,
+      "Cannot assign to a sparse tensor");
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
   Variable value;

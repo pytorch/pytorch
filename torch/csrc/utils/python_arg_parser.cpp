@@ -633,19 +633,14 @@ bool is_tensor_list_and_append_overloaded(
     PyObject* iobj =
         tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
     if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
-      if (throw_error) {
-        C10_THROW_ERROR(
-            TypeError,
-            c10::str(
-                "expected Tensor as element ",
-                // TODO: fix the %d format
-                static_cast<int>(idx),
-                " in argument ",
-                // TODO: fix the %d format
-                argnum,
-                ", but got ",
-                Py_TYPE(iobj)->tp_name));
-      }
+      TORCH_CHECK_TYPE(
+          throw_error,
+          "expected Tensor as element ",
+          idx,
+          " in argument ",
+          argnum,
+          ", but got ",
+          Py_TYPE(iobj)->tp_name);
       return false;
     }
   }
@@ -1216,23 +1211,20 @@ std::string FunctionSignature::toString() const {
   const long max_pos_args = signature.max_pos_args;
   const long min_args = signature.min_args;
   const long nargs_ = nargs;
-  if (min_args != max_pos_args) {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str(
-            signature.name.c_str(),
-            "() takes from ",
-            min_args,
-            " to ",
-            max_pos_args,
-            " positional arguments but ",
-            nargs_,
-            " were given"));
-  }
+  TORCH_CHECK_TYPE(
+      min_args != max_pos_args,
+      signature.name,
+      "() takes from ",
+      min_args,
+      " to ",
+      max_pos_args,
+      " positional arguments but ",
+      nargs_,
+      " were given");
   C10_THROW_ERROR(
       TypeError,
       c10::str(
-          signature.name.c_str(),
+          signature.name,
           "() takes ",
           max_pos_args,
           " positional argument",
@@ -1264,7 +1256,7 @@ std::string FunctionSignature::toString() const {
   C10_THROW_ERROR(
       TypeError,
       c10::str(
-          signature.name.c_str(),
+          signature.name,
           "() missing ",
           num_missing,
           " required positional argument",
@@ -1296,30 +1288,20 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   Py_ssize_t pos = 0;
 
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
-    if (!THPUtils_checkString(key)) {
-      C10_THROW_ERROR(TypeError, "keywords must be strings");
-    }
-
+    TORCH_CHECK_TYPE(!THPUtils_checkString(key), "keywords must be strings");
     auto param_idx = find_param(signature, key);
-    if (param_idx < 0) {
-      C10_THROW_ERROR(
-          TypeError,
-          c10::str(
-              signature.name,
-              "() got an unexpected keyword argument '",
-              THPUtils_unpackString(key),
-              "'"));
-    }
-
-    if (param_idx < num_pos_args) {
-      C10_THROW_ERROR(
-          TypeError,
-          c10::str(
-              signature.name,
-              "() got multiple values for argument '",
-              THPUtils_unpackString(key),
-              "'"));
-    }
+    TORCH_CHECK_TYPE(
+        param_idx < 0,
+        signature.name,
+        "() got an unexpected keyword argument '",
+        THPUtils_unpackString(key),
+        "'");
+    TORCH_CHECK_TYPE(
+        param_idx < num_pos_args,
+        signature.name,
+        "() got multiple values for argument '",
+        THPUtils_unpackString(key),
+        "'");
   }
 
   // this should never be hit
@@ -1415,44 +1397,23 @@ bool FunctionSignature::parse(
       arg_pos = nargs;
       continue;
     } else if (raise_exception) {
-      if (is_kwd) {
-        // foo(): argument 'other' must be str, not int
-        C10_THROW_ERROR(
-            TypeError,
-            c10::str(
-                name,
-                "(): argument '",
-                param.name,
-                "' must be ",
-                param.type_name(),
-                ", not ",
-                Py_TYPE(obj)->tp_name));
-      } else {
-        // foo(): argument 'other' (position 2) must be str, not int
-        if (failed_idx != -1) {
-          if (!(PyTuple_Check(obj) || PyList_Check(obj))) {
-            TORCH_INTERNAL_ASSERT(varargs_eligible);
-            obj = args;
-          }
-          TORCH_INTERNAL_ASSERT(failed_idx < PySequence_Size(obj));
-          C10_THROW_ERROR(
-              TypeError,
-              c10::str(
-                  name,
-                  "(): argument '",
-                  param.name,
-                  "' (position ",
-                  arg_pos + 1,
-                  ") must be ",
-                  param.type_name(),
-                  ", but found element of type ",
-                  Py_TYPE(py::reinterpret_steal<py::object>(
-                              PySequence_GetItem(obj, failed_idx))
-                              .ptr())
-                      ->tp_name,
-                  " at pos ",
-                  failed_idx));
+      // foo(): argument 'other' must be str, not int
+      TORCH_CHECK_TYPE(
+          is_kwd,
+          name,
+          "(): argument '",
+          param.name,
+          "' must be ",
+          param.type_name(),
+          ", not ",
+          Py_TYPE(obj)->tp_name);
+      // foo(): argument 'other' (position 2) must be str, not int
+      if (failed_idx != -1) {
+        if (!(PyTuple_Check(obj) || PyList_Check(obj))) {
+          TORCH_INTERNAL_ASSERT(varargs_eligible);
+          obj = args;
         }
+        TORCH_INTERNAL_ASSERT(failed_idx < PySequence_Size(obj));
         C10_THROW_ERROR(
             TypeError,
             c10::str(
@@ -1463,9 +1424,26 @@ bool FunctionSignature::parse(
                 arg_pos + 1,
                 ") must be ",
                 param.type_name(),
-                ", not ",
-                Py_TYPE(obj)->tp_name));
+                ", but found element of type ",
+                Py_TYPE(py::reinterpret_steal<py::object>(
+                            PySequence_GetItem(obj, failed_idx))
+                            .ptr())
+                    ->tp_name,
+                " at pos ",
+                failed_idx));
       }
+      C10_THROW_ERROR(
+          TypeError,
+          c10::str(
+              name,
+              "(): argument '",
+              param.name,
+              "' (position ",
+              arg_pos + 1,
+              ") must be ",
+              param.type_name(),
+              ", not ",
+              Py_TYPE(obj)->tp_name));
     } else {
       return false;
     }
@@ -1631,10 +1609,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     C10_THROW_ERROR(
         TypeError,
         c10::str(
-            "expected Tensor as argument ",
-            i,
-            ", but got ",
-            Py_TYPE(obj)->tp_name));
+            "expected Tensor as argument ", i, ", but got ", Py_TYPE(obj)->tp_name));
   }
   at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;

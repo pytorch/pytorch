@@ -92,13 +92,10 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   using namespace torch::autograd;
 
   HANDLE_TH_ERRORS
-  if (!THPVariable_Check(_new_state)) {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str(
-            "expected a torch.ByteTensor, but got ",
-            Py_TYPE(_new_state)->tp_name));
-  }
+  TORCH_CHECK_TYPE(
+      !THPVariable_Check(_new_state),
+      "expected a torch.ByteTensor, but got ",
+      Py_TYPE(_new_state)->tp_name);
   auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
   const auto& new_state_tensor = THPVariable_Unpack(_new_state);

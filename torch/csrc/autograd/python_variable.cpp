@@ -728,11 +728,9 @@ static PyObject* THPVariable_as_subclass(
   ParsedArgs<1> parsed_args{};
   auto r = parser.parse(_self, args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str("cls must be a type (got ", Py_TYPE(cls)->tp_name, ")"));
-  }
+  TORCH_CHECK_TYPE(
+      !PyType_Check(cls),
+      "cls must be a type (got ", Py_TYPE(cls)->tp_name, ")");
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -751,11 +749,9 @@ static PyObject* THPVariable_make_subclass(
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
-  if (!PyType_Check(cls)) {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str("cls must be a type (got ", Py_TYPE(cls)->tp_name, ")"));
-  }
+  TORCH_CHECK_TYPE(
+      !PyType_Check(cls),
+      "cls must be a type (got ", Py_TYPE(cls)->tp_name, ")");
   // guard completely turns off torch dispatch modes, doesn't just pop off the
   // stack
   torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
@@ -818,9 +814,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   TORCH_CHECK_TYPE(
       PyType_Check(cls),
-      "cls must be a type (got ",
-      Py_TYPE(cls)->tp_name,
-      ")");
+      "cls must be a type (got ", Py_TYPE(cls)->tp_name, ")");
 
   // This is an important safety check; without it, the default behavior will be
   // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
@@ -833,8 +827,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
   TORCH_CHECK_TYPE(
       attr.ptr() != nullptr &&
           attr.ptr() != torch::disabled_torch_dispatch_impl(),
-      ((PyTypeObject*)cls)->tp_name,
-      " must define __torch_dispatch__");
+      ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
                            .dtype(r.scalartype(5))
@@ -1060,14 +1053,9 @@ int THPVariable_set_data(THPVariable* self, PyObject* data, void* unused) {
   }
   THPUtils_assertRet(
       -1, data, "Deleting tensor data is not allowed. Delete tensor instead!");
-  if (!THPVariable_Check(data)) {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str(
-            "Variable data has to be a tensor, but got ",
-            Py_TYPE(data)->tp_name));
-  }
-
+  TORCH_CHECK_TYPE(
+      !THPVariable_Check(data),
+      "Variable data has to be a tensor, but got ", Py_TYPE(data)->tp_name);
   THPVariable_Unpack(self).set_data(THPVariable_Unpack(data));
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)

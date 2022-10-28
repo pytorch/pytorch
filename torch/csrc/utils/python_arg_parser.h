@@ -339,16 +339,13 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* args,
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
-  if (N < max_args) {
-    C10_THROW_ERROR(
-        ValueError,
-        c10::str(
-            "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
-            max_args,
-            " (got ",
-            N,
-            ")"));
-  }
+  TORCH_CHECK_VALUE(
+      N < max_args,
+      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+      max_args,
+      " (got ",
+      N,
+      ")");
   return raw_parse(self, args, kwargs, dst.args);
 }
 
@@ -477,11 +474,8 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  if (size != N) {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str("expected tuple of ", N, " elements but got ", size));
-  }
+  TORCH_CHECK_TYPE(
+      size != N, "expected tuple of ", N, " elements but got ", size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
                           : PyList_GET_ITEM(arg.get(), idx);
@@ -1036,12 +1030,11 @@ inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
-  if (!THPStream_Check(args[i])) {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str(
-            "expected Stream object. Got '", Py_TYPE(args[i])->tp_name, "'"));
-  }
+  TORCH_CHECK_TYPE(
+      !THPStream_Check(args[i]),
+      "expected Stream object. Got '",
+      Py_TYPE(args[i])->tp_name,
+      "'");
   return c10::Stream::unpack(((THPStream*)args[i])->cdata);
 }
 
