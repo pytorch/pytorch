@@ -30,6 +30,11 @@ import sympy
 import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._python_dispatch import (
+    _len_torch_dispatch_stack,
+    _pop_mode,
+    _push_mode,
+)
 
 from . import config, logging as torchdynamo_logging
 
@@ -140,6 +145,17 @@ tensortype_to_dtype = {
     torch.ShortTensor: (torch.int16, torch.short),
     torch.BoolTensor: (torch.bool,),
 }
+
+
+@contextmanager
+def disable_current_modes():
+    mode_len = _len_torch_dispatch_stack()
+    old_modes = [_pop_mode() for _ in range(mode_len)]
+    try:
+        yield old_modes
+    finally:
+        for mode in reversed(old_modes):
+            _push_mode(mode)
 
 
 class DuplicateWarningChecker(object):
