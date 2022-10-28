@@ -3089,10 +3089,8 @@ class TestExamplesCorrectness(TestCase):
         func_model, weights = make_functional(model)
 
         def compute_loss(weights, image, target):
-            image = image.unsqueeze(0)
-            target = target.unsqueeze(0)
-            output = func_model(weights, image)
-            loss = criterion(output, target)
+            output = func_model(weights, images)
+            loss = criterion(output, targets)
             return loss
 
         batch_size = 3
@@ -3102,7 +3100,7 @@ class TestExamplesCorrectness(TestCase):
         result_grads = vmap(grad(compute_loss), in_dims=(None, 0, 0))(weights, images, targets)
 
         expected_grads = [
-            torch.autograd.grad(compute_loss(weights, images[i], targets[i]), weights)
+            torch.autograd.grad(compute_loss(weights, images[i].unsqueeze(0), targets[i].unsqueeze(0)), weights)
             for i in range(batch_size)
         ]
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/SymNodeImpl.h>
+#include <c10/core/SymFloatNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -14,21 +14,20 @@ namespace c10 {
 class C10_API SymFloat {
  public:
   /*implicit*/ SymFloat(double d) : data_(d){};
-  SymFloat(SymNode ptr)
-      : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)) {
-    TORCH_CHECK(ptr_->is_float());
-  };
+  SymFloat(SymFloatNode ptr)
+      : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)){};
   SymFloat() : data_(0.0) {}
 
-  SymNodeImpl* toSymNodeImplUnowned() const {
+  SymFloatNodeImpl* toSymFloatNodeImplUnowned() const {
     return ptr_.get();
   }
 
-  SymNodeImpl* release() && {
+  SymFloatNodeImpl* release() && {
     return std::move(ptr_).release();
   }
 
-  SymNode toSymNodeImpl() const;
+  SymFloatNode toSymFloatNodeImpl() const;
+  static c10::SymFloat toSymFloat(SymFloatNode sin);
 
   double expect_float() const {
     TORCH_CHECK(!is_symbolic());
@@ -54,7 +53,7 @@ class C10_API SymFloat {
  private:
   // TODO: optimize to union
   double data_;
-  SymNode ptr_;
+  SymFloatNode ptr_;
 };
 
 C10_API std::ostream& operator<<(std::ostream& os, SymFloat s);
