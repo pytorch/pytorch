@@ -888,7 +888,9 @@ class FakeTensorMode(TorchDispatchMode):
                     # We thus directly convert real tensor to fake tensor.
                     return converter(self, e)
                 else:
-                    return converter.from_meta_and_device(self, e, device or common_device)
+                    return converter.from_meta_and_device(
+                        self, e, device or common_device
+                    )
             else:
                 return e
 
