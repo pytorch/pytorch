@@ -599,7 +599,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
   if ((mask.dim() != 2) || (input_.dim() != 4)) {
     // Mask types 0 and 1 are only allowed for 2D masks and 4D inputs
     mask_type = 2;
-  };
+  }
 
   if (mask_type == 2) {
       TORCH_CHECK(input_.sizes() == mask.sizes(),
