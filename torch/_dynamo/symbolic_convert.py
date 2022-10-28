@@ -130,7 +130,7 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif (
-            isinstance(value, (TensorVariable, DynamicShapeVariable))
+            isinstance(value, (TensorVariable))
             and self.should_compile_partial_graph()
         ):
             # compile a partial subgraph prefix then jump into user code
@@ -156,6 +156,12 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             self
         ):
             if truth_fn(len(value.unpack_var_sequence(self))):
+                push and self.push(value)
+                self.jump(inst)
+        if isinstance(value, DynamicShapeVariable):
+        # and self.export: # Should this be export only?
+            eval_result = self.output.shape_env.evaluate_expr(value.dyn_shape.get_pyobj().expr)
+            if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
         else:
@@ -335,6 +341,7 @@ class InstructionTranslatorBase(object):
             raise
 
         # generate code from checkpoint
+        breakpoint()
         assert not self.output.output_instructions
         continue_inst, state = self.checkpoint
         self.restore_graphstate(state)

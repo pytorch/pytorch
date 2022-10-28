@@ -92,7 +92,7 @@ class Guard:
 
     def sort_key(self):
         return (
-            self.source.value,
+            self.source.value if self.source else -1,
             len(self.name),
             self.name,
             self.create_fn.__code__.co_firstlineno,
@@ -103,7 +103,7 @@ class Guard:
 
     def __str__(self):
         s = f"""
-            {self.source.name.lower()} {repr(self.name)} {self.create_fn.__name__}
+            {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
             {{
                 'guard_types': {self.guard_types},
                 'code': {self.code_list},
@@ -589,7 +589,7 @@ class CheckFunctionManager:
             if not config.guard_nn_modules and guard.is_nn_module():
                 continue
             guard.create(local_builder, global_builder)
-        self.check_fn = self.compile_check_fn(local_builder, global_builder)
+        self.check_fn = self.compile_check_fn(local_builder, global_builder, guards)
         self._seen_ids.clear()
 
     """
@@ -672,7 +672,7 @@ class CheckFunctionManager:
         expression = " and ".join(finished_expressions)
         return f"({expression})"
 
-    def compile_check_fn(self, local_builder, global_builder):
+    def compile_check_fn(self, local_builder, global_builder, guards_out):
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         args = [a for a in local_builder.scope.keys() if a == "___implicit0"]
@@ -704,6 +704,7 @@ class CheckFunctionManager:
             if symbolic_shape_expression:
                 code_parts.append(symbolic_shape_expression)
                 verbose_code_parts.append(symbolic_shape_expression)
+                guards_out.add(Guard(name='symbolic_shape_expression', source=None, create_fn=self._parse_symbolic_shape_expressions, code_list=symbolic_shape_expression))
 
             tensor_check_examples = (
                 local_builder.tensor_check_examples
