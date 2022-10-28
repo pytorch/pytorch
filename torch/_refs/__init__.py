@@ -852,6 +852,7 @@ def _make_elementwise_binary_reference(
     has_out=True,
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
+    supports_two_python_scalars=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"),
@@ -871,8 +872,11 @@ def _make_elementwise_binary_reference(
                 "Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!"
             )
 
-        # TODO: enable this for operations that support it, like add
-        if isinstance(a, Number) and isinstance(b, Number):
+        if (
+            not supports_two_python_scalars
+            and isinstance(a, Number)
+            and isinstance(b, Number)
+        ):
             raise ValueError(
                 f"Receive two Number inputs to an elementwise binary operation {prim}!"
             )
@@ -907,11 +911,6 @@ def add(
     """
     Reference implementation of torch.add
     """
-
-    if isinstance(a, Number) and isinstance(b, Number):
-        raise ValueError(
-            "Receive two Number inputs to an elementwise binary operation!"
-        )
 
     a, b = _maybe_broadcast(a, b)
 
@@ -1184,6 +1183,7 @@ floor_divide = _make_elementwise_binary_reference(
     _floor_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.floor_divide,
+    supports_two_python_scalars=True,
 )
 
 
@@ -1458,6 +1458,7 @@ minimum = _make_elementwise_binary_reference(
 mul = _make_elementwise_binary_reference(
     prims.mul,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_two_python_scalars=True,
 )
 
 # TODO: add docstring
@@ -1514,11 +1515,6 @@ def sub(
     Reference implementation of torch.sub
     """
 
-    if isinstance(a, Number) and isinstance(b, Number):
-        raise ValueError(
-            "Receive two Number inputs to an elementwise binary operation!"
-        )
-
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
@@ -1541,6 +1537,7 @@ true_divide = _make_elementwise_binary_reference(
     prims.div,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
+    supports_two_python_scalars=True,
 )
 
 
@@ -1584,6 +1581,7 @@ trunc_divide = _make_elementwise_binary_reference(
     _trunc_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # CompositeImplicitAutograd
+    supports_two_python_scalars=True,
 )
 
 #
