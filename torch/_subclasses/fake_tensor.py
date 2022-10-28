@@ -424,11 +424,58 @@ def nyi(fake_mode, func, *args, **kwargs):
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
 
-# Meta tensors give you the ability to run PyTorch code without having to
-# actually do computation through tensors allocated on a `meta` device.
-# Because the device is `meta`, meta tensors do not model device propagation.
-# FakeTensor extends MetaTensors to also carry an additional `fake_device`
-# which tracks devices that would have been used.
+@register_op_impl(
+    lambda func: func in (aten.convolution.default, aten.convolution_backward.default)
+)
+def conv(fake_mode, func, *args, **kwargs):
+    _, kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    device = kwargs["input"].fake_device
+    # need to re-enable mode so the tensors report fake device
+    with fake_mode:
+        # if the input is unsqueezed is done in Convolution.cpp we get segfault
+        k = kwargs["weight"].ndim
+        if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+            mem_fmt = None
+        else:
+            if func is aten.convolution.default:
+                conv_backend = torch._C._select_conv_backend(**kwargs)
+            else:
+                conv_backend = torch._C._select_conv_backend(
+                    kwargs["input"],
+                    kwargs["weight"],
+                    bias=None,
+                    stride=kwargs["stride"],
+                    padding=kwargs["padding"],
+                    dilation=kwargs["dilation"],
+                    transposed=kwargs["transposed"],
+                    output_padding=kwargs["output_padding"],
+                    groups=kwargs["groups"],
+                    bias_sizes=kwargs["bias_sizes"],
+                )
+            mem_fmt = torch._C._conv_determine_backend_memory_format(
+                kwargs["input"], kwargs["weight"], conv_backend
+            )
+
+    def convert(t, mem_fmt):
+        if t is None:
+            return t
+        if mem_fmt is not None:
+            t = t.to(memory_format=mem_fmt)
+        return FakeTensor(fake_mode, t, device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(**kwargs)
+
+        if func is aten.convolution.default:
+            return convert(out, mem_fmt)
+        else:
+            return (
+                convert(out[0], mem_fmt),
+                convert(out[1], mem_fmt),
+                convert(out[2], None),
+            )
 
 
 @contextlib.contextmanager
@@ -450,6 +497,14 @@ def in_kernel_invocation_manager(fake_mode):
 
 
 class FakeTensor(torch.Tensor):
+    """
+    Meta tensors give you the ability to run PyTorch code without having to
+    actually do computation through tensors allocated on a `meta` device.
+    Because the device is `meta`, meta tensors do not model device propagation.
+    FakeTensor extends MetaTensors to also carry an additional `fake_device`
+    which tracks devices that would have been used.
+    """
+
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]

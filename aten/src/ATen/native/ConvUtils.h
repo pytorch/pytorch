@@ -114,6 +114,7 @@ struct ConvParams {
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
+// Keep in sync with py::enum_ in Module.cpp
 enum class ConvBackend {
   CudaDepthwise2d,
   CudaDepthwise3d,
@@ -165,7 +166,11 @@ TORCH_API ConvBackend select_conv_backend(
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int64_t groups);
+    bool transposed, IntArrayRef output_padding, int64_t groups, const at::OptionalIntArrayRef bias_sizes_opt);
+
+TORCH_API at::MemoryFormat _determine_backend_memory_format(const Tensor& input,
+    const Tensor& weight,
+    const ConvBackend backend);
 
 // ---------------------------------------------------------------------
 //
