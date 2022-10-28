@@ -5314,14 +5314,13 @@ class TestQuantizeFx(QuantizationTestCase):
                 return torch.nn.functional.channel_shuffle(x + x, 2) + x
 
         x = torch.randn(4, 4, 4, 4)
-        models = [M1().eval(), M2().eval(), M3().eval()]
-        # torch.channel_shuffle is torch.nn.functional.channel_shuffle
-        expected_nodes = [
-            ns.call_module(torch.nn.ChannelShuffle),
-            ns.call_function(torch.channel_shuffle),
-            ns.call_function(torch.channel_shuffle)
+        # torch.channel_shuffle is equivalent to torch.nn.functional.channel_shuffle
+        model_node_pairs = [
+          (M1().eval(), ns.call_module(torch.nn.ChannelShuffle)),
+          (M2().eval(), ns.call_function(torch.channel_shuffle)),
+          (M3().eval(), ns.call_function(torch.channel_shuffle))
         ]
-        for m, node in zip(models, expected_nodes):
+        for m, node in model_node_pairs:
             m = prepare_fx(m, {"": default_qconfig}, example_inputs=(x,))
             m_copy = copy.deepcopy(m)
             m = convert_fx(m)
