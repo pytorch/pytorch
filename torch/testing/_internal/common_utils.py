@@ -1348,13 +1348,22 @@ def disable_functorch():
         del guard
 
 
+@contextmanager
+def disable_torch_function_mode():
+    guard = torch._C._DisableTorchFunctionMode()
+    try:
+        yield
+    finally:
+        del guard
+
+
 @contextlib.contextmanager
 def freeze_rng_state():
     # no_dispatch needed for test_composite_compliance
     # Some OpInfos use freeze_rng_state for rng determinism, but
     # test_composite_compliance overrides dispatch for all torch functions
     # which we need to disable to get and set rng state
-    with no_dispatch(), disable_functorch():
+    with no_dispatch(), disable_torch_function_mode(), disable_functorch():
         rng_state = torch.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
@@ -1367,7 +1376,9 @@ def freeze_rng_state():
         #
         # In the long run torch.cuda.set_rng_state should probably be
         # an operator.
-        with no_dispatch(), disable_functorch():
+        #
+        # NB: Mode disable is to avoid running cross-ref tests on thes seeding
+        with no_dispatch(), disable_torch_function_mode(), disable_functorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.set_rng_state(rng_state)

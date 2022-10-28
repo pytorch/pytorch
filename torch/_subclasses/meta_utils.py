@@ -1,9 +1,9 @@
+import contextlib
 import warnings
 import weakref
-import contextlib
+from typing import ContextManager
 
 import torch
-from torch.utils._mode_utils import no_dispatch
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -151,7 +151,9 @@ class MetaConverter:
         # function.  This is an error: we may be creating fake tensors and
         # will perform operations on them which need fake tensor mode to
         # be active.  You will segfault if you are in a no_dispatch() block.
-        assert not torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python)
+        assert not torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.Python
+        )
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
@@ -302,8 +304,12 @@ class MetaConverter:
                         # subclasses.  Relevant test is
                         # DynamicShapesFunctionTests::test_add_dynamic_shapes in
                         # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr = contextlib.nullcontext()
-                        from torch._subclasses.fake_tensor import FakeTensor, in_kernel_invocation_manager
+                        maybe_fake_mgr: ContextManager[None] = contextlib.nullcontext()
+                        from torch._subclasses.fake_tensor import (
+                            FakeTensor,
+                            in_kernel_invocation_manager,
+                        )
+
                         if isinstance(r, FakeTensor):
                             maybe_fake_mgr = in_kernel_invocation_manager(r.fake_mode)
                         with maybe_fake_mgr, torch.no_grad():
