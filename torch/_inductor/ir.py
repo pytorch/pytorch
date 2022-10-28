@@ -2316,6 +2316,16 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
+    def require_contiguous(cls, x):
+        if is_contiguous_storage_and_layout(x):
+            as_contiguous_storage_and_layout(x, freeze=True)
+            return x
+        x = cls.copy_input(x)
+        assert is_contiguous_storage_and_layout(x)
+        as_contiguous_storage_and_layout(x, freeze=True)
+        return x
+
+    @classmethod
     def require_stride_order(cls, x, order):
         # require x to have the layout as strided_ordered as order
         if isinstance(
@@ -2857,7 +2867,9 @@ class FallbackKernel(ExternKernelAlloc):
                     new_args.append(next(it_non_tensors))
             return pytree.tree_unflatten(new_args, args_spec)
 
-        tensor_args = [cls.realize_input(x) for x in tensor_args]
+        tensor_args = [
+            cls.require_contiguous(cls.realize_input(x)) for x in tensor_args
+        ]
 
         # We don't have generic shape formulas, so just burn in the
         # shapes and run an example input.
