@@ -1027,6 +1027,7 @@ def main():
         'lib/*.pdb',
         'lib/torch_shm_manager',
         'lib/*.h',
+        'include/*.h',
         'include/ATen/*.h',
         'include/ATen/cpu/*.h',
         'include/ATen/cpu/vec/vec256/*.h',
