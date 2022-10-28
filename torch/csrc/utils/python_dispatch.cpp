@@ -387,7 +387,7 @@ void initDispatchBindings(PyObject* module) {
                   DEF_ONE(CompositeImplicitAutograd) DEF_ONE(AutogradOther)
                       DEF_ONE(Autograd) DEF_ONE(BackendSelect)
                           DEF_ONE(ADInplaceOrView) DEF_ONE(PythonTLSSnapshot)
-                              DEF_ONE(Python)
+                              DEF_ONE(Python) DEF_ONE(PythonDispatcher)
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
 #define DEF_MULTIPLE(fullname, prefix)              \

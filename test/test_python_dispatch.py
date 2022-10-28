@@ -11,7 +11,8 @@ from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
+from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, \
+    _get_current_dispatch_mode_stack, TorchPreDispatchMode
 
 import logging
 
@@ -1667,6 +1668,35 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
 
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
+
+class TestPreDispatchModes(TestCase):
+    def test_basic(self):
+        class Foo(TorchPreDispatchMode):
+            def __torch_pre_dispatch__(self, func, args=(), kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                out.append("layer1")
+                return func(*args, **kwargs)
+
+        out = []
+        x = torch.randn(3)
+        with Foo():
+            x.sin()
+
+        self.assertEqual(out, ["layer1"])
+
+    def test_nested(self):
+        class Foo(TorchPreDispatchMode):
+            def __torch_pre_dispatch__(self, func, args=(), kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                out.append("layer1")
+                return func(*args, **kwargs)
+
+        out = []
+        x = torch.randn(3)
+        with Foo():
+            x.sin()
+
+        self.assertEqual(out, ["layer1"])
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):

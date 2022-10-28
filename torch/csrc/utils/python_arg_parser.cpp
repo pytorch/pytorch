@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
+#include <torch/csrc/utils/torch_pre_dispatch_mode.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 
 #include <ATen/ATen.h>
@@ -257,6 +258,21 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
   return (PyObject*)Py_TYPE(obj_or_type);
 }
 
+template<typename T>
+T choose_from_mode_options(TorchFunctionName torch_function_name,
+                           T torch_function_option, T torch_pre_dispatch_option, T torch_dispatch_option) {
+  switch (torch_function_name) {
+    case TorchFunctionName::TorchFunction:
+      return torch_function_option;
+    case TorchFunctionName::TorchPreDispatch:
+      return torch_pre_dispatch_option;
+    case TorchFunctionName::TorchDispatch:
+      return torch_dispatch_option;
+    default:
+      TORCH_INTERNAL_ASSERT(0, static_cast<int>(torch_function_name));
+  }
+}
+
 // See Note: [Overloaded args] for what they hold
 auto handle_torch_function_no_python_arg_parser(
     at::ArrayRef<py::handle> overloaded_args,
@@ -266,17 +282,11 @@ auto handle_torch_function_no_python_arg_parser(
     PyObject* torch_api_function,
     const char* module_name,
     TorchFunctionName torch_function_name) -> PyObject* {
-  const char* torch_function_name_str = nullptr;
-  switch (torch_function_name) {
-    case TorchFunctionName::TorchFunction:
-      torch_function_name_str = "__torch_function__";
-      break;
-    case TorchFunctionName::TorchDispatch:
-      torch_function_name_str = "__torch_dispatch__";
-      break;
-    default:
-      TORCH_INTERNAL_ASSERT(0, static_cast<int>(torch_function_name));
-  }
+  const char* torch_function_name_str = choose_from_mode_options(torch_function_name,
+                                                                 "__torch_function__",
+                                                                 "__torch_pre_dispatch__",
+                                                                 "__torch_dispatch__");
+
   // overloaded_args already all have unique types
   // nb: modes don't go in the overloaded types list, as they are not
   // necessarily types
@@ -290,25 +300,35 @@ auto handle_torch_function_no_python_arg_parser(
   py::object ret;
   PyObject* mode_obj = nullptr;
 
-  const bool is_torch_function =
-      torch_function_name == TorchFunctionName::TorchFunction;
   auto get_stack_len = [&]() {
-    return is_torch_function ? at::impl::PythonTorchFunctionTLS::stack_len()
-                             : c10::impl::TorchDispatchModeTLS::stack_len();
+    return choose_from_mode_options(torch_function_name,
+                                    at::impl::PythonTorchFunctionTLS::stack_len(),
+                                    c10::impl::PythonDispatcherTLS::pre_stack_len(),
+                                    c10::impl::TorchDispatchModeTLS::stack_len());
   };
 
   if (get_stack_len() > 0) {
     // Disable mode on the inside; this makes for a more user-friendly
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
+    at::optional<torch_pre_dispatch_mode::StashTorchPreDispatchModeGuard> tpd_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
-    if (is_torch_function) {
+    auto build_mode_obj = choose_from_mode_options<std::function<PyObject*()>>(torch_function_name,
+    [&]() {
       tf_g.emplace();
-      mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
-    } else {
+      return tf_g->get_cur_mode()->ptr(getPyInterpreter());
+    },
+    [&]() {
+      tpd_g.emplace();
+      return tpd_g->get_cur_mode()->ptr(getPyInterpreter());
+    },
+    [&]() {
       td_g.emplace();
-      mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
-    }
+      return td_g->get_cur_mode()->ptr(getPyInterpreter());
+    });
+    mode_obj = build_mode_obj();
+
+    std::cout << torch_function_name_str << std::endl;
     py::object torch_function =
         PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
     if (!torch_function) {

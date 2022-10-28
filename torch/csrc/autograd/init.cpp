@@ -70,11 +70,11 @@ struct EnableTorchFunction {
 };
 
 struct EnablePythonDispatcher {
-  EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
-    c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
+  EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_interpreter()) {
+    c10::impl::PythonDispatcherTLS::user_set_state(getPyInterpreter());
   }
   ~EnablePythonDispatcher() {
-    c10::impl::PythonDispatcherTLS::set_state(old_);
+    c10::impl::PythonDispatcherTLS::user_set_state(old_);
   }
   c10::impl::PyInterpreter* old_;
 };
@@ -721,6 +721,57 @@ static PyObject* len_torch_dispatch_stack(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* push_on_torch_pre_dispatch_stack(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg != Py_None) {
+    Py_INCREF(arg);
+    c10::impl::PythonDispatcherTLS::push_onto_pre_stack(
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()), getPyInterpreter());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* pop_torch_pre_dispatch_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = c10::impl::PythonDispatcherTLS::pop_pre_stack();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_pre_dispatch_stack_at(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"get_pre_dispatch_stack_at(int64_t level)"});
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  auto idx = _r.toInt64(0);
+  const auto& mode = c10::impl::PythonDispatcherTLS::get_pre_stack_at(idx);
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* len_torch_pre_dispatch_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto len = c10::impl::PythonDispatcherTLS::pre_stack_len();
+  return utils::wrap(static_cast<int64_t>(len));
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
     {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -800,6 +851,22 @@ static PyMethodDef methods[] = { // NOLINT
      nullptr},
     {"_len_torch_dispatch_stack",
      len_torch_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_push_on_torch_pre_dispatch_stack",
+     push_on_torch_pre_dispatch_stack,
+     METH_O,
+     nullptr},
+    {"_pop_torch_pre_dispatch_stack",
+     pop_torch_pre_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_get_pre_dispatch_stack_at",
+     castPyCFunctionWithKeywords(get_pre_dispatch_stack_at),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_len_torch_pre_dispatch_stack",
+     len_torch_pre_dispatch_stack,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};

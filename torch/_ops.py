@@ -12,6 +12,7 @@ import torch.jit
 from torch import _utils_internal
 
 # Query `hasattr` only once.
+from torch.utils._python_dispatch import _pop_pre_mode_temporarily
 
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
@@ -124,9 +125,11 @@ class PyOperator(PyOperatorABC):
 
     def py_impl(self, dispatch_key_or_mode):
         def inner(fn):
-            if inspect.isclass(dispatch_key_or_mode) and issubclass(
+            if inspect.isclass(dispatch_key_or_mode) and (issubclass(
                 dispatch_key_or_mode, torch.utils._python_dispatch.TorchDispatchMode
-            ):
+            ) or issubclass(
+                dispatch_key_or_mode, torch.utils._python_dispatch.TorchPreDispatchMode
+            )):
                 mode = dispatch_key_or_mode
                 assert mode not in self.python_key_mode_table
                 # TODO(voz): Should we replace setting torch._C.DispatchKey.Python entirely with setting mode keys?
@@ -146,6 +149,10 @@ class PyOperator(PyOperatorABC):
 
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+        if dispatch_key == torch._C.DispatchKey.PythonDispatcher:
+            curr_mode = type(_get_current_dispatch_mode())
+            return self.python_key_mode_table[curr_mode](*args, **kwargs)
 
         if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
@@ -314,6 +321,14 @@ class OpOverload(PyOperatorABC):
             key = torch._C._dispatch_key_parse(attr)
         except Exception as e:
             raise AttributeError()
+
+        if key == torch._C.DispatchKey.PythonDispatcher:
+            from torch.utils._python_dispatch import _pop_pre_mode_temporarily
+            def handler(*args, **kwargs):
+                with _pop_pre_mode_temporarily() as mode:
+                    return mode.__torch_pre_dispatch__(self, args, kwargs)
+            setattr(self, attr, handler)
+            return handler
 
         if key == torch._C.DispatchKey.Python:
             if not self.python_key_mode_table:
