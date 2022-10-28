@@ -194,7 +194,7 @@ void host_softmax(
             // Process mask differently depending on the type:
             // For a generic mask of mask_type == 2, mask shape is the same as the input shape,
             // so indexing is the same.
-            int64_t mask_outer_idx = outer_idx;
+            auto mask_outer_idx = outer_idx;
             if (mask_type_ == 0) {
                 // Optimized case: attention mask of shape LxL
                 // outer_idx goes over BxHxL, mask_outer_idx goes over L.
