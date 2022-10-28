@@ -1618,21 +1618,20 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
-active_meta_table = {}
+all_meta_table = {}
 
 
 def activate_meta():
-    meta_candidates = {}
     # For a given op, we pick the most specific decomp function from
     # global_decomp_table in the precedence order of meta > post_autograd > pre_autograd
     for type in ["meta", "post_autograd", "pre_autograd"]:
         registry = global_decomposition_table[type]
 
         for opo in registry:
-            if opo not in meta_candidates:
-                meta_candidates[opo] = registry[opo]
+            if opo not in all_meta_table:
+                all_meta_table[opo] = registry[opo]
 
-    for op_overload, fn in meta_candidates.items():
+    for op_overload, fn in all_meta_table.items():
         assert isinstance(op_overload, OpOverload)
 
         # register python meta kernel to python dispatcher
@@ -1659,11 +1658,6 @@ def activate_meta():
             "aten::clone",  # causing infinite recursion
             "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
             "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
-            "aten::add.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::sub.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::mul.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::div.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test_fake_tensor.py -k test_scalar_inputs  # noqa: B950
-            "aten::div.Tensor_mode",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_div8_cpu  # noqa: B950
             "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
@@ -1675,9 +1669,6 @@ def activate_meta():
 
             # register python meta kernel to python dispatcher
             # op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
-
-            # add python meta function to active_meta_table
-            active_meta_table[op_overload] = fn
 
 
 activate_meta()
