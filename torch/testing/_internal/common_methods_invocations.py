@@ -10744,7 +10744,8 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06),
+                                     torch.complex64: tol(atol=1.3e-04, rtol=1.3e-05)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-04, rtol=2e-04), }),
@@ -10761,7 +10762,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.complex32: tol(atol=5e-2, rtol=5e-2)}),
                    "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
                DecorateInfo(
-                   toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
+                   toleranceOverride({torch.chalf: tol(atol=9e-2, rtol=9e-2), }),
                    'TestCommon', 'test_complex_half_reference_testing')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
