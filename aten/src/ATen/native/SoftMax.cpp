@@ -626,7 +626,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             mask = mask.expand(input_.sizes()).contiguous();
             mask_type = 2;
       }
-  };
+  }
 
   Tensor output = at::empty_like(input_, input_.options());
   auto input = input_.contiguous();
