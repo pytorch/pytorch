@@ -8520,6 +8520,7 @@
   dispatch:
     CPU: nonzero_out_cpu
     CUDA: nonzero_out_cuda
+    MPS: nonzero_out_mps
   tags: dynamic_output_shape
 
 - func: nonzero(Tensor self) -> Tensor
@@ -8527,6 +8528,7 @@
   dispatch:
     CPU: nonzero_cpu
     CUDA: nonzero_cuda
+    MPS: nonzero_mps
   tags: [dynamic_output_shape, canonical]
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
