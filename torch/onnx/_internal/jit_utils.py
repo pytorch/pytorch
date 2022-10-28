@@ -368,15 +368,17 @@ def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
 
 
 @_beartype.beartype
-def _parse_node_kind(kind: str) -> Tuple[str, str]:
+def parse_node_kind(kind: str) -> Tuple[str, str]:
+    """Parse node kind into domain and Op name."""
     if "::" not in kind:
-        raise torch.onnx.errors.OnnxExporterError(
-            "Node kind is invalid. '::' is not in node kind."
-        )
-    domain, opname = kind.split("::")
+        raise ValueError(f"Node kind: {kind} is invalid. '::' is not in node kind.")
+    domain, opname = kind.split("::", 1)
+    if "::" in opname:
+        raise ValueError(f"Node kind: {kind} is invalid. '::' should only apear once.")
     return domain, opname
 
 
 @_beartype.beartype
-def _is_custom_domain(domain: str) -> bool:
+def is_custom_domain(domain: str) -> bool:
+    """Check if the domain is official."""
     return domain not in {"onnx", "aten", "prim"}
