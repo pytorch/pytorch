@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -70,6 +72,7 @@ class TestCheckpoint(TestCase):
         net = ToyModel()
         self._test_tensor_only(net, x)
 
+    @skip_if_lt_x_gpu(1)
     def test_tensor_only_gpu(self):
         x = torch.randn(20, 100, device="cuda:0")
         net = ToyModel().to("cuda:0")
