@@ -1272,7 +1272,7 @@ endif()
 if(USE_ROCM)
   # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
   # Currently only active for Ubuntu 20.04 and greater versions.
-  if(UNIX)
+  if(UNIX AND EXISTS "/etc/os-release")
     file(STRINGS /etc/os-release OS_RELEASE)
     string(REGEX REPLACE "NAME=\"([A-Za-z]+).*" "\\1" OS_DISTRO ${OS_RELEASE})
     string(REGEX REPLACE ".*VERSION_ID=\"([0-9\.]+).*" "\\1" OS_VERSION ${OS_RELEASE})
