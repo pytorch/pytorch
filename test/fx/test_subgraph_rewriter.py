@@ -772,3 +772,71 @@ class TestSubgraphRewriter(JitTestCase):
                 repalcement_node_found += 1
 
         self.assertEqual(repalcement_node_found, 2)
+
+    def test_replace_pattern_with_filters(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, scale, zero_point):
+                # Match, second input to add is a scalar
+                x = x.dequantize()
+                x = torch.add(x, 2)
+                x = x.relu()
+                x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+
+                y = x + 1
+                # NOT a match, second input to add is NOT a scalar
+                x = x.dequantize()
+                x = torch.add(x, y)
+                x = x.relu()
+                x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+
+                return x
+
+        def BinaryOpScalarReLUPattern(x, num, scale, zero_point):
+            x = x.dequantize()
+            x = torch.add(x, num)
+            x = x.relu()
+            x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+            return x
+
+        def BinaryOpScalarReLUReplacement(x, num, scale, zero_point):
+            x = torch.mul(x, num)
+            return x
+
+        def second_input_is_scalar(match, original_graph, pattern_graph):
+            """ check the node that's matched to the second input of the pattern graph
+            is a scalar number
+            """
+            input_idx = 0
+            for node in pattern_graph.nodes:
+                if node.op == "placeholder":
+                    if input_idx == 1:
+                        num_node = node
+                    input_idx += 1
+            if not isinstance(match.nodes_map[num_node], (int, float)):
+                return False
+            return True
+
+        def num_repalcement_node_found(traced):
+            return sum(1 for node in traced.graph.nodes if node.target == torch.mul)
+
+        # match without filter, should find 2 match
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(
+            traced,
+            BinaryOpScalarReLUPattern,
+            BinaryOpScalarReLUReplacement)
+        self.assertEqual(len(matches), 2)
+        self.assertEqual(num_repalcement_node_found(traced), 2)
+
+        # match with filter, should find 1 match
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern_with_filters(
+            traced,
+            BinaryOpScalarReLUPattern,
+            BinaryOpScalarReLUReplacement,
+            [second_input_is_scalar])
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(num_repalcement_node_found(traced), 1)

@@ -32,7 +32,7 @@ from torch._C._distributed_c10d import (
     Work
 )
 from torch._six import string_classes
-
+from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
@@ -231,6 +231,17 @@ class Backend(object):
 # TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
 _backend: str = Backend.UNDEFINED
 dist_backend = Backend
+
+
+# NOTE(crcrpar): [ReduceOp static class attributes to support `isinstance`]
+#   A ReduceOp instance of `PREMUL_SUM` is supposed to be created via `_make_nccl_premul_sum`
+#   while the other `op`s (meaning RedOpType members) can be directly passed to c10d reduce collectives.
+#   I changed `ReduceOp` to struct from enum class and introduced RedOpType enum class for PREMUL_SUM,
+#   which broke an implicit contract of ReduceOp being enum-like with which users apply isinstance to
+#   `op`, for example, `isinstance(ReduceOp.SUM, ReduceOp)`: https://github.com/pytorch/pytorch/issues/87191
+DENY_LIST = ("PREMUL_SUM", )
+for _red_op_name, _red_op_value in ReduceOp.RedOpType.__members__.items():
+    setattr(ReduceOp, _red_op_name, _red_op_value if _red_op_name in DENY_LIST else ReduceOp(_red_op_value))
 
 
 class _reduce_op(object):
@@ -3321,15 +3332,17 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         group_rank = global_rank
 
     backend = Backend(backend)
-    pg = _new_process_group_helper(
-        group_world_size,
-        group_rank,
-        ranks,
-        backend,
-        default_store,
-        pg_options=pg_options,
-        timeout=timeout,
-    )
+
+    with record_function(f"## process_group:init with ranks: {ranks}"):
+        pg = _new_process_group_helper(
+            group_world_size,
+            group_rank,
+            ranks,
+            backend,
+            default_store,
+            pg_options=pg_options,
+            timeout=timeout,
+        )
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {

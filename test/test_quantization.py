@@ -84,6 +84,7 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
+    from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteNShadows  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError:
     pass

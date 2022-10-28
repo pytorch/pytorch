@@ -15,6 +15,10 @@ struct ReadyQueue;
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
+namespace {
+std::atomic<uint64_t> graph_task_id{0};
+}
+
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask : std::enable_shared_from_this<GraphTask> {
   std::atomic<uint64_t> outstanding_tasks_{0};
@@ -33,6 +37,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   // Records the nodes that are in the graph
   std::unordered_set<Node*> nodes_in_graph_;
+  c10::SmallVector<Node*, 4> graph_roots_;
   // Note [Exec info]
   // Exec info is created for each GraphTask, which allows filtering paths on
   // the graph that are not needed. It has a bit complicated semantics. If it's
@@ -152,20 +157,25 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   utils::DelayWarningHandler warning_handler_;
 
+  uint64_t id_;
+
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphTask(
       bool keep_graph,
       bool grad_mode,
       int reentrant_depth,
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
+      c10::SmallVector<Node*, 4> graph_roots,
       bool exit_on_error = false)
       : keep_graph_(keep_graph),
+        graph_roots_(std::move(graph_roots)),
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
         future_result_(c10::make_intrusive<at::ivalue::Future>(
-            c10::ListType::create(c10::TensorType::get()))) {
+            c10::ListType::create(c10::TensorType::get()))),
+        id_(graph_task_id.fetch_add(1, std::memory_order_relaxed)) {
     thread_locals_.set_grad_mode(grad_mode);
   }
 
@@ -191,6 +201,8 @@ get_current_graph_task_exec_info();
 TORCH_API const std::unordered_set<Node*>*
 get_current_graph_task_nodes_in_graph();
 TORCH_API bool get_current_graph_task_keep_graph();
+TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
+TORCH_API int get_current_graph_task_id();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
 } // namespace autograd

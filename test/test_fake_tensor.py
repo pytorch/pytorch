@@ -329,7 +329,6 @@ class FakeTensorTest(TestCase):
                         self.assertTrue(isinstance(ten, FakeTensor))
                     self.assertEqual(ten.device.type, 'cuda')
 
-    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fallback_memory_prop(self):
         m = nn.Conv2d(16, 33, 3, stride=2, device="cuda", dtype=torch.half)
@@ -463,6 +462,15 @@ class FakeTensorConstHandling(TestCase):
                 b = torch.randn(3, 800, 800)
                 inputs = [a, b]
                 ref = fn(inputs)
+
+    def test_fake_tensor_batch_norm_cpu(self):
+        with torch._subclasses.CrossRefFakeMode():
+            m = torch.nn.Sequential(
+                torch.nn.BatchNorm2d(10),
+                torch.nn.ReLU(),
+            )
+            m.eval()
+            out = m(torch.randn([2, 10, 8, 8]))
 
     def test_shared_storage_invalidation(self):
         with FakeTensorMode():
