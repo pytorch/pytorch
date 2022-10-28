@@ -1,3 +1,10 @@
+"""
+This file only exists since `torch.testing.assert_allclose` was removed, but used extensively throughout the tests in
+this package. The replacement `torch.testing.assert_close` doesn't support one feature that is needed here: comparison
+between numpy arrays and torch tensors. See https://github.com/pytorch/pytorch/issues/61844 for the reasoning why this
+was removed.
+"""
+
 import torch
 from typing import Tuple, Any, Optional
 
@@ -14,10 +21,6 @@ def _get_default_rtol_and_atol(actual: torch.Tensor, expected: torch.Tensor) -> 
     return max(actual_rtol, expected_rtol), max(actual_atol, expected_atol)
 
 
-# The function below is a faithful replica of the former `torch.testing.assert_allclose`. This is only here,
-# because it is used extensively throughout the tests in this package while needing one feature that
-# the new `torch.testing.assert_close` does not offer: comparison between numpy arrays and torch tensors. See
-# https://github.com/pytorch/pytorch/issues/61844 for the reasoning why this feature was removed.
 def assert_allclose(
     actual: Any,
     expected: Any,
