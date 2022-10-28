@@ -3121,6 +3121,8 @@ def pow(a, b):
         ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
+    elif isinstance(b, float) and b == 0.5:
+        return sqrt(a)
     elif isinstance(b, int) and b == 1:
         return a
     elif isinstance(b, int) and -32 < b < 32:
