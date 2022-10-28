@@ -305,7 +305,7 @@ def run_gen_lazy_tensor(
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
     native_func_definition_generator: Type[
         GenLazyNativeFuncDefinition
-    ] = GenLazyNativeFuncDefinition,
+    ] = default_args.native_func_definition_generator,
     # build_in_tree is true for TS backend and affects include paths
     build_in_tree: bool = False,
     # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
