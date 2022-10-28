@@ -5,3 +5,6 @@ FullyShardedDataParallel
 
 .. autoclass:: torch.distributed.fsdp.FullyShardedDataParallel
   :members:
+
+.. autoclass:: torch.distributed.fsdp.BackwardPrefetch
+  :members:
