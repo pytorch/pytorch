@@ -1247,15 +1247,14 @@ class TestNestedTensorDeviceType(TestCase):
     def test_bmm_cpu(self, device, dtype):
         self._test_bmm(device, dtype)
 
-    # TODO: Re-enable this test once bmm supports non-contiguous inputs.
-    # # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
-    # @dtypes(torch.float, torch.double)
-    # def test_bmm_noncontiguous(self, device, dtype):
-    #     nt0_contiguous, nt0_noncontiguous = random_nt_noncontiguous_pair((2, 3), device, dtype)
-    #     nt1_contiguous, nt1_noncontiguous = random_nt_noncontiguous_pair((6, 7), device, dtype)
-    #     self.assertEqual(
-    #         nt0_contiguous.transpose(-1, -2).bmm(nt1_contiguous),
-    #         nt0_noncontiguous.transpose(-1, -2).bmm(nt1_noncontiguous))
+    # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    def test_bmm_noncontiguous(self, device, dtype):
+        nt0_contiguous, nt0_noncontiguous = random_nt_noncontiguous_pair((2, 3), device, dtype)
+        nt1_contiguous, nt1_noncontiguous = random_nt_noncontiguous_pair((6, 7), device, dtype)
+        self.assertEqual(
+            nt0_contiguous.transpose(-1, -2).bmm(nt1_contiguous),
+            nt0_noncontiguous.transpose(-1, -2).bmm(nt1_noncontiguous))
 
     @dtypes(torch.float, torch.double)
     def test_matmul_with_bmm_path(self, device, dtype):
@@ -1278,7 +1277,7 @@ class TestNestedTensorDeviceType(TestCase):
             t2s.append(torch.randn(n_heads, head_dim, seq_len2))
         nt1 = torch.nested.nested_tensor(t1s, device=device, dtype=dtype)
         nt2 = torch.nested.nested_tensor(t2s, device=device, dtype=dtype)
-        self.assertEqual(torch._matmul_with_bmm_nested(nt1, nt2), unbind_rebind_matmul(nt1, nt2))
+        self.assertEqual(torch.matmul(nt1, nt2), unbind_rebind_matmul(nt1, nt2))
 
         # test with noncontiguous
         t3s = []
@@ -1289,7 +1288,7 @@ class TestNestedTensorDeviceType(TestCase):
             t4s.append(torch.randn(seq_len, n_heads, head_dim))
         nt3 = torch.nested.nested_tensor(t3s, device=device, dtype=dtype).transpose(1, 2)
         nt4 = torch.nested.nested_tensor(t4s, device=device, dtype=dtype).transpose(1, 2).transpose(2, 3)
-        self.assertEqual(torch._matmul_with_bmm_nested(nt3, nt4), unbind_rebind_matmul(nt3, nt4))
+        self.assertEqual(torch.matmul(nt3, nt4), unbind_rebind_matmul(nt3, nt4))
 
     # cannot test torch.float16 because: RuntimeError: "bmm" not implemented for 'Half'
     @dtypes(torch.float, torch.double)

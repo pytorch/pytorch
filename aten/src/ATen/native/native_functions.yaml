@@ -5440,10 +5440,6 @@
   autogen: _nested_from_padded_and_nested_example.out
 
 
-- func: _matmul_with_bmm_nested(Tensor self, Tensor mat2) -> Tensor
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: matmul_with_bmm_nested
-
 # The input arguments' types to this functions are temporary. When nested tensors switch to using SymInts for their metadata representation
 # this will need to be updated
 - func: _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)

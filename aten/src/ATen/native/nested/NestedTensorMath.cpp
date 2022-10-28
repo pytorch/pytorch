@@ -1125,11 +1125,6 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
     auto self_first_dim_n_heads = at::all(self_sizes.select(1, 0) == n_heads).item<bool>();
     auto mat2_first_dim_n_heads = at::all(mat2_sizes.select(1, 0) == n_heads).item<bool>();
     if (self_first_dim_n_heads && mat2_first_dim_n_heads) {
-      TORCH_WARN(
-        "matmul(): using bmm fast path for nested matmul.",
-        "This path is automatically turned on when inputs have shape self: [N, n_heads, *_1, *_2],"
-        " and mat2: [N, n_heads, *_2, *_3] and gradients are not being computed."
-      );
       return matmul_with_bmm_nested(self, mat2);
     }
   }
