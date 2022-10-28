@@ -1,5 +1,5 @@
 """
-Private common utilities for FSDP.
+This file includes private common utilities for FSDP.
 """
 
 from enum import auto, Enum
