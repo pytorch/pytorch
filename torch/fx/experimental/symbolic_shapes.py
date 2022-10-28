@@ -23,7 +23,8 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node"
+    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node",
+    "sym_sqrt"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -101,6 +102,12 @@ def sym_float(a):
     elif hasattr(a, '__sym_float__'):
         return a.__sym_float__()
     return float(a)
+
+# Drop in replacement for math.sqrt
+def sym_sqrt(a):
+    if hasattr(a, '__sym_sqrt__'):
+        return a.__sym_sqrt__()
+    return math.sqrt(a)
 
 def sym_int(a):
     if isinstance(a, SymInt):
@@ -270,15 +277,20 @@ magic_methods = {
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
     'max': lambda a, b: sympy.Max(a, b),
+    'sym_sqrt': lambda a: sympy.sqrt(a),
 }
 
 unary_magic_methods = {
     'ceil',
     'floor',
     'neg',
+    'sym_sqrt',
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
+float_magic_methods = {
+    "add", "sub", "mul", "truediv", "ceil", "floor", "eq",
+    "gt", "lt", "le", "ge", "pow", "sym_sqrt"
+}
 
 def wrap_node(x):
     if not isinstance(x, SymNode):
@@ -324,6 +336,8 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             if method in ["ceil", "floor"]:
                 op = getattr(math, method)
+            elif method == "sqrt":
+                op = sym_sqrt
             else:
                 op = getattr(operator, method)
             r = _handle_sym_dispatch(op, (wrap_node(self),), {})
@@ -335,6 +349,8 @@ def _make_node_magic(method, func):
         out = sympy.expand(out)
         if method in ["ceil", "floor"]:
             pytype = int
+        elif method in ["sym_sqrt"]:
+            pytype = float
         else:
             pytype = self.pytype
 
