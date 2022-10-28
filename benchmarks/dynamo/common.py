@@ -1802,8 +1802,14 @@ def main(runner, original_dir=None):
             placeholder_batch_size = 0
             try:
                 subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"], timeout=60*5)
+            except subprocess.TimeoutExpired:
+                print(f"cuda train {name} FAIL (TIMEOUT)", file=sys.stderr)
+                for device in args.devices:
+                    output_csv(
+                        output_filename, [], [device, name, placeholder_batch_size, 0.0]
+                    )
             except subprocess.SubprocessError:
-                print(f"cuda train {name} FAIL (TIMEOUT)")
+                print(f"cuda train {name} FAIL", file=sys.stderr)
                 for device in args.devices:
                     output_csv(
                         output_filename, [], [device, name, placeholder_batch_size, 0.0]
