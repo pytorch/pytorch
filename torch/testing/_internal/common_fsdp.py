@@ -1028,6 +1028,8 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
             fsdp_loss = fsdp_loss.cuda()
         fsdp_unsharded_params = get_full_params(fsdp_model)
+        # TODO: Are mismatching dtypes actually ok here or did this pass silently before, because `check_dtype=False`
+        #  was the default?
         torch.testing.assert_close(ref_loss, fsdp_loss, check_dtype=False)
         # Do not check for parameter parity if using mixed precision since (1)
         # the DDP parameters are in FP16 (from `half()`) while the FSDP
