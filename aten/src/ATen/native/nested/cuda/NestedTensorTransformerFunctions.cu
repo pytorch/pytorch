@@ -609,6 +609,9 @@ bool group_gemm_dispatch(
     std::vector<scalar_t*> aptr,
     std::vector<scalar_t*> bptr,
     std::vector<scalar_t*> dptr,
+    const std::vector<int64_t>& lda,
+    const std::vector<int64_t>& ldb,
+    const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
     int64_t ntensors) {
   return false;
@@ -620,6 +623,9 @@ bool group_gemm_dispatch(
     std::vector<float*> aptr,
     std::vector<float*> bptr,
     std::vector<float*> dptr,
+    const std::vector<int64_t>& lda,
+    const std::vector<int64_t>& ldb,
+    const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
     int64_t ntensors) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -646,11 +652,13 @@ bool group_gemm_dispatch(
 
 template <>
 bool group_gemm_dispatch(
-    at::ScalarType scalar_type,
     at::Device device,
-    std::vector<at::kHalf*> aptr_,
-    std::vector<at::kHalf*> bptr_,
-    std::vector<at::kHalf*> dptr_,
+    std::vector<c10::Half*> aptr_,
+    std::vector<c10::Half*> bptr_,
+    std::vector<c10::Half*> dptr_,
+    const std::vector<int64_t>& lda,
+    const std::vector<int64_t>& ldb,
+    const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
     int64_t ntensors) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -767,26 +775,29 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
     output_offsets.push_back(out_numel);
     out_numel += self_size0 * mat2_size1;
   }
+  const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
+  const Tensor &mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
   Tensor out_buffer = self_buffer.new_empty(out_numel);
   Tensor output = wrap_buffer(out_buffer, out_sizemat);
+  auto out_ptr = get_nested_tensor_impl(output);
 
 #ifndef USE_ROCM
 #ifndef _WIN32
-  const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
-  const Tensor &mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
-  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
-  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
   std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
   std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
   const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets();
   const std::vector<int64_t>& mat2_offsets = mat2_ptr->get_storage_offsets();
+  const std::vector<int64_t>& out_offsets = out_ptr->get_storage_offsets();
 
   bool success = false;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       self.scalar_type(), "group_gemm_dispatch", [&] {
         std::vector<scalar_t*> aptr;
         std::vector<scalar_t*> bptr;
         std::vector<scalar_t*> dptr;
+        std::vector<int64_t> lda;
+        std::vector<int64_t> ldb;
+        std::vector<int64_t> ldd;
         std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
         bool all_row_major = true;
         for (int64_t i = 0; i < ntensors; i++) {
@@ -798,11 +809,14 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           const int64_t &mat2_size1 = mat2_shape[1];
           gemm_sizes.push_back(
               cutlass::gemm::GemmCoord(self_size0, mat2_size1, self_size1));
-          aptr.push_back(a_buffer.data_ptr<c10::Half>() + a_offsets[i]);
-          bptr.push_back(b_buffer.data_ptr<c10::Half>() + b_offsets[i]);
-          dptr.push_back(d_buffer.data_ptr<c10::Half>() + d_offsets[i]);
+          aptr.push_back(self_buffer.data_ptr<scalar_t>() + self_offsets[i]);
+          bptr.push_back(mat2_buffer.data_ptr<scalar_t>() + mat2_offsets[i]);
+          dptr.push_back( out_buffer.data_ptr<scalar_t>() + out_offsets[i]);
           all_row_major = all_row_major && (self_strides[i][1] == 1);
           all_row_major = all_row_major && (mat2_strides[i][1] == 1);
+          lda.push_back(self_strides[i][0]);
+          ldb.push_back(mat2_strides[i][0]);
+          ldd.push_back(mat2_size1);
         }
         if (all_row_major) {
           success = group_gemm_dispatch<scalar_t>(
@@ -810,6 +824,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
               aptr,
               bptr,
               dptr,
+              lda,
+              ldb,
+              ldd,
               gemm_sizes,
               ntensors);
         }
@@ -820,14 +837,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 #endif
 #endif
   std::vector<Tensor> output_unbind = output.unbind();
-  const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
-  const Tensor &mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
-  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
-  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
-  std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
-  std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets();
-  const std::vector<int64_t>& mat2_offsets = mat2_ptr->get_storage_offsets();
   for (int64_t i = 0; i < ntensors; i++) {
     at::mm_out(
         output_unbind[i],
