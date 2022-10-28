@@ -20,7 +20,6 @@ from jit.test_modules import TestModules  # noqa: F401
 from jit.test_autodiff import TestAutodiffJit  # noqa: F401
 from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # noqa: F401
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
-from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_graph_rewrite_passes import TestGraphRewritePasses  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
@@ -97,7 +96,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
-    freeze_rng_state, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
+    freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, IS_MACOS, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -5913,23 +5912,6 @@ a")
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
-    def test_dropout_script(self):
-
-        eg = torch.zeros(1, 2, 3, requires_grad=True)
-
-        @_trace(eg)
-        def foo(x):
-            x = torch.neg(x)
-            return F.dropout(x)
-
-        class MyDrop(nn.Module):
-            def forward(self, x):
-                return foo(x)
-
-        f = io.BytesIO()
-        with warnings.catch_warnings(record=True):
-            torch.onnx.export(MyDrop(), (eg,), f, verbose=False)
-
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_cast(self):
         script = '''
@@ -9780,50 +9762,6 @@ dedent """
             m = M2()
             m(torch.zeros(4, 3))
 
-    @skipIfCompiledWithoutNumpy
-    def test_pack_padded_pad_packed_trace(self):
-        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-        T, B, C = 3, 5, 7
-
-        class PadPackedWrapper(torch.nn.Module):
-            def __init__(self):
-                super(PadPackedWrapper, self).__init__()
-
-            def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens)
-                x, _ = pad_packed_sequence(x)
-                return x
-
-        x = np.ones((T, B, C))
-        seq_lens = np.array([3, 3, 2, 2, 1], dtype=np.int32)
-        # set padding value so we can test equivalence
-        for b in range(B):
-            if seq_lens[b] < T:
-                x[seq_lens[b]:, b, :] = 0
-        seq_lens = torch.from_numpy(seq_lens)
-        x = torch.autograd.Variable(torch.from_numpy(x), requires_grad=True)
-
-        m = PadPackedWrapper()
-        m_traced = torch.jit.trace(m, (x, seq_lens,))
-
-        y = m(x, seq_lens)
-        loss = torch.sum(y)
-        loss.backward()
-        grad = x.grad.clone()
-        x.grad.zero_()
-
-        y_traced = m_traced(x, seq_lens)
-        loss_traced = torch.sum(y_traced)
-        loss_traced.backward()
-        grad_traced = x.grad.clone()
-
-        self.assertEqual(y_traced, x)
-        self.assertEqual(y_traced, y)
-        self.assertEqual(grad, grad_traced)
-
-        f = io.BytesIO()
-        torch.onnx._export(m, (x, seq_lens), f, verbose=False)
-
     def test_script_pack_padded_sequence(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
@@ -10023,54 +9961,6 @@ dedent """
 
         m_scripted = torch.jit.script(m)
         self.assertEqual(m_scripted(torch.tensor(1)), torch.tensor(246))
-
-    # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
-    @suppress_warnings
-    @skipIfCompiledWithoutNumpy
-    def test_rnn_trace_override(self):
-        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-        num_layers = 3
-        T, B, C = 11, 5, 7
-
-        class RNNTraceWrapper(torch.nn.Module):
-            def __init__(self, cell_type):
-                super(RNNTraceWrapper, self).__init__()
-                if cell_type == 'RNN':
-                    self.rnn = torch.nn.RNN(input_size=C, hidden_size=C, num_layers=num_layers)
-                elif cell_type == 'LSTM':
-                    self.rnn = torch.nn.LSTM(input_size=C, hidden_size=C, num_layers=num_layers)
-                elif cell_type == 'GRU':
-                    self.rnn = torch.nn.GRU(input_size=C, hidden_size=C, num_layers=num_layers)
-
-            def forward(self, x, seq_lens):
-                x = pack_padded_sequence(x, seq_lens)
-                x, _ = self.rnn(x)
-                x, _ = pad_packed_sequence(x)
-                return x
-
-        for cell_type in ['RNN', 'LSTM', 'GRU']:
-            x = torch.ones(T, B, C, requires_grad=True)
-            seq_lens = torch.from_numpy(np.array([11, 3, 2, 2, 1], dtype=np.int32))
-
-            m = RNNTraceWrapper(cell_type)
-            m_traced = torch.jit.trace(m, (x, seq_lens,))
-
-            y = m(x, seq_lens)
-            loss = torch.sum(y)
-            loss.backward()
-            grad = x.grad.clone()
-            x.grad.zero_()
-
-            y_traced = m_traced(x, seq_lens)
-            loss_traced = torch.sum(y_traced)
-            loss_traced.backward()
-            grad_traced = x.grad.clone()
-
-            self.assertEqual(y_traced, y)
-            self.assertEqual(grad, grad_traced)
-
-            f = io.BytesIO()
-            torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
     def test_python_call_non_tensor(self):
         def foo(a, b, c):

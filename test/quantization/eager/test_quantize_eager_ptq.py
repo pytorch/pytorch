@@ -71,7 +71,6 @@ hu.assert_deadline_disabled()
 
 # Standard library
 from typing import Tuple
-import io
 import unittest
 import numpy as np
 
@@ -1444,26 +1443,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         self.assertTrue('DynamicQuantizedLinear' in str(q_model))
 
 class TestQuantizeEagerONNXExport(JitTestCase):
-    def _test_lower_graph_impl(self, model, data):
-        model.qconfig = torch.ao.quantization.default_qconfig
-        model = torch.ao.quantization.prepare(model)
-        model = torch.ao.quantization.convert(model)
-
-        outputs = model(data)
-        input_names = ["x"]
-
-        def export_to_onnx(model, input, input_names):
-            traced = torch.jit.trace(model, input)
-            buf = io.BytesIO()
-            torch.jit.save(traced, buf)
-            buf.seek(0)
-
-            model = torch.jit.load(buf)
-            f = io.BytesIO()
-            torch.onnx.export(model, input, f, input_names=input_names,
-                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
-                              opset_version=9)
-        onnx_model = export_to_onnx(model, data, input_names)
 
     @skipIfNoFBGEMM
     @skipIfNoCaffe2
