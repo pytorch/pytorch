@@ -729,7 +729,7 @@ class TestOptim(TestCase):
         device = "cuda"
         for optimizer_constructor, params in optimizer_pairs_with_flags:
             res, state = [], []
-            for enabled in (False, True):
+            for flag_value in (False, True):
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device
                 ).reshape(3, 2)
@@ -743,7 +743,7 @@ class TestOptim(TestCase):
                 )
                 model.to(dtype=torch.float64, device=device)
                 params_with_flags = deepcopy(params)
-                params_with_flags[flag] = enabled
+                params_with_flags[flag] = flag_value
 
                 optimizer = optimizer_constructor(
                     model.parameters(), **params_with_flags
@@ -1602,7 +1602,7 @@ class TestOptim(TestCase):
             opt.step()
 
     # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
-    def test_functional_fused_adam_with_foundinf(self):
+    def test_functional_fused_optimizer_with_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 

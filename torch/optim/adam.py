@@ -1,4 +1,4 @@
-from typing import cast, List, Optional, Dict
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -6,47 +6,10 @@ from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _st
                         _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+from torch.optim._fused_utils import _MultiDeviceReplicator, _get_fp16AMP_params
 
 __all__ = ['Adam', 'adam']
 
-
-# TODO(crcrpar): Move this to soemwhere (e.g. torch/optim/_utils?) else when adding another fused optimizer.
-# NOTE(crcrpar): Almost the same as `_MultiDeviceReplicator` defined in
-# torch/cuda/amp/grad_scaler.py except for the key being str only for torch script.
-class _MultiDeviceReplicator:
-    main_tensor: Tensor
-    _per_device_tensors: Dict[str, Tensor]
-
-    def __init__(self, main_tensor: Tensor) -> None:
-        self.main_tensor = main_tensor
-        self._per_device_tensors = {str(main_tensor.device): main_tensor}
-
-    def get(self, device: str):
-        if device in self._per_device_tensors:
-            return self._per_device_tensors[device]
-        tensor = self.main_tensor.to(device=device, non_blocking=True, copy=True)
-        self._per_device_tensors[device] = tensor
-        return tensor
-
-
-# todo(crcrpar): Move this to another place when adding another fused optimizer.
-def _get_fp16AMP_params(
-    *,
-    optimizer: Optimizer,
-    grad_scaler: Optional[torch.cuda.amp.GradScaler] = None,
-    device: torch.device,
-) -> Optional[_MultiDeviceReplicator]:
-    if grad_scaler is None:
-        return None
-    found_inf_dict = grad_scaler._check_inf_per_device(optimizer)
-    # Combines found_inf tensors from all devices. As in GradScaler.update(),
-    # tensors are combined on the scale's device, which is an arbitrary but
-    # reasonable choice that avoids new context creation.
-    found_infs = [f.to(device, non_blocking=True) for f in found_inf_dict.values()]
-    assert len(found_infs) > 0, "No inf checks were recorded in _check_inf_per_device."
-    with torch.no_grad():
-        found_inf_combined = cast(torch.Tensor, sum(found_infs))
-    return _MultiDeviceReplicator(found_inf_combined)
 
 class Adam(Optimizer):
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
@@ -72,7 +35,7 @@ class Adam(Optimizer):
 
         if fused:
             if differentiable:
-                raise RuntimeError("`fused` cannot be `differentiable`")
+                raise RuntimeError("`fused` does not support `differentiable`")
             self._step_supports_amp_scaling = True
             # TODO(crcrpar): [low prec params & their higher prec copy]
             # Suppor AMP with FP16/BF16 model params which would need
@@ -82,7 +45,7 @@ class Adam(Optimizer):
                 p.is_cuda and torch.is_floating_point(p)
                 for pg in self.param_groups for p in pg['params']
             ):
-                raise RuntimeError("FusedAdam requires all the params to be CUDA, floating point")
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -452,7 +415,6 @@ def _single_tensor_adam(params: List[Tensor],
                 denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
 
             param.addcdiv_(exp_avg, denom, value=-step_size)
-
 
 
 def _multi_tensor_adam(params: List[Tensor],
