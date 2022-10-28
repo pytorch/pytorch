@@ -38,9 +38,7 @@ class TestCustomOps(common_utils.TestCase):
         def symbolic_custom_add(g, self, other):
             return g.op("Add", self, other)
 
-        from torch.onnx import register_custom_op_symbolic
-
-        register_custom_op_symbolic(
+        torch.onnx.register_custom_op_symbolic(
             "custom_namespace::custom_add", symbolic_custom_add, 9
         )
 
@@ -48,6 +46,9 @@ class TestCustomOps(common_utils.TestCase):
         y = torch.randn(2, 3, 4, requires_grad=False)
 
         model = CustomAddModel()
+        # before fixing #51833 this used to give a PyBind error
+        # with PyTorch 1.10dev ("Unable to cast from non-held to held
+        # instance (T& to Holder<T>)")
         onnxir, _ = do_export(model, (x, y), opset_version=11)
         onnx_model = onnx.ModelProto.FromString(onnxir)
         prepared = c2.prepare(onnx_model)
