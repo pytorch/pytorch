@@ -55,13 +55,13 @@ inline uint64_t PerfProfiler::CalcDelta(uint64_t start, uint64_t end) const {
 }
 
 inline void PerfProfiler::StartCounting() const {
-  for (auto& e: events_) {
+  for (auto& e : events_) {
     e.Enable();
   }
 }
 
 inline void PerfProfiler::StopCounting() const {
-   for (auto& e: events_) {
+  for (auto& e : events_) {
     e.Disable();
   }
 }

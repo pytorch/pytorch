@@ -19,7 +19,7 @@ ExperimentalConfig::ExperimentalConfig(
     : profiler_metrics{profiler_metrics},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
       verbose{verbose},
-      performance_events(std::move(performance_events)){}
+      performance_events(std::move(performance_events)) {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
   return !profiler_metrics.empty();
