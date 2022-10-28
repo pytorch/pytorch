@@ -34,14 +34,6 @@ inline py::object _PyDiagnostics() {
   return py::module::import("torch.onnx._internal.diagnostics");
 }
 
-inline py::object _PyEngine() {
-  return _PyDiagnostics().attr("engine");
-}
-
-inline py::object _PyContext() {
-  return _PyDiagnostics().attr("context");
-}
-
 inline py::object _PyRule(Rule rule) {
   return _PyDiagnostics().attr("rules").attr(
       kPyRuleNames[static_cast<uint32_t>(rule)]);
@@ -58,13 +50,12 @@ inline void Diagnose(
     std::unordered_map<std::string, std::string> messageArgs = {}) {
   py::object py_rule = _PyRule(rule);
   py::object py_level = _PyLevel(level);
-  py::object py_context = _PyContext();
 
   // TODO: statically check that size of messageArgs matches with rule.
   py::object py_message =
       py_rule.attr("format_message")(**py::cast(messageArgs));
 
-  py_context.attr("diagnose")(py_rule, py_level, py_message);
+  _PyDiagnostics().attr("diagnose")(py_rule, py_level, py_message);
 }
 
 } // namespace diagnostics

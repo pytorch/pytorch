@@ -1,7 +1,7 @@
 """Diagnostic components for PyTorch ONNX export."""
 
 import contextlib
-from typing import TypeVar
+from typing import Optional, TypeVar
 
 import torch
 from torch.onnx._internal.diagnostics import infra
@@ -20,12 +20,10 @@ class ExportDiagnostic(infra.Diagnostic):
 
     def __init__(
         self,
-        rule: infra.Rule,
-        level: infra.Level,
-        message: str,
+        *args,
         **kwargs,
     ) -> None:
-        super().__init__(rule, level, message, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def with_cpp_stack(self: _ExportDiagnostic) -> _ExportDiagnostic:
         # TODO: Implement this.
@@ -77,7 +75,10 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
     def __init__(self) -> None:
         super().__init__()
         self._background_context = infra.DiagnosticContext(
-            name="torch.onnx.export", version=torch.__version__, options=None
+            name="torch.onnx",
+            version=torch.__version__,
+            diagnostic_type=ExportDiagnostic,
+            options=None,
         )
 
     @property
@@ -86,7 +87,7 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
 
     def clear(self):
         super().clear()
-        self._background_context._diagnostics.clear()
+        self._background_context.diagnostics.clear()
 
     def sarif_log(self):
         log = super().sarif_log()
@@ -106,7 +107,9 @@ def create_export_diagnostic_context():
     export internals via global variable. See `ExportDiagnosticEngine` for more details.
     """
     global context
-    context = engine.create_diagnostic_context("torch.onnx.export", torch.__version__)
+    context = engine.create_diagnostic_context(
+        "torch.onnx.export", torch.__version__, diagnostic_type=ExportDiagnostic
+    )
     try:
         yield context
     finally:
@@ -116,7 +119,7 @@ def create_export_diagnostic_context():
 def diagnose(
     rule: infra.Rule,
     level: infra.Level,
-    message: str,
+    message: Optional[str] = None,
     **kwargs,
 ) -> ExportDiagnostic:
     """Creates a diagnostic and record it in the global diagnostic context.

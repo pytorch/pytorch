@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import FrozenSet, List, Optional, Sequence, Tuple, TypeVar
+from typing import FrozenSet, List, Optional, Sequence, Tuple, Type, TypeVar
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
@@ -171,12 +171,33 @@ _Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
 
 
 @dataclasses.dataclass
+class Graph:
+    """A graph of diagnostics.
+
+    This class stores the string representation of a model graph.
+    The `nodes` and `edges` fields are unused in the current implementation.
+    """
+
+    graph_str: str
+    name: str
+    description: Optional[str] = None
+
+    def sarif(self) -> sarif.Graph:
+        """Returns the SARIF representation of this graph."""
+        return sarif.Graph(
+            description=sarif.Message(text=self.graph_str),
+            properties=PatchedPropertyBag(name=self.name, description=self.description),
+        )
+
+
+@dataclasses.dataclass
 class Diagnostic:
     rule: Rule
     level: Level
     message: Optional[str] = None
     locations: List[Location] = dataclasses.field(default_factory=list)
     stacks: List[Stack] = dataclasses.field(default_factory=list)
+    graphs: List[Graph] = dataclasses.field(default_factory=list)
     additional_message: Optional[str] = None
     tags: List[Tag] = dataclasses.field(default_factory=list)
 
@@ -194,6 +215,7 @@ class Diagnostic:
         )
         sarif_result.locations = [location.sarif() for location in self.locations]
         sarif_result.stacks = [stack.sarif() for stack in self.stacks]
+        sarif_result.graphs = [graph.sarif() for graph in self.graphs]
         sarif_result.properties = sarif.PropertyBag(
             tags=[tag.value for tag in self.tags]
         )
@@ -207,6 +229,11 @@ class Diagnostic:
     def with_stack(self: _Diagnostic, stack: Stack) -> _Diagnostic:
         """Adds a stack to the diagnostic."""
         self.stacks.append(stack)
+        return self
+
+    def with_graph(self: _Diagnostic, graph: Graph) -> _Diagnostic:
+        """Adds a graph to the diagnostic."""
+        self.graphs.append(graph)
         return self
 
     def with_additional_message(self: _Diagnostic, message: str) -> _Diagnostic:
@@ -272,7 +299,8 @@ class DiagnosticContext:
     name: str
     version: str
     options: Optional[DiagnosticOptions] = None
-    _diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
+    diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
     _invocation: Invocation = dataclasses.field(init=False)
 
     def __enter__(self):
@@ -288,10 +316,10 @@ class DiagnosticContext:
                 driver=sarif.ToolComponent(
                     name=self.name,
                     version=self.version,
-                    rules=[diagnostic.rule.sarif() for diagnostic in self._diagnostics],
+                    rules=[diagnostic.rule.sarif() for diagnostic in self.diagnostics],
                 )
             ),
-            results=[diagnostic.sarif() for diagnostic in self._diagnostics],
+            results=[diagnostic.sarif() for diagnostic in self.diagnostics],
         )
 
     def add_diagnostic(self, diagnostic: Diagnostic) -> None:
@@ -301,7 +329,11 @@ class DiagnosticContext:
         Args:
             diagnostic: The diagnostic to add.
         """
-        self._diagnostics.append(diagnostic)
+        if not isinstance(diagnostic, self.diagnostic_type):
+            raise TypeError(
+                f"Expected diagnostic of type {self.diagnostic_type}, got {type(diagnostic)}"
+            )
+        self.diagnostics.append(diagnostic)
 
     def diagnose(
         self,
@@ -324,6 +356,6 @@ class DiagnosticContext:
         Raises:
             ValueError: If the rule is not supported by the tool.
         """
-        diagnostic = Diagnostic(rule, level, message, **kwargs)
+        diagnostic = self.diagnostic_type(rule, level, message, **kwargs)
         self.add_diagnostic(diagnostic)
         return diagnostic
