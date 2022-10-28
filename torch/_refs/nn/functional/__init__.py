@@ -27,6 +27,7 @@ from torch._refs import (
 from torch._subclasses.fake_tensor import FakeTensor
 
 __all__ = [
+    "alpha_dropout",
     "celu",
     "dropout",
     "elu",
@@ -58,6 +59,43 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
+
+
+@register_decomposition(torch.ops.aten.alpha_dropout)
+def alpha_dropout(
+    self: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
+) -> TensorLikeType:
+
+    if inplace:
+        raise NotImplementedError
+
+    if not training:
+        return self
+
+    assert p <= 1
+    assert p >= 0
+
+    if p == 1:
+        return refs.zeros_like(self)
+
+    if p == 0:
+        return self
+
+    noise = refs.lt(
+        refs.uniform(
+            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
+        ),
+        1 - p,
+    )
+
+    alpha = 1.7580993408473766
+
+    a = 1.0 / ((alpha * alpha * p + 1) ** 2 * (1 - p) ** 2)
+    b = refs.add(refs.mul(refs.add(-1, noise), alpha * a), alpha * a * p)
+    noise = refs.mul(a, noise)
+
+    return refs.add(refs.mul(self, noise), b)
+
 
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu

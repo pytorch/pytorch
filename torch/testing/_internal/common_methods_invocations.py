@@ -15599,6 +15599,22 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_dropout, valid_input_dim=(4, 5)),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs, inplace=True)),
+    OpInfo(
+        "nn.functional.alpha_dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_dropout,
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs, inplace=True),
+        skips=(
+            # lambda impl
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
     OpInfo(
@@ -16915,6 +16931,20 @@ python_ref_db = [
     #
     # Elementwise Unary nn.functional OpInfos
     #
+    PythonRefInfo(
+        "_refs.nn.functional.alpha_dropout",
+        torch_opinfo_name="nn.functional.alpha_dropout",
+        supports_nvfuser=False,
+        decorators=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestCommon', 'test_python_ref_executor', device_type='cuda'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+        )
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
