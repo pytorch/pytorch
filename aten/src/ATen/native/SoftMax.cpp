@@ -203,7 +203,7 @@ void host_softmax(
                 // Optimized case: padding mask of shape BxL
                 // outer_idx goes over BxHxL, mask_outer_idx goes over B.
                 mask_outer_idx = outer_idx / (input.size(1) * input.size(2));
-            };
+            }
 
             mask_data = mask_data_base + mask_outer_idx * outer_stride + inner_idx;
           };
