@@ -95,7 +95,7 @@ def argument(
     if isinstance(a, Argument):
         default: Optional[str] = None
         if should_default and a.default is not None:
-            default = cpp.default_expr(a.default, a.type, symint=symint)
+            default = cpp.default_expr(a.default, a.type)
         return [
             Binding(
                 nctype=argument_type(a, binds=a.name, symint=symint),
