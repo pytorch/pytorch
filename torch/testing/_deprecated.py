@@ -15,7 +15,6 @@ from . import _legacy
 
 __all__ = [
     "assert_allclose",
-    "get_all_device_types",
     "make_non_contiguous",
 ]
 
@@ -89,12 +88,10 @@ getter_instructions = (
 )
 
 # Deprecate and expose all dtype getters
-for name in _legacy.__all_dtype_getters__:
+for name in _legacy.__all__:
     fn = getattr(_legacy, name)
     globals()[name] = warn_deprecated(getter_instructions)(fn)
     __all__.append(name)
-
-get_all_device_types = warn_deprecated(getter_instructions)(_legacy.get_all_device_types)
 
 
 @warn_deprecated(

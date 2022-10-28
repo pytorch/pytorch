@@ -20,9 +20,6 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
 
-# The implementation should be moved here as soon as the deprecation period is over.
-from torch.testing._legacy import get_all_device_types  # noqa: F401
-
 try:
     import psutil  # type: ignore[import]
     HAS_PSUTIL = True
@@ -1325,3 +1322,8 @@ def skipMeta(fn):
 
 def skipXLA(fn):
     return skipXLAIf(True, "Marked as skipped for XLA")(fn)
+
+# TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
+#  This should probably enumerate all available device type test base classes.
+def get_all_device_types() -> List[str]:
+    return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
