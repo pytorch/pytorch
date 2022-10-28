@@ -6,7 +6,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 import torch
 from torch._ops import OpOverload
@@ -265,7 +265,9 @@ class FakeTensorConverter(object):
             )
         else:
             assert make_constant is False
-            assert t.device.type == "meta"
+            assert (
+                t.device.type == "meta"
+            ), f"tensor's device must be `meta`, got {t.device.type} instead"
             return self.from_meta_and_device(fake_mode, t, device)
 
 
@@ -541,11 +543,14 @@ class FakeTensor(torch.Tensor):
             return func(*args, **kwargs)
 
     @staticmethod
-    def _find_common_device(func, args, kwargs):
+    def _find_common_device(func, args, kwargs) -> Tuple[torch.device, bool]:
+        # Returns: (common_device, has_scalar_only_inputs)
+
         # cpu - zero-dim tensors can be called in cuda kernels,
         # so overwrite the common_device if it the only existing
         # device comes from a cpu zero-dim tensor
         common_device = None
+        has_scalar_only_inputs = False
         is_cpu_zero_dim = None
 
         def cpu_zero_dim(t):
@@ -597,11 +602,13 @@ class FakeTensor(torch.Tensor):
             )
             and common_device is None
         ):
+            # ops with scalar only inputs always have result on cpu
+            has_scalar_only_inputs = True
             common_device = torch.device("cpu")
 
         assert common_device is not None, f"Could not find common device for {func}"
 
-        return common_device
+        return common_device, has_scalar_only_inputs
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -870,13 +877,25 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Lazily initialized, in case there are no tensor returns
         common_device = None
+        has_scalar_only_inputs = False
 
         def wrap(e, device=None):
             nonlocal common_device
+            nonlocal has_scalar_only_inputs
             if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                 if common_device is None:
-                    common_device = FakeTensor._find_common_device(func, args, kwargs)
-                return converter(self, e, device or common_device)
+                    (
+                        common_device,
+                        has_scalar_only_inputs,
+                    ) = FakeTensor._find_common_device(func, args, kwargs)
+
+                if has_scalar_only_inputs:
+                    # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
+                    # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
+                    # We thus directly convert real tensor to fake tensor.
+                    return converter(self, e)
+                else:
+                    return converter(self, e, device or common_device)
             else:
                 return e
 
