@@ -9,6 +9,7 @@
 
 #include <iostream>
 #include <exception>
+#include <mutex>
 
 namespace at {
 namespace autocast {
@@ -64,7 +65,8 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
-thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
+std::unordered_map<TensorImpl*, val_type> cached_casts;
+std::mutex cached_casts_mutex;
 
 // nesting tracks the nesting depth of the Python-side context manager.
 // When the autocast context manager exits to a nesting level that's outside
@@ -89,6 +91,7 @@ thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
 }
 
 void clear_cache() {
+  const std::lock_guard<std::mutex> lock(cached_casts_mutex);
   cached_casts.clear();
 }
 
@@ -155,6 +158,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled);
     if (can_try_cache) {
+      const std::lock_guard<std::mutex> lock(cached_casts_mutex);
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
         return std::get<1>(it->second);
