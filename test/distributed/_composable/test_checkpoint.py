@@ -3,7 +3,6 @@
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
-    skipIfTorchDynamo,
 )
 
 import torch
@@ -75,3 +74,7 @@ class TestCheckpoint(TestCase):
         x = torch.randn(20, 100, device="cuda:0")
         net = ToyModel().to("cuda:0")
         self._test_tensor_only(net, x)
+
+
+if __name__ == "__main__":
+    run_tests()
