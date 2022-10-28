@@ -23,7 +23,7 @@ class DeserializationStorageContext;
 // deleted at some point, the Pickler doesn't produce it and it's only around to
 // support models saved before 1.1
 class TORCH_API Unpickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
+  AT_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
   using TypeParserT = c10::TypePtr (*)(const std::string&);
 

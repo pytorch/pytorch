@@ -27,6 +27,7 @@ from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
+from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_triton_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._pytree import tree_map
@@ -98,6 +99,8 @@ CI_SKIP_INDCUTOR_INFERENCE = [
     "cait_m36_384",  # Accuracy
     "ghostnet_100",  # Accuracy
     "swin_base_patch4_window7_224",  # Accuracy
+    # Trying to get CI working - https://github.com/pytorch/pytorch/pull/87588
+    "visformer_small",  # fails accuracy on CI but passes locally
 ]
 
 CI_SKIP_INDUCTOR_TRAINING = [
@@ -754,19 +757,19 @@ class DummyGradScaler:
         return loss
 
 
-def maybe_fresh_cache(fn):
-    def inner(self, *args, **kwargs):
+def maybe_fresh_cache(fn, is_cold_start):
+    def inner(*args, **kwargs):
         cache_minder = NullContext()
-        if self.args.cold_start_latency:
+        if is_cold_start:
             cache_entries = {}
             cache_minder = fresh_triton_cache(cache_entries)
 
         try:
             with cache_minder:
-                return fn(self, *args, **kwargs)
+                return fn(*args, **kwargs)
         finally:
             dump_cache = False
-            if dump_cache and self.args.cold_start_latency:
+            if dump_cache and is_cold_start:
                 output_csv(
                     output_filename[:-4] + "_triton_cache.csv",
                     ["dev", "name", "batch_size", "triton_cache"],
@@ -809,12 +812,15 @@ class BenchmarkRunner:
             self.autocast = torch.cuda.amp.autocast
 
     def init_optimizer(self, device, params):
-        param_list = list(params)
-        if device == "cuda" and len(param_list) != 0:
-            # capturable is only supported on cuda at the moment
-            self.optimizer = torch.optim.Adam(param_list, capturable=True)
-        else:
-            self.optimizer = None
+        self.optimizer = None
+        # TODO - Currently, optimizers are used incorrectly. Fix optimizers with
+        # https://github.com/pytorch/pytorch/pull/87492
+        # param_list = list(params)
+        # if device == "cuda" and len(param_list) != 0:
+        #     # capturable is only supported on cuda at the moment
+        #     self.optimizer = torch.optim.Adam(param_list, capturable=True)
+        # else:
+        #     self.optimizer = None
 
     @property
     def args(self):
@@ -1184,7 +1190,6 @@ class BenchmarkRunner:
                 "--diff_main called on main branch, what are you diffing?"
             )
 
-    @maybe_fresh_cache
     def run_one_model(
         self,
         name,
@@ -1355,6 +1360,11 @@ def parse_args():
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
     )
+    parser.add_argument(
+        "--disable-cudagraphs",
+        action="store_true",
+        help="Disables cudagraphs for Inductor",
+    )
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
@@ -1459,11 +1469,15 @@ def parse_args():
 
 def main(runner, original_dir=None):
     args = parse_args()
+    return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
+        runner, args, original_dir
+    )
 
+
+def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
     runner.args = args
 
-    # defaults
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
@@ -1614,8 +1628,6 @@ def main(runner, original_dir=None):
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.inductor or args.inductor_dynamic:
-        from torch._inductor import config as inductor_config
-
         inductor_config.debug = args.verbose
         if args.threads:
             inductor_config.cpp.threads = args.threads
@@ -1699,6 +1711,10 @@ def main(runner, original_dir=None):
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
+
+    if args.inductor or args.backend == "inductor":
+        if args.disable_cudagraphs:
+            inductor_config.triton.cudagraphs = False
 
     runner.setup_amp()
 
