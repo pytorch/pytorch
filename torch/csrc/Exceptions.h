@@ -269,17 +269,6 @@ TORCH_PYTHON_API void translate_exception_to_python(const std::exception_ptr&);
 
 TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
-// Abstract base class for exceptions which translate to specific Python types
-struct PyTorchError : public std::exception {
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  PyTorchError(const std::string& msg_ = std::string()) : msg(msg_) {}
-  virtual PyObject* python_type() = 0;
-  const char* what() const noexcept override {
-    return msg.c_str();
-  }
-  std::string msg;
-};
-
 // Declare a printf-like function on gcc & clang
 // The compiler can then warn on invalid format specifiers
 #ifdef __GNUC__
@@ -288,57 +277,6 @@ struct PyTorchError : public std::exception {
 #else
 #define TORCH_FORMAT_FUNC(FORMAT_INDEX, VA_ARGS_INDEX)
 #endif
-
-// Translates to Python IndexError
-struct IndexError : public PyTorchError {
-  using PyTorchError::PyTorchError;
-  IndexError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_IndexError;
-  }
-};
-
-// Translates to Python TypeError
-struct TypeError : public PyTorchError {
-  using PyTorchError::PyTorchError;
-  TORCH_API TypeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_TypeError;
-  }
-};
-
-// Translates to Python ValueError
-struct ValueError : public PyTorchError {
-  using PyTorchError::PyTorchError;
-  ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_ValueError;
-  }
-};
-
-// Translates to Python NotImplementedError
-struct NotImplementedError : public PyTorchError {
-  NotImplementedError() = default;
-  PyObject* python_type() override {
-    return PyExc_NotImplementedError;
-  }
-};
-
-// Translates to Python AttributeError
-struct AttributeError : public PyTorchError {
-  AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return PyExc_AttributeError;
-  }
-};
-
-// Translates to Python LinAlgError
-struct LinAlgError : public PyTorchError {
-  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
-  PyObject* python_type() override {
-    return THPException_LinAlgError;
-  }
-};
 
 // ATen warning handler for Python
 struct PyWarningHandler {
