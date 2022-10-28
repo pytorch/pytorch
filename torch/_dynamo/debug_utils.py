@@ -105,7 +105,6 @@ class NNModuleToString:
             model_str += f"{tab*2}self.register_buffer('{buffer_name}', {tensor_str})\n"
 
         for param_name, param in gm._parameters.items():
-            # import pdb; pdb.set_trace()
             if param is None:
                 continue
             tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
@@ -397,7 +396,7 @@ minifier(
     return helper_for_dump_minify(contents)
 
 
-class CompilerError(Exception):
+class AccuracyError(Exception):
     pass
 
 
@@ -485,8 +484,8 @@ def wrap_compiler_debug(compiler_fn, compiler_name: str):
                             copy_tensor_attrs,
                             compiler_name,
                         )
-                    log.exception(e)
-                    raise CompilerError("Failed to compile.")
+                    log.error("CompilerError")
+                    raise
 
         if config.repro_after == "aot":
             compiled_fn = deferred_for_real_inputs
@@ -815,10 +814,6 @@ with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
     helper_for_dump_minify(contents)
 
 
-class AccuracyError(Exception):
-    pass
-
-
 def wrap_backend_debug(compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
@@ -832,7 +827,6 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
     @functools.wraps(compiler_fn)
     def debug_wrapper(gm, example_inputs, **kwargs):
         assert config.repro_after in ("dynamo", "aot", None)
-        model_str = NNModuleToString.convert(gm)
         if config.repro_after == "dynamo":
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
