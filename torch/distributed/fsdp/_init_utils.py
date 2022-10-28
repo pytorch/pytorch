@@ -15,7 +15,7 @@ from torch.distributed.utils import _sync_params_and_buffers
 
 _TORCHDISTX_AVAIL = True
 try:
-    from torchdistx import deferred_init, fake
+    from torchdistx import deferred_init, fake  # type: ignore[import]
 except ImportError:
     _TORCHDISTX_AVAIL = False
 
