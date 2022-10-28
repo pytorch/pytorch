@@ -255,12 +255,8 @@ class FakeTensorConverter(object):
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors.
     # You must have created the FakeTensorMode with allow_meta == True
-    def __call__(
-        self, fake_mode, t, *, make_constant=False, shape_env=None
-    ):
-        return self.from_real_tensor(
-            fake_mode, t, make_constant, shape_env=shape_env
-        )
+    def __call__(self, fake_mode, t, *, make_constant=False, shape_env=None):
+        return self.from_real_tensor(fake_mode, t, make_constant, shape_env=shape_env)
 
 
 op_implementations = []
@@ -313,7 +309,9 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     r = func(inp, **new_kwargs)
     # TODO: I think this does the wrong thing if r is inp
-    return fake_mode.fake_tensor_converter.from_meta_and_device(fake_mode, r, out_device)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, r, out_device
+    )
 
 
 # Dont default to default device handling,
