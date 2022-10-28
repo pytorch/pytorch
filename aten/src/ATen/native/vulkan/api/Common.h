@@ -25,6 +25,7 @@
   ::at::native::vulkan::api::ShaderInfo {                       \
     CONCAT_LITERALS(vulkan., name), name##_spv, name##_spv_len, \
         name##_spv_layout, name##_spv_tile_size,                \
+        name##_spv_bias_storage_type,                           \
         name##_spv_weight_storage_type,                         \
   }
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
