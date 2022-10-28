@@ -1378,32 +1378,8 @@ def insert_observers_for_model(
                         model, modules, graph)
 
         # Second pass: Look for getitem nodes and make the input and output observers the same.
-        #
-        # Context: There are two use cases of getitem:
-        #   (1) Accessing some data structure (e.g. dict or list) of tensors
-        #   (2) Accessing an element or a slice within a tensor
-        #
-        # Currently, we skip inserting observers for getitem nodes due to use case (1). However,
-        # this means for use case (2), there is no way for us to control how observers are inserted
-        # around a getitem node (due to other surrounding nodes). For example:
-        #
-        #   (original model)
-        #   input -> linear -> getitem -> linear -> output
-        #
-        #   (after prepare)
-        #   input -> obs0 -> linear -> obs1 -> getitem -> obs2 -> linear -> obs3 -> output
-        #
-        #   (after convert + lowering)
-        #   input -> q -> quantized_linear -> dq -> getitem -> q -> quantized_linear -> dq -> output
-        #
-        # In the above case, the getitem node is not quantized because the input and output observers
-        # are different, though this is not the intended behavior. Thus, here we manually search for
-        # the pattern (obs1 -> getitem -> obs2) and replace it with (obs1 -> getitem -> obs1), so
-        # that the getitem node will be quantized.
-        #
-        # Note that this is only a workaround since we cannot differentiate between use cases (1)
-        # and (2) at the moment. In the future, once we have better support for dtype propagation,
-        # we should remove this pass and insert observers properly for getitem nodes.
+        # This is a temporary workaround for the lack of dtype propagation. In the future, we
+        # should insert observers properly for getitem nodes.
         _make_getitem_share_input_output_observers(model)
 
         # After this point, the current node has input and output observers
@@ -1425,6 +1401,32 @@ def _make_getitem_share_input_output_observers(model: GraphModule):
     For patterns (obs0 - getitem - obs1), make the output observer the same as the input observer,
     such that the new pattern becomes (obs0 - getitem - obs0). Note that this does not handle
     patterns with multiple nodes between the two observers, e.g. (obs0 - reshape - getitem - obs1).
+
+    Context: There are two use cases of getitem:
+      (1) Accessing some data structure (e.g. dict or list) of tensors
+      (2) Accessing an element or a slice within a tensor
+
+    Currently, we skip inserting observers for getitem nodes due to use case (1). However,
+    this means for use case (2), there is no way for us to control how observers are inserted
+    around a getitem node (due to other surrounding nodes). For example:
+
+      (original model)
+      input -> linear -> getitem -> linear -> output
+
+      (after prepare)
+      input -> obs0 -> linear -> obs1 -> getitem -> obs2 -> linear -> obs3 -> output
+
+      (after convert + lowering)
+      input -> q -> quantized_linear -> dq -> getitem -> q -> quantized_linear -> dq -> output
+
+    In the above case, the getitem node is not quantized because the input and output observers
+    are different, though this is not the intended behavior. Thus, here we manually search for
+    the pattern (obs1 -> getitem -> obs2) and replace it with (obs1 -> getitem -> obs1), so
+    that the getitem node will be quantized.
+
+    Note that this is only a workaround since we cannot differentiate between use cases (1)
+    and (2) at the moment. In the future, once we have better support for dtype propagation,
+    we should remove this pass and insert observers properly for getitem nodes.
     """
     modules = dict(model.named_modules(remove_duplicate=False))
     for node in model.graph.nodes:
