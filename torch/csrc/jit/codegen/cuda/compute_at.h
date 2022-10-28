@@ -29,14 +29,6 @@ struct ComputeAt {
       TensorView* consumer,
       int64_t consumer_position,
       ComputeAtMode mode = ComputeAtMode::Standard);
-
-  // Runs the compute with pass making consumer look like producer, computing
-  // producer relative to consumer
-  static void runWith(
-      TensorView* producer,
-      TensorView* consumer,
-      int64_t producer_position,
-      ComputeAtMode mode = ComputeAtMode::Standard);
 };
 
 } // namespace cuda

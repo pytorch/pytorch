@@ -322,14 +322,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
       int position,
       ComputeAtMode mode = ComputeAtMode::Standard);
 
-  //! Compute this tensor to consumer, at local position, -1 will compute
-  //! tensors inline with eachother, 0 doesn't share any loop nests between the
-  //! tensors. The mode parameter can be used in the same manner as computeAt.
-  TensorView* computeWith(
-      TensorView* consumer,
-      int position,
-      ComputeAtMode mode = ComputeAtMode::Standard);
-
   // Split "axis" into 2 axes
   //! inner_split dictates if the factor section of the split should be inside
   //! the

@@ -230,47 +230,6 @@ void ComputeAt::runAt(
   }
 }
 
-void ComputeAt::runWith(
-    TensorView* producer,
-    TensorView* consumer,
-    int64_t producer_position,
-    ComputeAtMode mode) {
-  FUSER_PERF_SCOPE("ComputeAt::runWith");
-
-  // Make sure the correct fusion is setup between this and consumer.
-  TORCH_CHECK(
-      producer->fusion() == consumer->fusion(),
-      producer,
-      " and ",
-      consumer,
-      " are not in the same fusion.");
-
-  if (mode == ComputeAtMode::MostInlined) {
-    producer_position = -1;
-  }
-
-  FusionGuard fg(producer->fusion());
-
-  auto selected = getPropagationSubgraph(producer, consumer);
-  ComputeAtSelector selector(selected);
-
-  MaxRootDomainInfoSpanningTree path(producer, producer_position, &selector);
-
-  if (mode == ComputeAtMode::MostInlined) {
-    MostInlinedTransformPropagator propagator;
-    path.traverse(&propagator);
-    inlineMost(selected);
-  } else {
-    TransformPropagator propagator(producer, producer_position);
-    path.traverse(&propagator);
-    inlineSelectedAt(
-        selected,
-        producer,
-        producer_position,
-        mode == ComputeAtMode::BestEffort);
-  }
-}
-
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
