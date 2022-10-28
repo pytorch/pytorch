@@ -341,7 +341,6 @@ class InstructionTranslatorBase(object):
             raise
 
         # generate code from checkpoint
-        breakpoint()
         assert not self.output.output_instructions
         continue_inst, state = self.checkpoint
         self.restore_graphstate(state)

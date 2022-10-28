@@ -171,7 +171,6 @@ class TorchVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import ConstantVariable, GradModeVariable, TensorVariable
-
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -377,7 +376,6 @@ class TorchVariable(VariableTracker):
                 for x in args[0].items:
                     if isinstance(x.value, numpy.generic):
                         x.value = x.value.item()
-
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(

@@ -468,13 +468,32 @@ class TensorVariable(VariableTracker):
         from . import ConstantVariable, TupleVariable
 
         kwargs = dict(kwargs)
-
+        # print("CALLING TENSOR OP", name)
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
+        elif name == "size" and self.size is None and config.dynamic_shapes:
+            example_size = self.proxy.node.meta['example_value'].size()
+            items = []
+            size_proxy = tx.output.create_proxy(
+                "call_method",
+                name,
+                *proxy_args_kwargs([self] + args, kwargs),
+                current_tx=tx,
+            )
+            for i, element in enumerate(example_size):
+                if isinstance(element, int):
+                    items.append(variables.ConstantVariable(element))
+                else:
+                    proxy = tx.output.create_proxy(
+                        "call_function", operator.getitem, (i,), {},
+                    )
+                    items.append(DynamicShapeVariable.create(tx, proxy, element))
+            size_proxy.node.meta['example_value'] = tuple([item.proxy.node.meta['example_value'] for item in items])
+            return SizeVariable(items, size_proxy, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
@@ -563,7 +582,6 @@ class TensorVariable(VariableTracker):
                 and not config.dynamic_shapes
             ):
                 name = "new_empty"
-
             return self.__class__.create(
                 tx,
                 tx.output.create_proxy(
