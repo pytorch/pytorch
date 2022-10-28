@@ -14,12 +14,12 @@
 #include <c10/util/strong_type.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
+#include <torch/csrc/profiler/events.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
+#include <torch/csrc/profiler/perf.h>
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
-#include <torch/csrc/profiler/perf.h>
-#include <torch/csrc/profiler/events.h>
 #include <torch/csrc/utils/python_stub.h>
 
 namespace torch {
