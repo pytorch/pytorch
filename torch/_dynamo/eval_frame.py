@@ -590,9 +590,6 @@ def export(
 
 def assume_constant_result(fn):
     fn._dynamo_marked_constant = True
-    assert (
-        not config.fake_tensor_propagation
-    ), "Constant result capture is not supported with fake tensors."
     return fn
 
 
