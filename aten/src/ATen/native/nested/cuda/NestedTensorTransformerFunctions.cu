@@ -603,27 +603,58 @@ void gemm_grouped_cuda_internal(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <typename scalar_t>
 bool group_gemm_dispatch(
-    at::ScalarType scalar_type,
     at::Device device,
-    Tensor a_buffer,
-    std::vector<int64_t> a_offsets,
-    Tensor b_buffer,
-    std::vector<int64_t> b_offsets,
-    Tensor d_buffer,
-    std::vector<int64_t> d_offsets,
-    std::vector<int64_t> lda,
-    std::vector<int64_t> ldb,
-    std::vector<int64_t> ldd,
+    std::vector<scalar_t*> aptr,
+    std::vector<scalar_t*> bptr,
+    std::vector<scalar_t*> dptr,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
-    int64_t ntensors,
-    bool all_row_major) {
+    int64_t ntensors) {
+  return false;
+}
+
+template <>
+bool group_gemm_dispatch(
+    at::Device device,
+    std::vector<float*> aptr,
+    std::vector<float*> bptr,
+    std::vector<float*> dptr,
+    std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    int64_t ntensors) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
 
-  if (!all_row_major) {
-    return false;
+  if (is_sm8x) {
+    gemm_grouped_cuda_internal<
+        float,
+        1,
+        cutlass::layout::RowMajor,
+        cutlass::layout::RowMajor,
+        cutlass::arch::OpClassSimt,
+        cutlass::arch::Sm80,
+        cutlass::gemm::GemmShape<128, 128, 8>,
+        cutlass::gemm::GemmShape<64, 32, 8>,
+        cutlass::gemm::GemmShape<1, 1, 1>>(
+        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+    return true;
   }
+
+  // Did not perform GEMM
+  return false;
+}
+
+template <>
+bool group_gemm_dispatch(
+    at::ScalarType scalar_type,
+    at::Device device,
+    std::vector<at::kHalf*> aptr_,
+    std::vector<at::kHalf*> bptr_,
+    std::vector<at::kHalf*> dptr_,
+    std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
+    int64_t ntensors) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
 
   // Check alignment
   bool all_pad_8 = true;
@@ -637,19 +668,31 @@ bool group_gemm_dispatch(
     all_pad_8 = all_pad_8 && (ldd[i] % 8 == 0);
   }
 
-  /* Float case */
-  if (scalar_type == at::kFloat) {
-    std::vector<float*> aptr;
-    std::vector<float*> bptr;
-    std::vector<float*> dptr;
-    for (int64_t i = 0; i < ntensors; i++) {
-      aptr.push_back(a_buffer.data_ptr<float>() + a_offsets[i]);
-      bptr.push_back(b_buffer.data_ptr<float>() + b_offsets[i]);
-      dptr.push_back(d_buffer.data_ptr<float>() + d_offsets[i]);
-    }
-    if (is_sm8x) {
+  std::vector<cutlass::half_t*> aptr;
+  std::vector<cutlass::half_t*> bptr;
+  std::vector<cutlass::half_t*> dptr;
+  for (int64_t i = 0; i < ntensors; i++) {
+    aptr.push_back(reinterpret_cast<cutlass::half_t*>(aptr_[i]));
+    bptr.push_back(reinterpret_cast<cutlass::half_t*>(bptr_[i]));
+    dptr.push_back(reinterpret_cast<cutlass::half_t*>(dptr_[i]));
+  }
+  if (is_sm8x) {
+    if (all_pad_8) {
       gemm_grouped_cuda_internal<
-          float,
+          cutlass::half_t,
+          8,
+          cutlass::layout::RowMajor,
+          cutlass::layout::RowMajor,
+          cutlass::arch::OpClassTensorOp,
+          cutlass::arch::Sm80,
+          cutlass::gemm::GemmShape<128, 128, 32>,
+          cutlass::gemm::GemmShape<64, 64, 32>,
+          cutlass::gemm::GemmShape<16, 8, 16>>(
+          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+      return true;
+    } else {
+      gemm_grouped_cuda_internal<
+          cutlass::half_t,
           1,
           cutlass::layout::RowMajor,
           cutlass::layout::RowMajor,
@@ -662,50 +705,6 @@ bool group_gemm_dispatch(
       return true;
     }
   }
-  /* Half case */
-  else if (scalar_type == at::kHalf) {
-    std::vector<cutlass::half_t*> aptr;
-    std::vector<cutlass::half_t*> bptr;
-    std::vector<cutlass::half_t*> dptr;
-    for (int64_t i = 0; i < ntensors; i++) {
-      aptr.push_back(reinterpret_cast<cutlass::half_t*>(
-          a_buffer.data_ptr<c10::Half>() + a_offsets[i]));
-      bptr.push_back(reinterpret_cast<cutlass::half_t*>(
-          b_buffer.data_ptr<c10::Half>() + b_offsets[i]));
-      dptr.push_back(reinterpret_cast<cutlass::half_t*>(
-          d_buffer.data_ptr<c10::Half>() + d_offsets[i]));
-    }
-    if (is_sm8x) {
-      if (all_pad_8) {
-        gemm_grouped_cuda_internal<
-            cutlass::half_t,
-            8,
-            cutlass::layout::RowMajor,
-            cutlass::layout::RowMajor,
-            cutlass::arch::OpClassTensorOp,
-            cutlass::arch::Sm80,
-            cutlass::gemm::GemmShape<128, 128, 32>,
-            cutlass::gemm::GemmShape<64, 64, 32>,
-            cutlass::gemm::GemmShape<16, 8, 16>>(
-            lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-        return true;
-      } else {
-        gemm_grouped_cuda_internal<
-            cutlass::half_t,
-            1,
-            cutlass::layout::RowMajor,
-            cutlass::layout::RowMajor,
-            cutlass::arch::OpClassSimt,
-            cutlass::arch::Sm80,
-            cutlass::gemm::GemmShape<128, 128, 8>,
-            cutlass::gemm::GemmShape<64, 32, 8>,
-            cutlass::gemm::GemmShape<1, 1, 1>>(
-            lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-        return true;
-      }
-    }
-  }
-
   // Did not perform GEMM
   return false;
 }
@@ -735,34 +734,17 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       " but got: ",
       ntensors2,
       ".");
-  const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
-  const Tensor &mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
-  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
-  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
-  std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
-  std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets();
-  const std::vector<int64_t>& mat2_offsets = mat2_ptr->get_storage_offsets();
 
   // create a contiguous output
-  int64_t out_numel = 0;
-  int64_t a_numel = 0;
-  int64_t b_numel = 0;
   const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
   int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
   std::vector<int64_t> output_offsets;
-  std::vector<int64_t> a_offsets;
-  std::vector<int64_t> b_offsets;
-  std::vector<int64_t> lda;
-  std::vector<int64_t> ldb;
-  std::vector<int64_t> ldd;
-#ifndef USE_ROCM
-#ifndef _WIN32
-  std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
-#endif
-#endif
-  bool all_row_major = true;
+
+  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
+  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
+
+  int64_t out_numel = 0;
   for (int64_t i = 0; i < ntensors; i++) {
     const IntArrayRef &self_shape = self_sizes[i], &mat2_shape = mat2_sizes[i];
     const int64_t &self_size0 = self_shape[0], &self_size1 = self_shape[1],
@@ -784,48 +766,68 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
     out_sizemat_ptr += 2;
     output_offsets.push_back(out_numel);
     out_numel += self_size0 * mat2_size1;
-#ifndef USE_ROCM
-#ifndef _WIN32
-    gemm_sizes.push_back(
-        cutlass::gemm::GemmCoord(self_size0, mat2_size1, self_size1));
-#endif
-#endif
-    lda.push_back(self_strides[i][0]);
-    ldb.push_back(mat2_strides[i][0]);
-    ldd.push_back(mat2_size1);
-    a_offsets.push_back(self_offsets[i]);
-    b_offsets.push_back(mat2_offsets[i]);
-    a_numel += self_size0 * self_strides[i][0];
-    b_numel += mat2_size0 * mat2_strides[i][0];
-    all_row_major = all_row_major && (self_strides[i][1] == 1);
-    all_row_major = all_row_major && (mat2_strides[i][1] == 1);
   }
   Tensor out_buffer = self_buffer.new_empty(out_numel);
   Tensor output = wrap_buffer(out_buffer, out_sizemat);
 
 #ifndef USE_ROCM
 #ifndef _WIN32
-  bool success = group_gemm_dispatch(
-      self.scalar_type(),
-      output.device(),
-      self_buffer,
-      a_offsets,
-      mat2_buffer,
-      b_offsets,
-      out_buffer,
-      output_offsets,
-      lda,
-      ldb,
-      ldd,
-      gemm_sizes,
-      ntensors,
-      all_row_major);
+  const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
+  const Tensor &mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
+  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
+  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
+  std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
+  std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
+  const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets();
+  const std::vector<int64_t>& mat2_offsets = mat2_ptr->get_storage_offsets();
+
+  bool success = false;
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
+      self.scalar_type(), "group_gemm_dispatch", [&] {
+        std::vector<scalar_t*> aptr;
+        std::vector<scalar_t*> bptr;
+        std::vector<scalar_t*> dptr;
+        std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
+        bool all_row_major = true;
+        for (int64_t i = 0; i < ntensors; i++) {
+          const IntArrayRef& self_shape = self_sizes[i];
+          const IntArrayRef& mat2_shape = mat2_sizes[i];
+          const int64_t &self_size0 = self_shape[0];
+          const int64_t &self_size1 = self_shape[1];
+          const int64_t &mat2_size0 = mat2_shape[0];
+          const int64_t &mat2_size1 = mat2_shape[1];
+          gemm_sizes.push_back(
+              cutlass::gemm::GemmCoord(self_size0, mat2_size1, self_size1));
+          aptr.push_back(a_buffer.data_ptr<c10::Half>() + a_offsets[i]);
+          bptr.push_back(b_buffer.data_ptr<c10::Half>() + b_offsets[i]);
+          dptr.push_back(d_buffer.data_ptr<c10::Half>() + d_offsets[i]);
+          all_row_major = all_row_major && (self_strides[i][1] == 1);
+          all_row_major = all_row_major && (mat2_strides[i][1] == 1);
+        }
+        if (all_row_major) {
+          success = group_gemm_dispatch<scalar_t>(
+              output.device(),
+              aptr,
+              bptr,
+              dptr,
+              gemm_sizes,
+              ntensors);
+        }
+      });
   if (success) {
     return output;
   }
 #endif
 #endif
   std::vector<Tensor> output_unbind = output.unbind();
+  const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
+  const Tensor &mat2_buffer = mat2_ptr->get_unsafe_storage_as_tensor();
+  std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
+  std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
+  std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
+  std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
+  const std::vector<int64_t>& self_offsets = self_ptr->get_storage_offsets();
+  const std::vector<int64_t>& mat2_offsets = mat2_ptr->get_storage_offsets();
   for (int64_t i = 0; i < ntensors; i++) {
     at::mm_out(
         output_unbind[i],
