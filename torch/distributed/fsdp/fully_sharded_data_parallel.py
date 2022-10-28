@@ -38,7 +38,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.utils import _sync_params_and_buffers, _to_kwargs
+from torch.distributed.fsdp._runtime_utils import (
+    _clear_grads_if_needed,
+    _prepare_forward_inputs,
+    _wait_for_computation_stream,
+)
+from torch.distributed.utils import _sync_params_and_buffers
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
@@ -1692,6 +1697,18 @@ class FullyShardedDataParallel(nn.Module):
             and (not root_only or submodule.check_is_root())
         ]
 
+    @staticmethod
+    def _fsdp_handles(module: nn.Module) -> List[FlatParamHandle]:
+        """
+        Returns all nested FSDP instances' handles in the module hierarchy
+        rooted at ``module``.
+        """
+        return [
+            handle
+            for fsdp_module in FullyShardedDataParallel.fsdp_modules(module)
+            for handle in fsdp_module._handles
+        ]
+
     def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
@@ -1755,31 +1772,6 @@ class FullyShardedDataParallel(nn.Module):
             self._communication_hook is not None
             and self._communication_hook in LOW_PRECISION_HOOKS
         )
-
-    def _cast_fp_inputs_to_dtype(
-        self, dtype: torch.dtype, *args: Any, **kwargs: Any
-    ) -> Tuple[Any, Any]:
-        """
-        Casts floating point tensors in ``args`` and ``kwargs`` to the
-        precision given by ``dtype``, while respecting the existing
-        ``requires_grad`` on the tensors.
-        """
-
-        def cast_fn(x: torch.Tensor) -> torch.Tensor:
-            if not torch.is_floating_point(x):
-                return x
-            y = x.to(dtype)
-            # Explicitly copy over `requires_grad` since this runs inside
-            # `torch.no_grad()`
-            if x.is_leaf:
-                y.requires_grad = x.requires_grad
-            return y
-
-        with torch.no_grad():
-            return (
-                _apply_to_tensors(cast_fn, args),
-                _apply_to_tensors(cast_fn, kwargs),
-            )
 
     def _cast_buffers(
         self,
@@ -2038,21 +2030,6 @@ class FullyShardedDataParallel(nn.Module):
         # Stream for pre-unshard logic, namely allocations and writes for
         # CPU offloading (H2D copy) and mixed precision (low precision cast).
         self._streams["pre_unshard"] = torch.cuda.Stream()
-
-    def _wait_for_previous_optim_step(self) -> None:
-        """
-        The root :class:`FullyShardedDataParallel` instance needs to
-        synchronize with the default stream to ensure that the previous
-        optimizer step is done.
-        """
-        if not self._is_root:
-            return
-        current_stream = torch.cuda.current_stream()
-        self._streams["unshard"].wait_stream(current_stream)
-        # Having the pre-all-gather stream wait for the current stream even if
-        # we do not leverage the pre-all-gather stream is tolerable since this
-        # only runs once per iteration
-        self._streams["pre_unshard"].wait_stream(current_stream)
 
     def _prefetch_handles(
         self,
@@ -2334,7 +2311,8 @@ class FullyShardedDataParallel(nn.Module):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         self._lazy_init()
-        self._clear_grads_if_needed()
+        if self._is_root:
+            _clear_grads_if_needed(self._fsdp_handles(self))
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             # Get config args
             full_state_dict_config = (
@@ -2509,25 +2487,6 @@ class FullyShardedDataParallel(nn.Module):
             handle._training_state = HandleTrainingState.IDLE
         return output
 
-    def _cast_forward_inputs(self, *args, **kwargs):
-        """Moves the forward inputs to the compute device and casts them to the
-        appropriate dtype if needed."""
-        # TODO: Do not use the side stream for tensor copies for now;
-        # investigate the perf with/without it
-        # TODO: For mixed precision, move the inputs to the compute device and
-        # cast to reduced-precision in a single `to()` call
-        args, kwargs = _to_kwargs(args, kwargs, self.compute_device.index, False)
-        args = args[0]
-        kwargs = kwargs[0]
-        if self._mixed_precision_enabled_for_params():
-            input_dtype = self.mixed_precision.param_dtype
-            args, kwargs = self._cast_fp_inputs_to_dtype(
-                input_dtype,
-                *args,
-                **kwargs,
-            )
-        return args, kwargs
-
     def _fsdp_root_pre_forward(self, *args, **kwargs):
         """
         Runs pre-forward logic specific to the root FSDP instance, which should
@@ -2544,24 +2503,21 @@ class FullyShardedDataParallel(nn.Module):
                 handles_key = tuple(fsdp_module._handles)
                 if handles_key:
                     self._needs_pre_forward_unshard[handles_key] = True
-        self._wait_for_previous_optim_step()
-        self._clear_grads_if_needed()
-        args, kwargs = self._cast_forward_inputs(*args, **kwargs)
+        _wait_for_computation_stream(
+            torch.cuda.current_stream(),
+            self._streams["unshard"],
+            self._streams["pre_unshard"],
+        )
+        _clear_grads_if_needed(self._fsdp_handles(self))
+        input_dtype = (
+            self.mixed_precision.param_dtype
+            if self._mixed_precision_enabled_for_params()
+            else None
+        )
+        args, kwargs = _prepare_forward_inputs(
+            self.compute_device, input_dtype, *args, **kwargs
+        )
         return args, kwargs
-
-    def _clear_grads_if_needed(self):
-        """
-        Iterates over all handles to clear original parameter gradients if
-        needed. See :meth:`FlatParamHandle._clear_grads_if_needed` for details.
-        Since this method's CPU overhead is minimal, we may call throughout
-        FSDP methods, which may serve as callsites to free the gradient memory
-        earlier.
-        """
-        if not self._use_orig_params or not self._is_root:
-            return
-        for fsdp_module in self.fsdp_modules(self):
-            for handle in fsdp_module._handles:
-                handle._clear_grads_if_needed()
 
     @staticmethod
     @contextlib.contextmanager
@@ -2710,7 +2666,8 @@ class FullyShardedDataParallel(nn.Module):
         for handle in self._handles:
             handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 
-        self._clear_grads_if_needed()
+        if self._is_root:
+            _clear_grads_if_needed(self._fsdp_handles(self))
         free_unsharded_flat_params = [
             handle.needs_unshard() for handle in self._handles
         ]
@@ -3010,7 +2967,7 @@ class FullyShardedDataParallel(nn.Module):
                 # that it is called after all backward calls complete
                 if self._is_root and not self._post_backward_callback_queued:
                     self._queue_wait_for_post_backward()
-                    self._clear_grads_if_needed()
+                    _clear_grads_if_needed(self._fsdp_handles(self))
                 elif _handles_key:
                     self._assert_state([TrainingState_.IDLE])
                 self.training_state = TrainingState_.BACKWARD_PRE
@@ -3531,12 +3488,16 @@ class FullyShardedDataParallel(nn.Module):
             collective communications.
         """
         self._lazy_init()
-        self._wait_for_previous_optim_step()
         if not self._is_root:
             raise RuntimeError(
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
             )
         self._assert_state(TrainingState_.IDLE)
+        _wait_for_computation_stream(
+            torch.cuda.current_stream(),
+            self._streams["unshard"],
+            self._streams["pre_unshard"],
+        )
 
         max_norm = float(max_norm)
         norm_type = float(norm_type)
