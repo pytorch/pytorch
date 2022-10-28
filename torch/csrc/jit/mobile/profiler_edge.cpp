@@ -34,8 +34,7 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
       with_stack,
       with_flops,
       with_modules,
-      experimental_config
-      );
+      experimental_config);
   torch::autograd::profiler::prepareProfiler(
       config, {torch::autograd::profiler::ActivityType::CPU});
   if (with_modules || with_stack) {

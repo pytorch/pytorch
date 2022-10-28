@@ -164,8 +164,8 @@ TEST(MobileProfiler, BackendMemoryEvents) {
 
 TEST(MobileProfiler, ProfilerEvent) {
   /*
-   * TODO: Using __FILE__ is unreliable e.g. it fails to resolve correctly when using
-   * buck2, works ok with buck1
+   * TODO: Using __FILE__ is unreliable e.g. it fails to resolve correctly when
+   * using buck2, works ok with buck1
    */
   std::string filePath(__FILE__);
   auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
