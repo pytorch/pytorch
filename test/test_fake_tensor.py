@@ -329,7 +329,7 @@ class FakeTensorTest(TestCase):
                         self.assertTrue(isinstance(ten, FakeTensor))
                     self.assertEqual(ten.device.type, 'cuda')
 
-    @uniskipIfRocm
+    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fallback_memory_prop(self):
         m = nn.Conv2d(16, 33, 3, stride=2, device="cuda", dtype=torch.half)
