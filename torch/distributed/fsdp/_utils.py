@@ -9,6 +9,7 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     _is_namedtuple,
 )
 from torch.nn.utils.rnn import PackedSequence
+from torch.utils._mode_utils import no_dispatch
 
 FSDP_FLATTENED = "_fsdp_flattened"
 
@@ -147,6 +148,11 @@ def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
     """Returns if ``x`` and ``y`` share the same storage."""
     # NOTE: CPU and GPU tensors are ensured to have different data pointers.
     return x.storage().data_ptr() == y.storage().data_ptr()
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
+    with no_dispatch():
+        tensor.record_stream(stream)
 
 
 def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:

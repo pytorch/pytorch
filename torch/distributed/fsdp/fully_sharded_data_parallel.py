@@ -62,6 +62,7 @@ from ._utils import (
     _contains_batchnorm,
     _free_storage,
     _is_fsdp_flattened,
+    _no_dispatch_record_stream,
     _override_batchnorm_mixed_precision,
     p_assert,
 )
@@ -3248,14 +3249,16 @@ class FullyShardedDataParallel(nn.Module):
                         grad.detach(), non_blocking=True
                     )
                     # Don't let this memory get reused until after the transfer.
-                    grad.data.record_stream(torch.cuda.current_stream())
+                    _no_dispatch_record_stream(grad.data, torch.cuda.current_stream())
 
                 # After _post_backward_hook returns, orig_grad_data will eventually
                 # go out of scope, at which point it could otherwise be freed for
                 # further reuse by the main stream while the div/reduce_scatter/copy
                 # are underway in the post_backward stream. See:
                 # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
-                orig_grad_data.record_stream(self._streams["post_backward"])
+                _no_dispatch_record_stream(
+                    orig_grad_data, self._streams["post_backward"]
+                )
 
                 if handle._use_orig_params:
                     # Since the handle's `FlatParameter` completed its gradient
@@ -3289,7 +3292,7 @@ class FullyShardedDataParallel(nn.Module):
             grad.data = grad.data.to(dtype=param.dtype)
             # Do not let the low precision gradient memory get reused until
             # the cast to full parameter precision completes
-            low_prec_grad_data.record_stream(torch.cuda.current_stream())
+            _no_dispatch_record_stream(low_prec_grad_data, torch.cuda.current_stream())
 
     def _should_free_unsharded_flat_param(self, handle: FlatParamHandle):
         return (
