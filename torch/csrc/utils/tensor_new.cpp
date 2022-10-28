@@ -248,14 +248,11 @@ void recursive_store(
         ValueError,
         c10::str(
             "expected sequence of length ",
-            // TODO(shikanime): maybe need to fix the %lld
-            (long long)n,
+            n,
             " at dim ",
-            // TODO(shikanime): maybe need to fix the %lld
-            (long long)dim,
+            dim,
             " (got ",
-            // TODO(shikanime): maybe need to fix the %lld
-            (long long)seq_size,
+            seq_size,
             ")"));
   }
 

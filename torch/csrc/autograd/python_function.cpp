@@ -499,7 +499,6 @@ static void _save_variables(
           TypeError,
           c10::str(
               "save_for_backward can only save variables, but argument ",
-              // TODO(shikanime): maybe need to fix the %ld format specifier
               i,
               " is of type ",
               Py_TYPE(obj)->tp_name));

@@ -344,10 +344,8 @@ inline PythonArgs PythonArgParser::parse(
         ValueError,
         c10::str(
             "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
-            // TODO(shikanime): maybe need to fix the %d format specifier
-            (int)max_args,
+            max_args,
             " (got ",
-            // TODO(shikanime): maybe need to fix the %d format specifier
             N,
             ")"));
   }
@@ -482,14 +480,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   if (size != N) {
     C10_THROW_ERROR(
         TypeError,
-        c10::str(
-            "expected tuple of ",
-            // TODO(shikanime): maybe need to fix the %d format specifier
-            N,
-            " elements but got ",
-            // TODO(shikanime): maybe need to fix the %d
-            // format specifier
-            (int)size));
+        c10::str("expected tuple of ", N, " elements but got ", size));
   }
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
@@ -531,8 +522,6 @@ inline void throw_intlist_exception(
           ", but found element of type ",
           Py_TYPE(obj)->tp_name,
           " at pos ",
-          // TODO(shikanime): maybe need to fix the %ld format
-          // specifier
           idx + 1));
 }
 
