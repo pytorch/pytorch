@@ -685,7 +685,7 @@ static bool is_int_list(
     // NB: do NOT check that the later arguments are ints, as this is
     // BC-breaking for FX
     for (int i = 1; i < len; i++) {
-      if (torch::is_symint(
+      if (torch::is_symint_node(
               py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
         if (failed_idx != nullptr) {
           *failed_idx = i;
@@ -716,9 +716,9 @@ static bool is_int_list(
 static bool is_int_or_symint(PyObject* obj) {
   // THPUtils_checkIndex may call __index__ or __int__
   // which may have side effects if obj is a symint node
-  // so we do `is_symint` check first
+  // so we do `is_symint_node` check first
   // TODO: maybe we should be using checkLong here?
-  return torch::is_symint(py::handle(obj)) || THPUtils_checkIndex(obj);
+  return torch::is_symint_node(py::handle(obj)) || THPUtils_checkIndex(obj);
 }
 
 static bool is_int_or_symint_list(
@@ -1570,13 +1570,13 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     // NB: we DO NOT put symbolic ints/floats into the Scalar itself,
     // because although Scalar supports SymInt/SymFloat, the subsequent
     // conversion to Tensor does not.  Instead, do it out of band.
-  } else if (torch::is_symint(py::handle(obj))) {
+  } else if (torch::is_symint_node(py::handle(obj))) {
     save_symint = true;
     // This scalar value doesn't matter, it shouldn't ever actually
     // get read out.  Make it a big and weird looking number to help
     // people figure out if there's aproblem.
     scalar = at::Scalar(7777777);
-  } else if (torch::is_symfloat(py::handle(obj))) {
+  } else if (torch::is_symfloat_node(py::handle(obj))) {
     save_symint = true;
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else {
@@ -1633,11 +1633,11 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
     return at::Scalar(THPUtils_unpackComplexDouble(arg));
   }
 
-  if (torch::is_symint(arg)) {
+  if (torch::is_symint_node(arg)) {
     return at::Scalar(py::cast<c10::SymInt>(arg));
   }
 
-  if (torch::is_symfloat(arg)) {
+  if (torch::is_symfloat_node(arg)) {
     return at::Scalar(py::cast<c10::SymFloat>(arg));
   }
 

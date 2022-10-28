@@ -27,7 +27,6 @@ from torch._dynamo.optimizations.log_args import conv_args_analysis
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
-from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_triton_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._pytree import tree_map
@@ -1361,11 +1360,6 @@ def parse_args():
         action="store_true",
         help="Use a fresh triton cachedir when running each model, to force cold-start compile.",
     )
-    parser.add_argument(
-        "--disable-cudagraphs",
-        action="store_true",
-        help="Disables cudagraphs for Inductor",
-    )
 
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
@@ -1625,6 +1619,8 @@ def main(runner, original_dir=None):
         experiment = speedup_experiment
         output_filename = "overheads.csv"
     elif args.inductor or args.inductor_dynamic:
+        from torch._inductor import config as inductor_config
+
         inductor_config.debug = args.verbose
         if args.threads:
             inductor_config.cpp.threads = args.threads
@@ -1708,10 +1704,6 @@ def main(runner, original_dir=None):
         )
         experiment = coverage_experiment
         output_filename = "coverage.csv"
-
-    if args.inductor or args.backend == "inductor":
-        if args.disable_cudagraphs:
-            inductor_config.triton.cudagraphs = False
 
     runner.setup_amp()
 
