@@ -53,27 +53,27 @@ jobs:
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           WORKFLOW_URL: ${{ github.event.workflow_run.html_url }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
         run: |
           echo "${WORKFLOW_URL}"
           python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}"
           python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
-        - name: Upload test artifacts
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
-            WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
-            WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          run: |
-            echo "${WORKFLOW_ARTIFACTS_URL}"
+      - name: Upload test artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_ARTIFACTS_URL: ${{ github.event.workflow_run.artifacts_url }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
+        run: |
+          echo "${WORKFLOW_ARTIFACTS_URL}"
 
-            # Check if the file exists before running it, this is to avoid breaking PRs that are not yet rebasing on top of this change
-            if [[ -f "tools/stats/upload_artifacts.py" ]]; then
-              # Note that in the case of Linux and Windows, their artifacts have already been uploaded to S3, so there simeply won't be
-              # anything on GitHub to upload. The command should return right away
-              python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
-            fi
+          # Check if the file exists before running it, this is to avoid breaking PRs that are not yet rebasing on top of this change
+          if [[ -f "tools/stats/upload_artifacts.py" ]]; then
+            # Note that in the case of Linux and Windows, their artifacts have already been uploaded to S3, so there simeply won't be
+            # anything on GitHub to upload. The command should return right away
+            python3 -m tools.stats.upload_artifacts --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
+          fi
 
   check-api-rate:
     if: ${{ always() }}
