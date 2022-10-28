@@ -1,9 +1,10 @@
-from .windows import cosine, exponential, gaussian, kaiser
+import warnings
+
+from .windows import cosine, exponential, gaussian
 
 
 __all__ = [
     'cosine',
     'exponential',
     'gaussian',
-    'kaiser',
 ]
