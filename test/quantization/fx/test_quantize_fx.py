@@ -5316,9 +5316,9 @@ class TestQuantizeFx(QuantizationTestCase):
         x = torch.randn(4, 4, 4, 4)
         # torch.channel_shuffle is equivalent to torch.nn.functional.channel_shuffle
         model_node_pairs = [
-          (M1().eval(), ns.call_module(torch.nn.ChannelShuffle)),
-          (M2().eval(), ns.call_function(torch.channel_shuffle)),
-          (M3().eval(), ns.call_function(torch.channel_shuffle))
+            (M1().eval(), ns.call_module(torch.nn.ChannelShuffle)),
+            (M2().eval(), ns.call_function(torch.channel_shuffle)),
+            (M3().eval(), ns.call_function(torch.channel_shuffle))
         ]
         for m, node in model_node_pairs:
             m = prepare_fx(m, {"": default_qconfig}, example_inputs=(x,))
