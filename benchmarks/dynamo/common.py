@@ -757,19 +757,19 @@ class DummyGradScaler:
         return loss
 
 
-def maybe_fresh_cache(fn):
-    def inner(self, *args, **kwargs):
+def maybe_fresh_cache(fn, is_cold_start):
+    def inner(*args, **kwargs):
         cache_minder = NullContext()
-        if self.args.cold_start_latency:
+        if is_cold_start:
             cache_entries = {}
             cache_minder = fresh_triton_cache(cache_entries)
 
         try:
             with cache_minder:
-                return fn(self, *args, **kwargs)
+                return fn(*args, **kwargs)
         finally:
             dump_cache = False
-            if dump_cache and self.args.cold_start_latency:
+            if dump_cache and is_cold_start:
                 output_csv(
                     output_filename[:-4] + "_triton_cache.csv",
                     ["dev", "name", "batch_size", "triton_cache"],
@@ -1190,7 +1190,6 @@ class BenchmarkRunner:
                 "--diff_main called on main branch, what are you diffing?"
             )
 
-    @maybe_fresh_cache
     def run_one_model(
         self,
         name,
@@ -1470,11 +1469,15 @@ def parse_args():
 
 def main(runner, original_dir=None):
     args = parse_args()
+    return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
+        runner, args, original_dir
+    )
 
+
+def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
     runner.args = args
 
-    # defaults
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
 
