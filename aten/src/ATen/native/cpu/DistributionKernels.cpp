@@ -36,70 +36,65 @@ void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, c10::
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
+#if !AT_MKL_ENABLED()
 void bernoulli_scalar_kernel_default(const TensorBase &self, double p, c10::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
 }
 
-#if !AT_MKL_ENABLED()
 void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
   bernoulli_scalar_kernel_default(self, p, gen);
 }
 #else
 void bernoulli_scalar_kernel(const TensorBase &self, double p, c10::optional<Generator> gen) {
-  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
-    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
-    int64_t seed;
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(generator->mutex_);
-      seed = generator->random();
-    }
-    int64_t n = self.numel();
-    bool contig = self.is_contiguous();
-
-    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
-      at::Tensor tmp_int_tensor;
-      if (std::is_same<scalar_t, int>::value && contig) {
-        tmp_int_tensor = self;
-      } else {
-        tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
-      }
-
-      scalar_t *self_ptr = self.data_ptr<scalar_t>();
-      int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
-
-      auto sample = [&](int64_t begin, int64_t end) {
-        int64_t len = end - begin;
-        if (len > 0) {
-          VSLStreamStatePtr stream;
-          vslNewStream(&stream, VSL_BRNG_MCG31, seed);
-          vslSkipAheadStream(stream, begin);
-          viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
-            sample_int_ptr + begin, p);
-          vslDeleteStream(&stream);
-
-          // vectorized copy if using buffer and contiguous, i.e., being non-int
-          // type and contiguous
-          if (!std::is_same<scalar_t, int>::value && contig) {
-            scalar_t *self_seg = self_ptr + begin;
-            int* tmp_seg = sample_int_ptr + begin;
-            at::vec::convert<int, scalar_t>(tmp_seg, self_seg, len);
-          }
-        }
-      };
-
-      parallel_for(0, n, /* grain_size= */ 800, sample);
-
-      // copy_ if using buffer and non contiguous
-      if (!contig) {
-        OptionalTensorRef(self)->copy_(tmp_int_tensor);
-      }
-    });
-  } else {
-    // The situation of AMD, move to using the default version
-    bernoulli_scalar_kernel_default(self, p, gen);
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+  int64_t seed;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    seed = generator->random();
   }
+  int64_t n = self.numel();
+  bool contig = self.is_contiguous();
+
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+    at::Tensor tmp_int_tensor;
+    if (std::is_same<scalar_t, int>::value && contig) {
+      tmp_int_tensor = self;
+    } else {
+      tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
+    }
+
+    scalar_t *self_ptr = self.data_ptr<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
+
+    auto sample = [&](int64_t begin, int64_t end) {
+      int64_t len = end - begin;
+      if (len > 0) {
+        VSLStreamStatePtr stream;
+        vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+        vslSkipAheadStream(stream, begin);
+        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
+          sample_int_ptr + begin, p);
+        vslDeleteStream(&stream);
+
+        // vectorized copy if using buffer and contiguous, i.e., being non-int
+        // type and contiguous
+        if (!std::is_same<scalar_t, int>::value && contig) {
+          scalar_t *self_seg = self_ptr + begin;
+          int* tmp_seg = sample_int_ptr + begin;
+          at::vec::convert<int, scalar_t>(tmp_seg, self_seg, len);
+        }
+      }
+    };
+
+    parallel_for(0, n, /* grain_size= */ 800, sample);
+
+    // copy_ if using buffer and non contiguous
+    if (!contig) {
+      OptionalTensorRef(self)->copy_(tmp_int_tensor);
+    }
+  });
 }
 #endif
 
