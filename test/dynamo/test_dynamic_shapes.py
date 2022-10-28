@@ -53,17 +53,6 @@ unittest.expectedFailure(
 )
 
 
-# DynamicShapesReproTests
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_reformer_eval_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_reformer_train_dynamic_shapes
-    # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
-)
-
 unittest.expectedFailure(
     DynamicShapesReproTests.test_issue175_dynamic_shapes
     # TypeError: 'torch._C.SymIntNode' object cannot be interpreted as an integer
@@ -77,11 +66,6 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesReproTests.test_convert_boxes_to_pooler_format_dynamic_shapes
     # Could not infer dtype of torch._C.SymIntNode
-)
-
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_ellipsis_dynamic_shapes
-    # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
 unittest.expectedFailure(
@@ -104,49 +88,13 @@ unittest.expectedFailure(
     # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
 )
 
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_maml_item_capture_dynamic_shapes
-    # Cannot call numel() on tensor with symbolic sizes/strides
-)
-
 # DynamicShapesMiscTests
 unittest.expectedFailure(
     DynamicShapesMiscTests.test_unsupported_fake_tensor_dynamic_shapes
     # aten.quantize_per_tensor.default - couldn't find symbolic meta function/decomposition
 )
-unittest.expectedFailure(
-    DynamicShapesMiscTests.test_module_deepcopy_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decompositio
-)
-
-# DynamicShapesUnspecTests
-unittest.expectedFailure(
-    DynamicShapesUnspecTests.test_unspec_float_precision_dynamic_shapes
-    # float() argument must be a string or a real number, not 'torch._C.SymIntNode'
-)
-
-
-# DynamicShapesNNModuleTests
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_unsupportedmethod_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_unsupportedmodule_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
-unittest.expectedFailure(
-    DynamicShapesNNModuleTests.test_self_mutating1_dynamic_shapes
-    # aten.squeeze_.dim - couldn't find symbolic meta function/decomposition
-)
-
 
 # DynamicShapesExportTests
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_compare_optimize_with_make_fx_dynamic_shapes
-)
 unittest.expectedFailure(
     DynamicShapesExportTests.test_export_with_constant_list_nonzero_dynamic_shapes
 )
@@ -155,9 +103,6 @@ unittest.expectedFailure(
 )
 unittest.expectedFailure(
     DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_stack_trace_dynamic_shapes
 )
 
 # DynamicShapesSubGraphTests
