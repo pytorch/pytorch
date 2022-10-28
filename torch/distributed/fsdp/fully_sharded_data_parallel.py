@@ -34,6 +34,8 @@ from torch.autograd import Variable
 from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
+    _CHECKPOINT_WRAPPED_MODULE,
+    ActivationWrapper,
 )
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.distributed_c10d import _get_default_group
@@ -1634,6 +1636,10 @@ class FullyShardedDataParallel(nn.Module):
         """
         Returns the wrapped module (like :class:`DistributedDataParallel`).
         """
+        # FSDP's `.module` must refer to the innermost wrapped module when
+        # composing with other module wrappers in order for state dict to work
+        if isinstance(self._fsdp_wrapped_module, ActivationWrapper):
+            return getattr(self._fsdp_wrapped_module, _CHECKPOINT_WRAPPED_MODULE)
         return self._fsdp_wrapped_module
 
     @property
@@ -1884,44 +1890,6 @@ class FullyShardedDataParallel(nn.Module):
         # to non-root instances
         inconsistent_limit_all_gathers = False
         for fsdp_module in self.fsdp_modules(self):
-            if not fsdp_module._use_orig_params and fsdp_module._has_params:
-                # Check if the wrapped module changed after construction
-                # (e.g. applying the activation checkpointing wrapper) and
-                # if so, de-register the `FlatParameter` from the old
-                # wrapped module and register it to the new wrapped module
-                # NOTE: The `FlatParameter`'s FQN metadata is not updated, so
-                # any added wrappers must clean their prefixes from FQNs.
-                flat_param = fsdp_module._handles[0].flat_param
-                target_submodule = None
-                target_name = None
-                for submodule in fsdp_module.modules():
-                    for param_name, param in submodule._parameters.items():
-                        if flat_param is param:  # found registered `FlatParameter`
-                            target_submodule = submodule
-                            target_name = param_name
-                            break
-                    if target_submodule is not None:
-                        break
-                if (
-                    target_submodule is not None
-                    and target_submodule is not fsdp_module.module
-                ):
-                    assert target_name is not None
-                    if fsdp_module._debug_level == dist.DebugLevel.DETAIL:
-                        warnings.warn(
-                            "The FSDP wrapped module changed from "
-                            f"{target_submodule} to {fsdp_module.module} on "
-                            f"rank {fsdp_module.rank}. {fsdp_module}"
-                        )
-                    target_submodule._parameters.pop(target_name)  # de-register
-                    fsdp_module._register_flat_param()  # re-register
-                elif target_submodule is None:
-                    raise RuntimeError(
-                        "Either the FSDP wrapped module was removed from "
-                        "the model or its `FlatParameter` was manually "
-                        f"de-registered on rank {fsdp_module.rank}. Both of "
-                        f"these are invalid behavior. {fsdp_module}"
-                    )
             if fsdp_module is not self:
                 # Relax the assert for non-root FSDP instances in case the
                 # nested initialized module is wrapped again in FSDP later (e.g.
