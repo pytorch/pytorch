@@ -2,11 +2,23 @@ import torch.nn as nn
 import torch.nn.intrinsic as nni
 
 from typing import Union, Callable, Tuple, Dict, Optional, Type
-from torch.ao.quantization.utils import Pattern
-
-from torch.ao.quantization.utils import get_combined_dict
-from torch.ao.quantization.utils import MatchAllNode
+from torch.ao.quantization.utils import Pattern, get_combined_dict, MatchAllNode
 import itertools
+
+__all__ = [
+    "fuse_conv_bn",
+    "fuse_conv_bn_relu",
+    "fuse_linear_bn",
+    "fuse_convtranspose_bn",
+    "sequential_wrapper2",
+    "get_fuser_method",
+    "reverse_sequential_wrapper2",
+    "reverse2",
+    "reverse3",
+    "DEFAULT_PATTERN_TO_FUSER_METHOD",
+    "get_valid_patterns",
+    "get_fuser_method_new",
+]
 
 def fuse_conv_bn(is_qat, conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module

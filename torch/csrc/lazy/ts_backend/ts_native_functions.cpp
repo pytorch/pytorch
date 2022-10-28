@@ -407,7 +407,7 @@ at::Tensor LazyNativeFunctions::_unsafe_view(
     at::IntArrayRef size) {
   TORCH_LAZY_FN_COUNTER("lazy::");
   return LazyNativeFunctions::view_copy_symint(
-      self, c10::fromIntArrayRef(size));
+      self, c10::fromIntArrayRefSlow(size));
 }
 
 // This is needed by the torch.tensor constructor.
@@ -520,6 +520,15 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   out.resize_(out_unwrapped.sizes());
   out.copy_(out_unwrapped);
   return out;
+}
+
+at::Tensor LazyNativeFunctions::diag_embed(
+    const at::Tensor& self,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(
+      diag_embed)>::call(self, offset, dim1, dim2);
 }
 
 at::Tensor LazyNativeFunctions::diagonal_backward_symint(

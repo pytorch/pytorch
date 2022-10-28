@@ -42,11 +42,6 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/grad_mode.cpp
   ${TORCH_API_TEST_DIR}/operations.cpp
 )
-
-if(USE_DEPLOY)
-  list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/imethod.cpp)
-endif()
-
 if(USE_CUDA)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
 endif()
@@ -66,10 +61,6 @@ if(USE_CUDA)
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_api PRIVATE "USE_CUDA")
-endif()
-
-if(USE_DEPLOY)
-  target_link_libraries(test_api PRIVATE torch_deploy)
 endif()
 
 # Workaround for https://github.com/pytorch/pytorch/issues/40941

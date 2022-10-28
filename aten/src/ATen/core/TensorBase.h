@@ -942,4 +942,24 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
     return c10::MaybeOwned<TensorBase>::owned(__dispatch_contiguous(memory_format));
   }
 }
+
+namespace symint {
+
+template <typename T>
+using enable_if_symint = std::enable_if_t<std::is_same<T, c10::SymInt>::value>;
+template <typename T>
+using enable_if_int = std::enable_if_t<std::is_same<T, int64_t>::value>;
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }
+template <typename T, typename = enable_if_int<T>>
+IntArrayRef sizes(const TensorBase& t) { return t.sizes(); }
+
+template <typename T, typename = enable_if_symint<T>>
+c10::SymIntArrayRef strides(const TensorBase& t) { return t.sym_strides(); }
+template <typename T, typename = enable_if_int<T>>
+IntArrayRef strides(const TensorBase& t) { return t.strides(); }
+
+} // namespace symint
+
 } // namespace at
