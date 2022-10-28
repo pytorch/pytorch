@@ -1,5 +1,7 @@
 """
-Public common utilities for FSDP.
+This file includes public utilities for FSDP such as classes for the FSDP
+constructor arguments. We keep this file private and only for organization, and
+we make the contents public via other files.
 """
 
 from enum import auto, Enum
