@@ -2,7 +2,6 @@ import weakref
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._mode_utils import no_dispatch
 
 
 def safe_is_leaf(t):
@@ -56,7 +55,7 @@ class WeakTensorRefKey(object):
 class MetaConverter:
     def __init__(self):
         self.storage_memo = {}
-        self.tensor_memo = weakref.WeakValueDictionary()
+        self.tensor_memo: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
         self.maybe_storages_to_delete = []
         self.check_expired_frequency = 128
         self.check_expired_count = 0
@@ -183,6 +182,11 @@ class MetaConverter:
                         )
                     )
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    # Note [is_coalesced is dispatched]
+                    # Strangely enough, is_coalesced() is a dispatched operator,
+                    # which means that it will get caught by fake tensor mode.
+                    # Ordinarily this would error, but there's some logic in
+                    # fake tensor ensure this doesn't happen.
                     r._coalesced_(t.is_coalesced())
                     if t.requires_grad:
                         r.requires_grad = True
@@ -223,10 +227,12 @@ class MetaConverter:
                         r = base.as_strided(sizes, strides, sym(t.storage_offset()))
                 else:
                     is_leaf = safe_is_leaf(t)
+                    sizes, strides = sym_sizes_strides(t)
+                    storage_offset = sym(t.storage_offset())
                     # Fake up some autograd history.
                     if t.requires_grad:
                         r = callback(
-                            lambda: torch.empty((0,), dtype=t.dtype, device="meta")
+                            lambda: torch.empty_strided(sizes, strides, dtype=t.dtype, device="meta")
                         )
                         assert safe_is_leaf(
                             r
@@ -234,25 +240,40 @@ class MetaConverter:
                         r.requires_grad = t.requires_grad
                         if not is_leaf:
                             with torch.enable_grad():
-                                # The backward function here will be wrong, but
-                                # that's OK; our goal is just to get the metadata
-                                # looking as close as possible; we're not going to
-                                # actually try to backward() on these produced
-                                # metas.  TODO: would be safer to install some
-                                # sort of unsupported grad_fn here
-                                r = r.clone()
+                                # preserve_format is the default, but we want to
+                                # emphasize how important it is to preserve
+                                # format here
+                                r = r.clone(memory_format=torch.preserve_format)
                     else:
                         r = callback(
-                            lambda: torch.empty((0,), dtype=t.dtype, device="meta")
+                            lambda: torch.empty_strided(sizes, strides, dtype=t.dtype, device="meta")
                         )
                         assert safe_is_leaf(
                             r
                         ), "the callback you passed in doesn't detach"
-                    s = self.meta_storage(t.storage().untyped(), callback=callback)
-                    with no_dispatch():
-                        sizes, strides = sym_sizes_strides(t)
+
+                    s = t.storage().untyped()
+                    swr = StorageWeakRef(s)
+                    if swr not in self.storage_memo and r.stride() == strides and r.storage_offset() == storage_offset:
+                        # You're normal and happy, install the fresh storage into the memo
+                        self.storage_memo[swr] = r.storage().untyped()
+                    else:
+                        # You're in crazy town; somehow you gave us a tensor
+                        # that wasn't a view, but had nonzero storage offset,
+                        # nontrivial strides (such that clone() couldn't
+                        # preserve them), or already aliases with another
+                        # tensor's storage.  The most typical way to end
+                        # up here is with set_.  So use set_ to bludgeon this
+                        # in.
+                        r_s = self.meta_storage(s, callback=callback)
+                        # NB: In principle, this should always work, but there
+                        # is some subtle difference in the autograd metadata
+                        # that means we will backprop the set_ call, even if
+                        # r is declared as an input to grad.
+                        # See https://github.com/pytorch/pytorch/issues/87956
+                        # for the reproducer.
                         with torch.no_grad():
-                            r.set_(s, sym(t.storage_offset()), sizes, strides)
+                            r.set_(r_s, storage_offset, sizes, strides)
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())

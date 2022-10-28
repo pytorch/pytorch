@@ -650,6 +650,12 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return args[0].fake_device
 
+        # Some attribute queries that can be serviced directly
+        # See Note [is_coalesced is dispatched]
+        if func in [torch.ops.aten.is_coalesced.default]:
+            with no_dispatch():
+                return func(*args, **kwargs)
+
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
@@ -885,6 +891,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten.as_strided.default,
             aten.zeros.default,
             aten.detach.default,
+            aten.set_.source_Storage_storage_offset,
         ]
 
     @property
