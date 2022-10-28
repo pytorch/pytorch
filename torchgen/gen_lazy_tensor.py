@@ -199,7 +199,6 @@ class default_args:
     shape_inference_hdr: str = "torch/csrc/lazy/core/shape_inference.h"
     tensor_class: str = "torch::lazy::LazyTensor"
     tensor_class_hdr: str = "torch/csrc/lazy/core/tensor.h"
-    shape_class: str = "torch::lazy::Shape"
     lazy_ir_generator: Type[GenLazyIR] = GenLazyIR
     native_func_definition_generator: Type[
         GenLazyNativeFuncDefinition
@@ -258,12 +257,6 @@ def main() -> None:
         help="Path to header file defining custom Lazy Tensor class",
     )
     parser.add_argument(
-        "--shape_class",
-        type=str,
-        default=default_args.shape_class,
-        help="Name of backend specific customer Shape class",
-    )
-    parser.add_argument(
         "--backend_name",
         type=str,
         default=default_args.backend_name,
@@ -292,7 +285,6 @@ def main() -> None:
         options.tensor_class,
         options.tensor_class_hdr,
         options.shape_inference_hdr,
-        options.shape_class,
         lazy_ir_generator,
         native_func_definition_generator,
         options.backend_name,
@@ -310,7 +302,6 @@ def run_gen_lazy_tensor(
     tensor_class: str = default_args.tensor_class,
     tensor_class_hdr: str = default_args.tensor_class_hdr,
     shape_inference_hdr: str = default_args.shape_inference_hdr,
-    shape_class: str = default_args.shape_class,
     lazy_ir_generator: Type[GenLazyIR] = default_args.lazy_ir_generator,
     native_func_definition_generator: Type[
         GenLazyNativeFuncDefinition
@@ -542,7 +533,7 @@ def run_gen_lazy_tensor(
     )
     # Generate IR node classes
     lazy_ir_obj = lazy_ir_generator(
-        backend_indices[backend_key], backend_name, node_base, shape_class
+        backend_indices[backend_key], backend_name, node_base
     )
 
     fm.write_with_template(
