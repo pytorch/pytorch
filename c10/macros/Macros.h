@@ -347,8 +347,8 @@ __host__ __device__
 #endif // __CUDA_ARCH__
     void
     _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
-}
 #endif // __SYCL_DEVICE_ONLY__
+}
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
   if (C10_UNLIKELY(!(cond))) {                                                                   \
