@@ -2,7 +2,6 @@
 """check_labels.py"""
 
 from typing import Any, List
-from datetime import datetime, timedelta
 
 from export_pytorch_labels import get_pytorch_labels
 from gitutils import (
@@ -40,21 +39,15 @@ def delete_comment(comment_id: int) -> None:
 def has_required_labels(pr: GitHubPR) -> bool:
     pr_labels = pr.get_labels()
 
-    # Check if PR is not user facing
-    is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
-    if is_not_user_facing_pr:
-        return True
-
-    # Check if bot has already posted a message within the past hour to include a release notes label
+    # Delete all previous comments
     for comment in pr.get_comments():
         if comment.body_text.lstrip(" #").startswith(ERR_MSG_TITLE) and comment.author_login in BOT_AUTHORS:
-            ts = datetime.strptime(comment.created_at, "%Y-%m-%dT%H:%M:%SZ")
-            if (datetime.utcnow() - ts) < timedelta(hours=1):
-                return True
             delete_comment(comment.database_id)
-            break
 
-    return any(label.strip() in get_release_notes_labels() for label in pr_labels)
+    # Check if PR is not user facing
+    is_not_user_facing_pr = any(label.strip() == "topic: not user facing" for label in pr_labels)
+
+    return is_not_user_facing_pr or any(label.strip() in get_release_notes_labels() for label in pr_labels)
 
 
 def parse_args() -> Any:
