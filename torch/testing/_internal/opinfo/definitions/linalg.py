@@ -318,7 +318,6 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
         [2, 4, 3, 5, 3, 2],
     ]
 
-    result = []
     for sizes in test_cases:
         tensors = []
         for size in zip(sizes[:-1], sizes[1:]):
@@ -326,9 +325,7 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
                 size, dtype=dtype, device=device, requires_grad=requires_grad
             )
             tensors.append(t)
-        result.append(SampleInput(tensors))
-
-    return result
+        yield SampleInput(tensors)
 
 
 def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kwargs):
@@ -1096,6 +1093,13 @@ op_db: List[OpInfo] = [
         supports_out=True,
         supports_fwgrad_bwgrad=True,
         supports_forward_ad=True,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     OpInfo(
         "linalg.det",
@@ -1213,6 +1217,11 @@ op_db: List[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
                 dtypes=(torch.complex64, torch.complex128),
+            ),
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
             ),
         ),
     ),
@@ -1650,6 +1659,13 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         supports_out=False,
         sample_inputs_func=sample_inputs_linalg_vander,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     ReductionOpInfo(
         "linalg.vector_norm",
@@ -2126,6 +2142,13 @@ op_db: List[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     OpInfo(
         "linalg.tensorsolve",
@@ -2144,6 +2167,13 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ],
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
 ]
 

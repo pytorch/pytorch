@@ -1,0 +1,1 @@
+from .contract import contract

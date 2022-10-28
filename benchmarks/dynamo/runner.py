@@ -65,6 +65,7 @@ TABLE = {
         "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
         "aot_nvfuser": "--training --nvfuser --backend=aot_nvfuser ",
         "inductor": "--training --inductor ",
+        "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
     },
     "inference": {
         "ts_nnc": "--speedup-ts",
@@ -85,6 +86,7 @@ DEFAULTS = {
         "aot_cudagraphs",
         "aot_nvfuser",
         "inductor",
+        "inductor_no_cudagraphs",
     ],
     "inference": ["ts_nvfuser_cudagraphs", "inductor"],
     "dtypes": [
@@ -255,6 +257,9 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.quick:
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
+
+                    if testing == "performance" and compiler == "inductor":
+                        cmd = f"{cmd} --cold_start_latency"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])

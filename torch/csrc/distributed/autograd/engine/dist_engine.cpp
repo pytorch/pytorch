@@ -185,6 +185,13 @@ void DistEngine::computeDependencies(
     bool retainGraph) {
   TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
 
+  // Store root nodes so we can traverse through the graph later
+  // e.g., for get_current_graph_task_execution_order
+  c10::SmallVector<Node*, 4> temp_roots{rootEdges.size()};
+  for (const auto i : c10::irange(rootEdges.size())) {
+    temp_roots[i] = rootEdges[i].function.get();
+  }
+
   // Build the graph task and graph root.
   // NOTE: we don't need to build and pass a cpu_ready_queue to GraphTask
   // as we use execute_graph_task_until_ready_queue_empty, which will build
@@ -194,6 +201,7 @@ void DistEngine::computeDependencies(
       /* create_graph */ false,
       /* depth */ 0,
       /* cpu_ready_queue */ global_cpu_ready_queue_,
+      /* graph_roots */ temp_roots,
       /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
