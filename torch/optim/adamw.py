@@ -5,6 +5,7 @@ from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _di
                         _maximize_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+from torch.optim._fused_utils import _MultiDeviceReplicator, _get_fp16AMP_params
 
 __all__ = ["AdamW", "adamw"]
 
@@ -23,6 +24,7 @@ class AdamW(Optimizer):
         foreach: Optional[bool] = None,
         capturable: bool = False,
         differentiable: bool = False,
+        fused: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -44,8 +46,23 @@ class AdamW(Optimizer):
             maximize=maximize,
             capturable=capturable,
             differentiable=differentiable,
+            fused=fused,
         )
         super(AdamW, self).__init__(params, defaults)
+
+        if fused:
+            if differentiable:
+                raise RuntimeError("`fused` does not support `differentiable`")
+            self._step_supports_amp_scaling = True
+            # TODO(crcrpar): [low prec params & their higher prec copy]
+            # Suppor AMP with FP16/BF16 model params which would need
+            # higher prec copy of params to do update math in higher prec to
+            # alleviate the loss of information.
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -55,6 +72,7 @@ class AdamW(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
+            group.setdefault("fused", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -63,7 +81,26 @@ class AdamW(Optimizer):
             for s in state_values:
                 s["step"] = torch.tensor(float(s["step"]))
 
-    def _init_group(self, group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps):
+    def _init_group(
+        self,
+        group,
+        grad_scaler,
+        params_with_grad,
+        grads,
+        amsgrad,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+    ):
+        grad_scale = None
+        found_inf = None
+        if group['fused'] and grad_scaler is not None:
+            grad_scale = grad_scaler._get_scale_async()
+            device = grad_scale.device
+            grad_scale = _MultiDeviceReplicator(grad_scale)
+            found_inf = _get_fp16AMP_params(optimizer=self, grad_scaler=grad_scaler, device=device)
+
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -103,8 +140,10 @@ class AdamW(Optimizer):
 
             state_steps.append(state["step"])
 
+        return grad_scale, found_inf
+
     @_use_grad_for_differentiable
-    def step(self, closure=None):
+    def step(self, closure=None, *, grad_scaler=None):
         """Performs a single optimization step.
 
         Args:
@@ -128,7 +167,17 @@ class AdamW(Optimizer):
             amsgrad = group["amsgrad"]
             beta1, beta2 = group["betas"]
 
-            self._init_group(group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+            grad_scale, found_inf = self._init_group(
+                group,
+                grad_scaler,
+                params_with_grad,
+                grads,
+                amsgrad,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+            )
 
             adamw(
                 params_with_grad,
@@ -147,6 +196,9 @@ class AdamW(Optimizer):
                 foreach=group["foreach"],
                 capturable=group["capturable"],
                 differentiable=group["differentiable"],
+                fused=group["fused"],
+                grad_scale=grad_scale,
+                found_inf=found_inf,
             )
 
         return loss
@@ -231,6 +283,9 @@ def adamw(
     foreach: Optional[bool] = None,
     capturable: bool = False,
     differentiable: bool = False,
+    fused: bool = False,
+    grad_scale: Optional[_MultiDeviceReplicator] = None,
+    found_inf: Optional[_MultiDeviceReplicator] = None,
     *,
     amsgrad: bool,
     beta1: float,
@@ -261,6 +316,8 @@ def adamw(
 
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamw
+    elif fused and not torch.jit.is_scripting():
+        func = _fused_adamw
     else:
         func = _single_tensor_adamw
 
@@ -280,6 +337,8 @@ def adamw(
         maximize=maximize,
         capturable=capturable,
         differentiable=differentiable,
+        grad_scale=grad_scale,
+        found_inf=found_inf,
     )
 
 
@@ -290,6 +349,8 @@ def _single_tensor_adamw(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
+    grad_scale: Optional[_MultiDeviceReplicator],
+    found_inf: Optional[_MultiDeviceReplicator],
     *,
     amsgrad: bool,
     beta1: float,
@@ -301,6 +362,8 @@ def _single_tensor_adamw(
     capturable: bool,
     differentiable: bool,
 ):
+
+    assert grad_scale is None and found_inf is None
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -389,6 +452,8 @@ def _multi_tensor_adamw(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
+    grad_scale: Optional[_MultiDeviceReplicator],
+    found_inf: Optional[_MultiDeviceReplicator],
     *,
     amsgrad: bool,
     beta1: float,
@@ -502,3 +567,61 @@ def _multi_tensor_adamw(
                 denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
             torch._foreach_addcdiv_(device_params, device_exp_avgs, denom, step_size)
+
+
+def _fused_adamw(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    grad_scale: Optional[_MultiDeviceReplicator],
+    found_inf: Optional[_MultiDeviceReplicator],
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+    capturable: bool,  # Needed for consistency.
+    differentiable: bool,
+) -> None:
+    grouped_tensors = _group_tensors_by_device_and_dtype(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+    for (device, dtype) in grouped_tensors:
+        (
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
+        ) = grouped_tensors[(device, dtype)]
+        if grad_scale is not None and found_inf is not None:
+            device_grad_scale = grad_scale.get(device)
+            device_found_inf = found_inf.get(device)
+        else:
+            device_grad_scale = None
+            device_found_inf = None
+        torch._foreach_add_(device_state_steps, 1)
+        torch._fused_adamw_(
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
+            amsgrad=amsgrad,
+            lr=lr,
+            beta1=beta1,
+            beta2=beta2,
+            weight_decay=weight_decay,
+            eps=eps,
+            maximize=maximize,
+            grad_scale=device_grad_scale,
+            found_inf=device_found_inf,
+        )
+        if device_found_inf is not None:
+            torch._foreach_sub_(device_state_steps, [device_found_inf] * len(device_state_steps))

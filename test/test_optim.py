@@ -871,12 +871,15 @@ class TestOptim(TestCase):
         self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "foreach")
 
     def test_fused_optimizers(self):
-        optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True)),
-        ]
+        optimizer_pairs_with_flags = tuple(itertools.product(
+            (optim.Adam, optim.AdamW),
+            (
+                dict(weight_decay=1., amsgrad=False),
+                dict(weight_decay=1., amsgrad=True),
+                dict(weight_decay=0., amsgrad=False),
+                dict(weight_decay=0., amsgrad=True),
+            ),
+        ))
         self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
@@ -1606,23 +1609,13 @@ class TestOptim(TestCase):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
-        from torch.optim import adam
+        from torch.optim import adam, adamw
 
         num_tensors = 5
-        for amsgrad in (False, True):
-            params, grads, exp_avgs, exp_avg_sqs = [
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                for _ in range(4)
-            ]
-            max_exp_avg_sqs = (
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)]
-                if amsgrad
-                else []
-            )
-            state_steps = [
-                torch.ones((1,), dtype=torch.float32, device="cuda")
-                for _ in range(num_tensors)
-            ]
+        for functional_optim, amsgrad in itertools.product((adam.adam, adamw.adamw), (False, True)):
+            params, grads, exp_avgs, exp_avg_sqs = [[torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
+            state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
             grad_scale = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
                 torch.ones((1,), dtype=torch.float32, device="cuda")
             )
@@ -1630,7 +1623,7 @@ class TestOptim(TestCase):
                 torch.ones((1,), dtype=torch.float32, device="cuda")
             )
 
-            adam.adam(
+            functional_optim(
                 params,
                 grads,
                 exp_avgs,
