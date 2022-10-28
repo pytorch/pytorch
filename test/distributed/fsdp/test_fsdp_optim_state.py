@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 import torch
 from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
+    _CHECKPOINT_WRAPPED_MODULE,
     apply_activation_checkpointing,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -610,7 +610,7 @@ class TestFSDPOptimState(FSDPTest):
         self.assertEqual(optim_state_dict["state"].keys(), state_dict.keys())
         # Check that checkpointing prefix was indeed stripped.
         for key in optim_state_dict["state"]:
-            self.assertNotIn(_CHECKPOINT_PREFIX, key)
+            self.assertNotIn(_CHECKPOINT_WRAPPED_MODULE, key)
 
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_nested_invalid(self):
