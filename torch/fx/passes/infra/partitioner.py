@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable, Optional
+from typing import Dict, List, Set, Iterable, Sequence, Optional
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
@@ -35,11 +35,19 @@ class CapabilityBasedPartitioner:
     def __init__(self,
                  graph_module: GraphModule,
                  operator_support: OperatorSupportBase,
-                 allows_single_node_partition: bool = False
+                 allows_single_node_partition: bool = False,
+                 non_compute_ops: Optional[Sequence[str]] = None,
+                 allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
                  ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
+        self.non_compute_ops = non_compute_ops if non_compute_ops is not None else []
+        self.allowed_single_node_partition_ops = (
+            allowed_single_node_partition_ops
+            if allowed_single_node_partition_ops is not None
+            else []
+        )
 
     def __is_node_supported(self, node: Node) -> bool:
         return (
@@ -169,13 +177,17 @@ class CapabilityBasedPartitioner:
         # filter out single node partitions
         if not self.allows_single_node_partition:
             logger.debug("Filtering out single node partitions...")
-            non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
+            default_non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
+            non_compute_ops = default_non_compute_ops.union(set(self.non_compute_ops))
             partitions_to_remove: List[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
                     if node.op == "call_function" and \
                        _get_qualified_name(node.target) not in non_compute_ops:  # type: ignore[arg-type]
+                        compute_node_count += 1
+                    if node.op == "call_function" and \
+                       _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
                         compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)
