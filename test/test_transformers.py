@@ -1021,12 +1021,12 @@ class TestTransformers(NNTestCase):
         def make_tensor(*size, device=device, dtype=dtype):
             return torch.randn(size, device=device, dtype=dtype)
 
-        with sdp_kernel(enable_flash=False, enable_math=False):
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
             q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional._scaled_dot_product_attention(q, k, v))
 
-        with sdp_kernel(enable_flash=True, enable_math=False):
+        with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
             # Failures for invalid input
 
             # Dim is not 4
@@ -1035,14 +1035,19 @@ class TestTransformers(NNTestCase):
                 q, k, v, None, 0.0, False, False))
 
             # Xformers can now cover this case but will add back in next PR
-            # # Invalid last_dim size
-            # q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
-            # self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
-            #     q, k, v, None, 0.0, False, False))
+            # Invalid last_dim size
+            q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
 
             # Invalid dtype
             q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float64), make_tensor(
                 2, 2, 3, 16, dtype=torch.float64), make_tensor(2, 2, 3, 16, dtype=torch.float64)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float32), make_tensor(
+                2, 2, 3, 16, dtype=torch.float32), make_tensor(2, 2, 3, 16, dtype=torch.float32)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
