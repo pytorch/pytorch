@@ -326,6 +326,7 @@ class OutputGraph(fx.Tracer):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
@@ -434,10 +435,6 @@ class OutputGraph(fx.Tracer):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            log.warning("-" * 40 + "\n")
-            log.warning("TORCHDYNAMO: backend compiler failed\n")
-            log.warning(e, exc_info=True)
-            log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
             raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
