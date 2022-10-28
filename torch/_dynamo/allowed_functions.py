@@ -18,6 +18,24 @@ from torch.fx._symbolic_trace import is_fx_tracing
 from . import config
 from .utils import is_safe_constant
 
+"""
+A note on allowed functions:
+
+Dynamo consults this file to determine if a particular function/module
+is allowed to appear as a node in its fx output.
+
+If a function is disallowed, it may either be traced-through, or skipped.
+
+Trace-through means dynamo will continue to trace the interior code for
+the function/module rather than stopping at its boundary and recording it
+as a node in the fx graph. Whether tracing through or allowing, the functionality
+of the function/module is part of the dynamo graph.  Caveat: if tracing through,
+any interior operation could trigger its own graph-break.
+
+Skips are determined by (torch/_dynamo/skipfiles.py) - see "a note on
+skipfiles" there.
+"""
+
 
 def make_function_id_set(lazy_initializer):
     """
@@ -82,7 +100,6 @@ def _disallowed_function_ids():
         torch.cuda.amp.autocast_mode.autocast,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
-        torch.get_rng_state,
         torch.inference_mode,
         torch.set_anomaly_enabled,
         torch.set_autocast_cache_enabled,
@@ -90,7 +107,6 @@ def _disallowed_function_ids():
         torch.set_autocast_cpu_enabled,
         torch.set_autocast_enabled,
         torch.set_autocast_gpu_dtype,
-        torch.set_rng_state,
         torch.autograd.profiler.profile,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
@@ -132,6 +148,7 @@ def _allowed_function_ids():
             "torch._inductor.",
             "torch._C.inductor.",
             "torch.fx.",
+            "torch.distributed.fsdp.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)

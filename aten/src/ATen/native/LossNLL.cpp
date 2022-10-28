@@ -1,12 +1,31 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/SmallBuffer.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/cross_entropy_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/log_softmax.h>
+#include <ATen/ops/nll_loss.h>
+#include <ATen/ops/nll_loss2d.h>
+#include <ATen/ops/nll_loss_backward_native.h>
+#include <ATen/ops/nll_loss_forward.h>
+#include <ATen/ops/nll_loss_forward_native.h>
+#include <ATen/ops/nll_loss_native.h>
+#include <ATen/ops/nll_loss_nd.h>
+#include <ATen/ops/nll_loss_nd_native.h>
+#endif
 
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
@@ -624,6 +643,15 @@ Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::opt
 }
 
 Tensor nll_loss_symint(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, c10::SymInt ignore_index) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, ignore_index));
+}
+
+// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
+Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;

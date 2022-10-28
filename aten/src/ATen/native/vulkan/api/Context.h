@@ -2,6 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Common.h>
