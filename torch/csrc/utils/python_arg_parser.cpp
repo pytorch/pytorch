@@ -931,6 +931,7 @@ static inline std::vector<int64_t> parse_intlist_args(
 
   // case 1. s is an int (e.g., s=2)
   if (s[0] != '{') {
+    TORCH_CHECK(size > 0, "Incorrect size of IntArrayRef: ", size);
     return std::vector<int64_t>(size, std::stol(s));
   }
 
