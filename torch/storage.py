@@ -646,9 +646,7 @@ class TypedStorage:
         return self._storage.device
 
     def size(self):
-        # NB: don't indirect through __len__, as that requires
-        # an int to be returned
-        return self.nbytes() // self.element_size()
+        return len(self)
 
     def pickle_storage_type(self):
         try:
