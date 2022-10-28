@@ -774,7 +774,9 @@ class CommonTemplate:
         # Mismatched elements: 1 / 256 (0.4%)
         # Greatest absolute difference: 2.002716064453125e-05 at index (36,) (up to 1e-05 allowed)
         # Greatest relative difference: 4.907013266928203e-06 at index (36,) (up to 1.3e-06 allowed)
-        self.common(fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=5e-5, rtol=1e-5)
+        self.common(
+            fn, (torch.randn(2, 197, 256), torch.randn(2, 1, 256)), atol=5e-5, rtol=1e-5
+        )
 
     def test_min_max_reduction(self):
         def fn(a, b):
