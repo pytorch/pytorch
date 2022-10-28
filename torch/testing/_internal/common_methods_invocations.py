@@ -8607,7 +8607,7 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
                         # https://github.com/pytorch/pytorch/issues/70904
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+                        DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                     )),
     OpInfo('combinations',
            op=torch.combinations,
