@@ -71,25 +71,26 @@ void initCudartBindings(PyObject* module) {
       "cuda"
       "HostRegister",
       [](uintptr_t ptr, size_t size, unsigned int flags) -> cudaError_t {
-        return cudaHostRegister((void*)ptr, size, flags);
+        return C10_CUDA_ERROR_HANDLED(
+            cudaHostRegister((void*)ptr, size, flags));
       });
   cudart.def(
       "cuda"
       "HostUnregister",
       [](uintptr_t ptr) -> cudaError_t {
-        return cudaHostUnregister((void*)ptr);
+        return C10_CUDA_ERROR_HANDLED(cudaHostUnregister((void*)ptr));
       });
   cudart.def(
       "cuda"
       "StreamCreate",
       [](uintptr_t ptr) -> cudaError_t {
-        return cudaStreamCreate((cudaStream_t*)ptr);
+        return C10_CUDA_ERROR_HANDLED(cudaStreamCreate((cudaStream_t*)ptr));
       });
   cudart.def(
       "cuda"
       "StreamDestroy",
       [](uintptr_t ptr) -> cudaError_t {
-        return cudaStreamDestroy((cudaStream_t)ptr);
+        return C10_CUDA_ERROR_HANDLED(cudaStreamDestroy((cudaStream_t)ptr));
       });
 #if !defined(USE_ROCM)
   cudart.def(
@@ -104,7 +105,7 @@ void initCudartBindings(PyObject* module) {
         c10::cuda::CUDAGuard guard(device);
         size_t device_free = 0;
         size_t device_total = 0;
-        cudaMemGetInfo(&device_free, &device_total);
+        C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
         return {device_free, device_total};
       });
 }
