@@ -70,7 +70,7 @@ def _graph_op(
     args = [_const_if_tensor(g, arg) for arg in raw_args]
 
     if "::" in opname:
-        namespace, op = jit_utils._parse_node_kind(opname)
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname
@@ -124,7 +124,7 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
 @_beartype.beartype
 def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
     if "::" in opname:
-        namespace, op = jit_utils._parse_node_kind(opname)
+        namespace, op = jit_utils.parse_node_kind(opname)
     else:
         namespace = "onnx"
         op = opname

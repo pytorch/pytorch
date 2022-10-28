@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch.nn
 from torch import fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
@@ -104,6 +105,8 @@ class OutputGraph(fx.Tracer):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map = {}
+        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
+        self.tensor_id_to_sym_shape_ref = {}
 
     @property
     def output(self):
@@ -394,8 +397,10 @@ class OutputGraph(fx.Tracer):
         gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
+
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
+
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
@@ -403,7 +408,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    torchdynamo_logging.CODE,
+                    logging.CODE,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
@@ -434,8 +439,7 @@ class OutputGraph(fx.Tracer):
             log.warning(e, exc_info=True)
             log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
-            if config.raise_on_backend_error:
-                raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):

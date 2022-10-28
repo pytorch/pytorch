@@ -149,6 +149,9 @@ export DNNL_MAX_CPU_ISA=AVX2
 
 # Should still run even in the absence of SHARD_NUMBER
 if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
+  # TODO(sdym@meta.com) remove this when the linked issue resolved.
+  # py is temporary until https://github.com/Teemu/pytest-sugar/issues/241 is fixed
+  pip install --user py==1.11.0
   pip install --user pytest-sugar
   # NB: Warnings are disabled because they make it harder to see what
   # the actual erroring test is

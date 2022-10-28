@@ -17,7 +17,7 @@ if fake_tensors_available:
         DataDependentOutputException,
         DynamicOutputShapeException,
     )
-    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor
+    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
 import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
@@ -45,7 +45,7 @@ class _missing:
     pass
 
 
-def _run_node(node, args, kwargs, nnmodule):
+def _run_node(output_graph, node, args, kwargs, nnmodule):
     op = node.op
     if op == "call_function":
         return node.target(*args, **kwargs)
@@ -54,6 +54,8 @@ def _run_node(node, args, kwargs, nnmodule):
     elif op == "call_module":
         assert nnmodule is not None
         return nnmodule(*args, **kwargs)
+    elif op == "get_attr":
+        return output_graph.get_submodule(node.target)
     raise AssertionError(op)
 
 
@@ -84,7 +86,7 @@ def _get_real_value(node, output_graph):
         nn_module = None
 
     try:
-        real_value = _run_node(node, args, kwargs, nn_module)
+        real_value = _run_node(output_graph, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
         raise TorchRuntimeError() from e
@@ -96,7 +98,7 @@ def _get_fake_value(node, tx):
     Run the computation represented by `node` using fake tensors and return the result.
     """
     op = node.op
-    fake_wrapper = functools.partial(wrap_to_fake_tensor, fake_mode=tx.fake_mode)
+    fake_wrapper = functools.partial(wrap_to_fake_tensor_and_record, tx=tx)
     from ..utils import wrap_fake_exception
 
     def visit(n: torch.fx.Node):
@@ -126,7 +128,9 @@ def _get_fake_value(node, tx):
         nnmodule(*args, **kwargs)
     try:
         with context():
-            return wrap_fake_exception(lambda: _run_node(node, args, kwargs, nnmodule))
+            return wrap_fake_exception(
+                lambda: _run_node(tx.output, node, args, kwargs, nnmodule)
+            )
     except Unsupported:
         raise
     except RuntimeError as e:
@@ -202,13 +206,17 @@ class TensorVariable(VariableTracker):
                 proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
                 if use_fake_tensors:
                     fake_wrapper = functools.partial(
-                        wrap_to_fake_tensor, fake_mode=tx.fake_mode
+                        wrap_to_fake_tensor_and_record, tx=tx
                     )
                     example_value = fake_wrapper(example_value)
 
         if isinstance(example_value, torch.Tensor):
             is_parameter = isinstance(example_value, torch.nn.Parameter)
-            parameter_value = initial_example_value if is_parameter else None
+            should_specialize = options.pop("should_specialize", False)
+            if is_parameter or should_specialize:
+                specialized_value = initial_example_value
+            else:
+                specialized_value = None
 
             example_value = _clone_input(example_value)
             proxy.node.meta["example_value"] = example_value
@@ -218,7 +226,7 @@ class TensorVariable(VariableTracker):
                     torch.nn.Parameter if is_parameter else torch.Tensor
                 )
 
-            specialized_props["parameter_value"] = parameter_value
+            specialized_props["specialized_value"] = specialized_value
 
             options.update(specialized_props)
             return cls(proxy, **options)
@@ -233,14 +241,14 @@ class TensorVariable(VariableTracker):
             return TorchVariable(proxy.node.target)
         elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and config.dynamic_shapes:
             proxy.node.meta["example_value"] = example_value
             sizes = []
             for i, v in enumerate(example_value):
                 proxy_i = proxy[i]
                 proxy_i.node.meta["example_value"] = v
-                sizes.append(DynamicShapeVariable(proxy_i, int))
+                sizes.append(DynamicShapeVariable(proxy_i, v))
             return SizeVariable(sizes, proxy, **options)
         elif istype(example_value, int) and proxy.node.target in (
             torch.seed,
@@ -250,7 +258,7 @@ class TensorVariable(VariableTracker):
             getattr(torch.distributed, "get_world_size", _missing),
         ):
             proxy.node.meta["example_value"] = example_value
-            return DynamicShapeVariable(proxy, type(example_value), **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         elif istype(example_value, torch.Size) and all(
             [isinstance(x, int) for x in example_value]
         ):
@@ -324,11 +332,14 @@ class TensorVariable(VariableTracker):
                 )
         elif (
             proxy.node.target == torch._C._DisableFuncTorch
-            or proxy.node.target == torch._C._cuda_isInBadFork
+            or proxy.node.target == torch.cuda._is_in_bad_fork
         ):
             from . import UserDefinedObjectVariable
 
             return UserDefinedObjectVariable(example_value)
+        elif isinstance(example_value, torch.SymInt):
+            proxy.node.meta["example_value"] = example_value
+            return cls(proxy, **options)
         else:
             raise AssertionError(
                 "torch.* op returned non-Tensor "
@@ -348,7 +359,7 @@ class TensorVariable(VariableTracker):
         is_contiguous=None,
         is_sparse=None,
         class_type=torch.Tensor,
-        parameter_value=None,
+        specialized_value=None,
         **kwargs,
     ):
         super(TensorVariable, self).__init__(**kwargs)
@@ -363,7 +374,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
-        self.parameter_value = parameter_value
+        self.specialized_value = specialized_value
 
     def as_proxy(self):
         return self.proxy
@@ -466,7 +477,6 @@ class TensorVariable(VariableTracker):
         kwargs = dict(kwargs)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
@@ -570,12 +580,12 @@ class DynamicShapeVariable(TensorVariable):
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
 
-    def __init__(self, proxy, dyn_shape_cls, **kwargs):
+    def __init__(self, proxy, dyn_shape, **kwargs):
         super(DynamicShapeVariable, self).__init__(proxy, **kwargs)
-        self.dyn_shape_cls = dyn_shape_cls
+        self.dyn_shape = dyn_shape
 
     def python_type(self):
-        return self.dyn_shape_cls
+        return type(self.dyn_shape)
 
     def unpack_var_sequence(self, tx):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)

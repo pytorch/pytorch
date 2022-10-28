@@ -147,13 +147,17 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #else
   if (k.size() > 0) {
 #endif
-    TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
-               "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
-               "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
-               "  dispatch key: ", toString(dispatch_key), "\n",
-               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : (sym_cpp_signature_.has_value() ? sym_cpp_signature_->debug : "no debug info")), "\n",
-               "       new kernel: ", debug
-    );
+    // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
+    // for some ops
+    if (dispatch_key != DispatchKey::Meta) {
+      TORCH_WARN("Overriding a previously registered kernel for the same operator and the same dispatch key\n",
+            "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+            "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
+            "  dispatch key: ", toString(dispatch_key), "\n",
+            "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : (sym_cpp_signature_.has_value() ? sym_cpp_signature_->debug : "no debug info")), "\n",
+            "       new kernel: ", debug
+      );
+    }
   }
 
 #ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
@@ -495,6 +499,22 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
   );
 };
 
+std::string post_process_dispatch_key_str(std::string dispatch_key) {
+  const std::string substr = "PrivateUse1";
+  if (substr.size() <= dispatch_key.size() && std::equal(substr.rbegin(), substr.rend(), dispatch_key.rbegin())) {
+    auto privateuse1_backend = get_privateuse1_backend();
+    if (privateuse1_backend != "privateuseone") {
+      // remove trailing "*PrivateUse1"
+      dispatch_key.erase(dispatch_key.length() - substr.length());
+      // append the registered backend's name.
+      // AutogradPrivateUse1 -> AutogradFoo
+      auto backend_name = c10::get_privateuse1_backend();
+      dispatch_key = dispatch_key + backend_name;
+    }
+  }
+  return dispatch_key;
+}
+
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
   checkInvariants();
@@ -509,7 +529,7 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   }
 
   TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run '", name_, "' with arguments",
-          " from the '", toString(dispatchKey), "' backend. This could be because "
+          " from the '", post_process_dispatch_key_str(toString(dispatchKey)), "' backend. This could be because "
           "the operator doesn't exist for this backend, or was omitted during ",
           "the selective/custom build process (if using custom build). If you are a ",
           "Facebook employee using PyTorch on mobile, please visit ",
