@@ -195,10 +195,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // SwitchToDevice()
   void FinishDeviceComputation() override {
     CUDA_ENFORCE(cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_)));
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-      CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
-    }
   }
 
   inline int device_id() const {
@@ -309,11 +305,13 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, StreamId stream_id) {
-    auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
-    auto status = cudaStreamQuery(stream);
+    const auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
+    const auto status = C10_CUDA_ERROR_HANDLED(cudaStreamQuery(stream));
     if (status == cudaErrorNotReady) {
       // ignore and clear the error if not ready
-      (void)cudaGetLastError();
+      C10_CUDA_CLEAR_ERROR();
+    } else {
+      C10_CUDA_CHECK(status); // Reraise error
     }
     return status == cudaSuccess;
   }
