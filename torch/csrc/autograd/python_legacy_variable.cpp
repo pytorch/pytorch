@@ -77,8 +77,11 @@ static PyObject* THPVariable_pynew(
   } else if (THPVariable_Check(data)) {
     var = THPVariable_Unpack(data).detach();
   } else {
-    throw torch::TypeError(
-        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
+    C10_THROW_ERROR(
+        TypeError,
+        c10::str(
+            "Variable data has to be a tensor, but got ",
+            Py_TYPE(data)->tp_name));
   }
   // We set `tensor`'s `allow_tensor_metadata_change` to true here, because we
   // want to allow the following use case for backward compatibility:

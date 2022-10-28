@@ -93,9 +93,11 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
 
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(_new_state)) {
-    throw torch::TypeError(
-        "expected a torch.ByteTensor, but got %s",
-        Py_TYPE(_new_state)->tp_name);
+    C10_THROW_ERROR(
+        TypeError,
+        c10::str(
+            "expected a torch.ByteTensor, but got ",
+            Py_TYPE(_new_state)->tp_name));
   }
   auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
