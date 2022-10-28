@@ -4,9 +4,13 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/radix_sort.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
@@ -570,6 +574,136 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
+// Note [scatter reduce optimization]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//
+// 1. initiative: optimize `scatter_reduce` on classic PyG use-case:
+//   `scatter_reduce` is extensively used on 'message passing' when
+//   aggregating info.
+//
+//   Typically, `self` will 2D tensor and `index` is a 1D extended/broadcasted
+//   tensor, which means that the aggregation is on rowwise and we can vectorize
+//   on the inner dimensions.
+//
+// 2. implementation: map `scatter_reduce` to `spmm` reduce
+//   in the shape of `[M, N]` * `[N, K]`, where:
+//
+//   M: self_dim_size
+//   nnz: index_dim_size
+//   K: index.numel() / index_dim_size;
+//
+//   step 1: convert input index to CSR format (use radix_sort to
+//     solve write addr conflicts on `self` tensor)
+//
+//   step 2: spmm reduce, parallel on M and vectorize on K
+//
+template <typename scalar_t>
+void cpu_scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
+  int64_t* index_data = index.data_ptr<int64_t>();
+  scalar_t* self_data = self.data_ptr<scalar_t>();
+  scalar_t* src_data = src.data_ptr<scalar_t>();
+
+  const int64_t M = ensure_nonempty_size(self, 0);
+  const int64_t nnz = ensure_nonempty_size(index, 0);
+  const int64_t K = index.numel() / nnz;
+
+  const int64_t index_upper_bound = M;
+
+  std::unique_ptr<int64_t []> keys(new int64_t[nnz]);
+  std::unique_ptr<int64_t []> values(new int64_t[nnz]);
+  std::unique_ptr<int64_t []> keys_tmp(new int64_t[nnz]);
+  std::unique_ptr<int64_t []> values_tmp(new int64_t[nnz]);
+  at::parallel_for(0, nnz, 1, [&](int64_t begin, int64_t end) {
+    for (const auto i : c10::irange(begin, end)) {
+      int64_t index = index_data[i];
+      TORCH_CHECK(index >= 0 && index < index_upper_bound,
+                "index ", index,
+                " is out of bounds for dimension ", 0,
+                " with size ", index_upper_bound);
+      keys[i] = index;
+      values[i] = i;
+    }
+  });
+
+  int64_t* sorted_col_index_keys = nullptr;
+  int64_t* sorted_col_index_values = nullptr;
+  std::tie(sorted_col_index_keys, sorted_col_index_values) = radix_sort_parallel(
+      keys.get(),
+      values.get(),
+      keys_tmp.get(),
+      values_tmp.get(),
+      nnz,
+      M);
+
+  int num_threads = at::get_num_threads();
+  std::vector<int64_t> num_uniq(num_threads, 0);
+  at::parallel_for(1, nnz, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    for(const auto i : c10::irange(begin, end)) {
+      if (sorted_col_index_keys[i] != sorted_col_index_keys[i - 1]) {
+        num_uniq[tid]++;
+      }
+    }
+  });
+  num_uniq[0]++;
+  for (const auto n : c10::irange(1, num_threads)) {
+    num_uniq[n] += num_uniq[n - 1];
+  }
+
+  // in case some rows are not written into, num_nonzero_rows will be smaller than M
+  int64_t num_nonzero_rows = num_uniq[num_threads - 1];
+  std::unique_ptr<int64_t []> row_index_tmp(new int64_t[num_nonzero_rows]);
+  std::unique_ptr<int64_t []> row_index_offset_tmp(new int64_t[num_nonzero_rows + 1]);
+  int64_t* row_index = row_index_tmp.get();
+  int64_t* row_index_offset = row_index_offset_tmp.get();
+  row_index[0] = sorted_col_index_keys[0];
+  row_index_offset[0] = 0;
+  row_index_offset[num_nonzero_rows] = nnz;
+
+  at::parallel_for(1, nnz, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    int64_t* t_index = row_index + ((tid == 0) ? 1 : num_uniq[tid - 1]);
+    int64_t* t_index_offset = row_index_offset + ((tid == 0) ? 1 : num_uniq[tid - 1]);
+    for (const auto i : c10::irange(begin, end)) {
+      if (sorted_col_index_keys[i] != sorted_col_index_keys[i - 1]) {
+        *t_index = sorted_col_index_keys[i];
+        *t_index_offset = i;
+        t_index++;
+        t_index_offset++;
+      }
+    }
+  });
+
+  // TODO: do blocking on col dimension to reduce WR bandwidth
+  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
+  at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
+    for (const auto m : c10::irange(begin, end)) {
+      int64_t row = row_index[m];
+      int64_t off_start = row_index_offset[m];
+      int64_t off_end = row_index_offset[m + 1];
+      scalar_t* self_ptr = self_data + row * K;
+      for (const auto n : c10::irange(off_start, off_end)) {
+        int64_t col = sorted_col_index_values[n];
+        scalar_t* src_ptr = src_data + col * K;
+        vec::map2<scalar_t>(
+            [](Vec x, Vec y) { return x + y; },
+            self_ptr,
+            self_ptr,
+            src_ptr,
+            K);
+      }
+    }
+  });
+}
+
+void scatter_add_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, self.scalar_type(),
+    "scatter_add_contig", [&] {
+      cpu_scatter_add_expanded_index_kernel<scalar_t>(self, index, src);
+  });
+}
+
 void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
     result, dim, index, self,
@@ -586,11 +720,43 @@ void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& inde
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
 
-void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  cpu_scatter_gather_base_kernel<>()(
-    self, dim, index, src,
-    "scatter_add_", reduce_add);
+inline bool can_use_expanded_index_path(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  if (!is_radix_sort_available()) { return false; }
 
+  // skip when having empty tensor
+  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) { return false; }
+
+  // skip when having scalar tensor
+  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) { return false; }
+
+  // using `spmm` for scatter would require sorting on index,
+  // this is only perf beneficial when the inner dimension, aka, `channels`
+  // is big enough.
+  constexpr int64_t threshold = 16;
+  if (index.numel() / index.size(0) < threshold) { return false; }
+
+  // usually the expanded index has stride on the first dimension to be 1,
+  // and strides on other dims to be 0 or 1, e.g.
+  //   shape [108365, 16]; strides [1, 0]
+  //   shape [13264, 1, 7]; strides [1, 1, 0]
+  auto index_strides = index.strides().vec();
+  bool is_index_expanded = index_strides[0] == 1;
+  for (const auto dim : c10::irange(1, index_strides.size())) {
+    if (index_strides[dim] > 1) { is_index_expanded = false; }
+  }
+
+  // index is expanded
+  return dim == 0 && is_index_expanded && src.is_contiguous() && self.is_contiguous();
+}
+
+void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  if (can_use_expanded_index_path(self, dim, index, src)) {
+    scatter_add_expanded_index(self, index, src);
+  } else {
+    cpu_scatter_gather_base_kernel<>()(
+      self, dim, index, src,
+      "scatter_add_", reduce_add);
+  }
 }
 
 void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tensor& index,
