@@ -8,6 +8,8 @@ from torch.autograd.graph import save_on_cpu
 from torch.distributed.utils import _pack_kwargs, _replace_by_prefix, _unpack_kwargs
 from torch.utils.checkpoint import checkpoint as torch_utils_checkpoint
 
+# TODO: Refactor `_CHECKPOINT_PREFIX` to include the trailing '.' like FSDP
+_CHECKPOINT_WRAPPED_MODULE = "_checkpoint_wrapped_module"
 _CHECKPOINT_PREFIX = "_checkpoint_wrapped_module"
 
 class CheckpointImpl(Enum):
