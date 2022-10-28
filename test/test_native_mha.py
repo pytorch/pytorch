@@ -1,5 +1,6 @@
 # Owner(s): ["module: nn"]
 import math
+import copy
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -116,36 +117,40 @@ class TestMHADeviceType(TestCase):
         bs = 16
         sl = 8
 
-        q = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype) * 10
+        q = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
         if use_padding:
             if pad_all:
                 for q_i in q:
-                    q_i[-1] = torch.zeros_like(q[0][-1], device=device, dtype=dtype)
+                    q_i[-1] = torch.zeros_like(q[0][-1], device=device, dtype=torch.float32)
                 mask = torch.zeros(q.shape[:-1], device=device, dtype=torch.bool)
                 for mask_i in mask:
                     mask_i[-1] = True
             else:
-                q[0][-1] = torch.zeros_like(q[0][-1], device=device, dtype=dtype)
+                q[0][-1] = torch.zeros_like(q[0][-1], device=device, dtype=torch.float32)
                 mask = torch.zeros(q.shape[:-1], device=device, dtype=torch.bool)
                 mask[0][-1] = True
         if mode == "self":
             k = q
             v = q
         elif mode == "encdec":
-            k = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype) * 10
+            k = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
             v = k
         elif mode == "generic":
-            k = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype) * 10
-            v = torch.randn(bs, sl, embed_dim, device=device, dtype=dtype) * 10
+            k = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
+            v = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
         else:
             self.fail(f"invalid mode `{mode}`!")
 
-        qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
-        proj = torch.nn.Linear(embed_dim, embed_dim, device=device, dtype=dtype)
+        qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=torch.float32)
+        native_qkv = copy.deepcopy(qkv).to(dtype=dtype)
+
+        proj = torch.nn.Linear(embed_dim, embed_dim, device=device, dtype=torch.float32)
+        native_proj = copy.deepcopy(proj).to(dtype=dtype)
 
         pt = torch.nn.MultiheadAttention(
-            embed_dim, num_heads, batch_first=True, device=device, dtype=dtype
+            embed_dim, num_heads, batch_first=True, device=device, dtype=torch.float32
         )
+
         pt.in_proj_weight = qkv.weight
         pt.in_proj_bias = qkv.bias
         pt.out_proj.weight = proj.weight
@@ -177,7 +182,7 @@ class TestMHADeviceType(TestCase):
                 )
 
         npt = NativeMHA(
-            embed_dim=embed_dim, num_heads=num_heads, qkv=qkv, proj=proj
+            embed_dim=embed_dim, num_heads=num_heads, qkv=native_qkv, proj=native_proj
         ).to(dtype)
 
         if device == "cuda":
@@ -209,8 +214,12 @@ class TestMHADeviceType(TestCase):
                 k = torch.nested.nested_tensor(torch.unbind(k), device=device, dtype=dtype)
                 v = torch.nested.nested_tensor(torch.unbind(v), device=device, dtype=dtype)
 
+        native_q = q.to(dtype=dtype)
+        native_k = k.to(dtype=dtype)
+        native_v = v.to(dtype=dtype)
+
         ynpt, weight_npt = npt(
-            q, k, v, key_padding_mask=mask if use_padding and not use_nt else None
+            native_q, native_k, native_v, key_padding_mask=mask if use_padding and not use_nt else None
         )
         if use_nt:
             ynpt = ynpt.to_padded_tensor(0)
@@ -244,7 +253,7 @@ class TestMHADeviceType(TestCase):
                         weight_npt[0][nh][-1] = torch.zeros_like(weight_npt[0][nh][-1], device=device, dtype=dtype)
 
         if dtype == torch.half:
-            torch.testing.assert_close(ypt, ynpt, atol=1e-3, rtol=1e-3)
+            torch.testing.assert_close(ypt, ynpt.to(torch.float32), atol=1e-3, rtol=1e-3)
         else:
             # High rtol seems necessary for
             # test_native_multihead_attention_cpu_float32 on Windows,
