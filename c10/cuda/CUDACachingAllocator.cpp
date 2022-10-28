@@ -389,99 +389,12 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 } // anonymous namespace
 } // namespace Native
 
-// Backend static initialization.
-#define DECLARE_BACKEND_INTERFACE(RET, FUNC, ARGS) RET FUNC ARGS;
-
-// Not called directly by clients.
-namespace Native {
-FORALL_ALLOCATOR_INTERFACE(DECLARE_BACKEND_INTERFACE)
-}
-
-// Not called directly by clients.
-namespace CudaMallocAsync {
-FORALL_ALLOCATOR_INTERFACE(DECLARE_BACKEND_INTERFACE)
-}
-
-#undef DECLARE_BACKEND_INTERFACE
-
-#define DEFINE_CHOSEN(RET, FUNC, ARGS) RET(*FUNC) ARGS = 0;
-
-namespace Chosen {
-FORALL_ALLOCATOR_INTERFACE(DEFINE_CHOSEN);
-} // namespace Chosen
-
-#define INITIALIZE_NATIVE(RET, FUNC, ARGS) Chosen::FUNC = Native::FUNC;
-
-#define INITIALIZE_CUDAMALLOCASYNC(RET, FUNC, ARGS) \
-  Chosen::FUNC = CudaMallocAsync::FUNC;
-
-struct BackendStaticInitializer {
-  AllocatorBackend backend;
-
-  // Parses env for backend at load time, duplicating some logic from
-  // CachingAllocatorConfig. CachingAllocatorConfig double-checks it later (at
-  // runtime). Defers verbose exceptions and error checks, including Cuda
-  // version checks, to CachingAllocatorConfig's runtime doublecheck. If this
-  // works, maybe we should move all of CachingAllocatorConfig here?
-  AllocatorBackend parseEnvForBackend() {
-    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-
-    if (val == NULL) {
-      return AllocatorBackend::NATIVE;
-    } else {
-      const std::string config(val);
-
-      std::regex exp("[\\s,]+");
-      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-      std::sregex_token_iterator end;
-      std::vector<std::string> options(it, end);
-
-      for (auto option : options) {
-        std::regex exp2("[:]+");
-        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-        std::sregex_token_iterator end2;
-        std::vector<std::string> kv(it2, end2);
-        if (kv.size() >= 2) {
-          if (kv[0] == "backend") {
-            if (kv[1] == "cudaMallocAsync")
-              return AllocatorBackend::CUDAMALLOCASYNC;
-            if (kv[1] == "native")
-              return AllocatorBackend::NATIVE;
-          }
-        }
-      }
-    }
-    return AllocatorBackend::NATIVE;
-  }
-
-  BackendStaticInitializer() {
-    backend = parseEnvForBackend();
-    switch (backend) {
-      case AllocatorBackend::NATIVE:
-        FORALL_ALLOCATOR_INTERFACE(INITIALIZE_NATIVE)
-        break;
-      case AllocatorBackend::CUDAMALLOCASYNC:
-        FORALL_ALLOCATOR_INTERFACE(INITIALIZE_CUDAMALLOCASYNC)
-        break;
-    }
-  }
-};
-
-#undef INITIALIZE_NATIVE
-#undef INITIALIZE_CUDAMALLOCAYSNC
-
-BackendStaticInitializer backend_static_initializer{};
-
 // Environment config parser
 // Defined here, rather than its own .cpp file,
 // because parseArgs needs to know kLargeBuffer.
 // Defined outside namespace Native because it's not Native-specific.
 class CachingAllocatorConfig {
  public:
-  static AllocatorBackend allocator_backend() {
-    return instance().m_allocator_backend;
-  }
-
   static size_t max_split_size() {
     return instance().m_max_split_size;
   }
@@ -516,7 +429,6 @@ class CachingAllocatorConfig {
     m_roundup_power2_divisions = 0;
     m_roundup_bypass_threshold = std::numeric_limits<size_t>::max();
     m_garbage_collection_threshold = 0;
-    m_allocator_backend = AllocatorBackend::NATIVE;
 
     if (env == nullptr) {
       return;
@@ -578,7 +490,6 @@ class CachingAllocatorConfig {
                 "backend:cudaMallocAsync requires CUDA runtime "
                 "11.4 or newer, but cudaDriverGetVersion returned ",
                 version);
-            m_allocator_backend = AllocatorBackend::CUDAMALLOCASYNC;
 #else
             TORCH_CHECK(
                 false,
@@ -588,7 +499,7 @@ class CachingAllocatorConfig {
 #endif
           }
           TORCH_INTERNAL_ASSERT(
-              m_allocator_backend == backend_static_initializer.backend,
+              kv[1] == get()->name(),
               "Allocator backend parsed at runtime != "
               "allocator backend parsed at load time");
         } else if (kv[0] == "garbage_collection_threshold") {
@@ -633,7 +544,6 @@ class CachingAllocatorConfig {
   std::atomic<size_t> m_roundup_power2_divisions;
   std::atomic<size_t> m_roundup_bypass_threshold;
   std::atomic<double> m_garbage_collection_threshold;
-  AllocatorBackend m_allocator_backend;
 };
 
 namespace Native {
@@ -1887,15 +1797,31 @@ class DeviceCachingAllocator {
   }
 };
 
-class NativeCachingAllocator {
+// Returns whether to force all allocations to bypass the caching allocator and
+// go straight to cudaMalloc.  This setting is useful when debugging GPU memory
+// errors, since the caching allocator foils cuda-memcheck.
+bool forceUncachedAllocator() {
+  static bool force_uncached =
+      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
+  return force_uncached;
+}
+
+static void uncached_delete(void* ptr) {
+  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+  if (C10_UNLIKELY(interp)) {
+    (*interp)->trace_gpu_memory_deallocation(reinterpret_cast<uintptr_t>(ptr));
+  }
+  C10_CUDA_CHECK(cudaFree(ptr));
+}
+
+void local_raw_delete(void* ptr);
+
+class NativeCachingAllocator : public CUDAAllocator {
  private:
   std::mutex mutex;
 
   // allocated blocks by device pointer
   ska::flat_hash_map<void*, Block*> allocated_blocks;
-
-  // lock around calls to cudaFree (to prevent deadlocks with NCCL)
-  mutable std::mutex cuda_free_mutex;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1904,10 +1830,6 @@ class NativeCachingAllocator {
 
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
-
-  std::mutex* getCudaFreeMutex() const {
-    return &cuda_free_mutex;
-  }
 
   Block* get_allocated_block(void* ptr, bool remove = false) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1922,7 +1844,7 @@ class NativeCachingAllocator {
     return block;
   }
 
-  void init(int device_count) {
+  void init(int device_count) override {
     const auto size = static_cast<int64_t>(device_allocator.size());
     if (size < device_count) {
       device_allocator.resize(device_count);
@@ -1965,7 +1887,7 @@ class NativeCachingAllocator {
     device_allocator[block->device]->free(block);
   }
 
-  void setMemoryFraction(double fraction, int device) {
+  void setMemoryFraction(double fraction, int device) override {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
@@ -1988,7 +1910,7 @@ class NativeCachingAllocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) {
+      bool alloc_trace_record_context) override {
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
     device_allocator[device]->recordHistory(
@@ -1998,18 +1920,18 @@ class NativeCachingAllocator {
         alloc_trace_record_context);
   }
 
-  void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
+  void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
     device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
   }
 
-  void emptyCache() {
+  void emptyCache() override {
     for (auto& da : device_allocator)
       da->emptyCache();
   }
 
-  void* getBaseAllocation(void* ptr, size_t* outSize) {
+  void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
       TORCH_CHECK(false, "invalid device pointer: ", ptr);
@@ -2017,7 +1939,7 @@ class NativeCachingAllocator {
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
   }
 
-  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
+  void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr.get()) {
@@ -2029,7 +1951,7 @@ class NativeCachingAllocator {
     // we have implemented reference counting based sharing mechanism to
     // guarantee tensors won't be accidentally freed by one process while
     // they are still being used in another
-    if (ptr.get_deleter() != &raw_delete)
+    if (ptr.get_deleter() != &local_raw_delete)
       return;
 
     Block* block = get_allocated_block(ptr.get());
@@ -2038,7 +1960,7 @@ class NativeCachingAllocator {
     device_allocator[block->device]->recordStream(block, stream);
   }
 
-  SnapshotInfo snapshot() {
+  SnapshotInfo snapshot() override {
     SnapshotInfo result;
     for (auto& da : device_allocator) {
       result.device_traces.emplace_back(da->trace());
@@ -2047,31 +1969,6 @@ class NativeCachingAllocator {
     }
     return result;
   }
-};
-
-NativeCachingAllocator caching_allocator;
-
-// Returns whether to force all allocations to bypass the caching allocator and
-// go straight to cudaMalloc.  This setting is useful when debugging GPU memory
-// errors, since the caching allocator foils cuda-memcheck.
-bool forceUncachedAllocator() {
-  static bool force_uncached =
-      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
-  return force_uncached;
-}
-
-static void uncached_delete(void* ptr) {
-  const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_memory_deallocation(reinterpret_cast<uintptr_t>(ptr));
-  }
-  C10_CUDA_CHECK(cudaFree(ptr));
-}
-
-// NB: I decided not to fold this into NativeCachingAllocator, because the
-// latter has a lot more methods and it wasn't altogether clear that they should
-// actually be publicly exposed
-struct CudaCachingAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
@@ -2092,217 +1989,164 @@ struct CudaCachingAllocator : public Allocator {
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
-      caching_allocator.malloc(
+      // Allocator declars allocate const!?
+      const_cast<NativeCachingAllocator*>(this)->malloc(
           &r, device, size, cuda::getCurrentCUDAStream(device));
     }
-    return {r, r, &raw_delete, Device(DeviceType::CUDA, device)};
+    return {r, r, &local_raw_delete, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
     if (forceUncachedAllocator()) {
       return &uncached_delete;
     } else {
-      return &raw_delete;
+      return &local_raw_delete;
     }
+  }
+  void cacheInfo(int dev_id, size_t* largestBlock) override {
+    device_allocator[dev_id]->cacheInfo(largestBlock);
+  }
+  void assertValidDevice(int device) {
+    const auto device_num = device_allocator.size();
+    TORCH_CHECK(
+        0 <= device && device < static_cast<int64_t>(device_num),
+        "Invalid device argument ",
+        device,
+        ": did you call init?");
+  }
+
+  DeviceStats getDeviceStats(int device) override {
+    assertValidDevice(device);
+    return device_allocator[device]->getStats();
+  }
+
+  void resetAccumulatedStats(int device) override {
+    assertValidDevice(device);
+    device_allocator[device]->resetAccumulatedStats();
+  }
+
+  void resetPeakStats(int device) override {
+    assertValidDevice(device);
+    device_allocator[device]->resetPeakStats();
+  }
+  // CUDAGraph interactions
+  void notifyCaptureBegin(
+      int device,
+      CaptureId_t graph_id,
+      MempoolId_t mempool_id) override {
+    assertValidDevice(device);
+    device_allocator[device]->notifyCaptureBegin(graph_id, mempool_id);
+  }
+
+  void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) override {
+    assertValidDevice(device);
+    device_allocator[device]->notifyCaptureAboutToEnd(graph_id);
+  }
+
+  void notifyCaptureEnded(int device, CaptureId_t graph_id) override {} // no-op
+
+  void notifyCaptureDestroy(int device, MempoolId_t mempool_id) override {
+    assertValidDevice(device);
+    device_allocator[device]->notifyCaptureDestroy(mempool_id);
+  }
+
+  void* raw_alloc(size_t nbytes) override {
+    if (nbytes == 0) {
+      return nullptr;
+    }
+    int device;
+    C10_CUDA_CHECK(cudaGetDevice(&device));
+    void* r = nullptr;
+    malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
+    return r;
+  }
+
+  void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) override {
+    if (nbytes == 0) {
+      return nullptr;
+    }
+    int device;
+    C10_CUDA_CHECK(cudaGetDevice(&device));
+    void* r = nullptr;
+    malloc(&r, device, nbytes, stream);
+    return r;
+  }
+  bool needsPoolSpecificPeerAccess() override {
+    return false;
+  }
+  void raw_delete(void* ptr) override {
+    this->free(ptr);
+  }
+
+  // In CUDA IPC, sender sends a tensor to receiver, getIpcDevPtr
+  // is called by the receiving process to map the CUDA memory from the sending
+  // process into its own address space.
+  //
+  // CUDA IPC only allows sharing a big memory block associated with a
+  // cudaIpcMemHandle_t and it can be opened only **once** per context per
+  // process. There can be multiple types of storage in the same IPC mem block,
+  // so we must cache the device ptr to construct typed storage as it comes.
+  //
+  // ipcMemHandle_to_devptr maps a cudaIpcMemHandle_t to a device pointer in the
+  // process that can be used to access the memory block in the sender process.
+  // It only saves a weak_ptr of the device pointer in the map, the shared_ptr
+  // will be used to reconstruct all storages in this CudaMalloc allocation. And
+  // it will deleted in cudaIpcCloseMemHandle when its reference count is 0.
+  //
+  std::mutex IpcMutex;
+  ska::flat_hash_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
+  std::shared_ptr<void> getIpcDevPtr(std::string handle) override {
+    std::lock_guard<std::mutex> lock(IpcMutex);
+
+    auto iter = ipcMemHandle_to_devptr.find(handle);
+    if (iter != ipcMemHandle_to_devptr.end()) {
+      auto devptr = iter->second.lock();
+      if (devptr)
+        return devptr;
+    }
+    // This ipcMemHandle hasn't been opened, or already expired, open it to
+    // enable IPC access to that mem block.
+    void* dev = nullptr;
+    auto ipc_handle =
+        reinterpret_cast<const cudaIpcMemHandle_t*>(handle.c_str());
+    C10_CUDA_CHECK(cudaIpcOpenMemHandle(
+        &dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
+    // devPtr has to be deleted in same device when created.
+    int curr_device;
+    C10_CUDA_CHECK(cudaGetDevice(&curr_device));
+    auto sp =
+        std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
+          cuda::CUDAGuard device_guard(curr_device);
+          std::lock_guard<std::mutex> deleter_lock(IpcMutex);
+          C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
+          ipcMemHandle_to_devptr.erase(handle);
+        });
+    std::weak_ptr<void> wp = sp;
+    // To eliminate an additional search, we can use insert().
+    // It doesn't overwrite when key already exists(ptr expired).
+    // But in the deleter for sp we erased the entry,
+    // this should be safe to do now.
+    ipcMemHandle_to_devptr.insert(iter, {handle, wp});
+
+    return sp;
+  }
+  std::string name() override {
+    return "native";
   }
 };
 
-CudaCachingAllocator device_allocator;
+NativeCachingAllocator allocator;
 
-Allocator* get(void) {
-  return &device_allocator;
-}
-
-void init(int device_count) {
-  caching_allocator.init(device_count);
-}
-
-void setMemoryFraction(double fraction, int device) {
-  caching_allocator.setMemoryFraction(fraction, device);
-}
-
-void recordHistory(
-    bool enabled,
-    CreateContextFn context_recorder,
-    size_t alloc_trace_max_entries,
-    bool alloc_trace_record_context) {
-  caching_allocator.recordHistory(
-      enabled,
-      std::move(context_recorder),
-      alloc_trace_max_entries,
-      alloc_trace_record_context);
+void local_raw_delete(void* ptr) {
+  allocator.free(ptr);
 }
 
 void setAllocatorSettings(const std::string& env) {
   CachingAllocatorConfig::instance().parseArgs(env.c_str());
 }
 
-void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
-  caching_allocator.attachOutOfMemoryObserver(std::move(observer));
-}
-
-void emptyCache(void) {
-  caching_allocator.emptyCache();
-}
-
-void cacheInfo(int dev_id, size_t* largestBlock) {
-  caching_allocator.device_allocator[dev_id]->cacheInfo(largestBlock);
-}
-
-void* getBaseAllocation(void* ptr, size_t* size) {
-  return caching_allocator.getBaseAllocation(ptr, size);
-}
-
-void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
-  caching_allocator.recordStream(ptr, stream);
-}
-
-std::mutex* getFreeMutex() {
-  return caching_allocator.getCudaFreeMutex();
-}
-
-static inline void assertValidDevice(int device) {
-  const auto device_num = caching_allocator.device_allocator.size();
-  TORCH_CHECK(
-      0 <= device && device < static_cast<int64_t>(device_num),
-      "Invalid device argument ",
-      device,
-      ": did you call init?");
-}
-
-DeviceStats getDeviceStats(int device) {
-  assertValidDevice(device);
-  return caching_allocator.device_allocator[device]->getStats();
-}
-
-void resetAccumulatedStats(int device) {
-  assertValidDevice(device);
-  caching_allocator.device_allocator[device]->resetAccumulatedStats();
-}
-
-void resetPeakStats(int device) {
-  assertValidDevice(device);
-  caching_allocator.device_allocator[device]->resetPeakStats();
-}
-
-SnapshotInfo snapshot() {
-  return caching_allocator.snapshot();
-}
-
-// CUDAGraph interactions
-void notifyCaptureBegin(
-    int device,
-    CaptureId_t graph_id,
-    MempoolId_t mempool_id) {
-  assertValidDevice(device);
-  caching_allocator.device_allocator[device]->notifyCaptureBegin(
-      graph_id, mempool_id);
-}
-
-void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
-  assertValidDevice(device);
-  caching_allocator.device_allocator[device]->notifyCaptureAboutToEnd(graph_id);
-}
-
-void notifyCaptureEnded(int device, CaptureId_t graph_id) {} // no-op
-
-void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
-  assertValidDevice(device);
-  caching_allocator.device_allocator[device]->notifyCaptureDestroy(mempool_id);
-}
-
-void* raw_alloc(size_t nbytes) {
-  if (nbytes == 0) {
-    return nullptr;
-  }
-  int device;
-  C10_CUDA_CHECK(cudaGetDevice(&device));
-  void* r = nullptr;
-  caching_allocator.malloc(
-      &r, device, nbytes, cuda::getCurrentCUDAStream(device));
-  return r;
-}
-
-void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
-  if (nbytes == 0) {
-    return nullptr;
-  }
-  int device;
-  C10_CUDA_CHECK(cudaGetDevice(&device));
-  void* r = nullptr;
-  caching_allocator.malloc(&r, device, nbytes, stream);
-  return r;
-}
-
-void raw_delete(void* ptr) {
-  caching_allocator.free(ptr);
-}
-
-// In CUDA IPC, sender sends a tensor to receiver, getIpcDevPtr
-// is called by the receiving process to map the CUDA memory from the sending
-// process into its own address space.
-//
-// CUDA IPC only allows sharing a big memory block associated with a
-// cudaIpcMemHandle_t and it can be opened only **once** per context per
-// process. There can be multiple types of storage in the same IPC mem block, so
-// we must cache the device ptr to construct typed storage as it comes.
-//
-// ipcMemHandle_to_devptr maps a cudaIpcMemHandle_t to a device pointer in the
-// process that can be used to access the memory block in the sender process. It
-// only saves a weak_ptr of the device pointer in the map, the shared_ptr will
-// be used to reconstruct all storages in this CudaMalloc allocation. And it
-// will deleted in cudaIpcCloseMemHandle when its reference count is 0.
-//
-namespace {
-std::mutex IpcMutex;
-ska::flat_hash_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
-} // namespace
-
-std::shared_ptr<void> getIpcDevPtr(std::string handle) {
-  std::lock_guard<std::mutex> lock(IpcMutex);
-
-  auto iter = ipcMemHandle_to_devptr.find(handle);
-  if (iter != ipcMemHandle_to_devptr.end()) {
-    auto devptr = iter->second.lock();
-    if (devptr)
-      return devptr;
-  }
-  // This ipcMemHandle hasn't been opened, or already expired, open it to
-  // enable IPC access to that mem block.
-  void* dev = nullptr;
-  auto ipc_handle = reinterpret_cast<const cudaIpcMemHandle_t*>(handle.c_str());
-  C10_CUDA_CHECK(
-      cudaIpcOpenMemHandle(&dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
-  // devPtr has to be deleted in same device when created.
-  int curr_device;
-  C10_CUDA_CHECK(cudaGetDevice(&curr_device));
-  auto sp = std::shared_ptr<void>(dev, [handle, curr_device](void* ptr) {
-    cuda::CUDAGuard device_guard(curr_device);
-    std::lock_guard<std::mutex> deleter_lock(IpcMutex);
-    C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
-    ipcMemHandle_to_devptr.erase(handle);
-  });
-  std::weak_ptr<void> wp = sp;
-  // To eliminate an additional search, we can use insert().
-  // It doesn't overwrite when key already exists(ptr expired).
-  // But in the deleter for sp we erased the entry,
-  // this should be safe to do now.
-  ipcMemHandle_to_devptr.insert(iter, {handle, wp});
-
-  return sp;
-}
-
 } // namespace Native
 
 // General caching allocator utilities
-
-// External config interface (declared in CUDACachingAllocator.h)
-// This is a useless layer of indirection with a minor
-// code-cleanliness benefit: it alleviates the need to define
-// CachingAllocatorConfig itself in CUDACachingAllocator.h.
-AllocatorBackend allocatorBackend() {
-  return CachingAllocatorConfig::allocator_backend();
-}
-
 void setAllocatorSettings(const std::string& env) {
   CachingAllocatorConfig::instance().parseArgs(env.c_str());
 }
@@ -2326,6 +2170,55 @@ inline std::string format_size(uint64_t size) {
   }
   return os.str();
 }
+
+namespace CudaMallocAsync {
+// If this is put in its own header file, it gets incorrectly renamed in HIPify.
+CUDAAllocator* allocator();
+
+} // namespace CudaMallocAsync
+
+struct BackendStaticInitializer {
+  // Parses env for backend at load time, duplicating some logic from
+  // CachingAllocatorConfig. CachingAllocatorConfig double-checks it later (at
+  // runtime). Defers verbose exceptions and error checks, including Cuda
+  // version checks, to CachingAllocatorConfig's runtime doublecheck. If this
+  // works, maybe we should move all of CachingAllocatorConfig here?
+  CUDAAllocator* parseEnvForBackend() {
+    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+    if (val != nullptr) {
+      const std::string config(val);
+
+      std::regex exp("[\\s,]+");
+      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+      std::sregex_token_iterator end;
+      std::vector<std::string> options(it, end);
+
+      for (auto option : options) {
+        std::regex exp2("[:]+");
+        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+        std::sregex_token_iterator end2;
+        std::vector<std::string> kv(it2, end2);
+        if (kv.size() >= 2) {
+          if (kv[0] == "backend") {
+            if (kv[1] == "cudaMallocAsync")
+              return CudaMallocAsync::allocator();
+            if (kv[1] == "native")
+              return &Native::allocator;
+          }
+        }
+      }
+    }
+    return &Native::allocator;
+  }
+
+  BackendStaticInitializer() {
+    auto r = parseEnvForBackend();
+    allocator.store(r);
+  }
+};
+
+std::atomic<CUDAAllocator*> allocator{};
+BackendStaticInitializer backend_static_initializer;
 
 } // namespace CUDACachingAllocator
 } // namespace cuda
