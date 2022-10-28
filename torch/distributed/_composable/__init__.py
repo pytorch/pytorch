@@ -1,2 +1,2 @@
-from .checkpoint import checkpoint
+from .checkpoint_activation import checkpoint
 from .contract import contract

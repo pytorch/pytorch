@@ -27,7 +27,7 @@ def _no_hook(module: nn.Module):
 
 class _ModuleHookCheckpointFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, module: nn.Module, output: Any, *inputs) -> Any:
+    def forward(ctx, module: nn.Module, output: Any, *inputs: Any) -> Any:
         ctx.module = module
 
         # Save non-tensor inputs in ctx, keep a placeholder None for tensors
@@ -48,9 +48,7 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(
-        ctx, output_grads: Tuple[Optional[torch.Tensor]]
-    ) -> Tuple[Optional[torch.Tensor]]:
+    def backward(ctx, output_grads: Tuple[Optional[torch.Tensor]]) -> Any:
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad() or when an "
@@ -102,16 +100,48 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
 
 @contract
 def checkpoint(module: nn.Module) -> nn.Module:
+    r"""
+    This is a composable activation checkpointing API. Unlike functional
+    activation checkpointing APIs, this one does not require changing model
+    source code. Unlike ``nn.Module`` wrapper activation checkpointing APIs,
+    this one does not modify model structure or fully-qualified names either.
+    Under the hood, it registers activation checkpointing logic as pre- and
+    post-forward hooks. Hence, this API can be easily applied to any model or
+    sub-modules in the model.
+
+    Args:
+        module (nn.Module): the target model or sub-module to apply activation
+            checkpointing.
+
+    Example::
+        >>> import torch.nn as nn
+        >>>
+        >>> class MyModel(nn.Module):
+        >>>     def __init__(self):
+        >>>         super().__init__()
+        >>>         self.l1 = nn.Linear(10, 10)
+        >>>         self.l2 = nn.Linear(10, 10)
+        >>>
+        >>>     def forward(self, x):
+        >>>         return self.l2(self.l1(x))
+        >>>
+        >>> model = MyModel()
+        >>> checkpoint(model.l1)  # apply activation checkpointing only to l1
+        >>> model(torch.zeros(2, 10)).sum().backward()
+
+    """
+
     def forward_pre_hook(module: nn.Module, inputs: Tuple[Any]) -> None:
         if checkpoint.state(module).enable_hook:
+            checkpoint.state(module).orig_grad_enabled = torch.is_grad_enabled()
             torch.set_grad_enabled(False)
 
     def forward_hook(module: nn.Module, inputs: Tuple[Any], output: Any) -> Any:
-        if not checkpoint.state(module).enable_hook:
+        if checkpoint.state(module).enable_hook:
+            torch.set_grad_enabled(checkpoint.state(module).orig_grad_enabled)
+            return _ModuleHookCheckpointFunction.apply(module, output, *inputs)
+        else:
             return output
-
-        torch.set_grad_enabled(True)
-        return _ModuleHookCheckpointFunction.apply(module, output, *inputs)
 
     # This hook does the following things:
     # 1. detach outputs from the autograd graph to discard activations
@@ -119,5 +149,7 @@ def checkpoint(module: nn.Module) -> nn.Module:
     #    activations during the backward pass.
     checkpoint.state(module).enable_hook = True
     module.register_forward_pre_hook(forward_pre_hook)
-    module.register_forward_hook(forward_hook)
+    # Use prepend to make sure we restore the original grad enabled state right
+    # after the module forward invocation.
+    module.register_forward_hook(forward_hook, prepend=True)
     return module
