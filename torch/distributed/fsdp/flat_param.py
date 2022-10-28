@@ -33,7 +33,6 @@ from ._utils import (
     p_assert,
 )
 
-
 __all__ = [
     "FlatParameter",
     "FlatParamHandle",
@@ -1507,7 +1506,8 @@ class FlatParamHandle:
                 # memory and owns the gradient storage, so it will never
                 # require gradient writeback.
                 flat_param_grad = (
-                    flat_param.grad if self.uses_sharded_strategy or not self._config.offload_params
+                    flat_param.grad
+                    if self.uses_sharded_strategy or not self._config.offload_params
                     else flat_param._cpu_grad  # type: ignore[attr-defined]
                 )
                 needs_grad_writeback = flat_param_grad is None or not _same_storage(
