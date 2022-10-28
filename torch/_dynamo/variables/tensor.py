@@ -47,16 +47,19 @@ class _missing:
 
 
 def _run_node(output_graph, node, args, kwargs, nnmodule):
-    op = node.op
-    if op == "call_function":
-        return node.target(*args, **kwargs)
-    elif op == "call_method":
-        return getattr(args[0], node.target)(*args[1:], **kwargs)
-    elif op == "call_module":
-        assert nnmodule is not None
-        return nnmodule(*args, **kwargs)
-    elif op == "get_attr":
-        return output_graph.get_submodule(node.target)
+    try:
+        op = node.op
+        if op == "call_function":
+            return node.target(*args, **kwargs)
+        elif op == "call_method":
+            return getattr(args[0], node.target)(*args[1:], **kwargs)
+        elif op == "call_module":
+            assert nnmodule is not None
+            return nnmodule(*args, **kwargs)
+        elif op == "get_attr":
+            return output_graph.get_submodule(node.target)
+    except Exception as e:
+        raise RuntimeError(f"Failed running {node}") from e
     raise AssertionError(op)
 
 
