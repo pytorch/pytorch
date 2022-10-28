@@ -145,6 +145,113 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
     else:
         return NotImplemented  # go directly to lowering
 
+import time
+def bench(f, name=None, iters=100, warmup=5, display=True):
+    for _ in range(warmup):
+        f()
+    torch.cuda.synchronize()
+    begin = time.time()
+    for i in range(iters):
+        f()
+    torch.cuda.synchronize()
+    us_per_iter = (time.time()-begin)*1e6/iters
+    if name is None:
+        res = us_per_iter
+    else:
+        res= f"{name}: {us_per_iter}us"
+    if display:
+        print(res)
+    return res
+
+import torch.nn.functional as F
+rounding_factor = 8
+
+from torch.utils._mode_utils import no_dispatch
+def should_pad_bench(a, b, op):
+    with no_dispatch():
+        a = torch.randn_like(a)
+        b = torch.randn_like(b)
+        no_pad = bench(lambda: op(a, b), display=False)
+        def round_up(x):
+            return (x + rounding_factor - 1) // rounding_factor * rounding_factor
+        a_pad = a.new_empty([round_up(i) for i in a.shape])
+        b_pad = b.new_empty([round_up(i) for i in b.shape])
+        pad = bench(lambda: op(a_pad, b_pad), display=False)
+        # print(a.shape, b.shape)
+        # print(no_pad, pad)
+        return no_pad > pad + 100
+
+def should_pad_mm(a, b):
+    if all(x % rounding_factor == 0 for x in a.shape + b.shape):
+        return False
+    flops = a.shape[0] * a.shape[1] * b.shape[1]
+    bw = a.shape[0] * a.shape[1] + b.shape[0] * b.shape[1] + a.shape[0] * b.shape[1]
+    if flops <= bw * 64 or flops <= 1e9:
+        return False
+    return True
+
+
+def should_pad_bmm(a, b):
+    if all(x % rounding_factor == 0 for x in a.shape + b.shape):
+        return False
+    flops = a.shape[0] * a.shape[1] * a.shape[2] * b.shape[2]
+    bw = a.shape[0] * a.shape[1] * a.shape[2] + b.shape[0] * b.shape[1] * b.shape[2] + a.shape[0] * a.shape[1] * b.shape[2]
+    if flops <= 1e9:
+        return False
+    return True
+
+def round_dim(x, multiple, dim):
+    offset = x.shape[dim] % multiple
+    if offset == 0:
+        return x
+    pad = x.new_zeros(*x.shape[:dim], multiple - offset, *x.shape[dim+1:])
+    return torch.cat([x, pad], dim=dim)
+
+
+@register_decomposition([aten.mm])
+def mm_decomp(a, b):
+    if not should_pad_mm(a, b):
+        return NotImplemented
+    # if not should_pad_bench(a, b, torch.mm):
+    #     return NotImplemented
+    b_offset = b.shape[1] % rounding_factor
+    a_offset = a.shape[0] % rounding_factor
+    k_offset = a.shape[1] % rounding_factor
+    if b_offset != 0:
+        b = round_dim(b, rounding_factor, 1)
+        return torch.ops.aten.mm(a, b)[:, :-(rounding_factor - b_offset)]
+    elif k_offset != 0:
+        a = round_dim(a, rounding_factor, 1)
+        b = round_dim(b, rounding_factor, 0)
+        return torch.ops.aten.mm(a, b)
+    # elif a_offset != 0:
+    #     a = round_dim(a, rounding_factor, 0)
+    #     return torch.ops.aten.mm(a, b)[:-(rounding_factor - a_offset), :]
+
+    return NotImplemented
+
+@register_decomposition([aten.bmm])
+def bmm_decomp(a, b):
+    if not should_pad_bmm(a, b):
+        return NotImplemented
+    # if not should_pad_bench(a, b, torch.bmm):
+    #     return NotImplemented
+    b_offset = b.shape[2] % rounding_factor
+    a_offset = a.shape[1] % rounding_factor
+    k_offset = a.shape[2] % rounding_factor
+    if k_offset != 0:
+        a = round_dim(a, rounding_factor, 2)
+        b = round_dim(b, rounding_factor, 1)
+        return torch.ops.aten.bmm(a, b)
+    elif b_offset != 0:
+        should_pad_bench(a, b, torch.bmm)
+        b = round_dim(b, rounding_factor, 2)
+        return torch.ops.aten.bmm(a, b)[:, :, :-(rounding_factor - b_offset)].contiguous()
+    # elif a_offset != 0:
+    #     a = round_dim(a, rounding_factor, 1)
+    #     return torch.ops.aten.bmm(a, b)[:, :-(rounding_factor - a_offset), :]
+
+    return NotImplemented
 
 @register_decomposition([aten.rsqrt])
 def rsqrt(x):
@@ -227,7 +334,7 @@ def nan_to_num(x, nan=0.0, posinf=None, neginf=None):
 
 
 @register_decomposition([aten.all.default])
-def all(input):
+def _all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
 
 
