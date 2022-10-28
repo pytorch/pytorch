@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Type
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
@@ -42,16 +42,16 @@ class DiagnosticEngine:
         >>> sarif_log = engine.sarif_log()
     """
 
-    _contexts: List[infra.DiagnosticContext]
+    contexts: List[infra.DiagnosticContext]
 
     def __init__(self) -> None:
-        self._contexts = []
+        self.contexts = []
 
     def sarif_log(self) -> sarif.SarifLog:
         return sarif.SarifLog(
             version=sarif_version.SARIF_VERSION,
             schema_uri=sarif_version.SARIF_SCHEMA_LINK,
-            runs=[context.sarif() for context in self._contexts],
+            runs=[context.sarif() for context in self.contexts],
         )
 
     def __str__(self) -> str:
@@ -66,13 +66,14 @@ class DiagnosticEngine:
 
     def clear(self) -> None:
         """Clears all diagnostic contexts."""
-        self._contexts.clear()
+        self.contexts.clear()
 
     def create_diagnostic_context(
         self,
         name: str,
         version: str,
         options: Optional[infra.DiagnosticOptions] = None,
+        diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
     ) -> infra.DiagnosticContext:
         """Creates a new diagnostic context.
 
@@ -84,6 +85,8 @@ class DiagnosticEngine:
         Returns:
             A new diagnostic context.
         """
-        context = infra.DiagnosticContext(name, version, options)
-        self._contexts.append(context)
+        context = infra.DiagnosticContext(
+            name, version, options, diagnostic_type=diagnostic_type
+        )
+        self.contexts.append(context)
         return context
