@@ -204,7 +204,7 @@ def get_quantize_node_info(
                 qparams = {
                     "_scale_": scale,
                     "_zero_point_": zero_point,
-                    "_quant_min": quant_max,
+                    "_quant_min": quant_min,
                     "_quant_max": quant_max,
                     "_dtype_": dtype
                 }
