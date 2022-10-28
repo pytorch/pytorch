@@ -2,7 +2,6 @@ import contextlib
 import functools
 import itertools
 import sys
-import warnings
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -139,15 +138,14 @@ def tree_flatten_only(ty: Type[T], pytree: PyTree):
 # structure. Like `MetaConverter`, it uses `WeakTensorRefKey` to
 # hold a weak reference for all memoized tensors.
 class FakeTensorConverter(object):
-    tensor_memo: weakref.WeakValueDictionary
+    @property
+    def tensor_memo(self):
+        return self.meta_converter.tensor_memo
+
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
 
     def __init__(self):
-        # FakeTensors store the FakeTensorMode which in turn stores a
-        # FakeTensor, so we need to hold a weak reference to the FakeTensor
-        # otherwise we would induce a circular reference
-        self.tensor_memo = weakref.WeakValueDictionary()
         self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
@@ -214,28 +212,26 @@ class FakeTensorConverter(object):
         # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
-        with no_dispatch():
-            meta_t = self.meta_converter(t, shape_env=shape_env)
-            if meta_t.device.type != "meta":
-                raise UnsupportedFakeTensorException("meta converter nyi")
-            out = FakeTensor(
-                fake_mode,
-                meta_t,
-                existing_device,
-                constant=t if make_constant else None,
-            )
-            out.requires_grad_(t.requires_grad)
-            if make_constant:
-                self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
             assert not make_constant
-            out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
-            grad_not_none = t.grad is not None
-        if grad_not_none:
-            out.grad = self.from_real_tensor(fake_mode, t.grad, shape_env=shape_env)
-        self.set_tensor_memo(t, out)
+
+        def mk_fake_tensor(make_meta_t):
+            with no_dispatch():
+                return FakeTensor(
+                    fake_mode,
+                    make_meta_t(),
+                    existing_device,
+                    constant=t if make_constant else None,
+                )
+
+        out = self.meta_converter(
+            t, shape_env=shape_env, strict=True, callback=mk_fake_tensor
+        )
+        if out is NotImplemented:
+            raise UnsupportedFakeTensorException("meta converter nyi")
+        if make_constant:
+            self.add_constant_storage_mapping(out)
+        # NB: meta_converter set the memo
         return out
 
     # If you specify the device, it MUST be a meta tensor.
@@ -648,6 +644,12 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return args[0].fake_device
 
+        # Some attribute queries that can be serviced directly
+        # See Note [is_coalesced is dispatched]
+        if func in [torch.ops.aten.is_coalesced.default]:
+            with no_dispatch():
+                return func(*args, **kwargs)
+
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
@@ -882,6 +884,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten.resize_.default,
             aten._fused_moving_avg_obs_fq_helper_functional.default,
             aten._sparse_coo_tensor_with_dims_and_tensors.default,
+            aten.set_.source_Storage_storage_offset,
         ]
 
     @property
