@@ -18,6 +18,8 @@ cond = PyOperator('cond')
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     def _unwrap_proxy(e):
+        if not isinstance(e, (torch.Tensor, torch.SymInt, torch.SymFloat)):
+            return e
         return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
 
     assert isinstance(operands, list), "Cond operands must be a list of tensors"
@@ -71,10 +73,14 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="conditional")
 
-    if pred:
-        out = true_fn(*operands)
-    else:
-        out = false_fn(*operands)
+    # At this point, we're *guaranteed* that whether an output came from the
+    # true or false branch is indistinguishable. So, as this is just for tracing
+    # purposes, choose the true branch.
+
+    # TODO: Uhh.... it shouldn't matter, but changing this to true_fn results in
+    # a FakeTensorMode error :
+    # `Current active mode <class 'torch._subclasses.fake_tensor.FakeTensorMode'> not registered`
+    out = false_fn(*operands)
 
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
