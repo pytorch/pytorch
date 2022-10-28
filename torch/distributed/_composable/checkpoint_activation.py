@@ -1,10 +1,9 @@
 import torch
 import torch.nn as nn
-from torch.utils._pytree import tree_map
 from torch.utils.checkpoint import detach_variable
 
 from contextlib import contextmanager
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from .contract import contract
 
@@ -27,7 +26,7 @@ def _no_hook(module: nn.Module):
 
 class _ModuleHookCheckpointFunction(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, module: nn.Module, output: Any, *inputs: Any) -> Any:
+    def forward(ctx, module: nn.Module, output: Any, *inputs: Any) -> Any:  # type: ignore[override]
         ctx.module = module
 
         # Save non-tensor inputs in ctx, keep a placeholder None for tensors
@@ -48,7 +47,7 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, output_grads: Tuple[Optional[torch.Tensor]]) -> Any:
+    def backward(ctx, output_grads: Tuple[Optional[torch.Tensor]]) -> Any:  # type: ignore[override]
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad() or when an "
@@ -76,12 +75,15 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
             output_grads = (output_grads,)
 
         # run backward() with only tensor that requires grad
-        outputs_requires_grad = []
-        output_grad_tensors = []
+        outputs_requires_grad: List[torch.Tensor] = []
+        output_grad_tensors: List[torch.Tensor] = []
         for i in range(len(outputs)):
             if torch.is_tensor(outputs[i]) and outputs[i].requires_grad:
                 outputs_requires_grad.append(outputs[i])
-                output_grad_tensors.append(output_grads[i])
+                assert (
+                    output_grads[i] is not None
+                ), f"expecting grad for output at index {i}, but got None."
+                output_grad_tensors.append(output_grads[i])  # type: ignore[arg-type]
         if len(outputs_requires_grad) == 0:
             raise RuntimeError(
                 "none of output has requires_grad=True,"
