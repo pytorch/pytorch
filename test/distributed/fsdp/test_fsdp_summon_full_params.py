@@ -231,7 +231,7 @@ class TestSummonFullParams(FSDPTest):
         output.register_hook(bad_backwards_hook)
 
         with self.assertRaisesRegex(
-            ValueError, "current state is TrainingState.BACKWARD_PRE"
+            ValueError, "current state is TrainingState.FORWARD_BACKWARD"
         ):
             output.backward()
 
