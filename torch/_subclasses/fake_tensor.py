@@ -656,7 +656,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
+        flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
             any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
             or len(flat_symints) > 0

@@ -223,6 +223,11 @@ class TORCH_API LazyGraphExecutor {
 
   ComputationCache::TypePtr LookupCachedCompile(const hash_t& hash);
 
+  void BuildInputOutputAliases(
+      const std::vector<LazyTensorPtr>& tensors,
+      c10::ArrayRef<size_t> indices,
+      LoweringContext* lowering_ctx);
+
   std::shared_ptr<Async> SyncTensorsGraphInternal(
       std::vector<LazyTensorPtr>* tensors,
       c10::ArrayRef<std::string> devices,

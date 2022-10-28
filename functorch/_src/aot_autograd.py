@@ -605,7 +605,7 @@ class PytreeThunk:
             return x
         return pytree.tree_unflatten(x, self.spec)
 
-KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymInt, torch.SymFloat]
+KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymIntNode, torch.SymFloatNode]
 
 
 def aot_function(
