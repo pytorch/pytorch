@@ -6,7 +6,7 @@ import sympy
 
 from torch.fx.graph import inplace_methods, magic_methods
 
-from .utils import sympy_str
+from .utils import sympy_str, sympy_symbol
 
 threadlocal = local()
 
@@ -60,17 +60,21 @@ class MockHandler:
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
-            return f"{name}({', '.join(fargs)})"
+            return self.truncate_expr(f"{name}({', '.join(fargs)})")
 
         return inner
 
     @staticmethod
-    def masked(mask, body, other):
-        return f"masked({mask}, {body()}, {other})"
+    def truncate_expr(expr):
+        return expr
+
+    @classmethod
+    def masked(cls, mask, body, other):
+        return cls.truncate_expr(f"masked({mask}, {body()}, {other})")
 
     @staticmethod
     def indirect_indexing(index_var):
-        return sympy.Symbol(str(index_var))
+        return sympy_symbol(str(index_var))
 
     @classmethod
     def _init_cls(cls):
