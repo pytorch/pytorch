@@ -126,6 +126,16 @@ inline at::ScalarType prioritize(
   return current;
 }
 
+inline at::ScalarType prioritize(
+    at::ScalarType current,
+    const ITensorListRef& list,
+    DeviceType device_type = DeviceType::CUDA) {
+  for (const auto& tensor : list) {
+    current = prioritize(current, tensor, device_type);
+  }
+  return current;
+}
+
 // Template to catch non-Tensor args (no-op that returns current best guess)
 template <typename T>
 inline at::ScalarType prioritize(
@@ -187,6 +197,18 @@ inline c10::optional<Tensor> cached_cast(
 inline std::vector<Tensor> cached_cast(
     at::ScalarType to_type,
     const TensorList& arg,
+    DeviceType device_type = DeviceType::CUDA) {
+  std::vector<Tensor> vec;
+  vec.reserve(arg.size());
+  for (const auto& t : arg) {
+    vec.push_back(cached_cast(to_type, t, device_type));
+  }
+  return vec;
+}
+
+inline std::vector<Tensor> cached_cast(
+    at::ScalarType to_type,
+    const ITensorListRef& arg,
     DeviceType device_type = DeviceType::CUDA) {
   std::vector<Tensor> vec;
   vec.reserve(arg.size());
