@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 from collections import OrderedDict
@@ -19,7 +18,7 @@ class _State:
     pass
 
 
-state_key = _StateKey()
+STATE_KEY = _StateKey()
 
 
 def contract(func):
@@ -58,14 +57,15 @@ def contract(func):
         >>> model(torch.randn(2, 10)).sum().backward()
     """
 
-    def get_all_state(module: nn.Module) -> Dict[Callable, Dict]:
-        d = module.__dict__.setdefault(state_key, {})
-        assert isinstance(d, dict), "Distributed composable API states corrupted"
-        return d
-
     def wrapper(module: nn.Module, *args, **kwargs) -> Optional[nn.Module]:
         # install states specific to the wrapped ``func``
-        all_state: Dict[Callable, dict] = get_all_state(module)
+        default_all_state: Dict[Callable, _State] = {}
+        all_state: Dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
+            STATE_KEY, default_all_state
+        )
+        assert isinstance(
+            all_state, dict
+        ), "Distributed composable API states corrupted"
         assert func not in all_state, (
             "Each distinct composable distributed API can only be applied to a "
             f"module once. {func} has already been applied to the following "
@@ -137,9 +137,9 @@ def contract(func):
 
         return updated
 
-    def get_state(module: nn.Module) -> _State:
-        return get_all_state(module).get(func)
+    def get_state(module: nn.Module) -> Optional[_State]:
+        return module.__dict__.get(STATE_KEY).get(func)  # type: ignore[call-overload]
 
-    wrapper.state = get_state
+    wrapper.state = get_state  # type: ignore[attr-defined]
 
     return wrapper
