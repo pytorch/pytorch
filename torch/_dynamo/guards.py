@@ -733,6 +733,7 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
+                ("floor", math.floor),
                 ("Eq", direct_equality),
                 ("Ne", direct_negation),
                 ("Mod", sympy.Mod),

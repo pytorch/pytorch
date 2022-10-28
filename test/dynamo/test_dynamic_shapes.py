@@ -104,11 +104,6 @@ unittest.expectedFailure(
     # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
 )
 
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_maml_item_capture_dynamic_shapes
-    # Cannot call numel() on tensor with symbolic sizes/strides
-)
-
 # DynamicShapesMiscTests
 unittest.expectedFailure(
     DynamicShapesMiscTests.test_unsupported_fake_tensor_dynamic_shapes
