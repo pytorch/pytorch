@@ -286,7 +286,12 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
-    def test_sharded_state_dict_with_manual_ac_wrapper(self, state_dict_type: str):
+    @parametrize("rank0_only_and_offload", [False, True])
+    def test_state_dict_with_manual_ac_wrapper(
+        self,
+        state_dict_type: str,
+        rank0_only_and_offload: bool,
+    ):
         """
         Tests saving and loading a state dict for a model manually wrapped with
         ``FSDP(CheckpointWrapper(module))``, where the ``CheckpointWrapper`` is
@@ -295,6 +300,8 @@ class TestFSDPStateDict(FSDPTest):
         TODO: Investigate why the test above does not cover everything in this
         test and de-duplicate afterwards.
         """
+        if state_dict_type == "sharded_state_dict" and rank0_only_and_offload:
+            return  # not supported
         model_ac = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
@@ -318,7 +325,6 @@ class TestFSDPStateDict(FSDPTest):
         model_ac.transformer = FSDP(model_ac.transformer)
 
         # Save, load, and compare the two models
-        rank0_only_and_offload = False
         with self._get_state_dict_mgr(
             model_no_ac, state_dict_type, rank0_only_and_offload
         ):
@@ -326,8 +332,11 @@ class TestFSDPStateDict(FSDPTest):
         with self._get_state_dict_mgr(
             model_ac, state_dict_type, rank0_only_and_offload
         ):
-            state_dict = model_ac.state_dict()
-        self.assertEqual(state_dict.keys(), state_dict_no_ac.keys())
+            state_dict_ac = model_ac.state_dict()
+        self.assertEqual(state_dict_ac.keys(), state_dict_no_ac.keys())
+        if rank0_only_and_offload:
+            state_dict_no_ac = self._broadcast_state_dict(model_no_ac, state_dict_no_ac)
+            state_dict_ac = self._broadcast_state_dict(model_ac, state_dict_ac)
         with self._get_state_dict_mgr(
             model_no_ac, state_dict_type, rank0_only_and_offload
         ):
@@ -335,7 +344,7 @@ class TestFSDPStateDict(FSDPTest):
         with self._get_state_dict_mgr(
             model_ac, state_dict_type, rank0_only_and_offload
         ):
-            model_ac.load_state_dict(state_dict)
+            model_ac.load_state_dict(state_dict_ac)
         self._compare_models(model_ac, model_no_ac, self.assertEqual)
 
     @skip_if_lt_x_gpu(2)
