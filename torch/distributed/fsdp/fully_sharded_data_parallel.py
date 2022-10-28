@@ -48,6 +48,7 @@ from torch.distributed.fsdp._init_utils import (
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
+    _lazy_init,
     _post_forward,
     _post_forward_reshard,
     _pre_forward,
