@@ -117,7 +117,7 @@ class TestMHADeviceType(TestCase):
         bs = 16
         sl = 8
 
-        q = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
+        q = 6 * torch.rand(bs, sl, embed_dim, device=device, dtype=torch.float32) - 3
         if use_padding:
             if pad_all:
                 for q_i in q:
@@ -133,11 +133,11 @@ class TestMHADeviceType(TestCase):
             k = q
             v = q
         elif mode == "encdec":
-            k = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
+            k = 6 * torch.rand(bs, sl, embed_dim, device=device, dtype=torch.float32) - 3
             v = k
         elif mode == "generic":
-            k = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
-            v = torch.randn(bs, sl, embed_dim, device=device, dtype=torch.float32) * 10
+            k = 6 * torch.rand(bs, sl, embed_dim, device=device, dtype=torch.float32) - 3
+            v = 6 * torch.rand(bs, sl, embed_dim, device=device, dtype=torch.float32) - 3
         else:
             self.fail(f"invalid mode `{mode}`!")
 
@@ -261,35 +261,9 @@ class TestMHADeviceType(TestCase):
             torch.testing.assert_close(ypt, ynpt, atol=2e-5, rtol=2e-3)
 
         if need_weights:
-            torch.testing.assert_close(weight_pt, weight_npt)
+            torch.testing.assert_close(weight_pt, weight_npt.to(torch.float32), atol=5e-4, rtol=5e-4)
         else:
             self.assertEqual(weight_pt, weight_npt)
-
-    # @dtypesIfCUDA(torch.float, torch.half)
-    # @dtypes(torch.float)
-    # @skipMeta
-    # @torch.no_grad()
-    # def test_native_multihead_self_attention(self, device, dtype):
-    #     for (use_padding, pad_all) in ((False, False), (True, False), (True, True)):
-    #         for use_nt in (False, True):
-    #             # Figuring out exactly which elements of the weights are garbage in this
-    #             # case eludes me, and it's not particularly enlightening to test anyway
-    #             # because padding doesn't especially affect the intermediate weights.
-    #             for need_weights in (False, not pad_all):
-    #                 for average_attn_weights in (False, True):
-    #                     with self.subTest(use_padding=use_padding, pad_all=pad_all,
-    #                                       use_nt=use_nt, need_weights=need_weights,
-    #                                       average_attn_weights=average_attn_weights):
-    #                         self._test_multihead_attention_impl(
-    #                             device,
-    #                             dtype,
-    #                             "self",
-    #                             use_nt=use_nt,
-    #                             use_padding=use_padding,
-    #                             pad_all=pad_all,
-    #                             need_weights=need_weights,
-    #                             average_attn_weights=average_attn_weights,
-    #                         )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
@@ -298,23 +272,29 @@ class TestMHADeviceType(TestCase):
     @parametrize("use_padding, pad_all", [(False, False), (True, False), (True, True)])
     @parametrize("need_weights", [False])
     @parametrize("average_attn_weights", [False, True])
+    @parametrize("fused", [False, True])
     @torch.no_grad()
-    def test_native_multihead_self_attention(self, device, dtype, use_nt, need_weights, average_attn_weights, use_padding=False, pad_all=False
-                                             ):
+    def test_native_multihead_self_attention(self, device, dtype, use_nt,
+                                             need_weights, average_attn_weights, use_padding, pad_all, fused):
         for need_weights in (False, not pad_all):
             with self.subTest(use_padding=use_padding, pad_all=pad_all,
                               use_nt=use_nt, need_weights=need_weights,
                               average_attn_weights=average_attn_weights):
-                self._test_multihead_attention_impl(
-                    device,
-                    dtype,
-                    "self",
-                    use_nt=use_nt,
-                    use_padding=use_padding,
-                    pad_all=pad_all,
-                    need_weights=need_weights,
-                    average_attn_weights=average_attn_weights,
-                )
+                with torch.backends.cuda.sdp_kernel(
+                        enable_flash=False, enable_mem_efficient=False
+                ) if not fused else torch.backends.cuda.sdp_kernel(
+                        enable_flash=True, enable_mem_efficient=True
+                ):
+                    self._test_multihead_attention_impl(
+                        device,
+                        dtype,
+                        "self",
+                        use_nt=use_nt,
+                        use_padding=use_padding,
+                        pad_all=pad_all,
+                        need_weights=need_weights,
+                        average_attn_weights=average_attn_weights,
+                    )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)

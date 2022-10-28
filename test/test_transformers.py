@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     slowTest
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
@@ -1013,46 +1013,77 @@ class TestTransformers(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA or TEST_WITH_ROCM or IS_WINDOWS, "Flash Attention was not built for this system")
     @parametrize("type", ["dense", "nested"])
-    def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, type: str):
+    @parametrize("fused_kernel", ["flash", "mem_efficient"])
+    def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, type: str, fused_kernel: str):
+        if (not SM80OrLater) and fused_kernel == "flash":
+            return
+
         def rand_nt(shape):
             batch, seq_len, num_heads, head_dim = shape
-            return torch.nested.nested_tensor([torch.randn(seq_len, 3 * num_heads * head_dim,
-                                                           device="cuda", dtype=torch.float16)*10 for _ in range(batch)])
+            tensors = [6 * torch.rand((seq_len, 3 * num_heads * head_dim), device="cuda", dtype=torch.float32) - 3
+                       for _ in range(batch)]
+            return (torch.nested.nested_tensor(tensors, device="cuda", dtype=torch.float32),
+                    torch.nested.nested_tensor(tensors, device="cuda", dtype=torch.float16))
+
         def rand_tensor(shape):
             batch, seq_len, num_heads, head_dim = shape
-            return torch.randn(batch, seq_len, 3 * num_heads * head_dim, device="cuda", dtype=torch.float16) * 10
+            tensor = 6 * torch.rand((batch, seq_len, 3 * num_heads * head_dim), device="cuda", dtype=torch.float32) - 3
+            return tensor, tensor.to(dtype=torch.float16)
 
         batch_size, seq_len, num_heads, head_dim = 16, 8, 4, 64
         shape = (batch_size, seq_len, num_heads, head_dim)
 
         # Test Packed
-        qkv = rand_tensor(shape) if type == "dense" else rand_nt(shape)
+        qkv, qkv_low_precision = rand_tensor(shape) if type == "dense" else rand_nt(shape)
         query, key, value = qkv.chunk(3, dim=-1)
+        query_lp, key_lp, value_lp = qkv_low_precision.chunk(3, dim=-1)
 
         query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        with sdp_kernel(enable_math=False):
-            actual = torch.nn.functional._scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+        query_lp = query_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key_lp = key_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value_lp = value_lp.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        with sdp_kernel(enable_flash=False):
-            math_query = query.contiguous().to(dtype=torch.float32)
-            math_key = key.contiguous().to(dtype=torch.float32)
-            math_value = value.contiguous().to(dtype=torch.float32)
+        if fused_kernel == "flash":
+            with sdp_kernel(enable_mem_efficient=False, enable_math=False):
+                actual = torch.nn.functional._scaled_dot_product_attention(
+                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+        elif fused_kernel == "mem_efficient":
+            with sdp_kernel(enable_flash=False, enable_math=False):
+                actual = torch.nn.functional._scaled_dot_product_attention(
+                    query_lp, key_lp, value_lp, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
 
-            math_ref = torch.nn.functional._scaled_dot_product_attention(math_query, math_key, math_value,
+        with sdp_kernel(enable_flash=False, enable_mem_efficient=False):
+            math_ref_lp = torch.nn.functional._scaled_dot_product_attention(
+                query_lp.contiguous(), key_lp.contiguous(), value_lp.contiguous(),
                 attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        with sdp_kernel(enable_flash=False, enable_mem_efficient=False):
+            math_query = query.contiguous()
+            math_key = key.contiguous()
+            math_value = value.contiguous()
+
+            math_ref = torch.nn.functional._scaled_dot_product_attention(
+                math_query, math_key, math_value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
 
         actual_test = actual[0]
         math_ref_test = math_ref[0]
+        math_ref_lp_test = math_ref_lp[0]
 
         if actual_test.is_nested:
             actual_test = torch.nested.to_padded_tensor(actual_test.contiguous(), padding=0.0)
             math_ref_test = torch.nested.to_padded_tensor(math_ref_test, padding=0.0)
+            math_ref_lp_test = torch.nested.to_padded_tensor(math_ref_lp_test, padding=0.0)
 
-        self.assertEqual(actual_test.to(dtype=torch.float32).contiguous(),math_ref_test.contiguous(), atol=5e-3, rtol=5e-3)
+        actual_test = actual_test.to(dtype=torch.float32).contiguous()
+        math_ref_test = math_ref_test.to(dtype=torch.float32).contiguous()
+        math_ref_lp_test = math_ref_lp_test.to(dtype=torch.float32).contiguous()
+
+        self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
+        self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
+
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sdp_runtime_dispatch(self):

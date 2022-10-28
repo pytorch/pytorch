@@ -724,7 +724,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     auto attn_mask = attn_mask_;
     // Naive, composite implementation defined here.
     const auto embed_size = query_.size(-1);
-    const auto query = query_ / ::sqrt(static_cast<double>(embed_size));
+
+    // Scale q,k before matmul for stability see https://tinyurl.com/sudb9s96 for math
+    const double scaling_factor = ::sqrt(::sqrt(static_cast<double>(embed_size)));
+    const auto query = query_ / scaling_factor;
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
@@ -747,7 +750,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         }
         // Otherwise, attn_mask represents an additive attention tensor
     }
-    auto attn = at::matmul(query, key.transpose(-2, -1));
+    auto attn = at::matmul(query, key.transpose(-2, -1)/scaling_factor);
     if (attn_mask.has_value()) {
         attn.add_(*attn_mask);
     }
