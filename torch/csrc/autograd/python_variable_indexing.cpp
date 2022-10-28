@@ -86,16 +86,6 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   return count;
 }
 
-[[noreturn]] static inline void invalid_index(PyObject* obj) {
-  C10_THROW_ERROR(
-      IndexError,
-      c10::str(
-          "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
-          "Variables are valid indices (got ",
-          Py_TYPE(obj)->tp_name,
-          ")"));
-}
-
 static inline Variable sequenceToVariable(
     c10::TensorOptions options,
     PyObject* seq) {
@@ -252,7 +242,13 @@ static inline Variable applySlicing(
             auto idx = THPObjectPtr(PyNumber_Index(obj));
             if (!idx) {
               PyErr_Clear();
-              invalid_index(obj);
+              C10_THROW_ERROR(
+                  IndexError,
+                  c10::str(
+                      "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
+                      "Variables are valid indices (got ",
+                      Py_TYPE(obj)->tp_name,
+                      ")"));
             }
             if (is_tracing && THPVariable_Check(idx)) {
               recordSelectTrace(THPVariable_Unpack(idx));
