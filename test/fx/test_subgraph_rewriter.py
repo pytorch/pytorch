@@ -773,7 +773,7 @@ class TestSubgraphRewriter(JitTestCase):
 
         self.assertEqual(repalcement_node_found, 2)
 
-    def test_replace_pattern_with_filter(self):
+    def test_replace_pattern_with_filters(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -833,10 +833,10 @@ class TestSubgraphRewriter(JitTestCase):
 
         # match with filter, should find 1 match
         traced = symbolic_trace(M())
-        matches = subgraph_rewriter.replace_pattern_with_filter(
+        matches = subgraph_rewriter.replace_pattern_with_filters(
             traced,
             BinaryOpScalarReLUPattern,
             BinaryOpScalarReLUReplacement,
-            second_input_is_scalar)
+            [second_input_is_scalar])
         self.assertEqual(len(matches), 1)
         self.assertEqual(num_repalcement_node_found(traced), 1)
