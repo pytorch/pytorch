@@ -218,7 +218,9 @@ at::Tensor tensor_from_numpy(
   }
   TORCH_CHECK_TYPE(
       !PyArray_Check(obj),
-      "expected np.ndarray (got ", Py_TYPE(obj)->tp_name, ")");
+      "expected np.ndarray (got ",
+      Py_TYPE(obj)->tp_name,
+      ")");
   auto array = (PyArrayObject*)obj;
 
   // warn_if_not_writable is true when a copy of numpy variable is created.

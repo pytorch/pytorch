@@ -1609,7 +1609,10 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     C10_THROW_ERROR(
         TypeError,
         c10::str(
-            "expected Tensor as argument ", i, ", but got ", Py_TYPE(obj)->tp_name));
+            "expected Tensor as argument ",
+            i,
+            ", but got ",
+            Py_TYPE(obj)->tp_name));
   }
   at::AutoDispatchBelowADInplaceOrView guard; // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
