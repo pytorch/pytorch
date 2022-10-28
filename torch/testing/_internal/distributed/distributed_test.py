@@ -7696,14 +7696,14 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_with_logger(self):
             self._test_verify_model_across_rank(use_logger=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
-        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with ucc")
+        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
