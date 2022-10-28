@@ -628,26 +628,19 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
     int64_t ntensors) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
 
-  if (is_sm8x) {
-    gemm_grouped_cuda_internal<
-        float,
-        1,
-        cutlass::layout::RowMajor,
-        cutlass::layout::RowMajor,
-        cutlass::arch::OpClassSimt,
-        cutlass::arch::Sm80,
-        cutlass::gemm::GemmShape<128, 128, 8>,
-        cutlass::gemm::GemmShape<64, 32, 8>,
-        cutlass::gemm::GemmShape<1, 1, 1>>(
-        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-    return true;
-  }
-
-  // Did not perform GEMM
-  return false;
+  gemm_grouped_cuda_internal<
+      float,
+      1,
+      cutlass::layout::RowMajor,
+      cutlass::layout::RowMajor,
+      cutlass::arch::OpClassSimt,
+      cutlass::arch::Sm80,
+      cutlass::gemm::GemmShape<128, 128, 8>,
+      cutlass::gemm::GemmShape<64, 32, 8>,
+      cutlass::gemm::GemmShape<1, 1, 1>>(
+      lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+  return true;
 }
 
 template <>
@@ -661,8 +654,6 @@ bool group_gemm_dispatch(
     const std::vector<int64_t>& ldd,
     std::vector<cutlass::gemm::GemmCoord> gemm_sizes,
     int64_t ntensors) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
 
   // Check alignment
   bool all_pad_8 = true;
@@ -684,34 +675,32 @@ bool group_gemm_dispatch(
     bptr.push_back(reinterpret_cast<cutlass::half_t*>(bptr_[i]));
     dptr.push_back(reinterpret_cast<cutlass::half_t*>(dptr_[i]));
   }
-  if (is_sm8x) {
-    if (all_pad_8) {
-      gemm_grouped_cuda_internal<
-          cutlass::half_t,
-          8,
-          cutlass::layout::RowMajor,
-          cutlass::layout::RowMajor,
-          cutlass::arch::OpClassTensorOp,
-          cutlass::arch::Sm80,
-          cutlass::gemm::GemmShape<128, 128, 32>,
-          cutlass::gemm::GemmShape<64, 64, 32>,
-          cutlass::gemm::GemmShape<16, 8, 16>>(
-          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-      return true;
-    } else {
-      gemm_grouped_cuda_internal<
-          cutlass::half_t,
-          1,
-          cutlass::layout::RowMajor,
-          cutlass::layout::RowMajor,
-          cutlass::arch::OpClassSimt,
-          cutlass::arch::Sm80,
-          cutlass::gemm::GemmShape<128, 128, 8>,
-          cutlass::gemm::GemmShape<64, 32, 8>,
-          cutlass::gemm::GemmShape<1, 1, 1>>(
-          lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
-      return true;
-    }
+  if (all_pad_8) {
+    gemm_grouped_cuda_internal<
+        cutlass::half_t,
+        8,
+        cutlass::layout::RowMajor,
+        cutlass::layout::RowMajor,
+        cutlass::arch::OpClassTensorOp,
+        cutlass::arch::Sm80,
+        cutlass::gemm::GemmShape<128, 128, 32>,
+        cutlass::gemm::GemmShape<64, 64, 32>,
+        cutlass::gemm::GemmShape<16, 8, 16>>(
+        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+    return true;
+  } else {
+    gemm_grouped_cuda_internal<
+        cutlass::half_t,
+        1,
+        cutlass::layout::RowMajor,
+        cutlass::layout::RowMajor,
+        cutlass::arch::OpClassSimt,
+        cutlass::arch::Sm80,
+        cutlass::gemm::GemmShape<128, 128, 8>,
+        cutlass::gemm::GemmShape<64, 32, 8>,
+        cutlass::gemm::GemmShape<1, 1, 1>>(
+        lda, ldb, ldd, aptr, bptr, dptr, gemm_sizes, ntensors, device);
+    return true;
   }
   // Did not perform GEMM
   return false;
@@ -818,7 +807,12 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           ldb.push_back(mat2_strides[i][0]);
           ldd.push_back(mat2_size1);
         }
-        if (all_row_major) {
+        auto dprops = at::cuda::getCurrentDeviceProperties();
+        bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+        if (all_row_major &&
+            self.is_contiguous() &&
+            mat2.is_contiguous() &&
+            is_sm8x) {
           success = group_gemm_dispatch<scalar_t>(
               output.device(),
               aptr,
