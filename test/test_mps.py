@@ -2174,15 +2174,15 @@ class TestNLLLoss(TestCase):
         self.assertEqual(all1s[:, 0].bincount(), torch.tensor([0, 32]))
 
         # test large number of bins - global memory use
-        big_exp = torch.zeros(10000000, device=device)
+        big_exp = torch.zeros(100, device=device)
         big_exp[-1] = 50.0
         big_w = torch.tensor([.5] * 100, device=device)
-        big_out = torch.tensor([9999999] * 100, device=device, dtype=torch.int32).bincount(big_w)
+        big_out = torch.tensor([99] * 100, device=device, dtype=torch.int32).bincount(big_w)
         self.assertEqual(big_exp, big_out)
         # test large input size
         big_exp = torch.zeros(2, device=device, dtype=torch.int64)
-        big_exp[1] = 1000000
-        big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
+        big_exp[1] = 10
+        big_out = torch.ones(10, dtype=torch.int8, device=device).bincount()
         self.assertEqual(big_exp, big_out)
 
     def test_bincount(self):
