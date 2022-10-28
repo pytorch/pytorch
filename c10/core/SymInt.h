@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/SymNodeImpl.h>
+#include <c10/core/SymIntNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -12,19 +12,24 @@ namespace c10 {
 
 class SymFloat;
 
-// SymInt represents either a regular int64_t, or a symbolic integer
-// (represented in a type erased way as SymNode).  The intention is for SymInt
-// to represent symbolic sizes that arise when doing shape computation in
-// operator kernels. This allows for tracing through programs without baking in
-// concrete sizes into kernel calls.
+// `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
+// represent concrete dimension values.
 //
-// SymInt has an API equivalent to int64_t.  In particular, it is a value type.
-// Internally, SymInt is represented in a clever packed way, so that it only
-// occupies one word of space; but morally, it is a union between an int64_t
-// and an intrusive pointer to SymNodeImpl.
+// `SymInt` is also a data type in Pytorch that can be used in function schemas
+// to enable tracing.
 //
-// Invariant: the referenced SymNodeImpl is guaranteed to be a SymNode where
-// is_int() returns true
+// `SymInt` is introduced to enable tracing arithmetic
+// operations on symbolic integers (e.g. sizes). Tracing symbolic sizes will
+// allow LTC and AOTAutograd representing dynamic shapes in expression graphs
+// faithfully without baking in concrete dimension values.
+//
+// To trace the operations, SymInt will overload arithmetic operators (e.g. +,
+// -, *) and will provide overloads taking SymInt for commonly used math
+// functions.
+//
+// SymInt will be extenteded to represent a union structure Union[int64_t,
+// SymIntNodeImpl*] which will be implemented as a single packed int64_t field
+// named data_.
 
 class C10_API SymInt {
  public:
@@ -39,7 +44,6 @@ class C10_API SymInt {
     TORCH_CHECK(!is_symbolic());
   };
   SymInt() : data_(0) {}
-  SymInt(SymNode n);
 
   // unchecked c-tor accepting raw `data_`
   // One appropriate use for this is when you are constructing a symint
@@ -51,7 +55,7 @@ class C10_API SymInt {
   // temporary and then use the move constructor/assignment
   SymInt(const SymInt& s) : data_(0) {
     if (s.is_symbolic()) {
-      *this = SymInt(s.toSymNodeImpl());
+      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
     } else {
       data_ = s.data_;
     }
@@ -63,7 +67,7 @@ class C10_API SymInt {
   SymInt& operator=(const SymInt& s) {
     if (this != &s) {
       if (s.is_symbolic()) {
-        *this = SymInt(s.toSymNodeImpl());
+        *this = SymInt::toSymInt(s.toSymIntNodeImpl());
       } else {
         data_ = s.data_;
       }
@@ -72,7 +76,7 @@ class C10_API SymInt {
   }
   SymInt& operator=(SymInt&& s) {
     if (this != &s) {
-      release_(); // release the current SymNode if any
+      release_(); // release the current SymIntNode if any
       data_ = s.data_;
       if (s.is_symbolic())
         s.data_ = 0;
@@ -82,31 +86,31 @@ class C10_API SymInt {
 
   SymInt clone() const {
     if (is_symbolic()) {
-      return SymInt(toSymNodeImplUnowned()->clone());
+      return toSymIntNodeImplUnowned()->clone()->toSymInt();
     }
     return *this;
   }
 
-  SymNodeImpl* toSymNodeImplUnowned() const {
+  SymIntNodeImpl* toSymIntNodeImplUnowned() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(is_symbolic());
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
     uint64_t sign_bit_mask = 1ULL << (62 - 1);
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
-    return static_cast<SymNodeImpl*>(
+    return static_cast<SymIntNodeImpl*>(
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
   void release_() {
     if (is_symbolic()) {
-      SymNode::reclaim(toSymNodeImplUnowned()); // steal
+      SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
   }
 
-  SymNodeImpl* release() && {
+  SymIntNodeImpl* release() && {
 #ifndef C10_MOBILE
     TORCH_INTERNAL_ASSERT(is_symbolic());
-    auto* r = toSymNodeImplUnowned();
+    auto* r = toSymIntNodeImplUnowned();
     data_ = 0; // transfer ownership
     return r;
 #else
@@ -114,7 +118,8 @@ class C10_API SymInt {
 #endif
   }
 
-  SymNode toSymNodeImpl() const;
+  SymIntNode toSymIntNodeImpl() const;
+  static c10::SymInt toSymInt(SymIntNode sin);
 
   ~SymInt() {
     release_();

@@ -21,4 +21,3 @@ torch.signal.windows
     cosine
     exponential
     gaussian
-    kaiser

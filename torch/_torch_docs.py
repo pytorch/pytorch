@@ -12397,7 +12397,7 @@ Alias for :func:`torch.linalg.det`
 add_docstr(
     torch.where,
     r"""
-where(condition, x, y, *, out=None) -> Tensor
+where(condition, x, y) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -12408,8 +12408,7 @@ The operation is defined as:
         \text{x}_i & \text{if } \text{condition}_i \\
         \text{y}_i & \text{otherwise} \\
     \end{cases}
-"""
-    + r"""
+
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -12419,9 +12418,6 @@ Arguments:
                           where :attr:`condition` is ``True``
     y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
-
-Keyword args:
-    {out}
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -12454,9 +12450,7 @@ Example::
 
 .. note::
     See also :func:`torch.nonzero`.
-""".format(
-        **common_args
-    ),
+""",
 )
 
 add_docstr(

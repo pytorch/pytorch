@@ -1310,6 +1310,7 @@ struct TORCH_API SymIntType : public Type {
     return "SymInt";
   }
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    // TODO: will become a Union[SymIntNodeImpl|int] in the near future
     return "int";
   }
   static const TypeKind Kind = TypeKind::SymIntType;

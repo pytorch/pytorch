@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/core/SymInt.h>
-#include <c10/core/SymNodeImpl.h>
+#include <c10/core/SymIntNodeImpl.h>
 
 using namespace c10;
 #ifndef C10_MOBILE
@@ -18,6 +18,12 @@ TEST(SymIntTest, ConcreteInts) {
   check(-1);
   // This is 2^62, which is the most negative number we can support.
   check(-4611686018427387904LL);
+}
+
+TEST(SymIntTest, AddNode) {
+  auto n = c10::make_intrusive<SymIntNodeImpl>();
+  auto i = n->toSymInt();
+  EXPECT_TRUE(i.is_symbolic());
 }
 
 TEST(SymIntTest, CheckRange) {

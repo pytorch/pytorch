@@ -875,7 +875,8 @@ def forward(self, a_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0)
-    pow_1 = sym_size ** 0.5;  sym_size = None
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
@@ -948,7 +949,7 @@ def forward(self, a_1):
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(5), torch.randn(4))
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
-        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj().expr == meta_d.meta['val'].node.expr)
+        self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj().expr == meta_d.meta['val'].expr)
 
     def test_metadata_fresh(self):
         def f(x):

@@ -335,8 +335,8 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymInt",
-    "SymFloat",
+    "SymIntNode",
+    "SymFloatNode",
 ]
 
 # The suffix(es) of source filenames.
