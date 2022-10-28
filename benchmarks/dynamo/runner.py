@@ -65,7 +65,6 @@ TABLE = {
         "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
         "aot_nvfuser": "--training --nvfuser --backend=aot_nvfuser ",
         "inductor": "--training --inductor ",
-        "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
     },
     "inference": {
         "ts_nnc": "--speedup-ts",
@@ -86,7 +85,6 @@ DEFAULTS = {
         "aot_cudagraphs",
         "aot_nvfuser",
         "inductor",
-        "inductor_no_cudagraphs",
     ],
     "inference": ["ts_nvfuser_cudagraphs", "inductor"],
     "dtypes": [

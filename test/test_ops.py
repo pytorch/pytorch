@@ -457,8 +457,7 @@ class TestCommon(TestCase):
         for ei in error_inputs:
             si = ei.sample_input
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
-                out = op(si.input, *si.args, **si.kwargs)
-                self.assertFalse(isinstance(out, type(NotImplemented)))
+                op(si.input, *si.args, **si.kwargs)
 
     @skipMeta
     @onlyNativeDeviceTypes

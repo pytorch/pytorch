@@ -392,8 +392,8 @@ def _elementwise_meta(
     # Number case
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
-    assert not isinstance(number, torch.SymInt), "NYI"
-    assert not isinstance(number, torch.SymFloat), "NYI"
+    assert not isinstance(number, torch.SymIntNode), "NYI"
+    assert not isinstance(number, torch.SymFloatNode), "NYI"
     return TensorMeta(number)
 
 
@@ -932,7 +932,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
-    is_integral = isinstance(a, (bool, int, torch.SymInt)) or (
+    is_integral = isinstance(a, (bool, int, torch.SymIntNode)) or (
         isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype)
     )
 

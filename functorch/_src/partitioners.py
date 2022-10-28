@@ -209,7 +209,7 @@ def _tensor_nbytes(numel, dtype):
 
 def _size_of(node: fx.Node) -> int:
     def to_size_hint(s):
-        if isinstance(s, torch.SymInt):
+        if isinstance(s, torch.SymIntNode):
             py_s = s.get_pyobj()
             return py_s.shape_env.size_hint(py_s.expr)
         assert isinstance(s, int)
