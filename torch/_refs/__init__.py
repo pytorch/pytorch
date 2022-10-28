@@ -2752,7 +2752,7 @@ def narrow(
     # not allowed by canonicalize_dim. But for narrow it's valid as long as
     # the length is 0, which is handled by the check below.
     if start != cur_length:
-        # Negative start means counting from the right.
+        # Negative start means indexing from the end of dim.
         start = utils.canonicalize_dim(cur_length, start)  # type: ignore[arg-type]
     check(
         length >= 0 and start <= cur_length - length,  # type: ignore[arg-type]

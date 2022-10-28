@@ -7980,7 +7980,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (Tensor or int): index to narrow from within `dim`. Can be negative,
+    start (int or Tensor): index to narrow from within `dim`. Can be negative,
         which means indexing from the end of `dim`. If `Tensor`, it must be an
         0-dim integral `Tensor` (bools not allowed)
     length (int): number of elements to return within `dim`

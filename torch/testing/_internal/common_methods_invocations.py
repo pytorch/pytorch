@@ -4296,7 +4296,7 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), rep_dim)
 
 
-def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow=True, **kwargs):
+def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
     shapes_and_args = (
         ((S, S, S), (1, 2, 2)),
         ((S, S, S), (-1, 2, 2)),
@@ -4313,8 +4313,8 @@ def sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, i
         if is_narrow:
             yield SampleInput(tensor, args=(args[0], torch.tensor(args[1]), args[2]))
 
-def reference_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow=True, **kwargs):
-    yield from sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, **kwargs)
+def reference_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *, is_narrow, **kwargs):
+    yield from sample_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, is_narrow=is_narrow, **kwargs)
 
     shapes_and_args = (
         # 1-dim
@@ -4351,7 +4351,7 @@ def reference_inputs_narrow_narrow_copy(op_info, device, dtype, requires_grad, *
         if is_narrow:
             yield SampleInput(tensor, args=(args[0], torch.tensor(args[1]), args[2]))
 
-def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow=True):
+def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # 0-dim
