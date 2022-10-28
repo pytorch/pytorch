@@ -762,6 +762,14 @@ class sdist(setuptools.command.sdist.sdist):
             super().run()
 
 
+def get_cmake_cache_vars():
+    try:
+        return defaultdict(lambda: False, cmake.get_cmake_cache_variables())
+    except FileNotFoundError:
+        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
+        return defaultdict(lambda: False)
+
+
 def configure_extension_build():
     r"""Configures extension build options according to system environment and user's choice.
 
@@ -769,11 +777,7 @@ def configure_extension_build():
       The input to parameters ext_modules, cmdclass, packages, and entry_points as required in setuptools.setup.
     """
 
-    try:
-        cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
-    except FileNotFoundError:
-        # CMakeCache.txt does not exist. Probably running "python setup.py clean" over a clean directory.
-        cmake_cache_vars = defaultdict(lambda: False)
+    cmake_cache_vars = get_cmake_cache_vars()
 
     ################################################################################
     # Configure compile flags
@@ -1060,7 +1064,7 @@ def main():
         'include/ATen/native/quantized/*.h',
         'include/ATen/native/quantized/cpu/*.h',
         'include/ATen/quantized/*.h',
-        'include/caffe2/serialization/*.h',
+        'include/caffe2/serialize/*.h',
         'include/c10/*.h',
         'include/c10/macros/*.h',
         'include/c10/core/*.h',
@@ -1162,7 +1166,7 @@ def main():
         'utils/model_dump/*.mjs',
     ]
 
-    if cmake_cache_vars['BUILD_CAFFE2']:
+    if get_cmake_cache_vars()['BUILD_CAFFE2']:
         torch_package_data.extend([
             'include/caffe2/**/*.h',
             'include/caffe2/utils/*.h',
