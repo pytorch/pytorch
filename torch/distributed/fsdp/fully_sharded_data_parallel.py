@@ -2680,9 +2680,16 @@ class FullyShardedDataParallel(nn.Module):
             self._reshard(self._handles, free_unsharded_flat_params)
             if with_grads:
                 self._reshard_grads(self._handles)
+            try:
+                yield
+            finally:
+                self.training_state = TrainingState_.IDLE
+                for handle in self._handles:
+                    handle._training_state = HandleTrainingState.IDLE
         else:
             # Unflatten the unsharded flattened parameters
             with contextlib.ExitStack() as stack:
+                # Invariant: rank == 0 or !rank0_only
                 for handle in self._handles:
                     if offload_to_cpu and handle.uses_sharded_strategy:
                         stack.enter_context(handle.to_cpu())
