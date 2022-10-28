@@ -910,8 +910,8 @@ static Tensor convolution_same(
   auto k = weight.dim();
   TORCH_CHECK(k > 2, "weight should have at least three dimensions");
   auto dim = static_cast<size_t>(k - 2);
-  auto weight_sizes = weight.sizes();
-  auto input_sizes = input.sizes();
+  auto weight_sizes = weight.sym_sizes();
+  auto input_sizes = input.sym_sizes();
   TORCH_CHECK(k == input.dim(),
               "Expected ", k, "-dimensional input for ",
               k, "-dimensional weight", weight_sizes, ", but got ",
@@ -926,7 +926,7 @@ static Tensor convolution_same(
   }
 
   // Calculate the correct padding
-  DimVector padding_l, padding_r;
+  SymDimVector padding_l, padding_r;
   bool symmetric_padding = true;
   for (auto i: c10::irange(dim)) {
     auto s = stride.size() == 1 ? stride[0] : stride[i];
@@ -942,14 +942,14 @@ static Tensor convolution_same(
 
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
-    DimVector output_padding(static_cast<size_t>(dim));
-    return at::convolution(input, weight, bias, stride, padding_l, dilation,
+    SymDimVector output_padding(static_cast<size_t>(dim));
+    return at::convolution_symint(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
   TORCH_WARN_ONCE("Using padding='same' with even kernel lengths and odd dilation may"
                   " require a zero-padded copy of the input be created");
-  SmallVector<int64_t, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
+  SmallVector<c10::SymInt, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
   for (auto i: c10::irange(dim)) {
     // Apply padding by the difference, leaving only a symmetric padding
     auto delta_pad = padding_r[i] - padding_l[i];
@@ -961,10 +961,10 @@ static Tensor convolution_same(
       padding_l[i] = padding_r[i];
     }
   }
-  auto padded_input = at::constant_pad_nd(input, pad_nd, 0);
-  DimVector output_padding(static_cast<size_t>(dim));
-  return at::convolution(padded_input, weight, bias, stride, padding_l,
-                         dilation, false, output_padding, groups);
+  auto padded_input = at::constant_pad_nd_symint(input, pad_nd, 0);
+  SymDimVector output_padding(static_cast<size_t>(dim));
+  return at::convolution_symint(padded_input, weight, bias, stride, padding_l,
+                                dilation, false, output_padding, groups);
 }
 
 Tensor _convolution_mode(
