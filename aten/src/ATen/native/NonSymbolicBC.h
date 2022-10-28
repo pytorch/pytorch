@@ -22,4 +22,5 @@ TORCH_API at::Tensor _embedding_bag_sparse_backward(const at::Tensor & grad, con
 TORCH_API at::Tensor value_selecting_reduction_backward(const at::Tensor & grad, int64_t dim, const at::Tensor & indices, at::IntArrayRef sizes, bool keepdim);
 TORCH_API at::Tensor trace_backward(const at::Tensor & grad, at::IntArrayRef sizes);
 TORCH_API at::Tensor index_select_backward(const at::Tensor & grad, at::IntArrayRef self_sizes, int64_t dim, const at::Tensor & index);
+TORCH_API std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim);
 }}
