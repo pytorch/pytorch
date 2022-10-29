@@ -910,8 +910,8 @@ static Tensor convolution_same(
   auto k = weight.dim();
   TORCH_CHECK(k > 2, "weight should have at least three dimensions");
   auto dim = static_cast<size_t>(k - 2);
-  auto weight_sizes = weight.sizes();
-  auto input_sizes = input.sizes();
+  auto weight_sizes = weight.sym_sizes();
+  auto input_sizes = input.sym_sizes();
   TORCH_CHECK(k == input.dim(),
               "Expected ", k, "-dimensional input for ",
               k, "-dimensional weight", weight_sizes, ", but got ",
@@ -926,7 +926,7 @@ static Tensor convolution_same(
   }
 
   // Calculate the correct padding
-  DimVector padding_l, padding_r;
+  SymDimVector padding_l, padding_r;
   bool symmetric_padding = true;
   for (auto i: c10::irange(dim)) {
     auto s = stride.size() == 1 ? stride[0] : stride[i];
@@ -942,14 +942,14 @@ static Tensor convolution_same(
 
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
-    DimVector output_padding(static_cast<size_t>(dim));
-    return at::convolution(input, weight, bias, stride, padding_l, dilation,
+    SymDimVector output_padding(static_cast<size_t>(dim));
+    return at::convolution_symint(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
   TORCH_WARN_ONCE("Using padding='same' with even kernel lengths and odd dilation may"
                   " require a zero-padded copy of the input be created");
-  SmallVector<int64_t, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
+  SmallVector<c10::SymInt, kDimVectorStaticSize * 2> pad_nd(static_cast<size_t>(2 * dim));
   for (auto i: c10::irange(dim)) {
     // Apply padding by the difference, leaving only a symmetric padding
     auto delta_pad = padding_r[i] - padding_l[i];
@@ -961,10 +961,10 @@ static Tensor convolution_same(
       padding_l[i] = padding_r[i];
     }
   }
-  auto padded_input = at::constant_pad_nd(input, pad_nd, 0);
-  DimVector output_padding(static_cast<size_t>(dim));
-  return at::convolution(padded_input, weight, bias, stride, padding_l,
-                         dilation, false, output_padding, groups);
+  auto padded_input = at::constant_pad_nd_symint(input, pad_nd, 0);
+  SymDimVector output_padding(static_cast<size_t>(dim));
+  return at::convolution_symint(padded_input, weight, bias, stride, padding_l,
+                                dilation, false, output_padding, groups);
 }
 
 Tensor _convolution_mode(
@@ -1066,8 +1066,14 @@ at::Tensor conv_transpose2d(
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv_transpose2d");
-  auto output = at::convolution(
+  Tensor output;
+  if (at::isComplexType(input_.scalar_type())) {
+    output = complex_convolution(
       input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  } else {
+    output = at::convolution(
+      input, weight, bias, stride, padding, dilation, true, output_padding, groups);
+  }
   return is_batched ? output : output.squeeze(0);
 }
 
@@ -1116,7 +1122,7 @@ at::Tensor convolution_overrideable(
 ConvBackend select_conv_backend(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
-    bool transposed_, IntArrayRef output_padding_, int64_t groups_) {
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_, const at::OptionalIntArrayRef bias_sizes_opt) {
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
@@ -1149,10 +1155,10 @@ ConvBackend select_conv_backend(
     weight = view4d(weight);
   }
 
-  auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
+  auto bias_sizes = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : bias_sizes_opt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  return _select_conv_backend(input, weight, bias, bias_sizes_opt, need_backward, params);
+  return _select_conv_backend(input, weight, bias, bias_sizes, need_backward, params);
 }
 
 ConvBackend select_conv_backend(
@@ -1357,6 +1363,13 @@ static inline at::MemoryFormat determine_backend_memory_format(
   }
 #endif
   return backend_memory_format;
+}
+
+at::MemoryFormat _determine_backend_memory_format(
+    const Tensor& input,
+    const Tensor& weight,
+    const ConvBackend backend)  {
+  return determine_backend_memory_format(input, weight, backend);
 }
 
 at::Tensor _convolution(
