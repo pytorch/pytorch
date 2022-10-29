@@ -4008,29 +4008,23 @@ class CommonTemplate:
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
+        dtypes = [
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64,
+        ]
 
-        inputs = (
-            rand_strided((2, 3), (3, 1), device="cuda"),
-            rand_strided((), (), device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-
-    @requires_cuda()
-    def test_unspec_inputs_fp16(self):
-        def fn(x, y):
-            return x + y, x * y, x / y
-
-        opt = torch._dynamo.optimize("inductor")(fn)
-
-        inputs = (
-            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
-            rand_strided((), (), dtype=torch.float16, device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        for d in dtypes:
+            inputs = (
+                rand_strided((2, 3), (3, 1), dtype=torch.float32, device="cuda"),
+                rand_strided((), (), dtype=d, device="cpu"),
+            )
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
+            inputs = (inputs[1], inputs[0])
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
