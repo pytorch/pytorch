@@ -156,4 +156,4 @@
 	url = https://github.com/NVIDIA/cutlass.git
 [submodule "third_party/nvfuer"]
 	path = third_party/nvfuer
-	url = git@github.com:jjsjann123/nvfuser.git
+	url = https://github.com/jjsjann123/nvfuser.git
