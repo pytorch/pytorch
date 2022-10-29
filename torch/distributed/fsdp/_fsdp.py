@@ -3,6 +3,7 @@ from typing import Callable, cast, Iterable, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed.fsdp import CPUOffload, MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp._common_utils import _State, FSDPState
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
@@ -13,11 +14,6 @@ from torch.distributed.fsdp._init_utils import (
     _init_process_group_state,
     _init_runtime_state,
     _init_state_dict_state,
-)
-from torch.distributed.fsdp._public_utils import (
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
 )
 
 
