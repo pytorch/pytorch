@@ -1980,8 +1980,6 @@ def _reduction(
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
-    a_converted = _maybe_convert_to_dtype(a, computation_dtype)
-    result = prim(a_converted, dims)
     a = _maybe_convert_to_dtype(a, computation_dtype)  # type: ignore[assignment]
     result = prim(a, dims)
     if keepdims:
