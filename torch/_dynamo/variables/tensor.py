@@ -52,7 +52,6 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
         if op == "call_function":
             return node.target(*args, **kwargs)
         elif op == "call_method":
-            print("CALLING INTO", node.target, args[1:])
             return getattr(args[0], node.target)(*args[1:], **kwargs)
         elif op == "call_module":
             assert nnmodule is not None
@@ -60,7 +59,9 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
     except Exception as e:
-        raise RuntimeError(f"Failed running {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)") from e
+        raise RuntimeError(
+            f"Failed running {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
+        ) from e
     raise AssertionError(op)
 
 
@@ -470,8 +471,9 @@ class TensorVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, TupleVariable
+
         kwargs = dict(kwargs)
-        print("CALLING TENSOR OP", name)
+        # print("CALLING TENSOR OP", name)
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
@@ -479,7 +481,7 @@ class TensorVariable(VariableTracker):
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
         elif name == "size" and self.size is None and config.dynamic_shapes:
-            example_size = self.proxy.node.meta['example_value'].size()
+            example_size = self.proxy.node.meta["example_value"].size()
             pure_size_proxy = tx.output.create_proxy(
                 "call_method",
                 name,
@@ -489,10 +491,13 @@ class TensorVariable(VariableTracker):
             if len(args) == 1 and isinstance(args[0], ConstantVariable):
                 assert isinstance(args[0].value, int)
                 proxy = tx.output.create_proxy(
-                        "call_function", operator.getitem, (pure_size_proxy, args[0].as_proxy()), {},
+                    "call_function",
+                    operator.getitem,
+                    (pure_size_proxy, args[0].as_proxy()),
+                    {},
                 )
                 value = example_size[args[0].value]
-                proxy.node.meta['example_value'] = value
+                proxy.node.meta["example_value"] = value
                 return DynamicShapeVariable.create(tx, proxy, value)
             items = []
             for i, element in enumerate(example_size):
@@ -500,11 +505,16 @@ class TensorVariable(VariableTracker):
                     items.append(variables.ConstantVariable(element))
                 else:
                     proxy = tx.output.create_proxy(
-                        "call_function", operator.getitem, (pure_size_proxy, i), {},
+                        "call_function",
+                        operator.getitem,
+                        (pure_size_proxy, i),
+                        {},
                     )
-                    proxy.node.meta['example_value'] = element
+                    proxy.node.meta["example_value"] = element
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
-            size_proxy.node.meta['example_value'] = torch.Size([item.proxy.node.meta['example_value'] for item in items])
+            size_proxy.node.meta["example_value"] = torch.Size(
+                [item.proxy.node.meta["example_value"] for item in items]
+            )
             return SizeVariable(items, size_proxy, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
