@@ -3078,51 +3078,6 @@ TEST_F(NVFuserTest, FusionRootMappingBroadcast_CUDA) {
       {false, false, true});
 }
 
-// Reproducer of issue #723
-TEST_F(NVFuserTest, FusionRootMappingTrivialReduction_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  auto tv1 = makeSymbolicTensor(2);
-
-  fusion.addInput(tv0);
-  fusion.addInput(tv1);
-
-  auto tv2 = broadcast(tv0, {true, false});
-  auto tv3 = sum(tv2, {0});
-  auto tv4 = add(tv2, tv1);
-
-  fusion.addOutput(tv3);
-  fusion.addOutput(tv4);
-
-  ComputeAtRootDomainMap map;
-  map.build();
-
-  checkIdMapped(
-      map, tv2, tv2->getRootDomain()[0], tv4, tv4->getRootDomain()[0], true);
-  checkIdMapped(
-      map, tv2, tv2->getRootDomain()[0], tv3, tv3->getRootDomain()[0], true);
-
-  tv2->computeAt(tv4, -1);
-
-  const int x = 11;
-  const int y = 12;
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({x}, options);
-  at::Tensor t1 = at::randn({y, x}, options);
-  std::vector<IValue> aten_inputs = {t0, t1};
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, aten_inputs);
-  auto outputs = fe.runFusion(aten_inputs);
-
-  auto t3 = t0;
-  auto t4 = t0.unsqueeze(0).expand({y, x}) + t1;
-
-  testValidate(&fusion, outputs, aten_inputs, {t3, t4}, __LINE__, __FILE__);
-}
-
 // Repro of issue #1950
 TEST_F(NVFuserTest, FusionRootMappingRepro1950_CUDA) {
   Fusion fusion;

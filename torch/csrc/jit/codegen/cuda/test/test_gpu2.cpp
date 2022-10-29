@@ -1061,67 +1061,6 @@ TEST_F(NVFuserTest, FusionTrivialReduction3_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-// Make sure trivial reductions are correctly detected even with
-// scheduling applied.
-TEST_F(NVFuserTest, FusionDetectTrivialReduction1_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-
-  auto tv1 = broadcast(tv0, {false, true});
-  auto tv2 = sum(tv1, {1});
-  fusion.addOutput(tv2);
-
-  tv2->split(1, 4);
-  tv2->split(1, 8);
-  auto tv3 = tv2->rFactor({-1});
-  auto tv4 = tv2->rFactor({-1});
-
-  auto tv5 = broadcast(tv0, {true, false});
-  auto tv6 = add(tv5, IrBuilder::create<Double>(1));
-  auto tv7 = sub(tv6, IrBuilder::create<Double>(1));
-  auto tv8 = sum(tv7, {0});
-  fusion.addOutput(tv8);
-
-  auto tv9 = broadcast(tv0, {false, true, true});
-  auto tv10 = sum(tv9, {1});
-  auto tv11 = sum(tv10, {1});
-  fusion.addOutput(tv11);
-
-  tv8->split(0, 3);
-  tv10->split(1, 4);
-  tv11->split(1, 5);
-
-  tv0->computeAt(tv2, -1);
-  tv0->computeAt(tv8, -1);
-  tv0->computeAt(tv11, 1);
-
-  // Test indexing to gmem-backed tensors
-  tv3->setMemoryType(MemoryType::Global);
-  tv8->setMemoryType(MemoryType::Global);
-
-  GpuLower gpulw(&fusion);
-
-  // No ReductionOp should be generated as all the reduction
-  // exprs should be replaced with a unary set op.
-  for (const auto expr : gpulw.kernel()->as<Fusion>()->exprs()) {
-    TORCH_CHECK(!expr->isA<ReductionOp>());
-  }
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({100}, options);
-  std::vector<IValue> aten_inputs = {t0};
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, aten_inputs);
-  auto cg_outputs = fe.runFusion(aten_inputs);
-
-  testValidate(
-      &fusion, cg_outputs, aten_inputs, {t0, t0, t0}, __LINE__, __FILE__);
-}
-
 // Test detection of partially trivial reduction
 TEST_F(NVFuserTest, FusionDetectTrivialReduction2_CUDA) {
   Fusion fusion;
@@ -5342,45 +5281,6 @@ TEST_F(NVFuserTest, FusionBlockWelfordInSerialLoop_CUDA) {
       &fusion, outputs, aten_inputs, {aten_avg, aten_M2}, __LINE__, __FILE__);
 }
 
-// See Issue #716
-TEST_F(NVFuserTest, FusionIOTensorTrivialReductionRepro_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  constexpr int M = 10;
-  constexpr int N = 11;
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-
-  std::vector<int> reduction_axes = {1};
-  std::vector<bool> broadcast_mask = {false, true};
-
-  auto tv0_bcast = broadcast(tv0, broadcast_mask);
-  auto path1_bcast = add(tv0_bcast, IrBuilder::create<Double>(1.0));
-  auto path1 = sum(path1_bcast, reduction_axes);
-  fusion.addOutput(path1);
-
-  auto p = path1->split(1, 1);
-  path1->rFactor({1});
-  path1->axis(0)->parallelize(ParallelType::BIDx);
-  tv0->computeAt(path1, 1);
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::manual_seed(0);
-  at::Tensor t0 = at::randn({M}, options);
-  at::Tensor t0_ref = t0.clone();
-  std::vector<IValue> aten_inputs = {t0};
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, aten_inputs);
-
-  // inplace op, we are adding t0 to itself
-  auto outputs = fe.runFusion(aten_inputs, {t0});
-
-  TORCH_CHECK(outputs[0].allclose(t0_ref.add(1)));
-}
-
 TEST_F(NVFuserTest, FusionReductionPredicate_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -6084,8 +5984,6 @@ TEST_F(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
 
   at::Tensor input0 = at::randn({2}, options);
   at::Tensor input1 = at::randn({0}, options);
-  at::Tensor cg_output2 = at::empty({2}, options);
-  at::Tensor cg_output3 = at::empty({0}, options);
 
   // Fails at schedule pointwise because our (maybe only) size-0 check is in
   // binding input sizes which the scheduler ends up calling.
@@ -6113,8 +6011,6 @@ TEST_F(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
 
   at::Tensor input0 = at::randn({2, 4}, options);
   at::Tensor input1 = at::randn({0}, options);
-  at::Tensor cg_output2 = at::empty({2}, options);
-  at::Tensor cg_output3 = at::empty({0}, options);
 
   auto reduction_params = getReductionHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
@@ -6161,8 +6057,6 @@ TEST_F(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
 
   at::Tensor input0 = at::randn({2, 4}, options);
   at::Tensor input1 = at::randn({0}, options);
-  at::Tensor cg_output2 = at::empty({2, 4}, options);
-  at::Tensor cg_output3 = at::empty({0}, options);
 
   auto reduction_params = getPersistentHeuristics(&fusion, {input0, input1});
   TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
@@ -6721,8 +6615,8 @@ TEST_F(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
   auto tv0 = makeConcreteTensor({17, 18, 128, 1});
 
   fusion->addInput(tv0);
-
-  auto tv1 = sum(tv0, {1, 2, 3});
+  auto tv1 = reductionOpNoSqueeze(
+      BinaryOpType::Add, {1, 2, 3}, IrBuilder::create<Double>(0.0), tv0);
   auto tv2 = broadcast(tv1, {false, true, true, true});
   auto tv3 = add(tv2, tv0);
 

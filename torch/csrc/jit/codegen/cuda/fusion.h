@@ -136,6 +136,10 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   //! Lower the fusion and print a kernel
   void printKernel(DataType index_type = DataType::Int);
 
+  //! Returns if this fusion is noop, for example, trivially forwarding inputs,
+  //! or all outputs are size-0 tensors, etc.
+  bool isNoOp();
+
   //! Lower the fusion and evaluate bank conflict info
   std::unordered_map<std::string, std::pair<int, int>> bankConflictInfo(
       DataType index_type = DataType::Int);

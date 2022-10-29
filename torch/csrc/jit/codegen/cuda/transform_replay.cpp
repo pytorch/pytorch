@@ -227,11 +227,14 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
 
   // If this is a reduction operation, we may call transform_replay on the
   // tensor view. When this happens, just return thet target view.
-  if (producer == consumer)
+  if (producer == consumer) {
     return {producer->domain(), producer->nDims()};
+  }
 
-  if (consumer_compute_at_axis < 0)
+  if (consumer_compute_at_axis < 0) {
     consumer_compute_at_axis += (int)consumer->nDims() + 1;
+  }
+
   TORCH_INTERNAL_ASSERT(
       consumer_compute_at_axis >= 0 &&
           (unsigned int)consumer_compute_at_axis <= consumer->nDims(),
@@ -452,13 +455,17 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   if (consumer == producer)
     return {consumer->domain(), consumer->nDims()};
 
-  if (producer_compute_at_axis < 0)
+  if (producer_compute_at_axis < 0) {
     producer_compute_at_axis += (int)producer->nDims() + 1;
+  }
 
   TORCH_INTERNAL_ASSERT(
       producer_compute_at_axis >= 0 &&
           (unsigned int)producer_compute_at_axis <= producer->nDims(),
-      "Invalid axis in transform replayCasP.");
+      "Invalid axis in transform replayCasP. Consumer: ",
+      consumer->toString(),
+      " Producer: ",
+      producer->toString());
 
   // producer ids we need to match in consumer
   std::vector<IterDomain*> producer_CA_ids(
@@ -505,14 +512,18 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   std::vector<IterDomain*> needed_dims;
   for (auto p_id : producer_CA_ids) {
     auto it = replay_CasP.getReplay().find(p_id);
-    TORCH_INTERNAL_ASSERT(
-        it != replay_CasP.getReplay().end(),
-        "Could not find axis, ",
-        p_id,
-        ", requested in replaying consumer ",
-        consumer,
-        " as producer ",
-        producer);
+    if (it == replay_CasP.getReplay().end()) {
+      // skip squeezed broadcast
+      TORCH_INTERNAL_ASSERT(
+          p_id->isBroadcast(),
+          "Could not find axis, ",
+          p_id,
+          ", requested in replaying consumer ",
+          consumer,
+          " as producer ",
+          producer);
+      continue;
+    }
     TORCH_INTERNAL_ASSERT(
         leaf_ids.find(it->second) != leaf_ids.end(),
         "Replayed id to match producer id ",
@@ -596,11 +607,15 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   // Add axes in (1)
   for (auto p_id : producer_CA_ids) {
     auto it = replay_CasP.getReplay().find(p_id);
-    TORCH_INTERNAL_ASSERT(
-        it != replay_CasP.getReplay().end(),
-        "Could not find axis, ",
-        p_id,
-        ", requested in replay.");
+    if (it == replay_CasP.getReplay().end()) {
+      // skip squeezed broadcast
+      TORCH_INTERNAL_ASSERT(
+          p_id->isBroadcast(),
+          "Could not find axis, ",
+          p_id,
+          ", requested in replay.");
+      continue;
+    }
     new_IDs.push_back(it->second);
     used_IDs.emplace(it->second);
   }
@@ -623,6 +638,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     }
   }
 
+  unsigned int consumer_compute_at_axis = new_IDs.size();
+
   // Add axes in (3)
   for (auto id : consumer->domain()->domain()) {
     if (consumer_replayed_leaves.getUnorderedLeafIDs().find(id) !=
@@ -635,9 +652,11 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   }
 
   // Add axes in (4)
-  for (auto id : consumer_replayed_leaves.getLeafIDs())
-    if (used_IDs.find(id) == used_IDs.end())
+  for (auto id : consumer_replayed_leaves.getLeafIDs()) {
+    if (used_IDs.find(id) == used_IDs.end()) {
       new_IDs.push_back(id);
+    }
+  }
 
   TensorDomain* replayed = IrBuilder::create<TensorDomain>(
       consumer->container(),
@@ -646,7 +665,7 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
       new_IDs,
       consumer->domain()->contiguity());
 
-  return {replayed, producer_CA_ids.size()};
+  return {replayed, consumer_compute_at_axis};
 }
 
 // replay Producer as Consumer

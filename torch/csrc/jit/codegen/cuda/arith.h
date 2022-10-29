@@ -86,8 +86,18 @@ TORCH_CUDA_CU_API TensorView* binaryOp(
     const TypePromotionConfig& config);
 
 // Perform a reduction operation on v1, initial value for reduction is init,
-// reduces across axes, and reduction operation defined by BinaryOp.
+// reduces across axes, and reduction operation defined by BinaryOp. Reduction
+// of size-1 dimension is automatically converted to squeeze.
 TORCH_CUDA_CU_API TensorView* reductionOp(
+    BinaryOpType reduction_op_type,
+    const std::vector<int>& axes,
+    Val* init,
+    TensorView* v1,
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
+
+// Similar to reductionOp, but don't convert size-1 reduction into squeeze
+TORCH_CUDA_CU_API TensorView* reductionOpNoSqueeze(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,

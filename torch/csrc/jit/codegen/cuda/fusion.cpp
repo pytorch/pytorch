@@ -284,6 +284,26 @@ std::vector<Expr*> Fusion::exprs() {
   return StmtSort::getExprs(this);
 }
 
+bool Fusion::isNoOp() {
+  if (exprs().empty()) {
+    return true;
+  }
+  for (auto out_tv : ir_utils::filterByType<TensorView>(outputs())) {
+    auto root_dom = TensorDomain::noReductions(out_tv->getMaybeRFactorDomain());
+    bool size_zero = false;
+    for (auto id : root_dom) {
+      if (id->extent()->isZeroInt()) {
+        size_zero = true;
+        break;
+      }
+    }
+    if (!size_zero) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::vector<Val*> Fusion::inputsOf(Val* val) {
   return InputsOf::output(this, val);
 }

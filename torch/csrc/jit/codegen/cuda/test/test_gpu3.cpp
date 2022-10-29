@@ -2319,94 +2319,6 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexPointwiseSchedule_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
-// Repro of issue #1539.
-TEST_F(NVFuserTest, FusionTrivialReductionForwarding1_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-
-  auto tv1 = broadcast(tv0, {true, false});
-  auto tv2 = sum(tv1, {0});
-  auto tv3 = set(tv2);
-  fusion.addOutput(tv3);
-
-  tv2->merge(0);
-  tv2->split(0, 4);
-
-  TransformPropagatorWithCheck propagator(tv2);
-  MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
-
-  // All tensors must be transformed to a 2D tensor with each axis
-  // mapped with each other in the LOOP map.
-  ComputeAtMap ca_map(&fusion);
-  for (auto tv : ir_utils::allTvs(&fusion)) {
-    TORCH_CHECK(
-        tv->nDims() == 2, "Expected to be a 2D tensor but: ", tv->toString());
-    for (const auto i : c10::irange(2)) {
-      TORCH_CHECK(ca_map.areMapped(
-          tv->axis(i), tv3->axis(i), IdMappingMode::PERMISSIVE));
-    }
-  }
-}
-
-TEST_F(NVFuserTest, FusionTrivialReductionForwarding2_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-
-  auto tv1 = broadcast(tv0, {true, false});
-  auto tv2 = sum(tv1, {0});
-  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
-
-  fusion.addOutput(tv3);
-
-  // Merging a trivial reduction with a non-reduction domain
-  tv2->merge(0, 1);
-  tv2->split(0, 4);
-
-  tv3->split(0, 4);
-
-  // tv2 and tv3 are different as tv3 lacks the trivial reduction, but
-  // they are mapped with each other by BestEffortReplay as the merge
-  // of trivial reduciton dim is forwarded.
-
-  PairwiseRootDomainMap root_map(tv2, tv3);
-
-  auto p2c = BestEffortReplay::replayCasP(tv3, tv2, 2, root_map).getReplay();
-  for (const auto i : c10::irange(tv2->nDims())) {
-    auto tv2_id = tv2->axis(i);
-    auto it = p2c.find(tv2_id);
-    TORCH_CHECK(
-        it != p2c.end(),
-        "Expected mapped consumer ID but not found: ",
-        tv2_id->toString());
-    auto tv3_mapped_id = it->second;
-    TORCH_CHECK(
-        tv3_mapped_id == tv3->axis(i),
-        "Unexpected mapped consumer ID: ",
-        tv3_mapped_id->toString());
-  }
-
-  auto c2p = BestEffortReplay::replayPasC(tv2, tv3, 2, root_map).getReplay();
-  for (const auto i : c10::irange(tv3->nDims())) {
-    auto tv3_id = tv3->axis(i);
-    auto it = c2p.find(tv3_id);
-    TORCH_CHECK(
-        it != c2p.end(),
-        "Expected mapped producer ID but not found: ",
-        tv3_id->toString());
-    auto tv2_mapped_id = it->second;
-    TORCH_CHECK(
-        tv2_mapped_id == tv2->axis(i),
-        "Unexpected mapped consumer ID: ",
-        tv2_mapped_id->toString());
-  }
-}
-
 TEST_F(NVFuserTest, FusionTrivialReductionForwarding3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -5423,53 +5335,6 @@ TEST_F(NVFuserTest, FusionInliningMismatchedDims2_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {output}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionInliningMismatchedDims3_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeConcreteTensor({2, 3, 4});
-  fusion.addInput(tv0);
-  auto tv1 = sin(tv0);
-  // broadcasting
-  auto tv2 = broadcast(tv1, {false, true, false, true, false, true});
-  auto tv3 = relu(tv2);
-  // trivial reduction
-  auto tv4 = sum(tv3, {1, 3, 5});
-  auto tv5 = cos(tv4);
-  auto tv6 = transpose(tv5, 1, 2);
-  auto tv7 = exp(tv6);
-  auto tv8 = tan(tv7);
-  fusion.addOutput(tv8);
-
-  for (auto tv : {tv2, tv3, tv4}) {
-    tv->merge(0);
-    tv->merge(1);
-    tv->merge(2);
-  }
-
-  inlineMost();
-
-  TORCH_CHECK(tv8->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv7->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv6->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv5->getComputeAtPosition() == 1);
-  TORCH_CHECK(tv4->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv3->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv2->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv1->getComputeAtPosition() == 3);
-
-  const auto options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::randn({2, 3, 4}, options);
-  auto output = input.sin().relu().cos().transpose(1, 2).exp().tan();
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, {input});
-  auto cg_outputs = fe.runFusion({input});
-
-  testValidate(&fusion, cg_outputs, {input}, {output}, __LINE__, __FILE__);
-}
-
 TEST_F(NVFuserTest, FusionInliningMismatchedDims4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -5542,75 +5407,6 @@ TEST_F(NVFuserTest, FusionInliningBroadcast_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {output}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionInliningBroadcastTrivialReduction_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeConcreteTensor({2, 3, 4});
-  fusion.addInput(tv0);
-  auto tv1 = sin(tv0);
-  // broadcasting
-  auto tv2 = broadcast(tv1, {false, true, false, true, false, true});
-  auto tv3 = tan(tv2);
-  // trivial reduction
-  auto tv4 = sum(tv3, {1, 3, 5});
-  auto tv5 = cos(tv4);
-  auto tv6 = exp(tv5);
-  fusion.addOutput(tv6);
-
-  for (auto tv : {tv2, tv3, tv4}) {
-    tv->merge(0);
-    tv->merge(1);
-    tv->merge(2);
-  }
-
-  inlineMost();
-
-  TORCH_CHECK(tv6->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv5->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv4->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv3->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv2->getComputeAtPosition() == 3);
-  TORCH_CHECK(tv1->getComputeAtPosition() == 3);
-
-  const auto options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::randn({2, 3, 4}, options);
-  auto output = input.sin().tan().cos().exp();
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, {input});
-  auto cg_outputs = fe.runFusion({input});
-
-  testValidate(&fusion, cg_outputs, {input}, {output}, __LINE__, __FILE__);
-}
-
-TEST_F(NVFuserTest, FusionMatchedLeafPosWithoutReplayTrivialReduction_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeConcreteTensor({2, 1, 3, 1, 4, 1});
-  fusion.addInput(tv0);
-  auto tv1 = sum(tv0, {1, 3, 5});
-  auto tv2 = sin(tv1);
-  fusion.addOutput(tv1);
-
-  for (auto tv : {tv0, tv1}) {
-    tv->merge(0);
-    tv->merge(1);
-    tv->merge(2);
-  }
-
-  TORCH_CHECK(
-      TransformReplay::getMatchedLeafPosWithoutReplayPasC(tv0, tv1, 3) == 3);
-  TORCH_CHECK(
-      TransformReplay::getMatchedLeafPosWithoutReplayCasP(tv1, tv0, 3) == 3);
-  TORCH_CHECK(
-      TransformReplay::getMatchedLeafPosWithoutReplayPasC(tv1, tv2, 3) == 3);
-  TORCH_CHECK(
-      TransformReplay::getMatchedLeafPosWithoutReplayCasP(tv2, tv1, 3) == 3);
-}
-
 TEST_F(NVFuserTest, FusionMatchedLeafPosWithoutReplayBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -5635,43 +5431,6 @@ TEST_F(NVFuserTest, FusionMatchedLeafPosWithoutReplayBroadcast_CUDA) {
       TransformReplay::getMatchedLeafPosWithoutReplayPasC(tv1, tv2, 3) == 3);
   TORCH_CHECK(
       TransformReplay::getMatchedLeafPosWithoutReplayCasP(tv2, tv1, 3) == 3);
-}
-
-TEST_F(NVFuserTest, FusionIdGraphTrivialReduction_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeConcreteTensor({2, 3, 4});
-  fusion.addInput(tv0);
-  auto tv1 = broadcast(tv0, {false, true, false, true, false, true});
-  auto tv2 = sum(tv1, {1, 3, 5});
-  auto tv3 = sin(tv2);
-  fusion.addOutput(tv3);
-
-  for (auto tv : {tv1, tv2}) {
-    tv->merge(0);
-    tv->merge(1);
-    tv->merge(2);
-  }
-
-  inlineMost();
-
-  ComputeAtMap ca_map(&fusion);
-
-  auto all_tvs = ir_utils::allTvs(&fusion);
-  for (auto tv1 : all_tvs) {
-    for (auto tv2 : all_tvs) {
-      if (tv1->isFusionInput() || tv2->isFusionInput()) {
-        continue;
-      }
-      for (int i : c10::irange(3)) {
-        auto id1 = tv1->axis(i);
-        auto id2 = tv2->axis(i);
-        TORCH_CHECK(ca_map.areMapped(id1, id2, IdMappingMode::LOOP));
-        TORCH_CHECK(ca_map.areMapped(id1, id2, IdMappingMode::PERMISSIVE));
-      }
-    }
-  }
 }
 
 TEST_F(NVFuserTest, FusionPrint_CUDA) {
@@ -6026,41 +5785,6 @@ TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction1_CUDA) {
       fusion, {out}, {t0, t1}, {t1 + t0.flatten()}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionMergeBroadcastingTrivialReduction2_CUDA) {
-  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-  auto fusion = fusion_ptr.get();
-  FusionGuard fg(fusion);
-
-  TensorView* tv0 = makeConcreteTensor({-1, 1, 1});
-  TensorView* tv1 = makeConcreteTensor({-1, -1});
-  fusion->addInput(tv0);
-  fusion->addInput(tv1);
-  auto tv2 = sum(tv0, {1});
-  auto tv3 = add(tv2, tv1);
-  fusion->addOutput(tv3);
-
-  tv2->merge(1);
-  tv2->merge(0);
-
-  MaxRootDomainInfoSpanningTree tree(tv0);
-  TransformPropagatorWithCheck tp(tv0);
-  tree.traverse(&tp);
-
-  inlineMost();
-
-  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
-  at::Tensor t0 = at::randn({10, 1, 1}, options);
-  at::Tensor t1 = at::randn({10, 10}, options);
-
-  FusionExecutor fe;
-  fe.compileFusion(fusion, {t0, t1});
-  auto cg_outputs = fe.runFusion({t0, t1});
-  auto out = cg_outputs[0];
-
-  testValidate(
-      fusion, {out}, {t0, t1}, {t1 + t0.squeeze(-1)}, __LINE__, __FILE__);
-}
-
 // Simple test case exercising the null scheduler path.
 TEST_F(NVFuserTest, FusionNullScheduler_CUDA) {
   auto fusion = std::make_unique<Fusion>();
@@ -6103,7 +5827,7 @@ TEST_F(NVFuserTest, FusionNullScheduler2_CUDA) {
   auto tv0 = makeConcreteTensor({0, 1, 9223372036854775807L});
   fusion->addInput(tv0);
 
-  auto tv1 = sum(tv0, {0, 1, 2});
+  auto tv1 = sum(tv0, {1, 2});
 
   fusion->addOutput(tv1);
 
@@ -6115,7 +5839,7 @@ TEST_F(NVFuserTest, FusionNullScheduler2_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion));
   auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
 
-  auto t1 = t0.sum({0, 1, 2});
+  auto t1 = t0.sum({1, 2});
 
   testValidate(
       executor_cache.fusion(), cg_outputs, {t0}, {t1}, __LINE__, __FILE__);
@@ -6165,6 +5889,33 @@ TEST_F(NVFuserTest, FusionNullScheduler3_CUDA) {
   for (auto group : groups) {
     TORCH_INTERNAL_ASSERT(group->heuristic() == ScheduleHeuristic::NoOp);
   }
+}
+
+TEST_F(NVFuserTest, FusionReducingZeroElements_CUDA) {
+  GTEST_SKIP()
+      << "Merging IterDomains with ending values that are 0 is not supported at this time.";
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeConcreteTensor({0, 1, 9223372036854775807L});
+  fusion->addInput(tv0);
+
+  auto tv1 = sum(tv0, {0, 1, 2});
+
+  fusion->addOutput(tv1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({0, 1, 9223372036854775807L}, options);
+
+  std::vector<IValue> aten_inputs({t0});
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto t1 = t0.sum({0, 1, 2});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t1}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionEmpty_CUDA) {

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/ops/alias.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 #include <cfloat>
@@ -1153,7 +1154,7 @@ TensorView* reductionOpZeroDimTensor(TensorView* inp) {
 
 } // namespace
 
-TensorView* reductionOp(
+TensorView* reductionOpNoSqueeze(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
@@ -1220,6 +1221,87 @@ TensorView* reductionOp(
       is_broadcast.at(axis) = true;
     }
     out = broadcast(out, is_broadcast);
+  }
+  return out;
+}
+
+TensorView* reductionOp(
+    BinaryOpType reduction_op_type,
+    const std::vector<int>& axes,
+    Val* init,
+    TensorView* tv,
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  // TODO: It would be nice if in this function we could convert reduction of
+  // zero elements into a `FullOp`
+
+  TORCH_CHECK(
+      init->isConstScalar(),
+      "Cannot create a reduction operation where the initial value is not a const scalar.");
+
+  TORCH_CHECK(
+      TensorDomain::sameAs(tv->getMaybeRFactorDomain(), tv->domain()->domain()),
+      "Reducing a tensor once it's gone under transformations is not permitted at this time. \n",
+      "Please set reductions before calling split/merge/computeAt.\n  RFactor: ",
+      tv->getMaybeRFactorDomain(),
+      "\n  Domain: ",
+      tv->domain()->toString());
+
+  TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  const int ndims = tv_root.size();
+
+  // PyTorch allows reduction of 0-dim tensors
+  if (ndims == 0) {
+    return reductionOpZeroDimTensor(tv);
+  }
+
+  std::vector<unsigned int> uint_axes;
+  for (int axis : axes) {
+    if (axis < 0) {
+      axis += ndims;
+    }
+
+    TORCH_CHECK(
+        axis >= 0 && axis < ndims,
+        "Reduction on invalid axis, received: ",
+        axis,
+        " however tensor view only has ",
+        ndims,
+        " non-reduction dims.");
+    uint_axes.push_back((unsigned int)axis);
+  }
+  std::sort(uint_axes.begin(), uint_axes.end());
+
+  std::vector<int> reduction_axes;
+  std::vector<bool> is_trivial_reduction(ndims, false);
+  int offset = 0;
+  for (unsigned int axis : uint_axes) {
+    auto id = tv_root[axis];
+    is_trivial_reduction[axis] = id->isBroadcast() &&
+        !id->hasExpandedExtent() && id->extent()->isOneInt();
+    if (!is_trivial_reduction[axis]) {
+      reduction_axes.push_back(axis + offset);
+    } else if (!keep_dim) {
+      offset--;
+    }
+  }
+
+  TensorView* squeezed = tv;
+  if (offset < 0) {
+    squeezed = squeeze(tv, is_trivial_reduction);
+  }
+
+  TensorView* out = squeezed;
+  if (!reduction_axes.empty()) {
+    return reductionOpNoSqueeze(
+        reduction_op_type, reduction_axes, init, squeezed, keep_dim, dtype);
+  }
+
+  if (out == tv) {
+    // makes sure that a new tensor is created
+    return set(tv);
   }
   return out;
 }

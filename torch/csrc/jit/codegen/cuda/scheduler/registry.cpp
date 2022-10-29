@@ -1146,16 +1146,20 @@ class NoOpScheduler : public SchedulerEntry {
 
   //! Check if the no-op heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
+    if (fusion->isNoOp()) {
+      return true;
+    }
     // Check there're no non-trivial reduction ops.
     for (auto reduction :
          ir_utils::getReductionOps(fusion, true /* ignore_trivial */)) {
-      for (auto input :
-           ir_utils::filterByType<TensorView>(reduction->inputs())) {
-        auto root_dom = input->getRootDomain();
-        auto all_nonzero =
-            std::none_of(root_dom.begin(), root_dom.end(), [](IterDomain* id) {
-              return id->extent()->isZeroInt();
-            });
+      for (auto output :
+           ir_utils::filterByType<TensorView>(reduction->outputs())) {
+        auto concrete_dimension =
+            TensorDomain::noReductions(output->getRootDomain());
+        auto all_nonzero = std::none_of(
+            concrete_dimension.begin(),
+            concrete_dimension.end(),
+            [](IterDomain* id) { return id->extent()->isZeroInt(); });
         if (all_nonzero) {
           scheduler_debug_utils::canScheduleRejectReason(
               ScheduleHeuristic::NoOp,
@@ -1167,27 +1171,9 @@ class NoOpScheduler : public SchedulerEntry {
 
     // Check that all outputs are either broadcast or ignored reduction.
     for (auto out_tv : ir_utils::filterByType<TensorView>(fusion->outputs())) {
-      auto non_zero_candidate_dimension = TensorDomain::noReductions(
+      auto concrete_dimension = TensorDomain::noReductions(
           TensorDomain::noBroadcasts(out_tv->domain()->domain()));
-
-      // non_zero_candidate_dimension is empty would mean this out tv has only
-      //  broadcast and trivial reduction axes, and this out tv would not
-      //  require scheduling ops.
-      // If any of the dimensions in non_zero_candidate_dimension is compile
-      // time
-      //  constant zero, this out tv also does not require any scheduling
-      //  operation as it is essentially a scalar.
-      // TODO:
-      // There seems to be a runtime component to it
-      //  too, i.e. if the runtime sizes are zero, then we should
-      //  handle it through null scheduler.
-      if (!non_zero_candidate_dimension.empty() &&
-          std::none_of(
-              non_zero_candidate_dimension.begin(),
-              non_zero_candidate_dimension.end(),
-              [](IterDomain* id) { return id->extent()->isZeroInt(); })) {
-        // We have found a out_tv with a dimension that NoOp scheduler couldn't
-        //  handle and therefore reject this fusion.
+      if (!concrete_dimension.empty()) {
         scheduler_debug_utils::canScheduleRejectReason(
             ScheduleHeuristic::NoOp, "output has a concrete dimension");
         return false;
