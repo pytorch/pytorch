@@ -189,7 +189,10 @@ FullOp::FullOp(
     DataType dtype)
     : Expr(passkey, ExprType::FullOp), dtype_(dtype), fill_value_(fill_value) {
   if (out->isA<TensorView>()) {
-    addInput(out->as<TensorView>()->getRootDomain()[0]->extent());
+    auto tv_root = out->as<TensorView>()->getRootDomain();
+    for (auto id : tv_root) {
+      addInput(id->extent());
+    }
   }
   addInput(fill_value);
   addOutput(out);

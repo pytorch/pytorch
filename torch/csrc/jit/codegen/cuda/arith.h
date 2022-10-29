@@ -96,8 +96,9 @@ TORCH_CUDA_CU_API TensorView* reductionOp(
     bool keep_dim = false,
     DataType dtype = DataType::Null);
 
-// Similar to reductionOp, but don't convert size-1 reduction into squeeze
-TORCH_CUDA_CU_API TensorView* reductionOpNoSqueeze(
+// Just create a ReductionOp, don't try to simplify it. Don't convert size-1
+// reduction into squeeze and don't convert size-0 reduction into full.
+TORCH_CUDA_CU_API TensorView* reductionOpRaw(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,

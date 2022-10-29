@@ -5892,8 +5892,6 @@ TEST_F(NVFuserTest, FusionNullScheduler3_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionReducingZeroElements_CUDA) {
-  GTEST_SKIP()
-      << "Merging IterDomains with ending values that are 0 is not supported at this time.";
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 

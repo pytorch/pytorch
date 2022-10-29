@@ -1154,7 +1154,7 @@ TensorView* reductionOpZeroDimTensor(TensorView* inp) {
 
 } // namespace
 
-TensorView* reductionOpNoSqueeze(
+TensorView* reductionOpRaw(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
     Val* init,
@@ -1225,6 +1225,51 @@ TensorView* reductionOpNoSqueeze(
   return out;
 }
 
+namespace {
+
+TensorView* maybeFullInsteadOfReduction(
+    const std::vector<unsigned int>& axes, // sorted
+    Val* init,
+    TensorView* tv,
+    bool keep_dim,
+    DataType dtype) {
+  auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  const int ndims = tv_root.size();
+  for (auto i : axes) {
+    if (tv_root.at(i)->extent()->isZeroInt()) {
+      std::vector<IterDomain*> new_root;
+      new_root.reserve(keep_dim ? ndims : ndims - axes.size());
+      int cur_pos = 0;
+      for (auto j : c10::irange(ndims)) {
+        bool is_reduction = cur_pos < axes.size() && axes[cur_pos] == j;
+        if (is_reduction) {
+          cur_pos++;
+          if (keep_dim) {
+            auto id = IterDomainBuilder(
+                          tv->fusion()->zeroVal(), tv->fusion()->oneVal())
+                          .iter_type(IterType::Broadcast)
+                          .build();
+            new_root.push_back(id);
+          }
+        } else {
+          new_root.push_back(tv_root.at(j)->cloneWithoutRFactor());
+        }
+      }
+
+      TensorDomain* td = IrBuilder::create<TensorDomain>(
+          new_root, TensorDomain::getContiguousContiguity(new_root));
+
+      dtype = dtype == DataType::Null ? tv->getDataType().value() : dtype;
+      auto output = IrBuilder::create<TensorView>(td, dtype);
+      IrBuilder::create<FullOp>(output, init, dtype);
+      return output;
+    }
+  }
+  return nullptr;
+}
+
+} // namespace
+
 TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
@@ -1232,9 +1277,6 @@ TensorView* reductionOp(
     TensorView* tv,
     bool keep_dim /*=false*/,
     DataType dtype /* DataType::Null */) {
-  // TODO: It would be nice if in this function we could convert reduction of
-  // zero elements into a `FullOp`
-
   TORCH_CHECK(
       init->isConstScalar(),
       "Cannot create a reduction operation where the initial value is not a const scalar.");
@@ -1274,6 +1316,14 @@ TensorView* reductionOp(
   }
   std::sort(uint_axes.begin(), uint_axes.end());
 
+  // In PyTorch, reduction of a size-0 tensor is effectively creating a tensor
+  // filled with the init value.
+  auto maybe_full =
+      maybeFullInsteadOfReduction(uint_axes, init, tv, keep_dim, dtype);
+  if (maybe_full != nullptr) {
+    return maybe_full;
+  }
+
   std::vector<int> reduction_axes;
   std::vector<bool> is_trivial_reduction(ndims, false);
   int offset = 0;
@@ -1295,7 +1345,7 @@ TensorView* reductionOp(
 
   TensorView* out = squeezed;
   if (!reduction_axes.empty()) {
-    return reductionOpNoSqueeze(
+    return reductionOpRaw(
         reduction_op_type, reduction_axes, init, squeezed, keep_dim, dtype);
   }
 

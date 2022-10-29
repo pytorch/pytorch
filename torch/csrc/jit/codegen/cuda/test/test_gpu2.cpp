@@ -6615,7 +6615,7 @@ TEST_F(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
   auto tv0 = makeConcreteTensor({17, 18, 128, 1});
 
   fusion->addInput(tv0);
-  auto tv1 = reductionOpNoSqueeze(
+  auto tv1 = reductionOpRaw(
       BinaryOpType::Add, {1, 2, 3}, IrBuilder::create<Double>(0.0), tv0);
   auto tv2 = broadcast(tv1, {false, true, true, true});
   auto tv3 = add(tv2, tv0);
