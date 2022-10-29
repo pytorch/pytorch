@@ -1,4 +1,6 @@
 import logging
+
+import math
 import re
 import types
 from typing import Dict, List
@@ -170,7 +172,13 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable, GradModeVariable, TensorVariable
+        # print("CALLING ON TORCH", self.value)
+        from . import (
+            ConstantVariable,
+            DynamicShapeVariable,
+            GradModeVariable,
+            TensorVariable,
+        )
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -365,6 +373,22 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        if (
+            any([isinstance(x, DynamicShapeVariable) for x in args])
+            and self.value == math.sqrt
+        ):
+            from torch.fx.experimental.symbolic_shapes import sym_sqrt
+
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    sym_sqrt,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                **options,
+            )
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
@@ -377,7 +401,6 @@ class TorchVariable(VariableTracker):
                 for x in args[0].items:
                     if isinstance(x.value, numpy.generic):
                         x.value = x.value.item()
-
             tensor_variable = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
