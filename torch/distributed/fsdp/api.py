@@ -1,7 +1,6 @@
 """
-This file includes public utilities for FSDP such as classes for the FSDP
-constructor arguments. We keep this file private and only for organization, and
-we make the contents public via other files.
+This file includes public APIs for FSDP such as the classes used for the
+constructor arguments.
 """
 
 from enum import auto, Enum
