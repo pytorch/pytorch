@@ -23,9 +23,13 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 import torch.nn as nn
 from torch.distributed import ProcessGroup
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+    _CHECKPOINT_WRAPPED_MODULE,
+    ActivationWrapper,
+)
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp import (
     BackwardPrefetch,
@@ -534,10 +538,11 @@ class FullyShardedDataParallel(nn.Module):
         """
         Returns the wrapped module (like :class:`DistributedDataParallel`).
         """
-        if hasattr(self, FSDP_WRAPPED_MODULE):
-            return self._fsdp_wrapped_module
-        else:
-            raise RuntimeError("_fsdp_wrapped_module not yet defined")
+        # FSDP's `.module` must refer to the innermost wrapped module when
+        # composing with other module wrappers in order for state dict to work
+        if isinstance(self._fsdp_wrapped_module, ActivationWrapper):
+            return getattr(self._fsdp_wrapped_module, _CHECKPOINT_WRAPPED_MODULE)
+        return self._fsdp_wrapped_module
 
     @property
     def _has_params(self) -> bool:
@@ -929,9 +934,7 @@ class FullyShardedDataParallel(nn.Module):
             module_name = f"{module_name}."
         # Activation checkpoint adds a prefix that has to be
         # removed as well.
-        module_name = module_name.replace(
-            f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
-        )
+        module_name = module_name.replace(_CHECKPOINT_PREFIX, "")
         return module_name
 
     @property
@@ -1372,7 +1375,8 @@ class FullyShardedDataParallel(nn.Module):
         attribute but dynamically change whether it is visible to ``nn.Module``
         methods.
         """
-        self.module._parameters.pop(FLAT_PARAM, None)
+        if self._has_params:
+            self.module._parameters.pop(FLAT_PARAM, None)
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
