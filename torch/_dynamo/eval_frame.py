@@ -221,35 +221,28 @@ class DisableContext(_TorchDynamoContext):
 def catch_errors_wrapper(callback):
     @functools.wraps(callback)
     def catch_errors(frame, cache_size):
-        try:
-            if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
-                log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
-                return None
-            if (
-                frame.f_code.co_filename == "<string>"
-                and frame.f_code.co_name == "__new__"
-            ):
-                # nametuple constructor
-                return None
-            if config.optimize_ddp:
-                ddp_module = DistributedDataParallel._get_active_ddp_module()
-                if ddp_module:
-                    with compile_lock:
-                        ddp_optimizer = DDPOptimizer(
-                            bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                            parameters_to_ignore=ddp_module.parameters_to_ignore,
-                            backend_compile_fn=callback._torchdynamo_orig_callable,
-                        )
-                        hijacked_callback = convert_frame.convert_frame(
-                            ddp_optimizer.compile_fn, guard_export_fn=None
-                        )
-                        return hijacked_callback(frame, cache_size)
+        if frame.f_lasti >= 0 or skipfiles.check(frame.f_code.co_filename):
+            log.debug(f"skipping {frame.f_code.co_name} {frame.f_code.co_filename}")
+            return None
+        if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
+            # nametuple constructor
+            return None
+        if config.optimize_ddp:
+            ddp_module = DistributedDataParallel._get_active_ddp_module()
+            if ddp_module:
+                with compile_lock:
+                    ddp_optimizer = DDPOptimizer(
+                        bucket_bytes_cap=ddp_module.bucket_bytes_cap,
+                        parameters_to_ignore=ddp_module.parameters_to_ignore,
+                        backend_compile_fn=callback._torchdynamo_orig_callable,
+                    )
+                    hijacked_callback = convert_frame.convert_frame(
+                        ddp_optimizer.compile_fn, guard_export_fn=None
+                    )
+                    return hijacked_callback(frame, cache_size)
 
-            with compile_lock:
-                return callback(frame, cache_size)
-        except Exception:
-            log.exception("Error while processing frame")
-            raise
+        with compile_lock:
+            return callback(frame, cache_size)
 
     catch_errors._torchdynamo_orig_callable = callback
     return catch_errors
