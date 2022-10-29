@@ -166,7 +166,7 @@ def valid_vec_isa():
 
 
 def cpp_compile_command(input, output, include_pytorch=False):
-    if include_pytorch or (config.cpp.simdlen and config.cpp.simdlen > 1):
+    if include_pytorch or valid_vec_isa():
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
