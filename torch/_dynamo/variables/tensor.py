@@ -466,7 +466,6 @@ class TensorVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, TupleVariable
-
         kwargs = dict(kwargs)
         # print("CALLING TENSOR OP", name)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -477,6 +476,12 @@ class TensorVariable(VariableTracker):
             constant_result = SizeVariable(sizes, **options)
         elif name == "size" and self.size is None and config.dynamic_shapes:
             example_size = self.proxy.node.meta['example_value'].size()
+            if len(args) == 1 and isinstance(args[0], ConstantVariable):
+                assert isinstance(args[0].value, int)
+                proxy = tx.output.create_proxy(
+                        "call_function", operator.getitem, *proxy_args_kwargs([self] + args, {}),
+                )
+                return DynamicShapeVariable.create(tx, proxy, None)
             items = []
             size_proxy = tx.output.create_proxy(
                 "call_method",
@@ -492,7 +497,7 @@ class TensorVariable(VariableTracker):
                         "call_function", operator.getitem, (i,), {},
                     )
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
-            size_proxy.node.meta['example_value'] = tuple([item.proxy.node.meta['example_value'] for item in items])
+            size_proxy.node.meta['example_value'] = torch.Size([item.proxy.node.meta['example_value'] for item in items])
             return SizeVariable(items, size_proxy, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
