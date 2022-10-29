@@ -108,11 +108,21 @@ inline bool check_head_dim_size(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_runtime_disabled(sdp_params params, bool debug) {
+inline bool check_runtime_disabled_flash(sdp_params params, bool debug) {
   // We check the global context to see if user has explicitly turned of flash
   // sdp kernels
   if (!at::globalContext().userEnabledFlashSDP()) {
     TORCH_CHECK(!debug, "Flash attention has been runtime disabled.");
+    return false;
+  }
+  return true;
+}
+
+inline bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
+  // We check the global context to see if user has explicitly turned of mem_efficient
+  // sdp kernels
+  if (!at::globalContext().userEnabledMemEfficientSDP()) {
+    TORCH_CHECK(!debug, "Memory Efficient attention has been runtime disabled.");
     return false;
   }
   return true;
@@ -164,7 +174,7 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
 
   //  Define gate functions that determine if a flash kernel can be ran
   std::vector<std::function<bool(sdp_params, bool)>> constraints{
-      check_runtime_disabled,
+      check_runtime_disabled_flash,
       check_tensor_shapes,
       check_for_attn_weights,
       check_for_attn_mask,
@@ -193,7 +203,7 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
   //  Define gate functions that determine if a flash kernel can be ran
   std::vector<std::function<bool(sdp_params, bool)>> constraints{
       check_gpu_sm50_or_greater,
-      check_runtime_disabled,
+      check_runtime_disabled_mem_efficient,
       check_for_attn_weights,
       check_tensor_shapes,
       check_for_attn_mask};
@@ -214,7 +224,7 @@ inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
   // 2. Mem Efficient Attention
   // 3. Math fallback
   auto& ctx = at::globalContext();
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()) {
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return SDPBackend::error;
   }
   // Because TORCHCHECK checks if condition is true we negate debug so that
