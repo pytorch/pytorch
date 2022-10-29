@@ -1885,6 +1885,7 @@
   dispatch:
     SparseCPU, SparseCUDA: div_sparse
     ZeroTensor: div_zerotensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_div_Tensor
   tags: canonical
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -1932,6 +1933,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_div_Scalar
   tags: canonical
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
