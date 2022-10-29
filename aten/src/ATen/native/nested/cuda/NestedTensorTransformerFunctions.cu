@@ -606,9 +606,9 @@ void gemm_grouped_cuda_internal(
 template <typename scalar_t>
 bool group_gemm_dispatch(
     at::Device device,
-    std::vector<scalar_t*> aptr,
-    std::vector<scalar_t*> bptr,
-    std::vector<scalar_t*> dptr,
+    const std::vector<scalar_t*>& aptr,
+    const std::vector<scalar_t*>& bptr,
+    const std::vector<scalar_t*>& dptr,
     const std::vector<int64_t>& lda,
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
@@ -620,9 +620,9 @@ bool group_gemm_dispatch(
 template <>
 bool group_gemm_dispatch(
     at::Device device,
-    std::vector<float*> aptr,
-    std::vector<float*> bptr,
-    std::vector<float*> dptr,
+    const std::vector<float*>& aptr,
+    const std::vector<float*>& bptr,
+    const std::vector<float*>& dptr,
     const std::vector<int64_t>& lda,
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
@@ -646,9 +646,9 @@ bool group_gemm_dispatch(
 template <>
 bool group_gemm_dispatch(
     at::Device device,
-    std::vector<c10::Half*> aptr_,
-    std::vector<c10::Half*> bptr_,
-    std::vector<c10::Half*> dptr_,
+    const std::vector<c10::Half*>& aptr_,
+    const std::vector<c10::Half*>& bptr_,
+    const std::vector<c10::Half*>& dptr_,
     const std::vector<int64_t>& lda,
     const std::vector<int64_t>& ldb,
     const std::vector<int64_t>& ldd,
@@ -736,7 +736,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
   int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
-  std::vector<int64_t> output_offsets;
 
   std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
   std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
@@ -761,7 +760,6 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
     out_sizemat_ptr[0] = self_size0;
     out_sizemat_ptr[1] = mat2_size1;
     out_sizemat_ptr += 2;
-    output_offsets.push_back(out_numel);
     out_numel += self_size0 * mat2_size1;
   }
   const Tensor &self_buffer = self_ptr->get_unsafe_storage_as_tensor();
@@ -781,12 +779,12 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   bool success = false;
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       self.scalar_type(), "group_gemm_dispatch", [&] {
-        std::vector<scalar_t*> aptr;
-        std::vector<scalar_t*> bptr;
-        std::vector<scalar_t*> dptr;
-        std::vector<int64_t> lda;
-        std::vector<int64_t> ldb;
-        std::vector<int64_t> ldd;
+        std::vector<scalar_t*> aptr(ntensors);
+        std::vector<scalar_t*> bptr(ntensors);
+        std::vector<scalar_t*> dptr(ntensors);
+        std::vector<int64_t> lda(ntensors);
+        std::vector<int64_t> ldb(ntensors);
+        std::vector<int64_t> ldd(ntensors);
         std::vector<cutlass::gemm::GemmCoord> gemm_sizes;
         bool all_row_major = true;
         for (int64_t i = 0; i < ntensors; i++) {
@@ -798,14 +796,14 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           const int64_t &mat2_size1 = mat2_shape[1];
           gemm_sizes.push_back(
               cutlass::gemm::GemmCoord(self_size0, mat2_size1, self_size1));
-          aptr.push_back(self_buffer.data_ptr<scalar_t>() + self_offsets[i]);
-          bptr.push_back(mat2_buffer.data_ptr<scalar_t>() + mat2_offsets[i]);
-          dptr.push_back( out_buffer.data_ptr<scalar_t>() + out_offsets[i]);
+          aptr[i] = self_buffer.data_ptr<scalar_t>() + self_offsets[i];
+          bptr[i] = mat2_buffer.data_ptr<scalar_t>() + mat2_offsets[i];
+          dptr[i] = out_buffer.data_ptr<scalar_t>() + out_offsets[i];
           all_row_major = all_row_major && (self_strides[i][1] == 1);
           all_row_major = all_row_major && (mat2_strides[i][1] == 1);
-          lda.push_back(self_strides[i][0]);
-          ldb.push_back(mat2_strides[i][0]);
-          ldd.push_back(mat2_size1);
+          lda[i] = self_strides[i][0];
+          ldb[i] = mat2_strides[i][0];
+          ldd[i] = mat2_size1;
         }
         auto dprops = at::cuda::getCurrentDeviceProperties();
         bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
