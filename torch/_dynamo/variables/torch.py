@@ -392,8 +392,6 @@ class TorchVariable(VariableTracker):
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
-            # TODO(voz): Remap via table
-
             if (
                 self.value in tensortype_to_dtype
                 and len(args) == 1
