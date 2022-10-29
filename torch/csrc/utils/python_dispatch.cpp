@@ -25,9 +25,9 @@ namespace torch {
 namespace impl {
 namespace dispatch {
 
-// NB: I'd like to index this on OperatorHandle, but I can't, as I can't guarantee
-// that the main interpreter has finish doing all registrations before the other
-// interpreters start banging on it
+// NB: I'd like to index this on OperatorHandle, but I can't, as I can't
+// guarantee that the main interpreter has finish doing all registrations before
+// the other interpreters start banging on it
 static ska::flat_hash_map<
     c10::OperatorName,
     ska::flat_hash_map<c10::DispatchKey, std::shared_ptr<c10::SafePyObject>>>
@@ -70,11 +70,13 @@ inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
 
 struct EnableHermeticPyObject {
   EnableHermeticPyObject()
-      : old_(c10::impl::HermeticPyObjectTLS::get_state())
-      , old_excluded_python_(c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Python))
-      , old_python_(c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Python))
-      , old_python_snapshot_(c10::impl::tls_is_dispatch_key_included(at::DispatchKey::PythonTLSSnapshot))
-  {
+      : old_(c10::impl::HermeticPyObjectTLS::get_state()),
+        old_excluded_python_(
+            c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Python)),
+        old_python_(
+            c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Python)),
+        old_python_snapshot_(c10::impl::tls_is_dispatch_key_included(
+            at::DispatchKey::PythonTLSSnapshot)) {
     c10::impl::HermeticPyObjectTLS::set_state(true);
     c10::impl::tls_set_dispatch_key_excluded(at::DispatchKey::Python, true);
     c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Python, false);
@@ -83,8 +85,10 @@ struct EnableHermeticPyObject {
   }
   ~EnableHermeticPyObject() {
     c10::impl::HermeticPyObjectTLS::set_state(old_);
-    c10::impl::tls_set_dispatch_key_excluded(at::DispatchKey::Python, old_excluded_python_);
-    c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Python, old_python_);
+    c10::impl::tls_set_dispatch_key_excluded(
+        at::DispatchKey::Python, old_excluded_python_);
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::Python, old_python_);
     c10::impl::tls_set_dispatch_key_included(
         at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
   }
@@ -100,8 +104,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
  public:
   PythonKernelHolder(py::object func, c10::DispatchKey dispatch_key)
-      : func_(func.release().ptr(), getPyInterpreter())
-      , dispatch_key_(dispatch_key) {}
+      : func_(func.release().ptr(), getPyInterpreter()),
+        dispatch_key_(dispatch_key) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -113,8 +117,10 @@ class PythonKernelHolder : public c10::OperatorKernel {
     // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
     const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
     if (mode_stack_len > 0) {
-      const auto& cur_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-      cur_torch_dispatch_mode_state->pyinterpreter()->python_op_registration_trampoline(op, dispatch_key_, stack);
+      const auto& cur_torch_dispatch_mode_state =
+          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+      cur_torch_dispatch_mode_state->pyinterpreter()
+          ->python_op_registration_trampoline(op, dispatch_key_, stack);
       return;
     }
 
@@ -126,17 +132,25 @@ class PythonKernelHolder : public c10::OperatorKernel {
     for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
       if (ivalue.isTensor()) {
         auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
-        if (interpreter && ivalue.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
-          (*interpreter)->python_op_registration_trampoline(op, dispatch_key_, stack);
+        if (interpreter &&
+            ivalue.unsafeToTensorImpl()->key_set().has(
+                at::DispatchKey::Python)) {
+          (*interpreter)
+              ->python_op_registration_trampoline(op, dispatch_key_, stack);
           return;
         }
-      } else if (ivalue.isTensorList() || (ivalue.isOptionalTensorList() && !ivalue.isNone())) {
-        // NB: use toListRef as it doesn't induce refcount bumps (toTensorListRef
-        // is not a thing)
+      } else if (
+          ivalue.isTensorList() ||
+          (ivalue.isOptionalTensorList() && !ivalue.isNone())) {
+        // NB: use toListRef as it doesn't induce refcount bumps
+        // (toTensorListRef is not a thing)
         for (const auto& nv : ivalue.toListRef()) {
           auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
-          if (interpreter && ivalue.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
-            (*interpreter)->python_op_registration_trampoline(op, dispatch_key_, stack);
+          if (interpreter &&
+              ivalue.unsafeToTensorImpl()->key_set().has(
+                  at::DispatchKey::Python)) {
+            (*interpreter)
+                ->python_op_registration_trampoline(op, dispatch_key_, stack);
             return;
           }
         }
@@ -184,8 +198,7 @@ void initDispatchBindings(PyObject* module) {
           [](py::object self, const char* schema, const char* alias) {
             TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
             self.cast<torch::Library&>().def(
-                torch::schema(schema, parseAliasAnalysisKind(alias))
-            );
+                torch::schema(schema, parseAliasAnalysisKind(alias)));
             return self;
           },
           "",
@@ -198,9 +211,7 @@ void initDispatchBindings(PyObject* module) {
           "def_legacy",
           [](py::object self, const char* schema) {
             TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
-            self.cast<torch::Library&>().def(
-              torch::jit::parseSchema(schema)
-            );
+            self.cast<torch::Library&>().def(torch::jit::parseSchema(schema));
             return self;
           },
           "",
@@ -283,8 +294,8 @@ void initDispatchBindings(PyObject* module) {
                 torch::dispatch(
                     dispatch,
                     CppFunction::makeFromBoxedFunctor(
-                        std::make_unique<PythonKernelHolder>(
-                            func, dispatch))), register_or_verify());
+                        std::make_unique<PythonKernelHolder>(func, dispatch))),
+                register_or_verify());
             python_registrations_[lib._resolve(name)].insert_or_assign(
                 dispatch,
                 std::make_shared<c10::SafePyObject>(
@@ -300,7 +311,8 @@ void initDispatchBindings(PyObject* module) {
           [](py::object self, const char* schema, const char* alias_analysis) {
             auto parsed_schema =
                 torch::schema(schema, parseAliasAnalysisKind(alias_analysis));
-            self.cast<torch::Library&>().def(std::move(parsed_schema), {}, register_or_verify());
+            self.cast<torch::Library&>().def(
+                std::move(parsed_schema), {}, register_or_verify());
             // TODO: this is dumb, had to make a second copy
             return torch::schema(schema, parseAliasAnalysisKind(alias_analysis))
                 .name();
@@ -598,10 +610,8 @@ void python_op_registration_trampoline_impl(
   TORCH_INTERNAL_ASSERT(func != nullptr);
   auto* pyobj = func->ptr(getPyInterpreter());
   TORCH_INTERNAL_ASSERT(pyobj != nullptr);
-  auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
-      pyobj,
-      args_kwargs.first.ptr(),
-      args_kwargs.second.ptr()));
+  auto obj = py::reinterpret_steal<py::object>(
+      PyObject_Call(pyobj, args_kwargs.first.ptr(), args_kwargs.second.ptr()));
   if (!obj) {
     throw python_error();
   }

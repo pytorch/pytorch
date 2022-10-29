@@ -123,7 +123,8 @@ class Library:
                     " Instead we should let the operator decompose, and ensure that we have meta kernels"
                     " for the base ops that it decomposes into.")
 
-        self.m.impl(name, dispatch_key, fn)
+        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
+
         _impls.add(key)
         self._op_impls.add(key)
 

@@ -38,7 +38,6 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/utils/python_dispatch.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -524,8 +523,8 @@ bool isResurrectable(THPVariable* self) {
   }
   auto const& tensor = THPVariable_Unpack(self);
   // Check if this is hermetic. If it is, no resurrection.
-  if (tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get())
-        != c10::make_optional((PyObject*)self)) {
+  if (tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get()) !=
+      c10::make_optional((PyObject*)self)) {
     return false;
   }
   if (!tensor.defined() || tensor.use_count() <= 1) {
@@ -623,9 +622,8 @@ static int THPVariable_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed() &&
-        tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get())
-        == c10::make_optional((PyObject*)self)
-        ) {
+        tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get()) ==
+            c10::make_optional((PyObject*)self)) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
