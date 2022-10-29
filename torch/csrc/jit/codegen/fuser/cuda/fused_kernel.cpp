@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 
-#include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <third_party/nvfuser/executor_utils.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>

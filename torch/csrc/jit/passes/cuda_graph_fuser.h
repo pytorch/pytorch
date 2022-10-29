@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Context.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <third_party/nvfuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <string>
