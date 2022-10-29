@@ -982,7 +982,7 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_CUDA OR USE_ROCM)
-  include(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/nvfuser.cmake)
+  include(${TORCH_ROOT}/third_party/nvfuser.cmake)
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
