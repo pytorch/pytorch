@@ -1,8 +1,10 @@
+import warnings
 import weakref
+import contextlib
 
 import torch
-from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._mode_utils import no_dispatch
+from torch.multiprocessing.reductions import StorageWeakRef
 
 
 def safe_is_leaf(t):
@@ -56,7 +58,7 @@ class WeakTensorRefKey(object):
 class MetaConverter:
     def __init__(self):
         self.storage_memo = {}
-        self.tensor_memo = {}
+        self.tensor_memo: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
         self.maybe_storages_to_delete = []
         self.check_expired_frequency = 128
         self.check_expired_count = 0
@@ -127,18 +129,29 @@ class MetaConverter:
 
     # NB: doesn't actually return a storage, because meta storage is
     # not supported
-    def meta_storage(self, s):
+    def meta_storage(self, s, callback):
         # NB: TypedStorage is freshly allocated and cannot be used as hash
         # key index.
 
         # Use a Weak Ref to s in order to not leak memory
         swr = StorageWeakRef(s)
         if swr not in self.storage_memo:
-            self.storage_memo[swr] = torch.empty(s.size(), dtype=s.dtype, device="meta")
+            self.storage_memo[swr] = (
+                callback(
+                    lambda: torch.empty(s.size(), dtype=torch.uint8, device="meta")
+                )
+                .storage()
+                .untyped()
+            )
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
-    def meta_tensor(self, t, shape_env=None):
+    def meta_tensor(self, t, shape_env=None, callback=lambda t: t()):
+        # This indicates you set no_dispatch() before calling into this
+        # function.  This is an error: we may be creating fake tensors and
+        # will perform operations on them which need fake tensor mode to
+        # be active.  You will segfault if you are in a no_dispatch() block.
+        assert not torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python)
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
@@ -166,14 +179,22 @@ class MetaConverter:
                 if t.is_sparse:
                     assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
-                    r = torch.ops.aten._sparse_coo_tensor_with_dims(
-                        t.sparse_dim(),
-                        t.dense_dim(),
-                        t.shape,
-                        dtype=t.dtype,
-                        layout=torch.sparse_coo,
-                        device="meta",
+                    r = callback(
+                        lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
+                            t.sparse_dim(),
+                            t.dense_dim(),
+                            t.shape,
+                            dtype=t.dtype,
+                            layout=torch.sparse_coo,
+                            device="meta",
+                        )
                     )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    # Note [is_coalesced is dispatched]
+                    # Strangely enough, is_coalesced() is a dispatched operator,
+                    # which means that it will get caught by fake tensor mode.
+                    # Ordinarily this would error, but there's some logic in
+                    # fake tensor ensure this doesn't happen.
                     r._coalesced_(t.is_coalesced())
                     if t.requires_grad:
                         r.requires_grad = True
@@ -188,7 +209,7 @@ class MetaConverter:
                     # directly from storage is WRONG because this won't cause
                     # version counters to get shared.
                     assert t._is_view()
-                    base = self.meta_tensor(t._base, shape_env)
+                    base = self.meta_tensor(t._base, shape_env, callback)
 
                     def is_c_of_r(complex_dtype, real_dtype):
                         return (
@@ -214,38 +235,92 @@ class MetaConverter:
                         r = base.as_strided(sizes, strides, sym(t.storage_offset()))
                 else:
                     is_leaf = safe_is_leaf(t)
+                    sizes, strides = sym_sizes_strides(t)
+                    storage_offset = sym(t.storage_offset())
                     # Fake up some autograd history.
                     if t.requires_grad:
-                        r = torch.empty(
-                            (0,), dtype=t.dtype, device="meta", requires_grad=True
+                        r = callback(
+                            lambda: torch.empty_strided(
+                                sizes, strides, dtype=t.dtype, device="meta"
+                            )
                         )
+                        assert safe_is_leaf(
+                            r
+                        ), "the callback you passed in doesn't detach"
+                        r.requires_grad = t.requires_grad
                         if not is_leaf:
                             with torch.enable_grad():
-                                # The backward function here will be wrong, but
-                                # that's OK; our goal is just to get the metadata
-                                # looking as close as possible; we're not going to
-                                # actually try to backward() on these produced
-                                # metas.  TODO: would be safer to install some
-                                # sort of unsupported grad_fn here
-                                r = r.clone()
+                                # preserve_format is the default, but we want to
+                                # emphasize how important it is to preserve
+                                # format here
+                                r = r.clone(memory_format=torch.preserve_format)
                     else:
-                        r = torch.empty((0,), dtype=t.dtype, device="meta")
-                    # As long as meta storage is not supported, need to prevent
-                    # redispatching on set_(Storage, ...) which will choke with
-                    # meta storage
-                    s = self.meta_storage(t.storage())
-                    with no_dispatch():
-                        sizes, strides = sym_sizes_strides(t)
-                        with torch.no_grad():
-                            r.set_(s, sym(t.storage_offset()), sizes, strides)
+                        r = callback(
+                            lambda: torch.empty_strided(
+                                sizes, strides, dtype=t.dtype, device="meta"
+                            )
+                        )
+                        assert safe_is_leaf(
+                            r
+                        ), "the callback you passed in doesn't detach"
 
+                    s = t.storage().untyped()
+                    swr = StorageWeakRef(s)
+                    if (
+                        swr not in self.storage_memo
+                        and r.stride() == strides
+                        and r.storage_offset() == storage_offset
+                    ):
+                        # You're normal and happy, install the fresh storage into the memo
+                        self.storage_memo[swr] = r.storage().untyped()
+                    else:
+                        # You're in crazy town; somehow you gave us a tensor
+                        # that wasn't a view, but had nonzero storage offset,
+                        # nontrivial strides (such that clone() couldn't
+                        # preserve them), or already aliases with another
+                        # tensor's storage.  The most typical way to end
+                        # up here is with set_.  So use set_ to bludgeon this
+                        # in.
+                        r_s = self.meta_storage(s, callback=callback)
+                        # NB: In principle, this should always work, but there
+                        # is some subtle difference in the autograd metadata
+                        # that means we will backprop the set_ call, even if
+                        # r is declared as an input to grad.
+                        # See https://github.com/pytorch/pytorch/issues/87956
+                        # for the reproducer.
+                        # NB: The in_kernel_invocation_manager here is necessary
+                        # for fake tensor.  If we run the set_ call with fake
+                        # tensor on, r will improperly report that it is NOT a
+                        # meta tensor but a cpu tensor, and then the set_ call
+                        # will fail due to device mismatch.  no_dispatch() is
+                        # not enough, because the fake tensor will still claim
+                        # to be a CPU tensor and you'll end up in the CPU
+                        # kernel.  Arguably this is a hack; a cleaner way to
+                        # solve this is to have a FakeStorage concept which
+                        # would report it's CPU device--no problem now!  But
+                        # this is difficult to do because we don't have storage
+                        # subclasses.  Relevant test is
+                        # DynamicShapesFunctionTests::test_add_dynamic_shapes in
+                        # test/dynamo/test_dynamic_shapes.py
+                        maybe_fake_mgr = contextlib.nullcontext()
+                        from torch._subclasses.fake_tensor import FakeTensor, in_kernel_invocation_manager
+                        if isinstance(r, FakeTensor):
+                            maybe_fake_mgr = in_kernel_invocation_manager(r.fake_mode)
+                        with maybe_fake_mgr, torch.no_grad():
+                            r.set_(r_s, storage_offset, sizes, strides)
+
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
+                    grad_not_none = t.grad is not None
+                if grad_not_none:
+                    r.grad = self.meta_tensor(t.grad, shape_env, callback)
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)
 
-    def __call__(self, t, shape_env=None):
+    def __call__(self, t, shape_env=None, *, strict=False, callback=lambda t: t()):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
@@ -280,10 +355,13 @@ class MetaConverter:
                 # tests all break so we just exclude this.  In any case
                 # the to conversion isn't really right anyhow.
                 self.miss += 1
+                if strict:
+                    return NotImplemented
                 return t
             else:
                 self.hit += 1
-                r = self.meta_tensor(t, shape_env=shape_env)
+                r = self.meta_tensor(t, shape_env=shape_env, callback=callback)
+                # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
                 return r
@@ -294,9 +372,13 @@ class MetaConverter:
             # support meta.  Trying to YOLO this is more trouble than it's
             # worth.
             self.miss += 1
+            if strict:
+                return NotImplemented
             return t
         else:
             # non-Tensor types don't count as hit or miss
+            if strict:
+                return NotImplemented
             return t
 
 
