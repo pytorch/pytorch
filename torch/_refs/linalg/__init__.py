@@ -103,17 +103,17 @@ def vector_norm(
     if ord == 0.0:
         return refs.sum(refs.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
     elif ord == float("inf"):
-        return to_result_dtype(refs.amax(torch.abs(x), dim=dim, keepdim=keepdim))
+        return to_result_dtype(refs.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value]
     elif ord == float("-inf"):
-        return to_result_dtype(refs.amin(torch.abs(x), dim=dim, keepdim=keepdim))
+        return to_result_dtype(refs.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value]
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
-        x = _maybe_convert_to_dtype(x, computation_dtype)
+        x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
         reduce_sum = partial(refs.sum, dim=dim, keepdim=keepdim)
 
         if not (ord % 2.0 == 0.0 and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
-        return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))
+        return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
 
 
 def backshift_permutation(dim0, dim1, ndim):
@@ -168,7 +168,7 @@ def matrix_norm(
             return vector_norm(A, 2, dim, keepdim, dtype=dtype)
         else:  # ord == "nuc"
             if dtype is not None:
-                A = _maybe_convert_to_dtype(A, dtype)
+                A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
             perm = backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
             if keepdim:
@@ -191,7 +191,7 @@ def matrix_norm(
 
         if abs_ord == 2.0:
             if dtype is not None:
-                A = _maybe_convert_to_dtype(A, dtype)
+                A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
             perm = backshift_permutation(dim[0], dim[1], A.ndim)
             result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
