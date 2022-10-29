@@ -29,8 +29,8 @@ class ResetRequired(TorchDynamoException):
         super(ResetRequired, self).__init__(
             textwrap.dedent(
                 """
-                Must call `torchdynamo.reset()` before changing backends.  Detected two calls to
-                `torchdynamo.optimize(...)` with a different backend compiler arguments.
+                Must call `torch._dynamo.reset()` before changing backends.  Detected two calls to
+                `torch._dynamo.optimize(...)` with a different backend compiler arguments.
                 """
             )
         )
