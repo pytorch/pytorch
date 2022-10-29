@@ -68,30 +68,29 @@ struct ExprGroupConnections {
       Val* consumer_val)
       : from(group_from),
         to(group_to),
-        producer_val_(producer_val),
-        consumer_val_(consumer_val) {}
+        producer_val(producer_val),
+        consumer_val(consumer_val) {}
   // Producer group from which the edge starts
-  ExprGroup* from;
+  ExprGroup* from = nullptr;
 
   // Consumer group from which the edge ends
-  ExprGroup* to;
+  ExprGroup* to = nullptr;
 
   // The value from the producer group connecting the groups
   // This value helps us resolve the compute at position of expr groups
-
-  Val* producer_val_;
+  Val* producer_val = nullptr;
 
   // The value that the producer val gets used to create on this edge
   // This value helps us resolve the produce at position of expr groups
-  Val* consumer_val_;
+  Val* consumer_val = nullptr;
 };
 
 struct ExprSortPayload : public PolymorphicBase {
   // Need to track compute at domains as well as produce at domains. Produce at
   // domains will be matched to producers compute at domains. Track the active
   // domains that will be matched from inner most dim to outer most.
-  std::vector<IterDomain*> ca_domains_;
-  std::vector<IterDomain*> pa_domains_;
+  std::vector<IterDomain*> ca_domains;
+  std::vector<IterDomain*> pa_domains;
 
   // Maximum path distance from an input expr group required for
   // Theorem 4.2
@@ -289,7 +288,7 @@ class ExprSegmentationSorter {
 
   // Checks if the for loop associated with the concrete ID is ready to be
   // resolved in sorting.
-  bool loopReady(IterDomain* concrete_id);
+  bool loopReady(IterDomain* concrete_id) const;
 
   // Disconnect the edges connecting group to the rest of the graph, and return
   // all the edges that were disconnected
@@ -309,7 +308,7 @@ class ExprSegmentationSorter {
 
   std::vector<std::pair<ExprGroup*, ExprGroup*>> to_merge_;
 
-  Fusion* fusion_;
+  Fusion* fusion_ = nullptr;
 
   // We use a theorem out of a paper mentioned in other comments. This theorem
   // is good at identifying multiple expr groups to merge during a single
@@ -330,7 +329,7 @@ class ExprSegmentationSorter {
   // id's in the loop map, this is because IDs may exist in some TVs but not
   // others, however, we need a "global" view to track these dependencies.
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
-      concrete_id_dependencies;
+      concrete_id_dependencies_;
 };
 
 // // Debug printing, disabled due to clang-tidy see above for declarations.
@@ -551,11 +550,15 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(
     // If not connected to consumers, doesn't mater what compute at is set to
     if (!terminating_expr) {
       for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
-        group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
+        auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+            out_tv->axis(tv_i), IdMappingMode::LOOP);
+        group->payload()->ca_domains.push_back(concrete_id);
       }
     }
     for (const auto tv_i : c10::irange(out_tv->getMaxProducerPosition())) {
-      group->payload()->pa_domains_.push_back(out_tv->axis(tv_i));
+      auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          out_tv->axis(tv_i), IdMappingMode::LOOP);
+      group->payload()->pa_domains.push_back(concrete_id);
     }
   }
   return group;
@@ -763,8 +766,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   // Connect joined group to resulting neighbors
   for (auto& edge : producer_edges) {
     auto from = edge->from;
-    auto producer_val = edge->producer_val_;
-    auto consumer_val = edge->consumer_val_;
+    auto producer_val = edge->producer_val;
+    auto consumer_val = edge->consumer_val;
 
     edges_.push_back(std::make_unique<ExprGroupConnections>(
         from, joined_groups, producer_val, consumer_val));
@@ -777,8 +780,8 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
 
   for (auto& edge : consumer_edges) {
     auto to = edge->to;
-    auto producer_val = edge->producer_val_;
-    auto consumer_val = edge->consumer_val_;
+    auto producer_val = edge->producer_val;
+    auto consumer_val = edge->consumer_val;
 
     edges_.push_back(std::make_unique<ExprGroupConnections>(
         joined_groups, to, producer_val, consumer_val));
@@ -791,7 +794,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   // to grab the producer val as that's the one we generate.
   std::unordered_set<IterDomain*> ca_ids;
   for (auto consumer_group_edge : joined_groups->consumerEdges()) {
-    auto producer_of_consumer_edge = consumer_group_edge->producer_val_;
+    auto producer_of_consumer_edge = consumer_group_edge->producer_val;
     if (producer_of_consumer_edge->isA<TensorView>()) {
       auto tv = producer_of_consumer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getComputeAtPosition())) {
@@ -806,7 +809,7 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   // to grab the consumer val as that's the one we generate.
   std::unordered_set<IterDomain*> pa_ids;
   for (auto producer_group_edge : joined_groups->producerEdges()) {
-    auto consumer_of_producer_edge = producer_group_edge->consumer_val_;
+    auto consumer_of_producer_edge = producer_group_edge->consumer_val;
     if (consumer_of_producer_edge->isA<TensorView>()) {
       auto tv = consumer_of_producer_edge->as<TensorView>();
       for (const auto tv_i : c10::irange(tv->getMaxProducerPosition())) {
@@ -820,14 +823,14 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
   all_ca_pa_ids.insert(pa_ids.begin(), pa_ids.end());
 
   auto ordered_ids = getLocalDomainOrdering(
-      joined_groups->exprs(), all_ca_pa_ids, concrete_id_dependencies);
+      joined_groups->exprs(), all_ca_pa_ids, concrete_id_dependencies_);
 
   for (auto id : ordered_ids) {
     if (ca_ids.count(id)) {
-      joined_groups->payload()->ca_domains_.emplace_back(id);
+      joined_groups->payload()->ca_domains.emplace_back(id);
     }
     if (pa_ids.count(id)) {
-      joined_groups->payload()->pa_domains_.emplace_back(id);
+      joined_groups->payload()->pa_domains.emplace_back(id);
     }
   }
 
@@ -835,16 +838,16 @@ ExprGroup* ExprSegmentationSorter::makeMergedNode(
 }
 
 bool canReducePA(ExprGroup* group) {
-  if (group->payload()->pa_domains_.empty()) {
+  if (group->payload()->pa_domains.empty()) {
     return false;
   }
 
-  IterDomain* group_pa_last_id = group->payload()->pa_domains_.back();
+  IterDomain* group_pa_last_id = group->payload()->pa_domains.back();
 
   // Look through producer edges to see if we can reduce our produce at domain
   for (auto producer_edge : group->producerEdges()) {
-    auto producer_val = producer_edge->producer_val_;
-    auto consumer_val = producer_edge->consumer_val_;
+    auto producer_val = producer_edge->producer_val;
+    auto consumer_val = producer_edge->consumer_val;
 
     // If producer isn't a tensor view it can't be mapped into a producer dim of
     // this group
@@ -855,7 +858,7 @@ bool canReducePA(ExprGroup* group) {
     // If the compute at domains of the producer group is empty, it can't map to
     // the produce at domains of this group
     auto producer_group = producer_edge->from;
-    if (producer_group->payload()->ca_domains_.empty()) {
+    if (producer_group->payload()->ca_domains.empty()) {
       continue;
     }
 
@@ -906,7 +909,7 @@ bool ExprSegmentationSorter::interIterUpdate() {
   bool lowered_a_domain = false;
   for (auto& group : groups_) {
     if (canReducePA(group.get())) {
-      group->payload()->pa_domains_.pop_back();
+      group->payload()->pa_domains.pop_back();
       lowered_a_domain = true;
     }
   }
@@ -972,7 +975,7 @@ void ExprSegmentationSorter::mergeNodes() {
 // Initialize concrete_id_dependencies and concrete_id_to_all_ids
 void ExprSegmentationSorter::initializeForLoopDependencies() {
   TORCH_INTERNAL_ASSERT(
-      concrete_id_dependencies.empty(),
+      concrete_id_dependencies_.empty(),
       "For loop dependencies have already been initialized.");
 
   for (auto tv : ir_utils::allTvs(fusion_)) {
@@ -985,11 +988,11 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
       auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
           tv_id, IdMappingMode::LOOP);
 
-      if (concrete_id_dependencies.find(concrete_id) ==
-          concrete_id_dependencies.end()) {
-        concrete_id_dependencies[concrete_id] = dependencies;
+      if (concrete_id_dependencies_.find(concrete_id) ==
+          concrete_id_dependencies_.end()) {
+        concrete_id_dependencies_[concrete_id] = dependencies;
       } else {
-        concrete_id_dependencies[concrete_id].insert(
+        concrete_id_dependencies_[concrete_id].insert(
             dependencies.begin(), dependencies.end());
       }
 
@@ -1018,8 +1021,8 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
   std::unordered_set<IterDomain*> visited;
 
   std::transform(
-      concrete_id_dependencies.begin(),
-      concrete_id_dependencies.end(),
+      concrete_id_dependencies_.begin(),
+      concrete_id_dependencies_.end(),
       std::back_inserter(to_visit),
       [](const auto& concrete_dep_entry) { return concrete_dep_entry.first; });
 
@@ -1035,7 +1038,7 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
       break;
     }
 
-    auto& dependencies = concrete_id_dependencies.at(id);
+    auto& dependencies = concrete_id_dependencies_.at(id);
     bool ready = dependencies.empty() ||
         std::all_of(dependencies.begin(),
                     dependencies.end(),
@@ -1049,7 +1052,7 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
     inf_loop_counter = to_visit.size();
 
     for (auto dependency : dependencies) {
-      auto dep_of_dep = concrete_id_dependencies.at(dependency);
+      auto dep_of_dep = concrete_id_dependencies_.at(dependency);
       dependencies.insert(dep_of_dep.begin(), dep_of_dep.end());
     }
     visited.emplace(id);
@@ -1067,7 +1070,7 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
     }
 
     std::cerr << "Depdencies: " << std::endl;
-    for (const auto& dep_entry : concrete_id_dependencies) {
+    for (const auto& dep_entry : concrete_id_dependencies_) {
       std::cerr << "  Deps of " << dep_entry.first->toString() << std::endl
                 << "   ";
 
@@ -1085,13 +1088,30 @@ void ExprSegmentationSorter::initializeForLoopDependencies() {
 // resolved in sorting. This could be done more efficiently with some
 // additional tracking, however we recreate ca_domain_ when we merge groups,
 // so it's hard to track what is no longer needed.
-bool ExprSegmentationSorter::loopReady(IterDomain* concrete_id) {
-  const auto& dependencies = concrete_id_dependencies[concrete_id];
+bool ExprSegmentationSorter::loopReady(IterDomain* concrete_id) const {
+  TORCH_INTERNAL_ASSERT(
+      concrete_id ==
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              concrete_id, IdMappingMode::LOOP),
+      "Received a non-concrete ID: ",
+      concrete_id->toString(),
+      ", LOOP concrete ID: ",
+      GpuLower::current()
+          ->caMap()
+          ->getConcreteMappedID(concrete_id, IdMappingMode::LOOP)
+          ->toString());
+  TORCH_INTERNAL_ASSERT(
+      concrete_id_dependencies_.find(concrete_id) !=
+          concrete_id_dependencies_.end(),
+      "Dependency information not found for ",
+      concrete_id->toString());
+
+  const auto& dependencies = concrete_id_dependencies_.at(concrete_id);
   for (auto& group : groups_) {
     // Only need to check compute at domain here, because if there's an entry in
     // produce at, that has no matching entry in compute at, then that ID can be
     // removed as in canReducePA
-    for (auto ca_domain : group->payload()->ca_domains_) {
+    for (auto ca_domain : group->payload()->ca_domains) {
       if (dependencies.count(ca_domain)) {
         return false;
       }
@@ -1115,18 +1135,18 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
   auto producer_group = getProducer(sg1, sg2);
   auto consumer_group = sg1 == producer_group ? sg2 : sg1;
 
-  if (producer_group->payload()->ca_domains_.size() <
-      producer_group->payload()->pa_domains_.size()) {
+  if (producer_group->payload()->ca_domains.size() <
+      producer_group->payload()->pa_domains.size()) {
     return false;
   }
 
-  if (consumer_group->payload()->pa_domains_.size() <
-      consumer_group->payload()->ca_domains_.size()) {
+  if (consumer_group->payload()->pa_domains.size() <
+      consumer_group->payload()->ca_domains.size()) {
     return false;
   }
 
-  const auto& producer_ca_domain = producer_group->payload()->ca_domains_;
-  const auto& consumer_pa_domain = consumer_group->payload()->pa_domains_;
+  const auto& producer_ca_domain = producer_group->payload()->ca_domains;
+  const auto& consumer_pa_domain = consumer_group->payload()->pa_domains;
 
   if (producer_ca_domain.empty() && consumer_pa_domain.empty()) {
     return true;
@@ -1146,8 +1166,8 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
     if (edge->to != consumer_group) {
       continue;
     }
-    auto producer_val = edge->producer_val_;
-    auto consumer_val = edge->consumer_val_;
+    auto producer_val = edge->producer_val;
+    auto consumer_val = edge->consumer_val;
 
     if (!producer_val->isA<TensorView>()) {
       continue;
