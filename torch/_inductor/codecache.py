@@ -142,10 +142,11 @@ def install_gcc_via_conda():
 def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
+
 @functools.lru_cache(1)
 def vec_isa_info():
     # TODO: Add windows support
-    if sys.platform != 'linux':
+    if sys.platform != "linux":
         return ""
 
     if config.cpp.simdlen is None or config.cpp.simdlen <= 1:
@@ -159,6 +160,7 @@ def vec_isa_info():
             return "-DCPU_CAPABILITY_AVX2"
         # TODO: Add ARM Vec here
         return ""
+
 
 def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch or (config.cpp.simdlen and config.cpp.simdlen > 1):
