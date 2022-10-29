@@ -603,7 +603,7 @@ class DynamicShapeVariable(VariableTracker):
     def create(cls, tx, proxy, dyn_shape, **options):
         if "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == dyn_shape
-        if not dyn_shape:
+        if dyn_shape is None:
             dyn_shape = _get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = dyn_shape
         return DynamicShapeVariable(proxy, dyn_shape, **options)
