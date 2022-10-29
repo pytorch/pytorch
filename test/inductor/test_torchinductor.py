@@ -37,7 +37,7 @@ try:
     import torch._inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-    from torch._inductor import config, metrics
+    from torch._inductor import codecache, config, metrics
     from torch._inductor.compile_fx import compile_fx, complex_memory_overlap
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
@@ -52,7 +52,6 @@ except (ImportError, AssertionError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
-
 
 HAS_CPU = False
 try:
@@ -4186,6 +4185,9 @@ if HAS_CPU:
             self.assertFalse(complex_memory_overlap(gathered))
             self.assertFalse(complex_memory_overlap(gathered.t()))
 
+        @unittest.skipIf(
+            not codecache.valid_vec_isa(), "Does not support vectorization"
+        )
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_kernel_cpu_only(self):
             def fn(x1, x2):
