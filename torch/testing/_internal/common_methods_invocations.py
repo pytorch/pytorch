@@ -15618,6 +15618,9 @@ op_db: List[OpInfo] = [
             # RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
             DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                          dtypes=(torch.float16,), device_type='cpu'),
+            # RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
+            DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                         dtypes=(torch.float16,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
     # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
