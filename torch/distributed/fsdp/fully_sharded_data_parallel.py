@@ -28,6 +28,12 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
+from torch.distributed.fsdp import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp._common_utils import (
     _get_param_to_unflat_param_names,
     clean_tensor_name,
@@ -46,12 +52,6 @@ from torch.distributed.fsdp._init_utils import (
     _init_process_group_state,
     _init_runtime_state,
     _init_state_dict_state,
-)
-from torch.distributed.fsdp._public_utils import (
-    BackwardPrefetch,
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
