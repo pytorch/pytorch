@@ -1104,12 +1104,7 @@ class CppScheduling:
         return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
 
     def can_vec(self, nodes):
-        # TODO: Query cpu arch and vec length from aten.
-        # Currently, we only support float. Hence, 8 represents AVX256 and 16 represents
-        # AVX512 for X86. For ARM platform, we could polish the logic to support ARM
-        # vectorization.
-        valid_vec_len = [8, 16]
-        if config.cpp.simdlen is None or config.cpp.simdlen not in valid_vec_len:
+        if not codecache.valid_vec_isa():
             return False
 
         _, (group, reduction_group) = max(

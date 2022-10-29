@@ -144,7 +144,11 @@ def is_gcc():
 
 
 @functools.lru_cache(1)
-def vec_isa_info():
+def valid_vec_isa():
+    # TODO: Add ARM Vec here.
+    # Tuple(isa, number of float element)
+    vec_isa_info = [("avx512", 16), ("avx2", 8)]
+
     # TODO: Add windows support
     if sys.platform != "linux":
         return ""
@@ -154,11 +158,10 @@ def vec_isa_info():
 
     with open("/proc/cpuinfo") as _cpu_info:
         cpu_info_content = _cpu_info.read()
-        if "avx512" in cpu_info_content and config.cpp.simdlen == 16:
-            return "-DCPU_CAPABILITY_AVX512"
-        if "avx2" in cpu_info_content and config.cpp.simdlen == 8:
-            return "-DCPU_CAPABILITY_AVX2"
-        # TODO: Add ARM Vec here
+        for isa, elt_num in vec_isa_info:
+            if isa in cpu_info_content and config.cpp.simdlen == elt_num:
+                return isa
+
         return ""
 
 
@@ -167,7 +170,11 @@ def cpp_compile_command(input, output, include_pytorch=False):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = " " + vec_isa_info()
+        macros = ""
+        if valid_vec_isa() == "avx512":
+            macros = " " + "-DCPU_CAPABILITY_AVX512"
+        elif valid_vec_isa() == "avx2":
+            macros = " " + "-DCPU_CAPABILITY_AVX2"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
