@@ -1,9 +1,7 @@
 import warnings
 import weakref
-import contextlib
 
 import torch
-from torch.utils._mode_utils import no_dispatch
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -147,11 +145,6 @@ class MetaConverter:
 
     # This function assumes that it's possible to do the conversion
     def meta_tensor(self, t, shape_env=None, callback=lambda t: t()):
-        # This indicates you set no_dispatch() before calling into this
-        # function.  This is an error: we may be creating fake tensors and
-        # will perform operations on them which need fake tensor mode to
-        # be active.  You will segfault if you are in a no_dispatch() block.
-        assert not torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python)
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
@@ -288,25 +281,7 @@ class MetaConverter:
                         # r is declared as an input to grad.
                         # See https://github.com/pytorch/pytorch/issues/87956
                         # for the reproducer.
-                        # NB: The in_kernel_invocation_manager here is necessary
-                        # for fake tensor.  If we run the set_ call with fake
-                        # tensor on, r will improperly report that it is NOT a
-                        # meta tensor but a cpu tensor, and then the set_ call
-                        # will fail due to device mismatch.  no_dispatch() is
-                        # not enough, because the fake tensor will still claim
-                        # to be a CPU tensor and you'll end up in the CPU
-                        # kernel.  Arguably this is a hack; a cleaner way to
-                        # solve this is to have a FakeStorage concept which
-                        # would report it's CPU device--no problem now!  But
-                        # this is difficult to do because we don't have storage
-                        # subclasses.  Relevant test is
-                        # DynamicShapesFunctionTests::test_add_dynamic_shapes in
-                        # test/dynamo/test_dynamic_shapes.py
-                        maybe_fake_mgr = contextlib.nullcontext()
-                        from torch._subclasses.fake_tensor import FakeTensor, in_kernel_invocation_manager
-                        if isinstance(r, FakeTensor):
-                            maybe_fake_mgr = in_kernel_invocation_manager(r.fake_mode)
-                        with maybe_fake_mgr, torch.no_grad():
+                        with torch.no_grad():
                             r.set_(r_s, storage_offset, sizes, strides)
 
                 with warnings.catch_warnings():
