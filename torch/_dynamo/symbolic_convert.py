@@ -158,9 +158,7 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             if truth_fn(len(value.unpack_var_sequence(self))):
                 push and self.push(value)
                 self.jump(inst)
-        if isinstance(value, DynamicShapeVariable):
-        # and self.export: # Should this be export only?
-            # breakpoint()
+        elif isinstance(value, DynamicShapeVariable):
             eval_result = self.output.shape_env.evaluate_expr(value.dyn_shape.get_pyobj().expr)
             if truth_fn(eval_result):
                 push and self.push(value)
