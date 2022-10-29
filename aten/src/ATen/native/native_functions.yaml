@@ -1539,6 +1539,7 @@
     SparseCPU, SparseCUDA: copy_sparse_wrapper_
     CompositeExplicitAutograd: copy_
     SparseCsrCPU, SparseCsrCUDA: copy_sparse_compressed_
+    NestedTensorCPU, NestedTensorCUDA: copy_nested_
   autogen: copy.out
 
 - func: _copy_from(Tensor self, Tensor dst, bool non_blocking=False) -> Tensor
@@ -2329,6 +2330,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: expm1_out
+    MPS: expm1_out_mps
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
 
@@ -2404,6 +2406,7 @@
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
     SparseCsrCPU, SparseCsrCUDA: fill_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: fill_nested_
   autogen: fill.Scalar_out
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
@@ -2414,6 +2417,7 @@
     MPS: fill_tensor_mps_
     QuantizedCPU, QuantizedCUDA: fill_quantized_
     Meta: fill_meta_
+    NestedTensorCPU, NestedTensorCUDA: fill_nested_
   autogen: fill.Tensor_out
 
 - func: floor(Tensor self) -> Tensor
@@ -3863,6 +3867,7 @@
     # NB: Although this composite mutates on the inside, it is
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: ones_like
+    NestedTensorCPU, NestedTensorCUDA: ones_like
   autogen: ones_like.out
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
