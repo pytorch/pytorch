@@ -57,15 +57,5 @@ struct C10_API HermeticPyObjectTLS {
   static bool get_tls_state();
 };
 
-struct C10_API EnableHermeticPyObject {
-  EnableHermeticPyObject() : old_(HermeticPyObjectTLS::get_state()) {
-    HermeticPyObjectTLS::set_state(true);
-  }
-  ~EnableHermeticPyObject() {
-    HermeticPyObjectTLS::set_state(old_);
-  }
-  bool old_;
-};
-
 } // namespace impl
 } // namespace c10

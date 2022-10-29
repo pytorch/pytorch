@@ -89,7 +89,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
 // merge everything
 
 #define DEF_PRELUDE "def(\"", schema.operator_name(), "\"): "
-Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name, const std::vector<at::Tag>& tags) & {
+Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name, const std::vector<at::Tag>& tags, _RegisterOrVerify rv) & {
   TORCH_CHECK(kind_ == DEF || kind_ == FRAGMENT,
     DEF_PRELUDE,
     "Cannot define an operator inside of a ", toString(kind_), " block.  "
@@ -125,13 +125,20 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   if (out_name) {
     *out_name = schema.operator_name(); // copy!
   }
-  registrars_.emplace_back(
-    c10::Dispatcher::singleton().registerDef(
-      std::move(schema),
-      debugString(file_, line_),
-      tags
-    )
-  );
+  switch (rv) {
+    case _RegisterOrVerify::REGISTER:
+      registrars_.emplace_back(
+        c10::Dispatcher::singleton().registerDef(
+          std::move(schema),
+          debugString(file_, line_),
+          tags
+        )
+      );
+      break;
+    case _RegisterOrVerify::VERIFY:
+      c10::Dispatcher::singleton().waitForDef(schema);
+      break;
+  }
   return *this;
 }
 #undef DEF_PRELUDE
@@ -195,7 +202,7 @@ at::OperatorName Library::_parseNameForLib(const char* name_str) const {
   return name;
 }
 
-Library& Library::_impl(const char* name_str, CppFunction&& f) & {
+Library& Library::_impl(const char* name_str, CppFunction&& f, _RegisterOrVerify rv) & {
   at::OperatorName name = _parseNameForLib(name_str);
   // See Note [Redundancy in registration code is OK]
   TORCH_CHECK(!(f.dispatch_key_.has_value() &&
@@ -209,26 +216,29 @@ Library& Library::_impl(const char* name_str, CppFunction&& f) & {
     ERROR_CONTEXT
   );
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
-  registrars_.emplace_back(
-    c10::Dispatcher::singleton().registerImpl(
-      std::move(name),
-      dispatch_key,
-      std::move(f.func_),
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      std::move(f.cpp_signature_),
-      std::move(f.schema_),
-      debugString(std::move(f.debug_), file_, line_)
-    )
-  );
+  switch (rv) {
+    case _RegisterOrVerify::REGISTER:
+      registrars_.emplace_back(
+        c10::Dispatcher::singleton().registerImpl(
+          std::move(name),
+          dispatch_key,
+          std::move(f.func_),
+          // NOLINTNEXTLINE(performance-move-const-arg)
+          std::move(f.cpp_signature_),
+          std::move(f.schema_),
+          debugString(std::move(f.debug_), file_, line_)
+        )
+      );
+      break;
+    case _RegisterOrVerify::VERIFY:
+      c10::Dispatcher::singleton().waitForImpl(name, dispatch_key);
+      break;
+  }
   return *this;
 }
 
-c10::OperatorHandle Library::_resolve(const char* name_str) const {
-  at::OperatorName name = _parseNameForLib(name_str);
-  auto r = c10::Dispatcher::singleton().findSchema(name);
-  // We always register before resolving, so this should always succeed
-  TORCH_INTERNAL_ASSERT(r.has_value());
-  return *r;
+c10::OperatorName Library::_resolve(const char* name_str) const {
+  return _parseNameForLib(name_str);
 }
 #undef IMPL_PRELUDE
 

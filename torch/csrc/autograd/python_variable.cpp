@@ -38,6 +38,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/python_dispatch.h>
 
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -222,6 +223,14 @@ struct ConcretePyInterpreterVTable final
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,
       torch::jit::Stack* stack) const override;
+  // NB: this is defined in python_dispatch.cpp
+  void python_op_registration_trampoline(
+      const c10::OperatorHandle& op,
+      c10::DispatchKey key,
+      torch::jit::Stack* stack) const override {
+    torch::impl::dispatch::python_op_registration_trampoline_impl(
+        op, key, stack);
+  }
 
   bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override;
   bool is_strides_like(const TensorImpl* self, at::MemoryFormat) const override;
@@ -435,7 +444,6 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   }
 
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    TORCH_INTERNAL_ASSERT(var.device().type() != c10::kXLA, "hermetic XLA NYI");
     return THPVariable_NewWithVar(
         (PyTypeObject*)THPVariableClass,
         std::move(var),
@@ -516,9 +524,8 @@ bool isResurrectable(THPVariable* self) {
   }
   auto const& tensor = THPVariable_Unpack(self);
   // Check if this is hermetic. If it is, no resurrection.
-  if (!tensor.unsafeGetTensorImpl()
-           ->check_pyobj(self_interpreter.get())
-           .has_value()) {
+  if (tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get())
+        != c10::make_optional((PyObject*)self)) {
     return false;
   }
   if (!tensor.defined() || tensor.use_count() <= 1) {
@@ -616,9 +623,9 @@ static int THPVariable_clear(THPVariable* self) {
     //        because Tensor asked us to (it's already destructing).
 
     if (!self->cdata.unsafeIsBorrowed() &&
-        !tensor.unsafeGetTensorImpl()
-             ->check_pyobj(self_interpreter.get())
-             .has_value()) {
+        tensor.unsafeGetTensorImpl()->check_pyobj(self_interpreter.get())
+        == c10::make_optional((PyObject*)self)
+        ) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
