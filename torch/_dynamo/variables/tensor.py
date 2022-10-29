@@ -512,10 +512,10 @@ class TensorVariable(VariableTracker):
                     )
                     proxy.node.meta["example_value"] = element
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
-            size_proxy.node.meta["example_value"] = torch.Size(
+            pure_size_proxy.node.meta["example_value"] = torch.Size(
                 [item.proxy.node.meta["example_value"] for item in items]
             )
-            return SizeVariable(items, size_proxy, **options)
+            return SizeVariable(items, pure_size_proxy, **options)
         elif name == "numel" and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
