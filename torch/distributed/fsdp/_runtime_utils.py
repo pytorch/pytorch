@@ -14,7 +14,7 @@ from torch.distributed.fsdp._common_utils import (
     TrainingState,
 )
 from torch.distributed.fsdp._utils import _apply_to_tensors, p_assert
-from torch.distributed.fsdp.common_utils import BackwardPrefetch
+from torch.distributed.fsdp.api import BackwardPrefetch
 from torch.distributed.fsdp.flat_param import (
     _HandlesKey,
     FlatParameter,
