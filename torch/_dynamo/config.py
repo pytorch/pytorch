@@ -96,6 +96,7 @@ skipfiles_inline_module_allowlist = {
     torch.nn,
     torch.distributions,
     torch.testing,
+    torch.ao.nn,
 }
 if HAS_REFS_PRIMS:
     skipfiles_inline_module_allowlist |= {
@@ -151,6 +152,10 @@ dynamo_import = __name__.replace(".config", "")
 
 # How to import torchinductor, either torchinductor or torch.inductor
 inductor_import = dynamo_import.replace("dynamo", "inductor")
+
+# If true, error with a better message if we symbolically trace over a
+# dynamo-optimized function. If false, silently suppress dynamo.
+error_on_nested_fx_trace = True
 
 # root folder of the project
 if "torch." in dynamo_import:
