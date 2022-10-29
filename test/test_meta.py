@@ -78,8 +78,10 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m1.is_neg(), m2.is_neg())
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
-            grad_not_none = m1.grad is not None
-        if grad_not_none:
+            m1_grad_not_none = m1.grad is not None
+            m2_grad_not_none = m2.grad is not None
+        self.assertEqual(m1_grad_not_none, m2_grad_not_none)
+        if m1_grad_not_none:
             self.assertMetadataMatches(m1.grad, m2.grad)
         if m1.is_sparse:
             self.assertEqual(m1.dense_dim(), m2.dense_dim())
@@ -93,6 +95,7 @@ class TestMetaConverter(TestCase):
                 self.assertMetadataMatches(m1._base, m2._base)
         # TODO: test if is resizable (no direct query for this atm)
         # TODO: audit AutogradMeta to see if it matches
+        # TODO: test forward AD
 
     def test_view_of_non_leaf(self):
         x = torch.randn(4, requires_grad=True)

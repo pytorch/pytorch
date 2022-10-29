@@ -239,32 +239,21 @@ class MetaConverter:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides = sym_sizes_strides(t)
                     storage_offset = sym(t.storage_offset())
-                    # Fake up some autograd history.
-                    if t.requires_grad:
-                        r = callback(
-                            lambda: torch.empty_strided(
-                                sizes, strides, dtype=t.dtype, device="meta"
-                            )
+                    r = callback(
+                        lambda: torch.empty_strided(
+                            sizes, strides, dtype=t.dtype, device="meta"
                         )
-                        assert safe_is_leaf(
-                            r
-                        ), "the callback you passed in doesn't detach"
+                    )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    if t.requires_grad:
                         r.requires_grad = t.requires_grad
                         if not is_leaf:
+                            # Fake up some autograd history.
                             with torch.enable_grad():
                                 # preserve_format is the default, but we want to
                                 # emphasize how important it is to preserve
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
-                    else:
-                        r = callback(
-                            lambda: torch.empty_strided(
-                                sizes, strides, dtype=t.dtype, device="meta"
-                            )
-                        )
-                        assert safe_is_leaf(
-                            r
-                        ), "the callback you passed in doesn't detach"
 
                     s = t.storage().untyped()
                     swr = StorageWeakRef(s)
@@ -326,7 +315,7 @@ class MetaConverter:
 
         return self.get_tensor_memo(t)
 
-    def __call__(self, t, shape_env=None, *, strict=False, callback=lambda t: t()):
+    def __call__(self, t, shape_env=None, *, callback=lambda t: t()):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
@@ -361,9 +350,7 @@ class MetaConverter:
                 # tests all break so we just exclude this.  In any case
                 # the to conversion isn't really right anyhow.
                 self.miss += 1
-                if strict:
-                    return NotImplemented
-                return t
+                return NotImplemented
             else:
                 self.hit += 1
                 r = self.meta_tensor(t, shape_env=shape_env, callback=callback)
@@ -378,13 +365,9 @@ class MetaConverter:
             # support meta.  Trying to YOLO this is more trouble than it's
             # worth.
             self.miss += 1
-            if strict:
-                return NotImplemented
-            return t
+            return NotImplemented
         else:
             # non-Tensor types don't count as hit or miss
-            if strict:
-                return NotImplemented
             return t
 
 
