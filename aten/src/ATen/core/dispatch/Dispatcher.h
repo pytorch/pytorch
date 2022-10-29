@@ -19,6 +19,14 @@
 namespace c10 {
 
 TORCH_API bool show_dispatch_trace();
+TORCH_API void dispatch_trace_nesting_incr();
+TORCH_API void dispatch_trace_nesting_decr();
+TORCH_API int64_t dispatch_trace_nesting_value();
+
+struct DispatchTraceNestingGuard {
+  DispatchTraceNestingGuard() { dispatch_trace_nesting_incr(); }
+  ~DispatchTraceNestingGuard() { dispatch_trace_nesting_decr(); }
+};
 
 class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
@@ -583,7 +591,10 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(const TypedOperatorHandl
   auto dispatchKeySet = op.operatorDef_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(args...);
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[call] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
@@ -603,7 +614,10 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[redispatch] op=[" << op.operator_name() << "], key=[" << toString(currentDispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
@@ -616,7 +630,10 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[callBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
@@ -666,7 +683,10 @@ inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorDef_->op;
 #ifndef NDEBUG
+  DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
+      auto nesting_value = dispatch_trace_nesting_value();
+      for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
       std::cerr << "[redispatchBoxed] op=[" << op.operator_name() << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
   }
 #endif
