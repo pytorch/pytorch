@@ -37,6 +37,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.fsdp import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp._common_utils import (
     _get_param_to_unflat_param_names,
     clean_tensor_name,
@@ -57,12 +63,6 @@ from torch.distributed.fsdp._init_utils import (
     _materialize_module,
     _move_module_to_device,
     _sync_module_states,
-)
-from torch.distributed.fsdp._public_utils import (
-    BackwardPrefetch,
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
