@@ -14,15 +14,14 @@ from torch.distributed.fsdp._init_utils import (
     _init_runtime_state,
     _init_state_dict_state,
 )
-from torch.distributed.fsdp._runtime_utils import (
-    _register_post_forward_hooks,
-    _register_pre_forward_hooks,
-    _register_root_pre_forward_hooks,
-)
-from torch.distributed.fsdp.common_utils import (
+from torch.distributed.fsdp._public_utils import (
     CPUOffload,
     MixedPrecision,
     ShardingStrategy,
+)
+from torch.distributed.fsdp._runtime_utils import (
+    _register_post_forward_hooks,
+    _register_pre_forward_hooks,
 )
 
 
