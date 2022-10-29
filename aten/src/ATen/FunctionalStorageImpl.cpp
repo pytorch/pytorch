@@ -95,7 +95,7 @@ c10::SymInt get_nbytes(const Tensor& value) {
   if (value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
     // Today, the two implementations of SymInt are in Python (proxy tensor),
     // and lazy tensor (LTC/XLA).
-    // LTC hasn't implemented SymInt support yet though (torch::lazy::SymIntNodeImpl).
+    // LTC hasn't implemented SymInt support yet though
     // Once it does, we should remove this check.
     if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
