@@ -7980,10 +7980,10 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int or Tensor): index to narrow from within `dim`. Can be negative,
+    start (int or Tensor): index to narrow from, within `dim`. Can be negative,
         which means indexing from the end of `dim`. If `Tensor`, it must be an
         0-dim integral `Tensor` (bools not allowed)
-    length (int): number of elements to return within `dim`
+    length (int): number of elements to return, within `dim`
 
 Example::
 
@@ -8014,9 +8014,9 @@ do not have a shared-storage narrow method.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): index to narrow from within `dim`. Can be negative, which means
+    start (int): index to narrow from, within `dim`. Can be negative, which means
         indexing from the end of `dim`
-    length (int): number of elements to return within `dim`
+    length (int): number of elements to return, within `dim`
 
 Keyword args:
     {out}
@@ -8037,6 +8037,7 @@ Example::
                            [0, 1]]),
            values=tensor([[[0, 1],
                            [2, 3]],
+
                           [[4, 5],
                            [6, 7]]]),
            size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
