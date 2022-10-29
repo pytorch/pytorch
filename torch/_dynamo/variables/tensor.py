@@ -487,14 +487,12 @@ class TensorVariable(VariableTracker):
                 current_tx=tx,
             )
             if len(args) == 1 and isinstance(args[0], ConstantVariable):
-                breakpoint()
                 assert isinstance(args[0].value, int)
                 proxy = tx.output.create_proxy(
                         "call_function", operator.getitem, (pure_size_proxy, args[0].as_proxy()), {},
                 )
                 value = example_size[args[0].value]
                 proxy.node.meta['example_value'] = value
-                breakpoint()
                 return DynamicShapeVariable.create(tx, proxy, value)
             items = []
             for i, element in enumerate(example_size):
@@ -634,7 +632,6 @@ class DynamicShapeVariable(VariableTracker):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
 
     def as_proxy(self):
-        breakpoint()
         return self.proxy
 
     def call_method(
