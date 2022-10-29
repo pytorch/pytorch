@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
@@ -493,8 +494,9 @@ TensorView* sortAndRFactor(TensorView* reference_tv) {
   return ir_utils::rfactorHelper(reference_tv, rfactor_axes);
 }
 
-void projectPersistentBuffers(Fusion* fusion) {
+std::vector<TensorView*> projectPersistentBuffers(Fusion* fusion) {
   auto persistent_info = scheduler_utils::persistentBuffers(fusion);
+  std::vector<TensorView*> dummy_outputs;
 
   // Convenience accessors
   const auto& persistent_buffers = persistent_info.persistent_buffers;
@@ -562,10 +564,39 @@ void projectPersistentBuffers(Fusion* fusion) {
       for (auto use : persistent_use_of_buffer) {
         TORCH_INTERNAL_ASSERT(use->definition() != nullptr);
         auto buffer_replicate = RecomputeTv::recompute(buffer);
+        // Create a shortcut buffer <--> buffer_replicate for propagation.
+        // Why is this needed?
+        // Consider that we have a fusion
+        //
+        //   T0[I]
+        //   T1[b b I] = broadcast(T0)
+        //   T2[b b r] = reduction(T1)
+        //   T3[b b b] = broadcast(T2)
+        //   T4[b, b, I] = T1 + T3
+        //   T5[b, b, r] = reduction(T4)
+        //
+        // After projection, it becomes
+        //
+        //   T0[I]
+        //   T1[b b I] = broadcast(T0)
+        //   T2[b b r] = reduction(T1)
+        //   T3[b b b] = broadcast(T2)
+        //   T6[b b I] = broadcast(T0)
+        //   T4[b, b, I] = T6 + T3
+        //   T5[b, b, r] = reduction(T4)
+        //
+        // During schedule, we need to propagate from T2 to T5. However, in the
+        // resulting DAG, neither the propagation path T2->T3->T4->T5 nor
+        // T2->T1->T0->T6->T4->T5 works because they both have missing root
+        // domain. But adding `T7 = T1 + T6` creates a new propagation path
+        // `T2->T1->T7->T6->T4->T5` which has all root domain information.
+        // See FusionBroadcastPersistentReduction_CUDA for an example
+        dummy_outputs.emplace_back(add(buffer_replicate, buffer));
         ir_utils::replaceValInExpr(use->definition(), buffer, buffer_replicate);
       }
     }
   }
+  return dummy_outputs;
 }
 
 } // namespace reduction_scheduler_utils

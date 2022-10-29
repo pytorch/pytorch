@@ -43,8 +43,11 @@ TORCH_CUDA_CU_API void multiReductionInliner(
 // Reduction inliner expects an rfactored domain.
 TORCH_CUDA_CU_API TensorView* sortAndRFactor(TensorView* reference_tv);
 
-// Take all projectable persistent buffers, and move them to the inputs.
-TORCH_CUDA_CU_API void projectPersistentBuffers(Fusion* fusion);
+// Take all projectable persistent buffers, and move them to the inputs. This
+// function create dummy outputs which should be used in later stages of the
+// scheduling.
+TORCH_CUDA_CU_API std::vector<TensorView*> projectPersistentBuffers(
+    Fusion* fusion);
 
 } // namespace reduction_scheduler_utils
 } // namespace cuda

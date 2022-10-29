@@ -974,11 +974,14 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
 
   // Project the persistent buffers to the inputs. Inputs will be cached in a
   // later step, this will move them to be in a register buffer as expected.
+  // dummy outputs are helper tensors to make sure persistent buffer projection
+  // does not create trouble for transform propagation.
   // TODO: Fix projected persistent buffers with view
   // https://github.com/csarofeen/pytorch/issues/2054
+  std::vector<TensorView*> dummy_outputs;
   if (rparams.project_persistent_buffers &&
       ir_utils::getViewOps(fusion).empty()) {
-    reduction_scheduler_utils::projectPersistentBuffers(fusion);
+    dummy_outputs = reduction_scheduler_utils::projectPersistentBuffers(fusion);
   }
 
   // Cache tensors before grabbing any references to reductions as cache_before
@@ -1043,6 +1046,9 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
       reference_tv != nullptr && reduction_tv != nullptr,
       "Need these two tensor views to finish the scheduling.");
 
+  for (auto output : dummy_outputs) {
+    fusion->addOutput(output);
+  }
   reduction_scheduler_utils::multiReductionInliner(
       fusion,
       rparams,
@@ -1051,6 +1057,9 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
       reduction_tvs,
       cached_inputs,
       cached_outputs);
+  for (auto output : dummy_outputs) {
+    fusion->removeOutput(output);
+  }
 }
 
 } // namespace cuda

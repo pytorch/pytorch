@@ -161,6 +161,8 @@ void IrPrinter::handle(const TensorView* tv) {
     case MemoryType::Local:
       os_ << "_l";
       break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown tensor memory type.");
   }
   handle(tv->domain());
 
@@ -704,6 +706,8 @@ void IrPrinter::handle(const kir::TensorIndex* ti) {
     case MemoryType::Local:
       os_ << "_l";
       break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unknown tensor memory type.");
   }
   os_ << "[";
   for (auto index : ti->indices()) {

@@ -6408,10 +6408,37 @@ TEST_F(NVFuserTest, FusionVectorizeRepro1843_CUDA) {
   testValidate(fusion, cg_outputs, {t1, t0}, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionBroadcastPersistentReduction_CUDA) {
+  // Simplified repro for
+  // https://github.com/csarofeen/pytorch/issues/2094
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  auto tv0 = makeContigTensor(2, DataType::Half);
+  auto tv1 = castOp(DataType::Float, tv0);
+  auto tv2 = broadcast(tv1, {true, true, false, false});
+  auto tv3 = sum(tv2, {-1}, true);
+  auto tv4 = add(tv2, tv3); // TODO: changing this to tv1 there is still errors
+  auto tv5 = sum(tv4, {-1});
+  fusion->addInput(tv0);
+  fusion->addOutput(tv5);
+
+  auto options = at::TensorOptions().dtype(kHalf).device(at::kCUDA, 0);
+  auto t0 = at::randn({1024, 768}, options);
+  auto t1 = t0.view({1, 1, 1024, 768}).to(kFloat);
+  auto t3 = t1.sum({-1}, true);
+  auto t4 = t1 + t3;
+  auto t5 = t4.sum({-1});
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({t0});
+  testValidate(fusion, cg_outputs, {t0}, {t5}, __LINE__, __FILE__);
+}
+
 // Repro for
 // https://github.com/csarofeen/pytorch/issues/2094
 TEST_F(NVFuserTest, FusionRepro2094_CUDA) {
-  return;
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);

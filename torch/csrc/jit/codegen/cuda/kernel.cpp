@@ -77,6 +77,8 @@ class KernelIrScanner : private IrVisitor {
           summary_.dynamic_lmem_allocations.emplace_back(allocate);
         }
         break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unknown memory type to allocate.");
     }
   }
 
