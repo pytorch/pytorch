@@ -512,8 +512,13 @@ class TensorVariable(VariableTracker):
                     )
                     proxy.node.meta["example_value"] = element
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
+            def extract(item):
+                if isinstance(item, ConstantVariable):
+                    return item.value
+                return item.proxy.node.meta["example_value"]
+
             pure_size_proxy.node.meta["example_value"] = torch.Size(
-                [item.proxy.node.meta["example_value"] for item in items]
+                [extract(item) for item in items]
             )
             return SizeVariable(items, pure_size_proxy, **options)
         elif name == "numel" and self.size is not None:
