@@ -47,7 +47,7 @@ struct ValidationConstants {
   // Tolerances generated from randn + add + sum fusion
   // compared against double precision
   std::array<std::array<double, 2>, 20> sum_tolerances_float = {
-      {{4, 1.51992e-06},      {8, 2.23704e-06},      {16, 2.95788e-06},
+      {{4, 1.68222e-06},      {8, 2.23704e-06},      {16, 2.95788e-06},
        {32, 4.4778e-06},      {64, 6.75395e-06},     {128, 8.57934e-06},
        {256, 1.30594e-05},    {512, 2.19122e-05},    {1024, 3.3451e-05},
        {2048, 5.78476e-05},   {4096, 0.000108292},   {8192, 0.00012207},

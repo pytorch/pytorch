@@ -456,7 +456,7 @@ std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
 
 C10_ALWAYS_INLINE bool has_same_shape(
     const Tensor& tensor, optional<int64_t> tensor_bdim,
-    IntArrayRef normalized_shape) {
+    c10::SymIntArrayRef normalized_shape) {
   if (!tensor.defined()) {
     return true;
   }
@@ -479,7 +479,7 @@ C10_ALWAYS_INLINE bool has_same_shape(
 
 C10_ALWAYS_INLINE void check_same_shape(
     const Tensor& tensor, optional<int64_t> tensor_bdim,
-    IntArrayRef normalized_shape, const std::string& name) {
+    c10::SymIntArrayRef normalized_shape, const std::string& name) {
   TORCH_CHECK(has_same_shape(tensor, tensor_bdim, normalized_shape),
       "Expected ", name, " to be of same shape as normalized_shape, but got ",
       name, " of shape ",
@@ -490,7 +490,7 @@ C10_ALWAYS_INLINE void check_same_shape(
 
 // Ugh, hard to deduplicate
 C10_ALWAYS_INLINE void _check_layer_norm_inputs(
-    IntArrayRef normalized_shape,
+    SymIntArrayRef normalized_shape,
     const Tensor& weight, optional<int64_t> weight_bdim,
     const Tensor& bias, optional<int64_t> bias_bdim) {
 
@@ -507,13 +507,13 @@ C10_ALWAYS_INLINE void _check_layer_norm_inputs(
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>,Tensor,optional<int64_t>>
 native_layer_norm_batch_rule(
     const Tensor& input, optional<int64_t> input_bdim,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt, optional<int64_t> weight_bdim,
     const c10::optional<Tensor>& bias_opt, optional<int64_t> bias_bdim,
     double eps) {
   auto input_ = moveBatchDimToFront(input, input_bdim);
   if (!weight_bdim && !bias_bdim) {
-    const auto result = at::native_layer_norm(input_, normalized_shape, weight_opt, bias_opt, eps);
+    const auto result = at::native_layer_norm_symint(input_, normalized_shape, weight_opt, bias_opt, eps);
     const auto mean = std::get<1>(result);
     const auto rstd = std::get<2>(result);
     const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
@@ -528,7 +528,7 @@ native_layer_norm_batch_rule(
   _check_layer_norm_inputs(normalized_shape, weight, weight_bdim, bias, bias_bdim);
 
   const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
-  const auto result = at::native_layer_norm(input_, normalized_shape, nullopt, nullopt, eps);
+  const auto result = at::native_layer_norm_symint(input_, normalized_shape, nullopt, nullopt, eps);
   auto result0 = std::get<0>(result);
   const auto mean = std::get<1>(result);
   const auto rstd = std::get<2>(result);

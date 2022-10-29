@@ -6,7 +6,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 import torch
 from torch._ops import OpOverload
@@ -115,6 +115,20 @@ def get_schema_info(func):
     return torch._C._SchemaInfo(func._schema)  # type: ignore[attr-defined]
 
 
+# many of the decompositions registered to torch/_prims do not at the moment model
+# aliasing or strides, so as an incremental step, just enable the decompositions in
+# torch/_decomp/decompositions.py.
+# decomps are used for aot autograd tracing so we would like to unify on their
+# implementation and add additional testing to them
+@functools.lru_cache(None)
+def torch_decomp_decompositions(func):
+    from torch._decomp import decomposition_table
+
+    decompositions = torch._decomp.decompositions
+    decomp_attrs = [getattr(decompositions, attr) for attr in dir(decompositions)]
+    return decomposition_table[func] in decomp_attrs
+
+
 def tree_flatten_only(ty: Type[T], pytree: PyTree):
     flat_vals, _ = tree_flatten(pytree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
@@ -220,11 +234,15 @@ class FakeTensorConverter(object):
             warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
             grad_not_none = t.grad is not None
         if grad_not_none:
-            out.grad = self.from_real_tensor(fake_mode, t.grad)
+            out.grad = self.from_real_tensor(fake_mode, t.grad, shape_env=shape_env)
         self.set_tensor_memo(t, out)
         return out
 
+    # If you specify the device, it MUST be a meta tensor.
     def from_meta_and_device(self, fake_mode, t, device):
+        assert (
+            t.device.type == "meta"
+        ), f"tensor's device must be `meta`, got {t.device.type} instead"
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -232,27 +250,15 @@ class FakeTensorConverter(object):
         self.set_tensor_memo(t, out)
         return out
 
-    # There are two ways to call this.  First, you can have manually constructed
-    # a meta tensor and you need to turn it into a fake tensor.  In that case,
-    # pass a meta tensor and a device argument.  Alternately, you can have a
-    # real tensor that you need to convert into a fake tensor; in that case,
-    # omit the device.
+    # You can have a real tensor that you need to convert into a fake tensor.
+    # If you have a meta tensor already, call from_meta_and_device.
     #
-    # The disallowed case: if you specify the device, it MUST be a meta tensor.
-    # However, you're allowed to pass a meta tensor to be turned into a fake
+    # You're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
-    # cross ref testing and the inner test is already operating on meta tensors
-    def __call__(
-        self, fake_mode, t, device=None, *, make_constant=False, shape_env=None
-    ):
-        if device is None:
-            return self.from_real_tensor(
-                fake_mode, t, make_constant, shape_env=shape_env
-            )
-        else:
-            assert make_constant is False
-            assert t.device.type == "meta"
-            return self.from_meta_and_device(fake_mode, t, device)
+    # cross ref testing and the inner test is already operating on meta tensors.
+    # You must have created the FakeTensorMode with allow_meta == True
+    def __call__(self, fake_mode, t, *, make_constant=False, shape_env=None):
+        return self.from_real_tensor(fake_mode, t, make_constant, shape_env=shape_env)
 
 
 op_implementations = []
@@ -302,8 +308,12 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     input_device = new_kwargs["device"]
     out_device = input_device if input_device else new_kwargs["input"].device
     new_kwargs["device"] = torch.device("meta")
-    r = func(*args, **new_kwargs)
-    return fake_mode.fake_tensor_converter(fake_mode, r, out_device)
+    inp = new_kwargs.pop("input")
+    r = func(inp, **new_kwargs)
+    # TODO: I think this does the wrong thing if r is inp
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, r, out_device
+    )
 
 
 # Dont default to default device handling,
@@ -329,7 +339,7 @@ def to_copy(fake_mode, func, *args, **kwargs):
 
     input_device = new_kwargs.pop("device", None)
     out_device = input_device if input_device else new_kwargs["input"].device
-    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
+    with in_kernel_invocation_manager(fake_mode):
         input = new_kwargs.pop("input").to("meta")
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
@@ -407,31 +417,87 @@ def nyi(fake_mode, func, *args, **kwargs):
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
 
-# Meta tensors give you the ability to run PyTorch code without having to
-# actually do computation through tensors allocated on a `meta` device.
-# Because the device is `meta`, meta tensors do not model device propagation.
-# FakeTensor extends MetaTensors to also carry an additional `fake_device`
-# which tracks devices that would have been used.
+@register_op_impl(
+    lambda func: func in (aten.convolution.default, aten.convolution_backward.default)
+)
+def conv(fake_mode, func, *args, **kwargs):
+    _, kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    device = kwargs["input"].fake_device
+    # need to re-enable mode so the tensors report fake device
+    with fake_mode:
+        # if the input is unsqueezed is done in Convolution.cpp we get segfault
+        k = kwargs["weight"].ndim
+        if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+            mem_fmt = None
+        else:
+            if func is aten.convolution.default:
+                conv_backend = torch._C._select_conv_backend(**kwargs)
+            else:
+                conv_backend = torch._C._select_conv_backend(
+                    kwargs["input"],
+                    kwargs["weight"],
+                    bias=None,
+                    stride=kwargs["stride"],
+                    padding=kwargs["padding"],
+                    dilation=kwargs["dilation"],
+                    transposed=kwargs["transposed"],
+                    output_padding=kwargs["output_padding"],
+                    groups=kwargs["groups"],
+                    bias_sizes=kwargs["bias_sizes"],
+                )
+            mem_fmt = torch._C._conv_determine_backend_memory_format(
+                kwargs["input"], kwargs["weight"], conv_backend
+            )
+
+    def convert(t, mem_fmt):
+        if t is None:
+            return t
+        if mem_fmt is not None:
+            t = t.to(memory_format=mem_fmt)
+        return FakeTensor(fake_mode, t, device)
+
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(**kwargs)
+
+        if func is aten.convolution.default:
+            return convert(out, mem_fmt)
+        else:
+            return (
+                convert(out[0], mem_fmt),
+                convert(out[1], mem_fmt),
+                convert(out[2], None),
+            )
 
 
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
     # See: note [Fake Tensor Dispatch Keys]
+    prev_in_kernel = fake_mode.in_kernel_invocation
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    prev = fake_mode.in_kernel_invocation
+    assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
 
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
     fake_mode.in_kernel_invocation = True
-    if not meta_in_tls:
-        torch._C._add_meta_to_tls_dispatch_include()
+    torch._C._set_meta_in_tls_dispatch_include(True)
     try:
         yield
     finally:
-        fake_mode.in_kernel_invocation = prev
-        if not meta_in_tls:
-            torch._C._remove_meta_from_tls_dispatch_include()
+        fake_mode.in_kernel_invocation = prev_in_kernel
+        torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
+        del guard
 
 
 class FakeTensor(torch.Tensor):
+    """
+    Meta tensors give you the ability to run PyTorch code without having to
+    actually do computation through tensors allocated on a `meta` device.
+    Because the device is `meta`, meta tensors do not model device propagation.
+    FakeTensor extends MetaTensors to also carry an additional `fake_device`
+    which tracks devices that would have been used.
+    """
+
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
     constant: Optional[torch.Tensor]
@@ -493,27 +559,6 @@ class FakeTensor(torch.Tensor):
             self_repr = super().__repr__()
         return f"FakeTensor({self_repr}, {self.fake_device})"
 
-    def new(self, *args, **kwargs):
-        # TODO: This doesn't work with sparse self
-
-        # torch.Tensor.new does not go through the normal dispatcher pattern
-        # so in order to use the same pattern as normal invocation of
-        # returning meta device within the kernel we need to intercept
-        # the call here
-        # because it doesn't go through the dispatcher, we run into errors
-        # when attempting to compute an output in meta, so
-        # we compute the real tensor then convert to meta
-        out_device = self.fake_device
-        with no_dispatch(), in_kernel_invocation_manager(self.fake_mode):
-            real_out = super().new(*args, **kwargs)
-
-        assert not isinstance(real_out, FakeTensor), real_out
-        assert real_out.device.type != "meta", real_out.device
-
-        with no_dispatch():
-            meta_out = MetaConverter()(real_out)
-            return FakeTensor(self.fake_mode, meta_out, out_device)
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # need to handle here to avoid infinite recursion
@@ -546,11 +591,14 @@ class FakeTensor(torch.Tensor):
             return func(*args, **kwargs)
 
     @staticmethod
-    def _find_common_device(func, args, kwargs):
+    def _find_common_device(func, args, kwargs) -> Tuple[torch.device, bool]:
+        # Returns: (common_device, has_scalar_only_inputs)
+
         # cpu - zero-dim tensors can be called in cuda kernels,
         # so overwrite the common_device if it the only existing
         # device comes from a cpu zero-dim tensor
         common_device = None
+        has_scalar_only_inputs = False
         is_cpu_zero_dim = None
 
         def cpu_zero_dim(t):
@@ -593,9 +641,22 @@ class FakeTensor(torch.Tensor):
         tree_map(merge_devices, args)
         tree_map(merge_devices, kwargs)
 
+        # some functions that allow Python numbers to bind to Tensors
+        # if we have failed to find a device, and we're running one of these operators,
+        # we must have scalar only inputs
+        if (
+            torch._C._should_allow_numbers_as_tensors(
+                func.name().split("::")[-1].split(".")[0]
+            )
+            and common_device is None
+        ):
+            # ops with scalar only inputs always have result on cpu
+            has_scalar_only_inputs = True
+            common_device = torch.device("cpu")
+
         assert common_device is not None, f"Could not find common device for {func}"
 
-        return common_device
+        return common_device, has_scalar_only_inputs
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -615,7 +676,8 @@ class FakeTensorMode(TorchDispatchMode):
         *,
         allow_fallback_kernels=True,
         allow_meta=False,
-        throw_on_data_dependent_ops=False,
+        throw_on_data_dependent_ops=True,
+        shape_env=None,
     ):
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
@@ -636,6 +698,8 @@ class FakeTensorMode(TorchDispatchMode):
         # the device property
         self.in_kernel_invocation = False
 
+        self.shape_env = shape_env
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
@@ -647,7 +711,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
+        flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
             any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
             or len(flat_symints) > 0
@@ -738,15 +802,20 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
+        from torch._decomp import decomposition_table
+
+        with self:
+            # Decomposes CompositeImplicitAutograd ops
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
-            # TODO: Find better approach for this
-            # Avoid circular import
-            from torch._decomp import decomposition_table
-            from torch._meta_registrations import meta_table
+            from torch._decomp import meta_table as meta_table
 
             with no_dispatch():
                 if func == aten.size.default:
@@ -764,10 +833,13 @@ class FakeTensorMode(TorchDispatchMode):
                 if func in decomposition_table:
                     return decomposition_table[func](*args, **kwargs)
 
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return r
+        if (
+            func in decomposition_table
+            and torch_decomp_decompositions(func)
+            and all(not e.is_sparse for e in flat_arg_fake_tensors)
+        ):
+            with self:
+                return decomposition_table[func](*args, **kwargs)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
@@ -853,13 +925,27 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Lazily initialized, in case there are no tensor returns
         common_device = None
+        has_scalar_only_inputs = False
 
         def wrap(e, device=None):
             nonlocal common_device
+            nonlocal has_scalar_only_inputs
             if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                 if common_device is None:
-                    common_device = FakeTensor._find_common_device(func, args, kwargs)
-                return converter(self, e, device or common_device)
+                    (
+                        common_device,
+                        has_scalar_only_inputs,
+                    ) = FakeTensor._find_common_device(func, args, kwargs)
+
+                if has_scalar_only_inputs:
+                    # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
+                    # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
+                    # We thus directly convert real tensor to fake tensor.
+                    return converter(self, e)
+                else:
+                    return converter.from_meta_and_device(
+                        self, e, device or common_device
+                    )
             else:
                 return e
 
@@ -869,6 +955,7 @@ class FakeTensorMode(TorchDispatchMode):
     def functions_with_cpp_meta_impl_that_support_symint(self):
         return [
             aten.empty_strided.default,
+            aten.as_strided_scatter.default,
             aten.as_strided.default,
             aten.zeros.default,
             aten.detach.default,
@@ -903,8 +990,10 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor, shape_env=None):
-        return self.fake_tensor_converter(self, tensor, shape_env=shape_env)
+    def from_tensor(self, tensor, static_shapes=False):
+        if static_shapes:
+            return self.fake_tensor_converter(self, tensor)
+        return self.fake_tensor_converter(self, tensor, shape_env=self.shape_env)
 
 
 # NB: returns fake tensors

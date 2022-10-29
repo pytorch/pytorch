@@ -73,7 +73,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
       cachedGraph->outputTensor : outputTensorData
     };
     stream->executeMPSGraph(cachedGraph->graph(), feeds, results,
-                            requires_sync ? SyncType::COMMIT : SyncType::NONE);
+                            requires_sync ? SyncType::COMMIT : SyncType::COMMIT_ADAPTIVE);
   }
   return output;
 }

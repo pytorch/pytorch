@@ -390,13 +390,15 @@ fourOutputs solve_ex_batch_rule(
 
 oneOutput cross_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim,
                            const Tensor& other, c10::optional<int64_t> other_bdim, const int64_t dim) {
-  const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
+  // match cross dimension checks
+  TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) == rankWithoutBatchDim(other, other_bdim),
+    "linalg.cross: inputs must have the same number of dimensions."
+  );
 
+  const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
   const auto self_other_bundled = _binary_pointwise_helper(self, self_bdim, other, other_bdim, false);
 
-  // might be a bug but still doesn't incur an extra perf hit because input would be expanded in cross' broadcast
   const auto self_ = ensure_has_bdim(std::get<0>(self_other_bundled), self_bdim.has_value(), batch_size);
-  // needed because of same bug since other_.conj() is used as input to cross in backwards formula
   const auto other_ = ensure_has_bdim(std::get<1>(self_other_bundled), other_bdim.has_value(), batch_size);
 
   const auto dim_ = getPhysicalDim(self_, true, dim);

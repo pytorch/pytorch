@@ -14,6 +14,7 @@ from torch._prims_common import (
     check,
     check_fp_or_complex,
     check_is_matrix,
+    Dim,
     DimsType,
     NumberType,
     TensorLikeType,
@@ -69,7 +70,7 @@ def vector_norm(
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
-    if isinstance(dim, int):
+    if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
     elif not isinstance(dim, List) and dim is not None:
         # refs.amin just accepts List rather than DimType (Tuple)
@@ -142,7 +143,7 @@ def matrix_norm(
     check_is_matrix(A, "linalg.matrix_norm")
     # dim
     dim = utils.canonicalize_dims(A.ndim, dim)
-    if isinstance(dim, int):
+    if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
     check(len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}")
     check(
@@ -219,7 +220,7 @@ def norm(
     dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     if dim is not None:
-        if isinstance(dim, int):
+        if isinstance(dim, Dim):
             dim = (dim,)  # type: ignore[assignment]
         check(
             len(dim) in (1, 2),

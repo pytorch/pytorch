@@ -31,7 +31,7 @@ def is_masked_tensor(a):
     return isinstance(a, MaskedTensor)
 
 
-def _tensors_match(a, b, exact=True):
+def _tensors_match(a, b, exact=True, rtol=1e-05, atol=1e-08):
     if is_masked_tensor(a) or is_masked_tensor(b):
         raise ValueError("Neither `a` nor `b` can be a MaskedTensor.")
     if a.layout != b.layout:
@@ -51,7 +51,7 @@ def _tensors_match(a, b, exact=True):
         )
     if exact:
         return (a.dim() == b.dim()) and torch.eq(a, b).all().item()
-    return (a.dim() == b.dim()) and torch.allclose(a, b)
+    return (a.dim() == b.dim()) and torch.allclose(a, b, rtol=rtol, atol=atol)
 
 
 def _masks_match(a, b):
@@ -153,6 +153,10 @@ class MaskedTensor(torch.Tensor):
         kwargs["requires_grad"] = requires_grad
         kwargs["dispatch_sizes_strides_policy"] = "strides"
         kwargs["dispatch_layout"] = True
+        warnings.warn(("The PyTorch API of MaskedTensors is in prototype stage "
+                       "and will change in the near future. Please open a Github issue "
+                       "for features requests and see our documentation on the torch.masked "
+                       "module for further information about the project."), UserWarning)
         if data.requires_grad:
             warnings.warn("It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
                           "To avoid this, you can use data.clone().detach()", UserWarning)

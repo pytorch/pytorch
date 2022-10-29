@@ -1,3 +1,4 @@
+#!/bin/bash
 # =================== The following code **should** be executed inside Docker container ===================
 
 # Install dependencies

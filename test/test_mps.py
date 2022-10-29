@@ -18,9 +18,10 @@ import itertools
 from collections import defaultdict
 from torch._six import inf
 from torch.nn import Parameter
+from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, run_tests, TestCase, download_file,
-     TEST_WITH_UBSAN, dtype_abbrs)
+    (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI,
+     TEST_WITH_UBSAN, dtype_abbrs, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -28,12 +29,30 @@ import torch.backends.mps
 from torch.distributions import Uniform, Exponential
 from functools import partial
 
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests
+from torch.testing._internal.common_methods_invocations import (
+    op_db,
+    UnaryUfuncInfo,
+    ReductionOpInfo,
+    SpectralFuncInfo,
+    BinaryUfuncInfo,
+)
+from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests, onlyMPS
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
 import torch.utils._pytree as pytree
+
+
+# Copied from `test_ops.py` for the purposes of duplicating `test_numpy_ref`
+_ref_test_ops = tuple(
+    filter(
+        lambda op: not isinstance(
+            op, (UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo, BinaryUfuncInfo)
+        )
+        and op.ref is not None,
+        op_db,
+    )
+)
 
 # Same logic as test_cuda.py
 if not torch.backends.mps.is_available():
@@ -1596,9 +1615,9 @@ class TestMPS(TestCase):
             tensor_list.append(t)
 
         for i in range(0, n_tensors - 1):
-            t = tensor_list[i].view(1, 784)
+            t = tensor_list[i].view(1, n_tensor_elems)
             t_mps = t.to("mps")
-            self.assertEqual(t, t_mps.cpu())
+            self.assertEqual(t, t_mps.cpu(), f"i={i}")
 
     # See https://github.com/pytorch/pytorch/issues/82427
     # and https://github.com/pytorch/pytorch/issues/83692
@@ -1648,6 +1667,27 @@ class TestMPS(TestCase):
         t_cpu = torch.tensor(a, device="cpu")
         t_mps = torch.tensor(a, device="mps")
         self.assertEqual(t_cpu, t_mps.to("cpu"))
+
+    # See https://github.com/pytorch/pytorch/issues/86954
+    def test_copy_non_contiguous(self):
+        x = torch.arange(27).reshape(3, 3, 3).permute(2, 0, 1)
+        self.assertFalse(x.is_contiguous())
+        y = x.to('mps')
+        self.assertFalse(y.is_contiguous())
+        self.assertEqual(x, y.to('cpu'))
+
+        x = torch.arange(4**3).reshape(4, 4, 4).permute((2, 0, 1))[1:, ::2]
+        y = x.to('mps')
+        self.assertEqual(x, y.to('cpu'))
+
+        x = torch.full((4, 4, 4, 4), 13, device="cpu")
+        y = torch.full((4, 4, 4, 4), 13, device="mps")
+        z = torch.arange(4**4).reshape(4, 4, 4, 4).permute(3, 2, 0, 1)[1::, ::2]
+        x.permute(3, 2, 1, 0)[1::, ::2] = z
+        # As y is on MPS and z on CPU, this dispatches to a copy operator
+        y.permute(3, 2, 1, 0)[1::, ::2] = z
+        self.assertEqual(x, y.to('cpu'))
+
 
 
 class TestLogical(TestCase):
@@ -3969,12 +4009,13 @@ class TestNLLLoss(TestCase):
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
     def test_gelu_simple(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+        def helper(shape, dtype=torch.float):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             gelu_result = torch.nn.GELU()(x)
-            gelu_result_cpu = torch.nn.GELU()(cpu_x)
+            # GELU is not supported on CPU, so cast it to float
+            gelu_result_cpu = torch.nn.GELU()(cpu_x.to(torch.float))
 
             cpu_grad = torch.ones_like(gelu_result_cpu)
             grad = cpu_grad.to('mps')
@@ -3982,12 +4023,18 @@ class TestNLLLoss(TestCase):
             gelu_result.backward(gradient=grad)
             gelu_result_cpu.backward(gradient=cpu_grad)
 
-            self.assertEqual(gelu_result, gelu_result_cpu)
-            self.assertEqual(x.grad, cpu_x.grad)
+            atol = 1e-5 if dtype == torch.float else 1e-2
+            rtol = 1e-3 if dtype == torch.float else 1e-2
+            self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
+            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
-        for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
-            helper(shape)
+        for dtype in [torch.float, torch.half]:
+            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
+                helper(shape, dtype)
+        # Test that gelu would raise an assert for integral types
+        for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+            self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
 
     def test_gelu(self):
         def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
@@ -4127,6 +4174,20 @@ class TestNLLLoss(TestCase):
             self.assertEqual(sign_result, sign_result_cpu)
 
         helper((2, 8, 4, 5))
+
+    def test_signbit(self):
+        def helper(shape, dtype):
+            cpu_x = torch.randn(shape, device='cpu').to(dtype)
+            x = cpu_x.clone().to('mps')
+
+            signbit_result = torch.signbit(x)
+            signbit_result_cpu = torch.signbit(cpu_x)
+
+            self.assertEqual(signbit_result, signbit_result_cpu)
+
+        helper((2, 8, 4, 5), torch.int)
+        helper((2, 8, 4, 5), torch.float)
+        helper((2, 8, 4, 5), torch.int64)
 
     # Test neg
     def test_neg(self):
@@ -4672,6 +4733,10 @@ class TestNLLLoss(TestCase):
         helper((1, 1, 1), (1, 1, 4), (2, 3, 1))
         helper([], (1, 1, 4), (2, 3, 1))
         helper([], (2, 3, 4), [])
+        helper((5, 2, 3), (2, 3), (2, 3))
+        helper((2, 3), (5, 2, 3), (2, 3))
+        helper((2, 3), (2, 3), (5, 2, 3))
+        helper((2, 3), (5, 2, 3), (6, 5, 2, 3))
 
     # Test normal
     def test_normal(self):
@@ -4857,6 +4922,7 @@ class TestNLLLoss(TestCase):
 
         helper((2, 8, 4, 5), torch.exp)
         helper((2, 8, 3, 5), torch.exp2)
+        helper((2, 8, 3, 5), torch.expm1)
         helper((2, 8, 3, 5), torch.log)
         helper((2, 8, 3, 5), torch.cos)
 
@@ -4877,6 +4943,26 @@ class TestNLLLoss(TestCase):
         helper(10000)
         helper((10000, 40))
 
+    def test_multinomial(self):
+        # Test with num_dist = 1
+        def helper(probs, compare_mean, compare_var, num_samples=5, replacement=True):
+            cpu_prob_tensor = torch.tensor(probs, device='cpu', dtype=torch.float, requires_grad=False)
+            prob_tensor = cpu_prob_tensor.detach().clone().to('mps')
+
+            mps_out = torch.multinomial(prob_tensor, num_samples, replacement=replacement)
+            if(not replacement):
+                print(mps_out.to('cpu'))
+            else:
+                # Compare "real" with theoretical values
+                print(mps_out.to('cpu').float().mean(), compare_mean)
+                print(mps_out.to('cpu').float().std() ** 2, compare_var)
+
+        # TODO: Add tests for data types
+        helper(np.array([[0., 0., 0., 0.5, 0.5]]), (3 + 4) / 2, (12.5 - 3.5 ** 2), 100000)
+        helper(np.array([[.2, .2, .2, .2, .2]]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
+        helper(np.array([[1, 1, 1, 1, 1]]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
+        helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
+        helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
 class TestNNMPS(NNTestCase):
 
@@ -5060,6 +5146,15 @@ class TestNNMPS(NNTestCase):
             input = torch.randn(1, 3, 4, 4).to(dtype)
             with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
+
+            # Input and weights on different devices
+            self.assertRaisesRegex(RuntimeError,
+                                   'must be on the same device',
+                                   lambda: torch.conv2d(torch.rand(1, 3, 32, 32), torch.rand(1, 3, 3, 3, device='mps')))
+            self.assertRaisesRegex(RuntimeError,
+                                   'Input type \\(MPSFloatType\\) and weight type \\(torch\\.FloatTensor\\) should be the same',
+                                   lambda: torch.conv2d(torch.rand(1, 3, 32, 32, device='mps'), torch.rand(1, 3, 3, 3)))
+
 
     def test_conv2d_valid_padding(self, device='mps'):
         # Test F.conv2d padding='valid' is the same as no padding
@@ -5656,6 +5751,15 @@ class TestViewOpsMPS(TestCase):
 
         self.assertEqual(expected1, out1)
         self.assertEqual(expected2, out2)
+
+    def test_detached_view_copy(self, device="mps"):
+        # https://github.com/pytorch/pytorch/issues/86052
+        x = torch.arange(2)
+        # .detach() makes y not a view, but contig tensor
+        # with non-zero offset
+        y = x[1].detach()
+        z = y.to(device)
+        self.assertEqual(y, z.cpu())
 
     def test_empty_reshape(self, device="mps"):
         x = torch.randn(0, 6, device=device)
@@ -7103,7 +7207,7 @@ class TestConsistency(TestCase):
         'bmm': ['f32'],
         'broadcast_shapes': ['f32'],
         'cat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'ceil': ['f32'],
+        'ceil': ['f32', 'int32', 'int64', 'f16'],
         'char': ['b8', 'u8'],
         'chunk': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'clone': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7113,8 +7217,8 @@ class TestConsistency(TestCase):
         'conj_physical': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'contiguous': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'corrcoef': ['f32'],
-        'cos': ['f32', 'i16', 'i32', 'u8'],
-        'cosh': ['f32', 'i16', 'i32', 'u8'],
+        'cos': ['f32', 'i16', 'i32', 'u8', 'i64'],
+        'cosh': ['f32', 'i16', 'i32', 'u8', 'i64'],
         'cov': ['f32'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'diag': ['f32', 'i32'],
@@ -7136,7 +7240,8 @@ class TestConsistency(TestCase):
         'fliplr': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'flipud': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'float': ['f32'],
-        'floor': ['f32'],
+        'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
+        'frac': ['f16', 'f32'],
         'gradient': ['f16', 'f32', 'i16'],
         'half': ['f16'],
         'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
@@ -7165,7 +7270,7 @@ class TestConsistency(TestCase):
         'matmul': ['f32'],
         'mm': ['f32'],
         'mv': ['f32'],
-        'neg': ['f16', 'f32', 'i16', 'i32'],
+        'neg': ['f16', 'f32', 'i16', 'i32', 'i64'],
         'nn.functional.adaptive_max_pool1d': ['f32'],
         'nn.functional.adaptive_max_pool2d': ['f32'],
         'nn.functional.binary_cross_entropy': ['f32'],
@@ -7244,13 +7349,13 @@ class TestConsistency(TestCase):
         'resolve_conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'resolve_neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'rot90': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'round': ['f32'],
+        'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
         'rsqrt': ['f32', 'i16', 'i32', 'u8'],
         'select_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'sgn': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'short': ['i16'],
         'sigmoid': ['f32'],
-        'sign': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
+        'sign': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'sin': ['f32', 'i16', 'i32', 'u8'],
         'sinh': ['f32', 'i16', 'i32', 'u8'],
         'slice_scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
@@ -7290,7 +7395,8 @@ class TestConsistency(TestCase):
         'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
+        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'where': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
 
 
     ALLOWLIST_OP_GRAD = {
@@ -7582,7 +7688,7 @@ class TestConsistency(TestCase):
         'normnuc': None,
         'nn.functional.softminwith_dtype': None,
         'nn.functional.feature_alpha_dropoutwith_train': None,
-        'log_softmaxdtype': None,
+        'log_softmaxwith_dtype': None,
         'split_with_sizes': None,
         'trapezoid': None,
         'eq': None,
@@ -7739,10 +7845,56 @@ class TestConsistency(TestCase):
             # So each test append to the dict and write it.
             with open("new_mps_allowlist_grad.txt", "w") as f:
                 pprint.pprint(self.NEW_ALLOW_LIST_GRAD, stream=f)
+
+
+# Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
+@skipIfSlowGradcheckEnv
+class TestCommon(TestCase):
+    exact_dtype = True
+
+    # Verifies, on teardown, that no OpInfo is still using dynamic dtypes in CI
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+
+        if IS_CI:
+            err_msg = (
+                "The operator(s) below is(are) using dynamic_dtypes in the OpInfo entries."
+                "This is OK for testing, but be sure to set the dtypes manually before landing your PR!"
+            )
+            # Assure no opinfo entry has dynamic_dtypes
+            filtered_ops = list(filter(opinfo.utils.is_dynamic_dtype_set, op_db))
+            for op in filtered_ops:
+                fmt_str = opinfo.utils.str_format_dynamic_dtype(op)
+                err_msg += "\n" + fmt_str
+
+            assert len(filtered_ops) == 0, err_msg
+
+    # This is the MPS equivalent of `test_numpy_ref` from `test_ops.py`. It lives over here while
+    # MPS still requires some fairly heavy special casing in the test framework.
+    # When MPS becomes more consistent, this can probably be merged with that test using
+    # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyMPS
+    @suppress_warnings
+    # MPS only supports float32
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
+    def test_numpy_ref_mps(self, device, dtype, op):
+        # Unlike `test_numpy_ref`, this test compares in `float32` since at the time of this test's creation MPS
+        # does not support float64 Tensors.
+        # A few ops are currently broken on their reference inputs, but not their sample inputs. These should
+        # get patched up and this workaround removed.
+        broken_on_ref_inputs = op.name in ['cat', 'clamp', 'where']
+        inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
+        for sample_input in inputs:
+            self.compare_with_reference(op, op.ref, sample_input)
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
-# case right now.
+# case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
+# to achieve this.
 instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
 
 if __name__ == "__main__":
     run_tests()

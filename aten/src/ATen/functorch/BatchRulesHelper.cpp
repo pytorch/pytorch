@@ -121,6 +121,16 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x) {
   return at::reshape(x, shape);
 }
 
+Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x) {
+  src = maybe_wrap_dim(src, x.dim());
+  c10::SymDimVector shape(x.sym_sizes().begin(), x.sym_sizes().end());
+  TORCH_INTERNAL_ASSERT(shape[src] % size1 == 0);
+  auto size2 = shape[src] / size1;
+  shape[src] = size1;
+  shape.insert(shape.begin() + src + 1, size2);
+  return at::reshape_symint(x, shape);
+}
+
 void vmapIncompatibleInplaceError(const char* schema_name) {
   TORCH_CHECK(false,
     "vmap: ", schema_name, "(self, *extra_args) is not possible because ",

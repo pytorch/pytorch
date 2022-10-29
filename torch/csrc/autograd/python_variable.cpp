@@ -188,42 +188,22 @@ void pushPyOutToStack(
 
 namespace {
 
-template <const char* func_name, typename... Ts>
-void concrete_trace_cuda(Ts... args) {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  if (Py_IsInitialized()) {
-    try {
-      py::module mod = py::module::import("torch.utils._cuda_trace");
-      py::object hook = mod.attr(func_name).attr("fire_callbacks");
-      hook(args...);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what();
-    }
+// NB: This is a macro and not a template function (like it was before)
+// because passing in constexpr char* as template argument breaks some
+// versions of MSVC that are being used internally at Meta.
+// MSVC 14.16.27023 (vs2017_15.9)
+#define CONCRETE_TRACE_CUDA(func_name, ...)                           \
+  at::impl::MaybeSetTLSOnEntryGuard guard;                            \
+  if (Py_IsInitialized()) {                                           \
+    pybind11::gil_scoped_acquire gil;                                 \
+    try {                                                             \
+      py::module mod = py::module::import("torch.utils._cuda_trace"); \
+      py::object hook = mod.attr(func_name).attr("fire_callbacks");   \
+      hook(__VA_ARGS__);                                              \
+    } catch (const std::exception& e) {                               \
+      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what(); \
+    }                                                                 \
   }
-}
-
-static constexpr char trace_cuda_event_creation_fn_name[] =
-    "CUDAEventCreationCallbacks";
-static constexpr char trace_cuda_event_deletion_fn_name[] =
-    "CUDAEventDeletionCallbacks";
-static constexpr char trace_cuda_event_record_fn_name[] =
-    "CUDAEventRecordCallbacks";
-static constexpr char trace_cuda_event_wait_fn_name[] =
-    "CUDAEventWaitCallbacks";
-static constexpr char trace_cuda_memory_allocation_fn_name[] =
-    "CUDAMemoryAllocationCallbacks";
-static constexpr char trace_cuda_memory_deallocation_fn_name[] =
-    "CUDAMemoryDeallocationCallbacks";
-static constexpr char trace_cuda_stream_creation_fn_name[] =
-    "CUDAStreamCreationCallbacks";
-static constexpr char trace_cuda_device_synchronization_fn_name[] =
-    "CUDADeviceSynchronizationCallbacks";
-static constexpr char trace_cuda_stream_synchronization_fn_name[] =
-    "CUDAStreamSynchronizationCallbacks";
-static constexpr char trace_cuda_event_synchronization_fn_name[] =
-    "CUDAEventSynchronizationCallbacks";
 
 struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
@@ -254,35 +234,35 @@ struct ConcretePyInterpreterVTable final
   c10::SymInt sym_storage_offset(const TensorImpl* self) const override;
 
   void trace_gpu_event_creation(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_creation_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventCreationCallbacks", event);
   }
   void trace_gpu_event_deletion(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_deletion_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventDeletionCallbacks", event);
   }
   void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
       const override {
-    concrete_trace_cuda<trace_cuda_event_record_fn_name>(event, stream);
+    CONCRETE_TRACE_CUDA("CUDAEventRecordCallbacks", event, stream);
   }
   void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_event_wait_fn_name>(event, stream);
+    CONCRETE_TRACE_CUDA("CUDAEventWaitCallbacks", event, stream);
   }
   void trace_gpu_memory_allocation(uintptr_t ptr) const override {
-    concrete_trace_cuda<trace_cuda_memory_allocation_fn_name>(ptr);
+    CONCRETE_TRACE_CUDA("CUDAMemoryAllocationCallbacks", ptr);
   }
   void trace_gpu_memory_deallocation(uintptr_t ptr) const override {
-    concrete_trace_cuda<trace_cuda_memory_deallocation_fn_name>(ptr);
+    CONCRETE_TRACE_CUDA("CUDAMemoryDeallocationCallbacks", ptr);
   }
   void trace_gpu_stream_creation(uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_stream_creation_fn_name>(stream);
+    CONCRETE_TRACE_CUDA("CUDAStreamCreationCallbacks", stream);
   }
   void trace_gpu_device_synchronization() const override {
-    concrete_trace_cuda<trace_cuda_device_synchronization_fn_name>();
+    CONCRETE_TRACE_CUDA("CUDADeviceSynchronizationCallbacks");
   }
   void trace_gpu_stream_synchronization(uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_stream_synchronization_fn_name>(stream);
+    CONCRETE_TRACE_CUDA("CUDAStreamSynchronizationCallbacks", stream);
   }
   void trace_gpu_event_synchronization(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
   static ConcretePyInterpreterVTable* instance() {
@@ -706,7 +686,9 @@ static PyObject* THPVariable_make_subclass(
     throw torch::TypeError(
         "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  torch_dispatch_mode::StashTorchDispatchModeGuard td_g;
+  // guard completely turns off torch dispatch modes, doesn't just pop off the
+  // stack
+  torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
   auto data =
       r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
@@ -1281,34 +1263,6 @@ PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
-#ifndef USE_DEPLOY
-// This code is only used for asserts, so it is OK to skip it entirely from
-// deploy interpreters (in which case we will just skip the safety check).  For
-// a more precise check, it would be necessary to test that we are not holding
-// the GIL for *all* active torch deploy interpreters.  There is not really any
-// reason to do this.
-struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
-  bool check_python_gil() const override {
-    return Py_IsInitialized() && PyGILState_Check();
-  };
-};
-// During process destruction, python_gil_hooks will get destructed, making
-// further virtual calls on the object invalid.  By the ordering of declarations
-// in this file, the registerer will get destructed first, removing the
-// externally visible reference to the object.  Assuming at this point in time,
-// there aren't other threads racing to read out the hooks, subsequent calls
-// into GIL hooks will hit a nullptr and gracefully no-op the asserts (as
-// desired, since at process shutdown time the Python interpreter is definitely
-// dead).
-//
-// An alternative way to reduce the risk of python_gil_hooks going prematurely
-// dead would be to leak it at destruction time.  I didn't do that because
-// it's annoying to write the Registerer class for this case.
-ConcretePythonGILHooks python_gil_hooks;
-static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(
-    &python_gil_hooks);
-#endif
 
 PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
@@ -2692,9 +2646,8 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
         "Cannot call numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return torch::is_symint(out) ? out.cast<c10::SymInt>()
+                               : c10::SymInt{py::cast<int64_t>(out)};
 }
 
 c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
@@ -2715,9 +2668,8 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
   if (out.is(py::none())) {
     return self->sym_storage_offset_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return torch::is_symint(out) ? out.cast<c10::SymInt>()
+                               : c10::SymInt{py::cast<int64_t>(out)};
 }
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
@@ -2747,9 +2699,8 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
-    auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
-        : c10::SymInt{py::cast<int64_t>(elm)};
+    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
+                                    : c10::SymInt{py::cast<int64_t>(elm)};
     symints.append(si.as_int_unchecked());
   }
 
