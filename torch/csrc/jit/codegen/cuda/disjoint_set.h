@@ -118,23 +118,23 @@ class VectorOfUniqueEntries {
   }
 
   // Returns iterator pointing to the beginning of vector container
-  auto begin() const {
+  typename std::vector<T>::const_iterator begin() const {
     return vector().begin();
   }
 
   // Returns iterator pointing to the end of vector container
-  auto end() const {
+  typename std::vector<T>::const_iterator end() const {
     return vector().end();
   }
 
   // Returns iterator pointing to the beginning of vector container
-  auto begin() {
-    return vector().begin();
+  typename std::vector<T>::iterator begin() {
+    return vector_.begin();
   }
 
   // Returns iterator pointing to the end of vector container
-  auto end() {
-    return vector().end();
+  typename std::vector<T>::iterator end() {
+    return vector_.end();
   }
 
   std::string toString() {

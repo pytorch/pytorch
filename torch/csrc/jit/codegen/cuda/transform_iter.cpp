@@ -1136,8 +1136,9 @@ DisjointSets<IterDomain*> BestEffortReplay::getIterDomainEquivalence() {
   const std::unordered_map<IterDomain*, IterDomain*>* maps[3] = {
       &target2replay_id_map_, &replay_forward_id_map_, &target_forward_id_map_};
   for (auto map : maps) {
-    for (auto entry : *map) {
-      result.mapEntries(entry.first, entry.second);
+    // Sort the keys so that they appear in a deterministic order
+    for (auto key : getSortedKeys(*map, Statement::lessThan)) {
+      result.mapEntries(key, map->at(key));
     }
   }
   return result;

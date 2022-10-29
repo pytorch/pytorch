@@ -174,6 +174,22 @@ constexpr unsigned int switch_pair(T t1, T t2) {
 
 std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type);
 
+//! Return a sorted list of keys of an unordered map so that it can be
+//! iterated deterministically
+template <typename KeyType, typename ValueType, typename Cmp>
+std::vector<KeyType> getSortedKeys(
+    const std::unordered_map<KeyType, ValueType>& map,
+    Cmp cmp) {
+  std::vector<KeyType> keys(map.size());
+  auto keys_it = keys.begin();
+  for (const auto& kv : map) {
+    *keys_it = kv.first;
+    ++keys_it;
+  }
+  std::sort(keys.begin(), keys.end(), cmp);
+  return keys;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

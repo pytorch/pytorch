@@ -399,9 +399,8 @@ void IterDomainGraph::build(Fusion* fusion) {
         // Map the entire replay map between the multiple
         // consumers even for the Parallel map as they share the same
         // loop.
-        for (auto entry : c2f_map) {
-          auto c_id = entry.first;
-          auto f_id = entry.second;
+        for (auto c_id : getSortedKeys(c2f_map, Statement::lessThan)) {
+          auto f_id = c2f_map.at(c_id);
           // Map the id's together
           permissive_nodes_.mapEntries(f_id, c_id);
           exact_nodes_.mapEntries(f_id, c_id);
@@ -439,9 +438,8 @@ void IterDomainGraph::build(Fusion* fusion) {
 
         const auto& exact_c2p_map = exact_replay_PasC.getReplay();
 
-        for (auto entry : exact_c2p_map) {
-          auto c_id = entry.first;
-          auto p_id = entry.second;
+        for (auto c_id : getSortedKeys(exact_c2p_map, Statement::lessThan)) {
+          auto p_id = exact_c2p_map.at(c_id);
           exact_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
@@ -1302,8 +1300,24 @@ std::string idGraphNodesToString(
     const ComputeAtMap& ca_map,
     IdMappingMode mode) {
   std::stringstream ss;
-  const auto& disjoint_sets = ca_map.getIdSets(mode);
-  for (const auto& s_ptr : disjoint_sets.disjointSets()) {
+  // Sort vectors before printing so that the resulting output is
+  // printed deterministically
+  auto disjoint_sets = ca_map.getIdSets(mode).disjointSets();
+  std::sort(
+      disjoint_sets.begin(),
+      disjoint_sets.end(),
+      [&](const auto& set1, const auto& set2) {
+        if (set1->empty()) {
+          return true;
+        } else if (set2->empty()) {
+          return false;
+        } else {
+          auto concrete_id1 = ca_map.getConcreteMappedID(set1->front(), mode);
+          auto concrete_id2 = ca_map.getConcreteMappedID(set2->front(), mode);
+          return Statement::lessThan(concrete_id1, concrete_id2);
+        }
+      });
+  for (const auto& s_ptr : disjoint_sets) {
     const auto& set = *s_ptr;
     IterDomain* concrete_id = nullptr;
     if (!set.empty()) {
@@ -1337,15 +1351,18 @@ std::string ComputeAtMap::toString() const {
   ss << "Permissive map:\n"
      << idGraphNodesToString(*this, IdMappingMode::PERMISSIVE);
   ss << "Consumer maps:\n";
-  for (auto entry : id_graph_.consumers()) {
-    ss << "  " << entry.first->toString() << " :: " << entry.second.toString()
-       << "\n";
+  for (auto key : getSortedKeys(id_graph_.consumers(), Statement::lessThan)) {
+    auto consumers = id_graph_.consumers().at(key);
+    std::sort(consumers.begin(), consumers.end(), Statement::lessThan);
+    ss << "  " << key->toString() << " :: " << consumers.toString() << "\n";
   }
 
   ss << "Producer maps:\n";
-  for (auto entry : id_graph_.producers()) {
-    ss << "  " << entry.first->toString() << " :: " << entry.second.toString()
-       << "\n";
+  for (auto key : getSortedKeys(id_graph_.producers(), Statement::lessThan)) {
+    VectorOfUniqueEntries<IterDomain*> producers =
+        id_graph_.producers().at(key);
+    std::sort(producers.begin(), producers.end(), Statement::lessThan);
+    ss << "  " << key->toString() << " :: " << producers.toString() << "\n";
   }
 
   ss << "Sibling map:\n" << id_graph_.siblings().toString() << "\n";

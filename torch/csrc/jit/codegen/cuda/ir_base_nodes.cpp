@@ -51,6 +51,12 @@ Expr* Statement::asExpr() {
   return this->as<Expr>();
 }
 
+bool Statement::lessThan(const Statement* stmt1, const Statement* stmt2) {
+  TORCH_INTERNAL_ASSERT(stmt1 != nullptr);
+  TORCH_INTERNAL_ASSERT(stmt2 != nullptr);
+  return stmt1->name() < stmt2->name();
+}
+
 std::string Statement::toString() const {
   std::stringstream ss;
   IrPrinter ir_printer(ss);

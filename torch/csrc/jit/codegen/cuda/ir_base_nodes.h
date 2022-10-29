@@ -161,6 +161,8 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
     return this == other;
   }
 
+  static bool lessThan(const Statement* stmt1, const Statement* stmt2);
+
   std::string toString() const;
   std::string toInlineString() const;
 

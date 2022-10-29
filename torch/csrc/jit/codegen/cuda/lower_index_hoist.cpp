@@ -361,7 +361,18 @@ class CommonIndexInserter : private kir::ExprMutator {
       return;
     }
 
-    for (const auto& key : innermost_loop_map_it->second) {
+    // Sort the keys so that the hoisted index vals appear in a
+    // deterministic way
+    std::vector<CommonIndexKey> keys = innermost_loop_map_it->second;
+    std::sort(
+        keys.begin(),
+        keys.end(),
+        [](const CommonIndexKey& key1, const CommonIndexKey& key2) {
+          return Statement::lessThan(
+              key1.concreteIndexedId(), key2.concreteIndexedId());
+        });
+
+    for (const auto& key : keys) {
       auto common_index = common_index_map_.commonIndexMap().at(key);
 
       // Insert only when the index is used multiple times and is not
