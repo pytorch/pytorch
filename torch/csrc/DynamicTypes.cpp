@@ -150,7 +150,8 @@ at::Storage createStorageGetType(
   }
 
   TORCH_CHECK_TYPE(
-      Py_TYPE(untyped_storage_obj) != reinterpret_cast<PyTypeObject*>(THPStorageClass),
+      Py_TYPE(untyped_storage_obj) ==
+          reinterpret_cast<PyTypeObject*>(THPStorageClass),
       "not a storage '",
       Py_TYPE(obj)->tp_name,
       "'");

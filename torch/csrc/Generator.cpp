@@ -93,7 +93,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
 
   HANDLE_TH_ERRORS
   TORCH_CHECK_TYPE(
-      !THPVariable_Check(_new_state),
+      THPVariable_Check(_new_state),
       "expected a torch.ByteTensor, but got ",
       Py_TYPE(_new_state)->tp_name);
   auto self = (THPGenerator*)_self;

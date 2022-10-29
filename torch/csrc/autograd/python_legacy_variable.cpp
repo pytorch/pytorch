@@ -54,10 +54,10 @@ static PyObject* THPVariable_pynew(
   }
 
   TORCH_CHECK_VALUE(
-      is_volatile && requires_grad,
+      !is_volatile || !requires_grad,
       "Variable can't be volatile and require_grad at the same time!");
   TORCH_CHECK_TYPE(
-      grad_fn && !THPFunction_Check(grad_fn),
+      !grad_fn || THPFunction_Check(grad_fn),
       "_grad_fn has to be a Function object or None, but got ",
       Py_TYPE(grad_fn)->tp_name);
   Variable var;
@@ -73,11 +73,10 @@ static PyObject* THPVariable_pynew(
   } else if (THPVariable_Check(data)) {
     var = THPVariable_Unpack(data).detach();
   } else {
-    C10_THROW_ERROR(
-        TypeError,
-        c10::str(
-            "Variable data has to be a tensor, but got ",
-            Py_TYPE(data)->tp_name));
+    TORCH_CHECK_TYPE(
+        false,
+        "Variable data has to be a tensor, but got ",
+        Py_TYPE(data)->tp_name);
   }
   // We set `tensor`'s `allow_tensor_metadata_change` to true here, because we
   // want to allow the following use case for backward compatibility:

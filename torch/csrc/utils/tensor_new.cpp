@@ -107,7 +107,7 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
     }
     sizes.push_back(length);
     TORCH_CHECK_VALUE(
-        sizes.size() > MAX_DIMS,
+        sizes.size() <= MAX_DIMS,
         "too many dimensions '",
         Py_TYPE(seq)->tp_name,
         "'");
@@ -115,7 +115,7 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
       break;
     handle = THPObjectPtr(PySequence_GetItem(seq, 0));
     TORCH_CHECK_VALUE(
-        !handle,
+        handle,
         "could not determine the shape of object type '",
         Py_TYPE(seq)->tp_name,
         "'");
@@ -170,7 +170,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     return var.scalar_type();
   }
   TORCH_CHECK_TYPE(
-      THPUtils_checkString(obj),
+      !THPUtils_checkString(obj),
       "new(): invalid data type '",
       Py_TYPE(obj)->tp_name,
       "'");
@@ -188,7 +188,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
         throw python_error();
       auto cur_item = handle.get();
       TORCH_CHECK_TYPE(
-          cur_item == obj, "new(): self-referential lists are incompatible");
+          cur_item != obj, "new(): self-referential lists are incompatible");
       ScalarType item_scalarType = infer_scalar_type(cur_item);
       scalarType = (scalarType) ? at::promoteTypes(*scalarType, item_scalarType)
                                 : item_scalarType;
@@ -240,7 +240,7 @@ void recursive_store(
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto seq_size = PySequence_Fast_GET_SIZE(seq.get());
   TORCH_CHECK_VALUE(
-      seq_size != n,
+      seq_size == n,
       "expected sequence of length ",
       n,
       " at dim ",
@@ -275,7 +275,7 @@ Tensor internal_new_from_data(
     bool type_inference,
     bool pin_memory = false) {
   TORCH_CHECK_TYPE(
-      THPUtils_checkString(data),
+      !THPUtils_checkString(data),
       "new(): invalid data type '",
       Py_TYPE(data)->tp_name,
       "'");
@@ -469,7 +469,7 @@ Tensor legacy_new_from_sequence(
     c10::optional<Device> device,
     PyObject* data) {
   TORCH_CHECK_TYPE(
-      !PySequence_Check(data),
+      PySequence_Check(data),
       "new(): data must be a sequence (got ",
       Py_TYPE(data)->tp_name,
       ")");
@@ -596,11 +596,11 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
       TORCH_CHECK_TYPE(
-          ctor_or_new == CtorOrNew::CTOR,
+          ctor_or_new != CtorOrNew::CTOR,
           "torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
           "or construct a strided tensor and convert it to sparse via to_sparse.");
-      C10_THROW_ERROR(
-          TypeError,
+      TORCH_CHECK_TYPE(
+          false,
           "SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() "
           "or construct a strided tensor and convert it to sparse via to_sparse.");
     }

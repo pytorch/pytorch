@@ -65,7 +65,7 @@ void initPythonCustomClassBindings(PyObject* module) {
               return ScriptClassFunctionPtr(fn);
             }
 
-            C10_THROW_ERROR(AttributeError, c10::str(name, " does not exist"));
+            TORCH_CHECK_ATTRIBUTE(false, name, " does not exist");
           })
       .def_property_readonly("__doc__", [](const ScriptClass& self) {
         return self.class_type_.type_->expectRef<ClassType>().doc_string();

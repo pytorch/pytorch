@@ -78,7 +78,7 @@ at::Dimname THPDimname_parse(PyObject* obj) {
   }
 
   TORCH_CHECK_TYPE(
-      !THPUtils_checkString(obj),
+      THPUtils_checkString(obj),
       "expected None or string for Dimname but got ",
       Py_TYPE(obj)->tp_name);
 

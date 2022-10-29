@@ -340,7 +340,7 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
   TORCH_CHECK_VALUE(
-      N < max_args,
+      N >= max_args,
       "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
       max_args,
       " (got ",
@@ -475,7 +475,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
   TORCH_CHECK_TYPE(
-      size != N, "expected tuple of ", N, " elements but got ", size);
+      size == N, "expected tuple of ", N, " elements but got ", size);
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
                           : PyList_GET_ITEM(arg.get(), idx);
@@ -505,18 +505,17 @@ inline void throw_intlist_exception(
     size_t i,
     PyObject* obj,
     size_t idx) {
-  C10_THROW_ERROR(
-      TypeError,
-      c10::str(
-          args->signature.name,
-          "(): argument '",
-          args->signature.params[i].name,
-          "' must be ",
-          args->signature.params[i].type_name(),
-          ", but found element of type ",
-          Py_TYPE(obj)->tp_name,
-          " at pos ",
-          idx + 1));
+  TORCH_CHECK_TYPE(
+      false,
+      args->signature.name,
+      "(): argument '",
+      args->signature.params[i].name,
+      "' must be ",
+      args->signature.params[i].type_name(),
+      ", but found element of type ",
+      Py_TYPE(obj)->tp_name,
+      " at pos ",
+      idx + 1);
 }
 
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
@@ -670,19 +669,17 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception& e) {
-      C10_THROW_ERROR(
-          TypeError,
-          c10::str(
-              signature.name,
-              "(): argument '",
-              signature.params[i].name,
-              "' must be ",
-              signature.params[i].type_name(),
-              ", but found element of type ",
-              Py_TYPE(obj)->tp_name,
-              " at pos ",
-              // TOOD(shikanime): fix %ld format specifier
-              idx + 1));
+      TORCH_CHECK_TYPE(
+          false,
+          signature.name,
+          "(): argument '",
+          signature.params[i].name,
+          "' must be ",
+          signature.params[i].type_name(),
+          ", but found element of type ",
+          Py_TYPE(obj)->tp_name,
+          " at pos ",
+          idx + 1);
     }
   }
   return res;
@@ -1031,7 +1028,7 @@ inline c10::Stream PythonArgs::stream(int i) {
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
   TORCH_CHECK_TYPE(
-      !THPStream_Check(args[i]),
+      THPStream_Check(args[i]),
       "expected Stream object. Got '",
       Py_TYPE(args[i])->tp_name,
       "'");

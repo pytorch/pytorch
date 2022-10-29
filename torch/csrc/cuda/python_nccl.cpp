@@ -282,7 +282,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
 
 static inline at::Tensor extract_tensor(PyObject* obj) {
   TORCH_CHECK_TYPE(
-      !THPVariable_Check(obj),
+      THPVariable_Check(obj),
       "expected Tensor (got ",
       Py_TYPE(obj)->tp_name,
       ")");
@@ -302,7 +302,7 @@ static inline std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
     TORCH_CHECK_TYPE(
-        !THPVariable_Check(item),
+        THPVariable_Check(item),
         "expected Tensor at ",
         i,
         " (got ",

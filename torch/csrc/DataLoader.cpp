@@ -179,15 +179,15 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
 static PyObject* THPModule_setWorkerPIDs(PyObject* module, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK_TYPE(
-      PyTuple_GET_SIZE(args) != 2,
+      PyTuple_GET_SIZE(args) == 2,
       "_set_worker_pids expects exactly 2 arguments.");
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
   TORCH_CHECK_VALUE(
-      worker_pids.find(key) != worker_pids.end(),
+      worker_pids.find(key) == worker_pids.end(),
       "_set_worker_pids should be called only once for each _BaseDataLoaderIter.");
   PyObject* child_pids = PyTuple_GET_ITEM(args, 1);
   TORCH_CHECK_TYPE(
-      !PyTuple_Check(child_pids),
+      PyTuple_Check(child_pids),
       "_set_worker_pids expects a tuple for child_pids, but got ",
       Py_TYPE(child_pids)->tp_name,
       ".");
@@ -213,7 +213,7 @@ static PyObject* THPModule_removeWorkerPIDs(
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   TORCH_CHECK_VALUE(
-      it == worker_pids.end(),
+      it != worker_pids.end(),
       "Cannot find worker information for _BaseDataLoaderIter with id ",
       key);
   worker_pids.erase(it);
