@@ -211,7 +211,7 @@ def _local_pre_load_state_dict_hook(
     assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
     load_tensor = shards[0].tensor
 
-    # Get the metada of the flat_param to decide whether to pad the loaded
+    # Get the metadata of the flat_param to decide whether to pad the loaded
     # tensor.
     flat_param = module._handles[0].flat_param
     assert flat_param is not None
