@@ -10,12 +10,13 @@ from typing import Optional
 
 import torch
 
+__all__ = ["ShardingStrategy", "BackwardPrefetch", "MixedPrecision", "CPUOffload"]
+
 
 class ShardingStrategy(Enum):
     """
     This specifies the sharding strategy to be used for distributed training by
     :class:`FullyShardedDataParallel`.
-
     - ``FULL_SHARD``: Parameters, gradients, and optimizer states are sharded.
     For the parameters, this strategy unshards (via all-gather) before the
     forward, reshards after the forward, unshards before the backward
@@ -46,12 +47,10 @@ class BackwardPrefetch(Enum):
     """
     This configures explicit backward prefetching, which can improve throughput
     but may slightly increase peak memory usage.
-
     For NCCL backend, any collectives, even if issued in different streams,
     contend for the same per-device NCCL stream, which is why the relative
     order in which the collectives are issued matters for overlapping. The
     different backward prefetching settings correspond to different orderings.
-
     - ``BACKWARD_PRE``: This prefetches the next set of parameters before the
     current set of parameter's gradient computation. This improves backward
     pass throughput by overlapping communication (next all-gather) and
@@ -74,7 +73,6 @@ class BackwardPrefetch(Enum):
 class MixedPrecision:
     """
     This configures FSDP-native mixed precision training.
-
     Attributes:
         param_dtype (torch.dtype): This specifies the dtype for model
             parameters, inputs, and therefore the dtype for computation.
@@ -91,21 +89,16 @@ class MixedPrecision:
             gradients back to the full parameter precision after the backward
             pass. This may be set to ``False`` to save memory if using custom
             optimizers that can perform the optimizer step in ``reduce_dtype``.
-
     .. note:: In ``summon_full_params``, parameters are forced to full
         precision, but buffers are not.
-
     .. note:: ``state_dict`` checkpoints parameters and buffers in full
         precision. For buffers, this is only supported for
         ``StateDictType.FULL_STATE_DICT``.
-
     .. note:: This API is experimental and subject to change.
-
     .. note:: Each low precision dtype must be specified explicitly. For
         example, ``MixedPrecision(reduce_dtype=torch.float16)`` only specifies
         the reduction dtype to be low precision, and FSDP will not cast
         parameters or buffers.
-
     .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
         happens in ``param_dtype`` if specified or the original parameter dtype
         otherwise.
@@ -121,7 +114,6 @@ class MixedPrecision:
 class CPUOffload:
     """
     This configures CPU offloading.
-
     Attributes:
         offload_params (bool): This specifies whether to offload parameters to
             CPU when not involved in computation. If enabled, this implicitly
