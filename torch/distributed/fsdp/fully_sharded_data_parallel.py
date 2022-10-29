@@ -47,6 +47,12 @@ from torch.distributed.fsdp._init_utils import (
     _init_state_dict_state,
     _init_streams,
 )
+from torch.distributed.fsdp._public_utils import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
     _fsdp_root_pre_forward,
@@ -61,12 +67,6 @@ from torch.distributed.fsdp._runtime_utils import (
     _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
-from torch.distributed.fsdp.common_utils import (
-    BackwardPrefetch,
-    CPUOffload,
-    MixedPrecision,
-    ShardingStrategy,
-)
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
