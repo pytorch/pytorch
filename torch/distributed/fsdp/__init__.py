@@ -5,8 +5,10 @@ from .fully_sharded_data_parallel import (
     FullStateDictConfig,
     FullyShardedDataParallel,
     LocalStateDictConfig,
+    MixedPrecision,
     OptimStateKeyType,
     ShardedStateDictConfig,
+    ShardingStrategy,
     StateDictType,
 )
 from .wrap import ParamExecOrderWrapPolicy
