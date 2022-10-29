@@ -480,28 +480,29 @@ class TensorVariable(VariableTracker):
             constant_result = SizeVariable(sizes, **options)
         elif name == "size" and self.size is None and config.dynamic_shapes:
             example_size = self.proxy.node.meta['example_value'].size()
+            pure_size_proxy = tx.output.create_proxy(
+                "call_method",
+                name,
+                *proxy_args_kwargs([self], kwargs),
+                current_tx=tx,
+            )
             if len(args) == 1 and isinstance(args[0], ConstantVariable):
+                breakpoint()
                 assert isinstance(args[0].value, int)
                 proxy = tx.output.create_proxy(
-                        "call_function", operator.getitem, *proxy_args_kwargs([self] + args, {}),
+                        "call_function", operator.getitem, (pure_size_proxy, args[0].as_proxy()), {},
                 )
                 value = example_size[args[0].value]
                 proxy.node.meta['example_value'] = value
                 breakpoint()
                 return DynamicShapeVariable.create(tx, proxy, value)
             items = []
-            size_proxy = tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self] + args, kwargs),
-                current_tx=tx,
-            )
             for i, element in enumerate(example_size):
                 if isinstance(element, int):
                     items.append(variables.ConstantVariable(element))
                 else:
                     proxy = tx.output.create_proxy(
-                        "call_function", operator.getitem, (i,), {},
+                        "call_function", operator.getitem, (pure_size_proxy, i), {},
                     )
                     proxy.node.meta['example_value'] = element
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
