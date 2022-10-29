@@ -52,6 +52,7 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
         if op == "call_function":
             return node.target(*args, **kwargs)
         elif op == "call_method":
+            print("CALLING INTO", node.target, args[1:])
             return getattr(args[0], node.target)(*args[1:], **kwargs)
         elif op == "call_module":
             assert nnmodule is not None
@@ -470,7 +471,7 @@ class TensorVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import ConstantVariable, TupleVariable
         kwargs = dict(kwargs)
-        # print("CALLING TENSOR OP", name)
+        print("CALLING TENSOR OP", name)
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
@@ -484,7 +485,10 @@ class TensorVariable(VariableTracker):
                 proxy = tx.output.create_proxy(
                         "call_function", operator.getitem, *proxy_args_kwargs([self] + args, {}),
                 )
-                return DynamicShapeVariable.create(tx, proxy, None)
+                value = example_size[args[0].value]
+                proxy.node.meta['example_value'] = value
+                breakpoint()
+                return DynamicShapeVariable.create(tx, proxy, value)
             items = []
             size_proxy = tx.output.create_proxy(
                 "call_method",
@@ -499,6 +503,7 @@ class TensorVariable(VariableTracker):
                     proxy = tx.output.create_proxy(
                         "call_function", operator.getitem, (i,), {},
                     )
+                    proxy.node.meta['example_value'] = element
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
             size_proxy.node.meta['example_value'] = torch.Size([item.proxy.node.meta['example_value'] for item in items])
             return SizeVariable(items, size_proxy, **options)
@@ -628,6 +633,7 @@ class DynamicShapeVariable(VariableTracker):
         super(DynamicShapeVariable, self).unpack_var_sequence(tx)
 
     def as_proxy(self):
+        breakpoint()
         return self.proxy
 
     def call_method(

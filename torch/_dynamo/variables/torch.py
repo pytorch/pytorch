@@ -170,6 +170,7 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        print("CALLING ON TORCH", self.value)
         from . import ConstantVariable, GradModeVariable, TensorVariable
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
