@@ -38,12 +38,12 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import HandleTrainingState, TrainingState
+from torch.distributed.fsdp._public_utils import BackwardPrefetch
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
     _prepare_forward_inputs,
     _wait_for_computation_stream,
 )
-from torch.distributed.fsdp.common_utils import BackwardPrefetch
 from torch.distributed.utils import _sync_params_and_buffers
 
 from ._optim_utils import (
