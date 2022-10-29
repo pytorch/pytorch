@@ -58,16 +58,16 @@ from torch.distributed.fsdp._init_utils import (
     _move_module_to_device,
     _sync_module_states,
 )
-from torch.distributed.fsdp._runtime_utils import (
-    _clear_grads_if_needed,
-    _prepare_forward_inputs,
-    _wait_for_computation_stream,
-)
-from torch.distributed.fsdp.common_utils import (
+from torch.distributed.fsdp._public_utils import (
     BackwardPrefetch,
     CPUOffload,
     MixedPrecision,
     ShardingStrategy,
+)
+from torch.distributed.fsdp._runtime_utils import (
+    _clear_grads_if_needed,
+    _prepare_forward_inputs,
+    _wait_for_computation_stream,
 )
 
 from ._optim_utils import (
