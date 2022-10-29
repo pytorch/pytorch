@@ -142,18 +142,30 @@ def install_gcc_via_conda():
 def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
+@functools.lru_cache(1)
+def vec_isa_info():
+    # TODO: Add windows support
+    if sys.platform != 'linux':
+        return ""
+
+    if config.cpp.simdlen is None or config.cpp.simdlen <= 1:
+        return ""
+
+    with open("/proc/cpuinfo") as _cpu_info:
+        cpu_info_content = _cpu_info.read()
+        if "avx512" in cpu_info_content and config.cpp.simdlen == 16:
+            return "-DCPU_CAPABILITY_AVX512"
+        if "avx2" in cpu_info_content and config.cpp.simdlen == 8:
+            return "-DCPU_CAPABILITY_AVX2"
+        # TODO: Add ARM Vec here
+        return ""
 
 def cpp_compile_command(input, output, include_pytorch=False):
     if include_pytorch or (config.cpp.simdlen and config.cpp.simdlen > 1):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = ""
-        if config.cpp.simdlen:
-            if config.cpp.simdlen == 16:
-                macros = " " + "-DCPU_CAPABILITY_AVX512"
-            elif config.cpp.simdlen == 8:
-                macros = " " + "-DCPU_CAPABILITY_AVX2"
+        macros = " " + vec_isa_info()
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.

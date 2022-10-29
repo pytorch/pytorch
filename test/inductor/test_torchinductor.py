@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import itertools
 import os
 import random
 import sys
@@ -19,6 +20,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -59,7 +61,7 @@ try:
     from torch._inductor.codecache import CppCodeCache
 
     CppCodeCache.load("")
-    HAS_CPU = True
+    HAS_CPU = not IS_FBCODE
 except (
     CalledProcessError,
     OSError,
@@ -408,13 +410,6 @@ class SweepInputs2:
         for name1 in cls.input_gen_types1:
             for name2 in cls.input_gen_types2:
                 cls.gen_template(name1, name2)
-
-
-class SweepInputsCpuTest(SweepInputs2, TestCase):
-    gen = InputGen(10, "cpu")
-
-
-SweepInputsCpuTest.populate()
 
 
 class TestIndexingSimplification(TorchTestCase):
@@ -1294,6 +1289,65 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    # For gpu path, there has a accurcy issue,
+    # see https://github.com/pytorch/pytorch/issues/87745.
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_unary(self):
+        def _unary_list():
+            unary_list = [
+                torch.nn.ReLU(),
+                torch.nn.Sigmoid(),
+                torch.nn.Tanh(),
+                torch.nn.Hardswish(),
+                torch.nn.LeakyReLU(0.1, inplace=False),
+                torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
+                torch.nn.GELU(approximate="none"),
+                torch.nn.GELU(approximate="tanh"),
+            ]
+            return unary_list
+
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        options = itertools.product(
+            _unary_list(),
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            test_memory_format,
+        )
+
+        for (
+            unary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 112, 112)
+            mod = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                unary_fn,
+            ).eval()
+
+            # TODO: add bf16 test for cpu path?
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            self.common(
+                mod,
+                (v,),
+            )
 
     def test_gather1(self):
         def fn(a, b):
@@ -4027,6 +4081,11 @@ class CommonTemplate:
 
 if HAS_CPU:
 
+    class SweepInputsCpuTest(SweepInputs2, TestCase):
+        gen = InputGen(10, "cpu")
+
+    SweepInputsCpuTest.populate()
+
     class CpuTests(TestCase):
         common = check_model
         device = "cpu"
@@ -4161,7 +4220,7 @@ if HAS_CPU:
 
             with set_simd(8):
                 metrics.reset()
-                traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
+                traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
@@ -4169,7 +4228,7 @@ if HAS_CPU:
                 metrics.reset()
                 x1 = x1.permute(1, 0)
                 x2 = torch.randn((20, 10))
-                traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
+                traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
@@ -4177,7 +4236,7 @@ if HAS_CPU:
                 metrics.reset()
                 x1 = torch.randn((10, 7))
                 x2 = torch.randn((10, 7))
-                traced = make_fx(fn, tracing_mode="symbolic")(x1, x2)
+                traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, ([x1, x2]))
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
