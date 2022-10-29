@@ -115,7 +115,7 @@ runs:
       if: inputs.use-gha
       with:
         # Add the run attempt, see [Artifact run attempt]
-        name: test-jsons-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
+        name: test-jsons-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}
         retention-days: 14
         if-no-files-found: warn
         path: test/**/*.json
@@ -125,7 +125,7 @@ runs:
       if: inputs.use-gha
       with:
         # Add the run attempt, see [Artifact run attempt]
-        name: test-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
+        name: test-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}
         retention-days: 14
         if-no-files-found: error
         path: test/**/*.xml
@@ -135,7 +135,7 @@ runs:
       if: inputs.use-gha
       with:
         # Add the run attempt, see [Artifact run attempt]
-        name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
+        name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}
         retention-days: 14
-        if-no-files-found: error
+        if-no-files-found: ignore
         path: usage_log.txt
