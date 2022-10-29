@@ -294,6 +294,7 @@ def _make_node_magic(method, func):
         other_expr = self.shape_env.replace(other_expr)
         out = func(expr, other_expr)
         out = sympy.expand(out)
+        pytype: Type
         if method in ["truediv"]:
             pytype = float
         else:
@@ -316,6 +317,7 @@ def _make_node_magic(method, func):
         expr = self.shape_env.replace(self.expr)
         out = func(expr)
         out = sympy.expand(out)
+        pytype: Type
         if method in ["ceil", "floor"]:
             pytype = int
         elif method in ["sym_float"]:
