@@ -93,11 +93,6 @@ unittest.expectedFailure(
 )
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_boxes_len_dynamic_shapes
-    # Unable to cast Python instance to C++ type
-)
-
-unittest.expectedFailure(
     DynamicShapesReproTests.test_guard_fail_tensor_bool_dynamic_shapes
     # RuntimeError: aten.allclose.default - couldn't find symbolic meta function/decomposition
 )
