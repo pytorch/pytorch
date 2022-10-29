@@ -59,7 +59,7 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
     except Exception as e:
-        raise RuntimeError(f"Failed running {node.target}({args}, {kwargs}):\n{e}\n(scroll up for backtrace)") from e
+        raise RuntimeError(f"Failed running {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)") from e
     raise AssertionError(op)
 
 
