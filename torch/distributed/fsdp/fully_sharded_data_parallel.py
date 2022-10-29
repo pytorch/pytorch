@@ -27,7 +27,6 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -2272,9 +2271,7 @@ class FullyShardedDataParallel(nn.Module):
             module_name = f"{module_name}."
         # Activation checkpoint adds a prefix that has to be
         # removed as well.
-        module_name = module_name.replace(
-            f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
-        )
+        module_name = module_name.replace(_CHECKPOINT_PREFIX, "")
         return module_name
 
     @property
@@ -4395,5 +4392,5 @@ def clean_tensor_name(tensor_name: str) -> str:
     # as it increases coupling between CheckpointWrapper and FSDP. This is also not
     # scalable for additional wrapped modules, we should come up with a general solution
     # for this issue.
-    tensor_name = tensor_name.replace(_CHECKPOINT_PREFIX + ".", "")
+    tensor_name = tensor_name.replace(_CHECKPOINT_PREFIX, "")
     return tensor_name
