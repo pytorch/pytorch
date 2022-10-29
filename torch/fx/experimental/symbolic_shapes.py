@@ -146,9 +146,9 @@ class SymNode:
         elif isinstance(num, float):
             return self.wrap_float(num)
         else:
-            # NotImplementedError is important so that Python tries the
+            # NotImplemented is important so that Python tries the
             # other magic method
-            raise NotImplementedError(type(num))
+            return NotImplemented
 
     def is_int(self):
         return self.pytype is int
@@ -372,10 +372,16 @@ def _make_user_magic(method, user_type):
         return wrap_node(getattr(self.node, method)())
 
     def binary_magic_impl(self, other):
-        return wrap_node(getattr(self.node, method)(self.node.to_node(other)))
+        other_node = self.node.to_node(other)
+        if other_node is NotImplemented:
+            return NotImplemented
+        return wrap_node(getattr(self.node, method)(other_node))
 
     def rbinary_magic_impl(self, other):
-        return wrap_node(getattr(self.node.to_node(other), method)(self.node))
+        other_node = self.node.to_node(other)
+        if other_node is NotImplemented:
+            return NotImplemented
+        return wrap_node(getattr(other_node, method)(self.node))
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
