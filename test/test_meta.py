@@ -774,7 +774,12 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
-        if torch.jit.is_tracing() or isinstance(func, torch.ScriptMethod):
+        if (
+            torch.jit.is_tracing() or isinstance(func, torch.ScriptMethod) or
+            # meta converter doesn't work correctly when no_dispatch() is on, so
+            # skip running the crossref test in this case
+            torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python)
+        ):
             return func(*args, **kwargs)
 
         if self.dtype in meta_function_skips.get(func, set()):

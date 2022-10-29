@@ -700,9 +700,7 @@ class FakeTensorMode(TorchDispatchMode):
         # dispatcher, to allow wrapper subclasses to wrap the new tensor
         if func in self.lift_fns:
             assert (
-                len(kwargs) == 0
-                and len(args) == 1
-                and type(args[0]) is torch.Tensor
+                len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
             ), f"{args} {kwargs}"
             return converter(self, args[0])
 
@@ -827,13 +825,9 @@ class FakeTensorMode(TorchDispatchMode):
             # no meta kernel registered, fallback to kernel for the device
             if not self.allow_fallback_kernels:
                 raise not_implemented_error
-            return run_fallback_kernel(
-                self, func, args, kwargs, not_implemented_error
-            )
+            return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
-        return self.wrap_meta_outputs_with_default_device_logic(
-            r, func, args, kwargs
-        )
+        return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)
 
     # [subclass inputs]
     # Suppose we enable fake tensor mode.  This means that fake tensor
@@ -950,6 +944,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     # Don't use in_kernel_invocation_manager(fake_mode) as we want to do
     # REAL compute (not with meta device)
     with no_dispatch():
+
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
                 out = torch.zeros_like(e, device=e.fake_device)
