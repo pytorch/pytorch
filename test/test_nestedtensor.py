@@ -1,7 +1,5 @@
 # Owner(s): ["module: nestedtensor"]
 
-import unittest
-
 import torch
 import torch.nn
 import unittest
