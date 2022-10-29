@@ -52,7 +52,6 @@ from torch.distributed.fsdp._init_utils import (
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
-    _fsdp_root_pre_forward,
     _lazy_init,
     _post_forward,
     _post_forward_reshard,
@@ -60,6 +59,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _pre_forward_unshard,
     _reshard,
     _reshard_grads,
+    _root_pre_forward,
     _should_free_in_backward,
     _unshard,
     _unshard_grads,
@@ -994,7 +994,7 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            args, kwargs = _fsdp_root_pre_forward(self, self, *args, **kwargs)
+            args, kwargs = _root_pre_forward(self, self, *args, **kwargs)
             unused = None
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
