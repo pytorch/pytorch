@@ -9,7 +9,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/codegen/cuda/interface.h>
+#include <third_party/nvfuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
