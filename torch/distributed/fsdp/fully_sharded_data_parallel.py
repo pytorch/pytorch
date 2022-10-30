@@ -44,6 +44,12 @@ from torch.distributed.fsdp._runtime_utils import (
     _prepare_forward_inputs,
     _wait_for_computation_stream,
 )
+from torch.distributed.fsdp.api import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 from torch.distributed.utils import _sync_params_and_buffers
 
 from ._optim_utils import (
@@ -100,10 +106,6 @@ if _TORCH_FX_AVAIL:
 
 __all__ = [
     "FullyShardedDataParallel",
-    "ShardingStrategy",
-    "MixedPrecision",
-    "CPUOffload",
-    "BackwardPrefetch",
     "StateDictType",
     "StateDictConfig",
     "FullStateDictConfig",
@@ -122,142 +124,6 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FLAT_PARAM = "_flat_param"
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
-
-
-class ShardingStrategy(Enum):
-    """
-    This specifies the sharding strategy to be used for distributed training by
-    :class:`FullyShardedDataParallel`.
-    FULL_SHARD: Parameters, gradients, and optimizer states are sharded. For
-                the parameters, this algorithm all-gathers before the forward,
-                reshards after the forward, all-gathers before the backward
-                computation, and reshards after the backward computation. The
-                gradients are synchronized and sharded via reduce-scatter after
-                the backward computation. The sharded optimizer states are
-                updated locally.
-    SHARD_GRAD_OP: Gradients and optimizer states are sharded during
-                   computation, and additionally parameters are sharded outside
-                   computation. For the parameters, this algorithm all-gathers
-                   before the forward, does not reshard after the forward, and
-                   only reshards after the backward computation. The gradients
-                   are synchronized and sharded via reduce-scatter after the
-                   backward computation. The sharded optimizer states are
-                   updated locally. Inside ``no_sync()``, the parameters are
-                   not resharded after the backward computation.
-    NO_SHARD: Parameters, gradients, and optimizer states are not sharded but
-              instead replicated across ranks, similar to PyTorch's
-              ``DistributedDataParallel`` API. The gradients are synchronized
-              via all-reduce after the backward computation. The unsharded
-              optimizer states are updated locally.
-    HYBRID_SHARD(future support): Apply ``FULL_SHARD`` intra-node and
-                                  ``NO_SHARD`` inter-node.
-
-    """
-
-    FULL_SHARD = auto()
-    SHARD_GRAD_OP = auto()
-    NO_SHARD = auto()
-    # TODO
-    # HYBRID_SHARD = auto()
-
-
-@dataclass
-class MixedPrecision:
-    """
-    A config to enable mixed precision training with FullyShardedDataParallel.
-    This class can be constructed with several flags:
-        ``param_dtype`` controls the precision of model parameters, inputs, and
-        therefore the precision under which computation happens. After forward
-        and backward passes, FSDP parameters point to full precision shards
-        that are kept in memory. Full precision parameters are always
-        checkpointed.
-        ``reduce_dtype`` controls the precision under which gradient reduction
-        would occur, which can potentially be different than ``param_dtype``
-        for use cases such as communication efficiency.
-        ``buffer_dtype`` controls the precision that buffers are cast to. Note
-        that buffers are unsharded and are cast in the first forward pass, and
-        remain in their reduced precision state even after forward/backward
-        passes. However, when taking checkpoints with ``state_dict``, buffers
-        are checkpointed in their full precision (and then restored back to
-        to their reduced precision) as expected. Note that this checkpoint
-        support is currently limited to ``StateDictType.FULL_STATE_DICT``.
-        ``keep_low_precision_grads``: Whether to upcast gradients back to the
-        full parameter precision after backwards or not. This can be disabled
-        to keep the gradients in the lower precision, which can potentially
-        save memory if custom Optimizers are able to perform parameter updates
-        effectively with lower precision grads.
-
-    .. note:: In ``summon_full_params``, parameters are summoned in full
-        precision but buffers are not.
-
-    .. note:: Parameters and buffers are checkpointed in full precision. For
-        buffers, this is only guaranteed to work for ``StateDictType.FULL_STATE_DICT``.
-
-    .. note:: This API is experimental and subject to change.
-
-    .. note:: Specification of reduced precision types must be explicit, in that
-        if, for example, ``param_dtype`` is not specified, it will not be cast by
-        FSDP. Thus, a config such as ``MixedPrecision(reduce_dtype=torch.float16)``
-        will not cast buffers or parameters. Note that if a ``MixedPrecision``
-        config is specified without a ``reduce_dtype``, gradient communication
-        would occur in the `param_dtype` precision, if given, otherwise, in the
-        original parameter precision.
-    """
-
-    # maintain a tensor of this dtype that the fp32 param shard will be cast to.
-    # Will control the precision of model params, inputs, and thus compute as
-    # well.
-    param_dtype: Optional[torch.dtype] = None
-    # Gradient communication precision.
-    reduce_dtype: Optional[torch.dtype] = None
-    # Buffer precision.
-    # TODO: buffer + param are usually of the same type, if user specifies
-    # param but not buffer, should we automatically make buffer be the same?
-    buffer_dtype: Optional[torch.dtype] = None
-    keep_low_precision_grads: Optional[bool] = False
-
-
-@dataclass
-class CPUOffload:
-    """
-    CPU offloading config. Currently, only parameter and gradient CPU
-    offload are supported.
-    offload_params: Offloading parameters to CPUs when these parameters are
-                    not used for computation on GPUs. This implicitly enables
-                    gradient offloading to CPUs in order for parameters and
-                    gradients to be on the same device to work with optimizer.
-    """
-
-    offload_params: bool = False
-
-
-class BackwardPrefetch(Enum):
-    """
-    Specify where to prefetch next layer's full parameters
-    during backward pass.
-    BACKWARD_PRE: prefetch right before current layer's backward computation
-                  starts, this approach will increase backward communication
-                  and computation overalpping and potentialy improve training
-                  performance, but it may increase the peak memory usage as
-                  the prefetched full parameters will be kept in the GPU memory
-                  until next layer's backward computation is done.
-    BACKWARD_POST: prefetch right after current layer's backward computation finishes,
-                   this approach will not increase peak memory as prefetching happens
-                   after current layer's full parameters are freed.
-                   It could potentially improve backward communication and computation
-                   overlapping as it avoids all_gather and reduce_scatter are blocked
-                   each other in the single NCCL stream. However, based on our experiments,
-                   for some models, the backward post backward hook fire order is not always
-                   the reversed forward computation order, so this
-                   approach may prefetch full parameters for layers ahead of next layer,
-                   this 'ahead' all_gather could delay next layer's all_gather in the
-                   single NCCL stream and cause the next layer's computation delay. So it may
-                   cause some performance regession for some models.
-    """
-
-    BACKWARD_PRE = auto()
-    BACKWARD_POST = auto()
-    # TODO, BACKWARD_PRE_CPU, prefetch full parameters and keep them in the CPU memory
 
 
 class StateDictType(Enum):
