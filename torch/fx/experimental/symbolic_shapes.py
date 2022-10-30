@@ -170,6 +170,13 @@ class SymNode:
     def __repr__(self):
         return self.str()
 
+    # These methods are metaprogrammed in below
+    def sym_int(self) -> "SymNode":
+        ...
+
+    def sym_float(self) -> "SymNode":
+        ...
+
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
         raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
