@@ -171,9 +171,10 @@ class TestMetaConverter(TestCase):
         m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
+        r = []
         for i in range(4):
             li.append(torch.rand([i]))
-            m(li[-1])
+            r.append(m(li[-1]))
         self.assertEqual(len(m.tensor_memo), 4)
         del li
         self.assertEqual(len(m.tensor_memo), 0)
@@ -240,6 +241,7 @@ CHECK_STRIDES_SKIPS = {
     aten.maximum.default,
     aten.minimum.default,
     aten.mul.Tensor,
+    aten.narrow_copy.default,
     aten.ne.Tensor,
     aten.nextafter.default,
     aten.pow.Scalar,
@@ -697,7 +699,6 @@ meta_function_device_expected_failures_only_outplace['cuda'] = {
 }
 
 meta_function_device_skips['cpu'] = {
-    torch.narrow_copy: {b8, bf16, c128, c32, c64, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.native_batch_norm: {f32, f64},
 }
 

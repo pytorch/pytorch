@@ -12365,10 +12365,6 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/84577
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-               # Not implemented
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta', device_type='cuda'),
            )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
