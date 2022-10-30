@@ -304,7 +304,8 @@ class GraphLowering(torch.fx.Interpreter):
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs or user.op == "output":
-                        result.realize_hint()
+                        is_output = user.op == "output"
+                        result.realize_hint(is_output)
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
