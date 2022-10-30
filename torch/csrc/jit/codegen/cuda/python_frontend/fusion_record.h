@@ -1476,7 +1476,7 @@ struct BatchNormOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(1).index, output.mean);
     fd.setFusionState(outputs_.at(2).index, output.invstd);
   }
-  
+
   virtual void print(std::ostream& os, bool close_function = true) const final {
     RecordFunctor::print(os, false);
     os << ", training=" << (training_ ? "True" : "False");
