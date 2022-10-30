@@ -1,7 +1,10 @@
 #pragma once
 
+#include <memory>
+
 #include <ATen/core/TensorBody.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/strong_type.h>
 #include <c10/util/variant.h>
 
@@ -73,6 +76,11 @@ class WeakTensor {
  private:
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self_;
 };
+
+struct Result;
+using result_ptr_t = std::shared_ptr<Result>;
+
+void calculateUniqueTensorIDs(std::vector<result_ptr_t>& sorted_results);
 
 } // namespace impl
 } // namespace profiler

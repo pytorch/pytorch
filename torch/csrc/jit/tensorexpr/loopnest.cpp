@@ -1506,12 +1506,12 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   if (!f) {
-    throw malformed_input("sliceHead attempted on null loop", f);
+    throw malformed_input("sliceHead attempted on null loop");
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("sliceHead attempted on loop with no parent", p);
+    throw malformed_input("sliceHead attempted on loop with no parent");
   }
 
   ExprPtr head_end = alloc<Min>(
@@ -1546,12 +1546,12 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
   }
 
   if (!f) {
-    throw malformed_input("sliceTail attempted on null loop", f);
+    throw malformed_input("sliceTail attempted on null loop");
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("sliceTail attempted on loop with no parent", p);
+    throw malformed_input("sliceTail attempted on loop with no parent");
   }
 
   ExprPtr tail_start = alloc<Max>(
@@ -1585,12 +1585,12 @@ void LoopNest::splitWithTail(
     ForPtr* inner,
     ForPtr* tail) {
   if (!f) {
-    throw malformed_input("splitWithTail attempted on null loop", f);
+    throw malformed_input("splitWithTail attempted on null loop");
   }
 
   BlockPtr p = to<Block>(f->get_parent());
   if (!p) {
-    throw malformed_input("splitWithTail attempted on loop with no parent", p);
+    throw malformed_input("splitWithTail attempted on loop with no parent");
   }
 
   // Normalize the loop to simplify start and stop bound computation

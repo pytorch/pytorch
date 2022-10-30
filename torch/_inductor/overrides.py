@@ -258,11 +258,12 @@ def check_node_kind(current_node, modules, node_kind):
 def check_node_is_binary(node):
     return (
         (node.op == "call_function" and node.target in [torch.add, torch.sub])
-        or (node.op == "call_function" and node.target in [operator.add, operator.sub])
         or (
-            node.op == "call_method"
-            and node.target in [torch.Tensor.add, torch.Tensor.sub]
+            node.op == "call_function"
+            and node.target
+            in [operator.add, operator.iadd, operator.sub, operator.isub]
         )
+        or (node.op == "call_method" and node.target in ["add", "add_", "sub", "sub_"])
     )
 
 
@@ -371,7 +372,7 @@ def fuse_binary(gm: torch.fx.GraphModule):
                             computation_node,
                             node,
                             fuse_func,
-                            attr,
+                            attr if attr != "iadd" else "add",
                             modules,
                             index_node,
                             index_pointwise,
@@ -523,12 +524,16 @@ unary_modules_map = {
 
 
 binary_attr = {
-    torch.add: "add",
-    torch.Tensor.add: "add",
-    operator.add: "add",
-    torch.sub: "sub",
-    torch.Tensor.sub: "sub",
-    operator.sub: "sub",
+    torch.add: "add",  # node.op == "call_function"
+    "add": "add",  # node.op == "call_method"
+    "add_": "iadd",  # node.op == "call_method"
+    operator.add: "add",  # node.op == "call_function"
+    operator.iadd: "iadd",  # node.op == "call_function"
+    torch.sub: "sub",  # node.op == "call_function"
+    "sub": "sub",  # node.op == "call_method"
+    "sub_": "sub",  # node.op == "call_method"
+    operator.sub: "sub",  # node.op == "call_function"
+    operator.isub: "sub",  # node.op == "call_function"
 }
 
 
@@ -538,11 +543,13 @@ computation_op_binary_op_fusion_map = {
 
 
 # For add: we support conv/linear + other and other + conv
-# For sub, we only support conv/linear - sub
+# For sub/add_/sub_, we only support conv/linear - other
+# or conv/linear +(-)= other
 supported_index_list = {
     "add": [
         {"index_computation": 0, "index_pointwise": 1},
         {"index_computation": 1, "index_pointwise": 0},
     ],
+    "iadd": [{"index_computation": 0, "index_pointwise": 1}],
     "sub": [{"index_computation": 0, "index_pointwise": 1}],
 }
