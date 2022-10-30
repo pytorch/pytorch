@@ -40,7 +40,6 @@ from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISIO
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _get_param_to_unflat_param_names,
-    clean_tensor_name,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
     HandleTrainingState,
