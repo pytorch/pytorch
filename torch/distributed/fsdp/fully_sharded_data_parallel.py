@@ -35,7 +35,6 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _get_param_to_unflat_param_names,
-    clean_tensor_name,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
     HandleTrainingState,
