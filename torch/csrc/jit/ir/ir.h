@@ -239,6 +239,11 @@ struct Value {
   const Node* node() const {
     return node_;
   }
+
+  /**
+   * @warning NEVER pass raw pointer of smart pointer managed Graph to Python.
+   * Check #87343 for details.
+   */
   Graph* owningGraph();
   const Graph* owningGraph() const;
   // TODO: make this more const correct
@@ -398,6 +403,10 @@ struct TORCH_API Node {
   }
   SourceRange sourceRange() const;
 
+  /**
+   * @warning NEVER pass raw pointer of smart pointer managed Graph to Python.
+   * Check #87343 for details.
+   */
   Graph* owningGraph() {
     return graph_;
   }
@@ -1049,6 +1058,10 @@ struct Block {
   const Node* param_node() const {
     return input_;
   }
+  /**
+   * @warning NEVER pass raw pointer of smart pointer managed Graph to Python.
+   * Check #87343 for details.
+   */
   Graph* owningGraph() {
     return graph_;
   }
@@ -1163,7 +1176,7 @@ struct Block {
   std::shared_ptr<Wrap<Block>> wrap_;
 };
 
-struct Graph {
+struct Graph : std::enable_shared_from_this<Graph> {
   AT_DISALLOW_COPY_AND_ASSIGN(Graph);
   friend struct Node;
   friend struct Value;
