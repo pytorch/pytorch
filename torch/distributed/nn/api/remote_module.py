@@ -365,6 +365,7 @@ class _RemoteModule(nn.Module):
         self,
         hook: Callable[..., None],
         prepend: bool = False,
+        with_kwargs: bool = False,
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
@@ -372,6 +373,7 @@ class _RemoteModule(nn.Module):
         self,
         hook: Callable[..., None],
         prepend: bool = False,
+        with_kwargs: bool = False,
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 

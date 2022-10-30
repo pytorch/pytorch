@@ -86,6 +86,47 @@ def full_backward_pre_hook(
     self.assertEqual(id(module), id(expected_module))
     self.assertEqual(len(grad_input), 1)
 
+class KwargModel(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.net1 = Net()
+        self.net2 = Net()
+
+    def forward(self, x: torch.Tensor, bias: torch.Tensor = None) -> torch.Tensor:
+        if bias is not None:
+            x = x + bias
+        return x
+
+
+def kwarg_forward_hook(
+    self: TestCase,
+    fired_hooks: List[int],
+    expected_module: nn.Module,
+    hook_id: int,
+    module: nn.Module,
+    inp: Tuple[torch.Tensor],
+    out: torch.Tensor,
+    kwargs: dict
+) -> None:
+    fired_hooks.append(hook_id)
+    self.assertEqual(id(module), id(expected_module))
+    self.assertEqual(len(inp), 1)
+    out = out + kwargs['bias']
+    return out
+def kwarg_forward_pre_hook(
+    self: TestCase,
+    fired_hooks: List[int],
+    expected_module: nn.Module,
+    hook_id: int,
+    module: nn.Module,
+    inp: Tuple[torch.Tensor],
+    kwargs: dict
+) -> None:
+    fired_hooks.append(hook_id)
+    self.assertEqual(id(module), id(expected_module))
+    self.assertEqual(len(inp), 1)
+    kwargs['bias'] = 2 * kwargs['bias']
+    return inp, kwargs
 
 class TestModuleHooks(TestCase):
 
@@ -190,6 +231,26 @@ class TestModuleHooks(TestCase):
         self.assertEqual(fired_hooks, [0, 1, 2, 3])
         model(x).sum().backward()
         self.assertEqual(fired_hooks, [0, 1, 2, 3, 0, 1, 2, 3])
+
+    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
+    def test_kwarg_hooks(self):
+        fired_hooks: List[int] = []
+        x = torch.randn(10, 10)
+        bias = torch.randn(10, 10)
+
+        model = KwargModel()
+        model.register_forward_pre_hook(partial(kwarg_forward_pre_hook, self, fired_hooks, model, 0), with_kwargs=True)
+
+        self.assertEqual(fired_hooks, [])
+        out = model(x, bias=bias)
+        self.assertEqual(fired_hooks, [0])
+        self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
+
+        model = KwargModel()
+        model.register_forward_hook(partial(kwarg_forward_hook, self, fired_hooks, model, 1), with_kwargs=True)
+        out = model(x, bias=bias)
+        self.assertEqual(fired_hooks, [0, 1])
+        self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
 if __name__ == "__main__":

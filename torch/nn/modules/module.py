@@ -1325,14 +1325,19 @@ class Module:
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
 
-            hook(module, input, with_kwargs=False) -> None or modified input
+            hook(module, input) -> None or modified input
 
-        If ``with_kwargs`` is ``False`` the input and output contains only the
-        positional arguments given to the module.  Keyword arguments won't be
-        passed to the hooks and only to the ``forward``.
         The hook can modify the input. User can either return a tuple or a
         single modified value in the hook. We will wrap the value into a tuple
         if a single value is returned(unless that value is already a tuple).
+
+        If ``with_kwargs`` is true, then the forward hook will be passed the
+        kwargs given to the forward function and be expected to return them
+        possibly modified:
+
+            hook_result = hook(self, input, kwargs)
+                if hook_result is not None:
+                    result, kwargs = hook_result
 
         Args:
             hook (Callable): The user defined hook to be registered.
@@ -1344,6 +1349,7 @@ class Module:
                 ``forward_pre`` hooks registered with
                 :func:`register_module_forward_pre_hook` will fire before all
                 hooks registered by this method.
+            with_kwargs (bool): If true the input and output contains the kwargs.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1373,6 +1379,11 @@ class Module:
         it will not have effect on forward since this is called after
         :func:`forward` is called.
 
+        If ``with_kwargs`` is true then the hook will recieve the kwargs, but not
+        be expected to return them (and shouldn't modify them).
+
+            hook_result = hook(self, input, result, kwargs)
+
         Args:
             hook (Callable): The user defined hook to be registered.
             prepend (bool): If true, the provided ``hook`` will be fired before
@@ -1383,6 +1394,7 @@ class Module:
                 ``forward`` hooks registered with
                 :func:`register_module_forward_hook` will fire before all hooks
                 registered by this method.
+            with_kwargs (bool): If true the input contains the kwargs.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1435,13 +1447,15 @@ class Module:
         if _global_forward_pre_hooks or self._forward_pre_hooks:
             for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
                 if hasattr(hook, 'with_kwargs') and hook.with_kwargs:
-                    input, kwargs = hook(mod, args, kwargs)
+                    result = hook(self, input, kwargs)
+                    if result is not None:
+                        result, kwargs = result
                 else:
                     result = hook(self, input)
-                    if result is not None:
-                        if not isinstance(result, tuple):
-                            result = (result,)
-                        input = result
+                if result is not None:
+                    if not isinstance(result, tuple):
+                        result = (result,)
+                    input = result
 
         bw_hook = None
         if full_backward_hooks or backward_pre_hooks:
@@ -1452,11 +1466,11 @@ class Module:
         if _global_forward_hooks or self._forward_hooks:
             for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
                 if hasattr(hook, 'with_kwargs') and hook.with_kwargs:
-                    input, kwargs = hook(self, input, result)
+                    hook_result = hook(self, input, result, kwargs)
                 else:
                     hook_result = hook(self, input, result)
-                    if hook_result is not None:
-                        result = hook_result
+                if hook_result is not None:
+                    result = hook_result
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
