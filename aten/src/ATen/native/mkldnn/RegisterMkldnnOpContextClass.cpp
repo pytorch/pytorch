@@ -43,6 +43,12 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_convolution_pointwise(Tensor X, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str attr, Scalar?[] scalars, str? algorithm) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_convolution_pointwise.binary(Tensor X, Tensor other, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups, str attr) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkldnn::_convolution_add_(Tensor(a!) other, Tensor X, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor(a!) Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkldnn::_convolution_add_relu_(Tensor(a!) other, Tensor X, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor(a!) Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkldnn::_convolution_add_relu(Tensor other, Tensor X, Tensor W, Tensor? B, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor Y"));
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {
