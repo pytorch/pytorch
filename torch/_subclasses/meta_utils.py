@@ -48,19 +48,6 @@ class WeakTensorRefKey(object):
         return self.id == other.id
 
 
-class Unsupported(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x):
-        # preserve_format is the default, but we want to
-        # emphasize how important it is to preserve
-        # format here
-        return x.clone(memory_format=torch.preserve_format)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        raise RuntimeError("cannot backward through this")
-
-
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -216,7 +203,7 @@ class MetaConverter:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
-                            r = Unsupported.apply(r)
+                            r = r.clone()
                             r._coalesced_(t.is_coalesced())
 
                 elif t._is_view() and self.preserve_views:
@@ -266,7 +253,7 @@ class MetaConverter:
                         r.requires_grad = t.requires_grad
                         if not is_leaf:
                             with torch.enable_grad():
-                                r = Unsupported.apply(r)
+                                r = r.clone()
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
