@@ -941,7 +941,8 @@ struct ReplaceValInIndexVal : public OptInDispatch {
 
   void handle(Val* val) override {
     TORCH_INTERNAL_ASSERT(
-        val->isA<Int>() || val->isA<NamedScalar>() || val->isA<kir::IntPair>(),
+        val->isA<Int>() || val->isA<Bool>() || val->isA<NamedScalar>() ||
+            val->isA<kir::IntPair>(),
         "Invalid Val type: ",
         val->toString());
 
@@ -960,6 +961,7 @@ struct ReplaceValInIndexVal : public OptInDispatch {
       switch (def->etype()) {
         case ExprType::UnaryOp:
         case ExprType::BinaryOp:
+        case ExprType::TernaryOp:
         case ExprType::Swizzle2DInt:
         case ExprType::PairSelect:
           handle(val->definition());
@@ -978,7 +980,10 @@ struct ReplaceValInIndexVal : public OptInDispatch {
   void handle(UnaryOp* uop) override {
     handle(uop->in());
     auto inp = last_visited_val_;
-    TORCH_INTERNAL_ASSERT(uop->out()->isA<Int>());
+    TORCH_INTERNAL_ASSERT(
+        uop->out()->isA<Int>() || uop->out()->isA<Bool>(),
+        "Unknown output type for expr ",
+        uop->toInlineString());
     auto out = IrBuilder::create<Int>(c10::nullopt);
     IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, inp);
     last_visited_val_ = out;
@@ -990,9 +995,29 @@ struct ReplaceValInIndexVal : public OptInDispatch {
     auto lhs = last_visited_val_;
     handle(bop->rhs());
     auto rhs = last_visited_val_;
-    TORCH_INTERNAL_ASSERT(bop->out()->isA<Int>());
+    TORCH_INTERNAL_ASSERT(
+        bop->out()->isA<Int>() || bop->out()->isA<Bool>(),
+        "Unknown output type for expr ",
+        bop->toInlineString());
     auto out = IrBuilder::create<Int>(c10::nullopt);
     IrBuilder::create<BinaryOp>(bop->getBinaryOpType(), out, lhs, rhs);
+    last_visited_val_ = out;
+  }
+
+  // Clone expression after recurisvely replacing inputs
+  void handle(TernaryOp* top) override {
+    handle(top->in1());
+    auto in1 = last_visited_val_;
+    handle(top->in2());
+    auto in2 = last_visited_val_;
+    handle(top->in3());
+    auto in3 = last_visited_val_;
+    TORCH_INTERNAL_ASSERT(
+        top->out()->isA<Int>() || top->out()->isA<Bool>(),
+        "Unknown output type for expr ",
+        top->toInlineString());
+    auto out = IrBuilder::create<Int>(c10::nullopt);
+    IrBuilder::create<TernaryOp>(top->getTernaryOpType(), out, in1, in2, in3);
     last_visited_val_ = out;
   }
 

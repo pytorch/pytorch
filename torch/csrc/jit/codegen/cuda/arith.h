@@ -350,6 +350,11 @@ TORCH_CUDA_CU_API Val* div(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* div(TensorView* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* div(Val* v1, TensorView* v2);
 TORCH_CUDA_CU_API TensorView* div(TensorView* v1, TensorView* v2);
+// cpp_div: similar to div, but don't promote to float
+TORCH_CUDA_CU_API Val* cpp_div(Val* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* cpp_div(TensorView* v1, Val* v2);
+TORCH_CUDA_CU_API TensorView* cpp_div(Val* v1, TensorView* v2);
+TORCH_CUDA_CU_API TensorView* cpp_div(TensorView* v1, TensorView* v2);
 // fmod
 TORCH_CUDA_CU_API Val* fmod(Val* v1, Val* v2);
 TORCH_CUDA_CU_API TensorView* fmod(TensorView* v1, Val* v2);

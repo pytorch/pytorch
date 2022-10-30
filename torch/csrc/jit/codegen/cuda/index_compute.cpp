@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/swizzle.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
@@ -552,18 +553,14 @@ void IndexCompute::handle(Swizzle2D* swizzle_2d) {
     // Generate integer swizzle math if the
     //  swizzle is activated. See also
     //  [Note on swizzle mode].
-
-    auto out_pair = IrBuilder::swizzle2DIntExpr(
+    std::pair<Val*, Val*> swizzled_index = dispatchSwizzle(
+        swizzle_2d->swizzleType(),
         out_x_ind,
         out_y_ind,
         getExtent(out_x_id),
-        getExtent(out_y_id),
-        swizzle_2d->swizzleType());
-
-    index_map_[in_x_id] =
-        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
-    index_map_[in_y_id] =
-        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
+        getExtent(out_y_id));
+    index_map_[in_x_id] = swizzled_index.first;
+    index_map_[in_y_id] = swizzled_index.second;
   }
 }
 

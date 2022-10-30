@@ -132,6 +132,18 @@ class TORCH_CUDA_CU_API IntOrDouble {
     }
     TORCH_INTERNAL_ASSERT(false);
   }
+  IntOrDouble operator^(const IntOrDouble& other) const {
+    if (is_int() && other.is_int()) {
+      return IntOrDouble(as<int64_t>() ^ other.as<int64_t>());
+    }
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  IntOrDouble operator^(int64_t other) const {
+    if (is_int()) {
+      return IntOrDouble(as<int64_t>() ^ other);
+    }
+    TORCH_INTERNAL_ASSERT(false);
+  }
 
 #define DEFINE_COMPARE_OP(op)                           \
   bool operator op(const IntOrDouble& other) const {    \

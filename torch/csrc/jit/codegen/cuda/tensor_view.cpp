@@ -580,6 +580,11 @@ TensorView* TensorView::swizzle(
   }
 
   TORCH_CHECK(
+      !(getMemoryType() == MemoryType::Global &&
+        swizzle_mode == SwizzleMode::Data),
+      "Data swizzle on global memory is not supported.");
+
+  TORCH_CHECK(
       x >= (int)getComputeAtPosition(),
       false,
       "Cannot swizzle axes within compute at position. Axis ",

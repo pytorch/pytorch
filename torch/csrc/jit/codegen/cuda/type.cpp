@@ -584,6 +584,10 @@ static const char* binary_op_type2string(BinaryOpType t) {
     // Logical Ops
     case BinaryOpType::And:
       return "and";
+    case BinaryOpType::Or:
+      return "or";
+    case BinaryOpType::Xor:
+      return "xor";
     case BinaryOpType::Eq:
       return "equal";
     case BinaryOpType::GE:

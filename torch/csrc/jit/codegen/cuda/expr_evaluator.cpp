@@ -146,7 +146,8 @@ void ExpressionEvaluator::handle(UnaryOp* uop) {
         break;
       default:
         TORCH_CHECK(
-            !"Unexpected operator type ",
+            false,
+            "Unexpected operator type ",
             uop->getUnaryOpType(),
             " in ",
             uop->toString());
@@ -190,8 +191,16 @@ void ExpressionEvaluator::handle(BinaryOp* bop) {
       case BinaryOpType::Min:
         known_values_[bop->out()] = min(*lhs, *rhs);
         break;
+      case BinaryOpType::Xor:
+        known_values_[bop->out()] = *lhs ^ *rhs;
+        break;
       default:
-        TORCH_CHECK(!"Unexpected operator type");
+        TORCH_CHECK(
+            false,
+            "Unexpected operator type: ",
+            bop->getBinaryOpType(),
+            " in ",
+            bop->toString());
     }
   }
 }
