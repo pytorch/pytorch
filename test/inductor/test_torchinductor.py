@@ -56,15 +56,12 @@ except (ImportError, AssertionError) as e:
 
 HAS_CPU = False
 try:
-    if IS_FBCODE:
-        raise torch._inductor.exc.CppCompileError
-
     from subprocess import CalledProcessError
 
     from torch._inductor.codecache import CppCodeCache
 
     CppCodeCache.load("")
-    HAS_CPU = True
+    HAS_CPU = not IS_FBCODE
 except (
     CalledProcessError,
     OSError,
@@ -108,9 +105,13 @@ unary_list = [
 
 
 binary_list = [
-    lambda x, y: torch.add(x, y),
-    lambda x, y: torch.add(y, x),
-    lambda x, y: torch.sub(x, y),
+    lambda x, y: torch.add(x, y),  # call_function
+    lambda x, y: torch.add(y, x),  # call_function
+    lambda x, y: x.add(y),  # call_method
+    lambda x, y: x.add_(y),  # call_method
+    lambda x, y: torch.sub(x, y),  # call_function
+    lambda x, y: x.sub(y),  # call_method
+    lambda x, y: x.sub_(y),  # call_method
 ]
 
 
@@ -1458,13 +1459,15 @@ class CommonTemplate:
                     bias=bias,
                     **kwargs,
                 )
-                self.conv2 = torch.nn.Conv2d(
-                    in_channels,
-                    out_channels,
-                    dilation=dilation,
-                    groups=groups,
-                    bias=bias,
-                    **kwargs,
+                self.conv2 = torch.nn.Sequential(
+                    torch.nn.Conv2d(
+                        in_channels,
+                        out_channels,
+                        dilation=dilation,
+                        groups=groups,
+                        bias=bias,
+                        **kwargs,
+                    )
                 )
                 self.binary_fn = binary_fn
 
@@ -2398,6 +2401,17 @@ class CommonTemplate:
             atol=1e-5,
             rtol=3e-05,
         )
+
+    def test_pow3(self):
+        # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
+        def fn(x):
+            z = torch.tensor(0.123, device=self.device)
+            w = z + x
+            return torch.pow(w, 0.5)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        input = torch.rand(())
+        self.assertTrue(same(opt(input), fn(input)))
 
     def test_glu(self):
         def fn(x):
@@ -4201,29 +4215,23 @@ class CommonTemplate:
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
+        dtypes = [
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64,
+        ]
 
-        inputs = (
-            rand_strided((2, 3), (3, 1), device="cuda"),
-            rand_strided((), (), device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-
-    @requires_cuda()
-    def test_unspec_inputs_fp16(self):
-        def fn(x, y):
-            return x + y, x * y, x / y
-
-        opt = torch._dynamo.optimize("inductor")(fn)
-
-        inputs = (
-            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
-            rand_strided((), (), dtype=torch.float16, device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        for d in dtypes:
+            inputs = (
+                rand_strided((2, 3), (3, 1), dtype=torch.float32, device="cuda"),
+                rand_strided((), (), dtype=d, device="cpu"),
+            )
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
+            inputs = (inputs[1], inputs[0])
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
