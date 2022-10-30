@@ -497,7 +497,7 @@ class FullyShardedDataParallel(nn.Module):
             forward_prefetch_limit,
         )
         _init_runtime_state(self)
-        _init_prefetching_state(self)
+        _init_prefetching_state(self, backward_prefetch, forward_prefetch)
         _init_buffer_state(self, module)
         _init_param_handle_from_module(
             self,
