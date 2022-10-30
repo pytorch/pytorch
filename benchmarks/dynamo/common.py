@@ -28,7 +28,7 @@ from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import fresh_triton_cache
+from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._pytree import tree_map
 
@@ -765,7 +765,7 @@ def maybe_fresh_cache(fn, is_cold_start):
         cache_minder = NullContext()
         if is_cold_start:
             cache_entries = {}
-            cache_minder = fresh_triton_cache(cache_entries)
+            cache_minder = fresh_inductor_cache(cache_entries)
 
         try:
             with cache_minder:
