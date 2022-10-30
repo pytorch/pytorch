@@ -210,16 +210,16 @@ class SymInt:
         # class has a field named node that stores SymNode
         self.node = node
 
-    # Magic methods installed later
-
     def __bool__(self):
         return self.node.bool_()
 
     def __int__(self):
         return self.node.int_()
 
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
     def __sym_float__(self):
-        return SymFloat(self.node.sym_float())
+        ...
 
     def __repr__(self):
         return self.node.str()
@@ -242,13 +242,13 @@ class SymFloat:
         # class has a field named node that stores SymNode
         self.node = node
 
-    # Magic methods installed later
-
     def __bool__(self):
         return self.node.bool_()
 
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
     def __sym_int__(self):
-        return SymInt(self.node.sym_int())
+        ...
 
     def __repr__(self):
         return self.node.str()
