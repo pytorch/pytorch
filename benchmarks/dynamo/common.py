@@ -1801,7 +1801,7 @@ def main(runner, original_dir=None):
             current_name = name
             placeholder_batch_size = 0
             try:
-                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"], timeout=60*5)
+                subprocess.check_call([sys.executable] + sys.argv + [f"--only={name}"], timeout=60*10)
             except subprocess.TimeoutExpired:
                 print(f"cuda train {name} FAIL (TIMEOUT)", file=sys.stderr)
                 for device in args.devices:
