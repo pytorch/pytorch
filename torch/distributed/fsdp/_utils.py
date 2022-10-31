@@ -10,14 +10,11 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
 )
 from torch.nn.utils.rnn import PackedSequence
 
-
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
 def _contains_batchnorm(module):
-    return any(
-        isinstance(mod, _BatchNorm) for mod in module.modules()
-    )
+    return any(isinstance(mod, _BatchNorm) for mod in module.modules())
 
 
 def _override_batchnorm_mixed_precision(module):
@@ -27,11 +24,14 @@ def _override_batchnorm_mixed_precision(module):
 
 
 def _apply_to_tensors(
-    fn: Callable, container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
+    fn: Callable,
+    container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence],
 ) -> Any:
     """Recursively apply to all tensor in different kinds of container types."""
 
-    def apply(x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]) -> Any:
+    def apply(
+        x: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence]
+    ) -> Any:
         if torch.is_tensor(x):
             return fn(x)
         elif hasattr(x, "__dataclass_fields__"):
@@ -75,6 +75,7 @@ def _apply_to_modules(
     module prefix name (e.g. "module.submodule." just like in model state dict)
     and makes that available to ``module_fn``.
     """
+
     def f(module: torch.nn.Module, prefix: str, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
         module_fn(module, prefix, *args, **kwargs)
@@ -120,7 +121,10 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     if not already_freed:
         p_assert(
             tensor.storage_offset() == 0,
-            "Freeing a tensor's storage is unsafe when it is not the sole occupant",
+            "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
+            f"storage offset: {tensor.storage_offset()}\n"
+            f"storage size: {tensor.storage().size()}\n"
+            f"tensor shape: {tensor.shape}",
         )
         tensor.storage().resize_(0)
     return not already_freed
@@ -137,6 +141,12 @@ def _set_fsdp_flattened(tensor: torch.Tensor) -> None:
 def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
     """Returns if ``tensor`` has been marked as flattened by FSDP."""
     return getattr(tensor, FSDP_FLATTENED, False)
+
+
+def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
+    """Returns if ``x`` and ``y`` share the same storage."""
+    # NOTE: CPU and GPU tensors are ensured to have different data pointers.
+    return x.storage().data_ptr() == y.storage().data_ptr()
 
 
 def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:

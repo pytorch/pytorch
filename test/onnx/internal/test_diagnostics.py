@@ -112,7 +112,6 @@ class TestOnnxDiagnostics(common_utils.TestCase):
         engine.clear()
         super().setUp()
 
-    @unittest.skip("TODO: Pass locally but fail in CI.")
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
         with self.assertRaises(AssertionError):
             with assert_diagnostic(

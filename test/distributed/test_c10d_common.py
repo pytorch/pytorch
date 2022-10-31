@@ -1630,6 +1630,18 @@ class CompilerTest(MultiProcessTestCase):
         self._test_work_wait(tensor, comm_fn=comm_fn)
 
 
+class ReduceOpTest(TestCase):
+
+    def test_op_isinstance_of_reduceop(self):
+        for reduce_op in (
+            c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
+            c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
+        ):
+            self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
+        for scale in ([torch.tensor(1.0)], 2.0):
+            self.assertTrue(isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp))
+
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized

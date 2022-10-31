@@ -11,6 +11,20 @@ import json
 import os
 import unittest
 
+
+# TODO(jansel): we should remove this workaround once this is fixed:
+# https://github.com/pytorch/pytorch/issues/86619
+NOT_IMPORTED_WHEN_TEST_WRITTEN = {
+    "torch.fx.experimental.normalize",
+    "torch.fx.experimental.proxy_tensor",
+    "torch.fx.experimental.schema_type_annotation",
+    "torch.fx.experimental.symbolic_shapes",
+    "torch.fx.passes.backends.cudagraphs",
+    "torch.fx.passes.infra.partitioner",
+    "torch.fx.passes.utils.fuser_utils",
+}
+
+
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
         """
@@ -193,8 +207,8 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
-            "SymFloatNode",
-            "SymIntNode",
+            "SymFloat",
+            "SymInt",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -247,7 +261,7 @@ class TestPublicBindings(TestCase):
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
-
+            "VULKAN_AUTOMATIC_GPU_TRANSFER",
             "wait",
             "Tag",
         }
@@ -320,6 +334,8 @@ class TestPublicBindings(TestCase):
                     why_not_looks_public = f"because it starts with `_` (`{elem}`)"
 
                 if is_public != looks_public:
+                    if modname in NOT_IMPORTED_WHEN_TEST_WRITTEN:
+                        return
                     if modname in allow_dict and elem in allow_dict[modname]:
                         return
 

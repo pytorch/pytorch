@@ -4,6 +4,7 @@ import functools
 import os
 import sys
 import unittest
+from typing import Optional
 
 import torch
 from torch.autograd import function
@@ -93,13 +94,27 @@ def skipForAllOpsetVersions():
     return skip_dec
 
 
-def skipTraceTest(min_opset_version=float("inf")):
+def skipTraceTest(skip_before_opset_version: Optional[int] = None, reason: str = ""):
+    """Skip tracing test for opset version less than skip_before_opset_version.
+
+    Args:
+        skip_before_opset_version: The opset version before which to skip tracing test.
+            If None, tracing test is always skipped.
+        reason: The reason for skipping tracing test.
+
+    Returns:
+        A decorator for skipping tracing test.
+    """
+
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            self.is_trace_test_enabled = self.opset_version >= min_opset_version
-            if not self.is_trace_test_enabled and not self.is_script:
-                raise unittest.SkipTest("Skip verify test for torch trace")
+            if skip_before_opset_version is not None:
+                self.skip_this_opset = self.opset_version < skip_before_opset_version
+            else:
+                self.skip_this_opset = True
+            if self.skip_this_opset and not self.is_script:
+                raise unittest.SkipTest(f"Skip verify test for torch trace. {reason}")
             return func(self, *args, **kwargs)
 
         return wrapper
@@ -107,13 +122,27 @@ def skipTraceTest(min_opset_version=float("inf")):
     return skip_dec
 
 
-def skipScriptTest(min_opset_version=float("inf")):
+def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str = ""):
+    """Skip scripting test for opset version less than skip_before_opset_version.
+
+    Args:
+        skip_before_opset_version: The opset version before which to skip scripting test.
+            If None, scripting test is always skipped.
+        reason: The reason for skipping scripting test.
+
+    Returns:
+        A decorator for skipping scripting test.
+    """
+
     def skip_dec(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            self.is_script_test_enabled = self.opset_version >= min_opset_version
-            if not self.is_script_test_enabled and self.is_script:
-                raise unittest.SkipTest("Skip verify test for TorchScript")
+            if skip_before_opset_version is not None:
+                self.skip_this_opset = self.opset_version < skip_before_opset_version
+            else:
+                self.skip_this_opset = True
+            if self.skip_this_opset and self.is_script:
+                raise unittest.SkipTest(f"Skip verify test for TorchScript. {reason}")
             return func(self, *args, **kwargs)
 
         return wrapper
