@@ -236,12 +236,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
 
-    @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy_str",
         ["no_shard", "shard_grad_op", "full_shard"],
     )
-    def test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
+    def _test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
         """
         Tests FSDP parity with DDP when using multiple parameter groups with
         different hyperparameter settings with CPU offloading enabled. This is

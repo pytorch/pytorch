@@ -271,7 +271,10 @@ void Engine::stop() {
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
   auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
-  auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
+  if (!wait_duration_str) {
+    wait_duration_str = "10.0";
+  }
+  auto wait_duration = std::atof(wait_duration_str);
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
     noBackward = noBackward && queue->empty();

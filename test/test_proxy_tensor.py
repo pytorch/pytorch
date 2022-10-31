@@ -975,11 +975,6 @@ def forward(self, a_1):
             return x.shape
         self._test_dynamic(f, [(5, 3)], [[(4, 6)]])
 
-    def test_rmethod(self):
-        def f(x):
-            return x.size(0) + x
-        self._test_dynamic(f, [(5,)], [[(4,)], [(12,)]])
-
     def test_mega_guard(self):
         def f(a, b):
             assert a.shape[0] == b.shape[0] * 2
