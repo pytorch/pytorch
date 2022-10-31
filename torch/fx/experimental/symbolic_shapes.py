@@ -15,7 +15,6 @@ from torch import SymInt, SymFloat
 
 try:
     import sympy  # type: ignore[import]
-    from sympy.printing.precedence import precedence  # type: ignore[import]
     HAS_SYMPY = True
 except ImportError:
     HAS_SYMPY = False
@@ -24,7 +23,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node"
+    "SymDispatchMode", "sym_float", "guard_int", "wrap_node"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -507,10 +506,6 @@ class ShapeEnv(object):
             for idx, k in enumerate(symbols)
         }
         new_expr = expr.xreplace(new_shape_env)
-        floor_div_replace = {}
-        for atom in new_expr.atoms(FloorDiv):
-            floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
-        new_expr = sympy.expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -533,15 +528,6 @@ class ShapeEnv(object):
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if expr.has(FloorDiv):
-            self._update_divisible()
-            div_replacements = {}
-            for atom in expr.atoms(FloorDiv):
-                base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = base / divisor
-            expr = expr.xreplace(div_replacements)
-            expr = sympy.expand(expr)
         return expr
 
     @lru_cache(256)
