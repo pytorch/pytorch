@@ -128,7 +128,7 @@ def _cuda_system_info_comment():
         )
         model_str += f"{cuda_version_out}\n"
     except FileNotFoundError:
-        model_str += "nvcc not found\n"
+        model_str += "# nvcc not found\n"
 
     gpu_names = subprocess.run(
         ["nvidia-smi", "--query-gpu=gpu_name", "--format=csv"],
@@ -796,9 +796,8 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                     run_fwd_maybe_bwd(compiled_gm, example_inputs)
                 except Exception as exc:
                     log.warning(
-                        "Compiled Fx GraphModule failed with following error. Setting up minifier."
+                        "Compiled Fx GraphModule failed. Creating script to minify the error."
                     )
-                    log.exception(exc)
                     if config.repro_level == 1:
                         dump_state_fn = functools.partial(
                             dump_backend_state, compiler_name=compiler_name
@@ -812,9 +811,10 @@ def wrap_backend_debug(compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    raise ValueError(
-                        f"Issue detected. Repro at {get_minifier_repro_path()}."
+                    exc.minifier_path = os.path.join(
+                        minifier_dir(), "minifier_launcher.py"
                     )
+                    raise
         else:
             compiled_gm = compiler_fn(gm, example_inputs, **kwargs)
 
@@ -840,9 +840,8 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     except Exception as exc:
         orig_failure = str(exc)
         log.warning(
-            "Compiled Fx GraphModule failed with following error. Starting minifier."
+            "Compiled Fx GraphModule failed. Creating script to minify the error."
         )
-        log.exception(exc)
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name
         )
