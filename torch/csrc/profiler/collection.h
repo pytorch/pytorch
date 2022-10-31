@@ -14,6 +14,7 @@
 #include <c10/util/strong_type.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
+#include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/events.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
@@ -39,48 +40,10 @@ enum class EventType : uint8_t {
 // ============================================================================
 // == Value (Tensor, Scalar) summary ==========================================
 // ============================================================================
+struct TORCH_API RawTensorMetadataBase {
+  RawTensorMetadataBase() = default;
+  explicit RawTensorMetadataBase(const at::Tensor& t);
 
-// We use a Tensor's TensorImpl adress and StorageImpl data start to build the
-// data flow graph. We do not hold a reference so we wrap them in strong types
-// to prevent direct access.
-using TensorImplAddress = strong::type<
-    const c10::TensorImpl*,
-    struct TensorImplAddress_,
-    strong::regular,
-    strong::hashable,
-    strong::boolean>;
-
-using StorageImplData = strong::type<
-    void*,
-    struct StorageImplData_,
-    strong::regular,
-    strong::hashable,
-    strong::boolean>;
-
-// Identity is a complex concept in PyTorch. A Tensor might not have a
-// an associated storage, multiple Tensors might share the same underlying
-// storage, the storage of a Tensor might change over time, etc.
-//
-// For the purpose of profiling we're mostly interested in data flow
-// analysis. As a result, we can take an expansive view of identity:
-// Tensors share an ID if they share a TensorImpl or storage data.
-//
-// This identity equality is transitive; If Tensors T0 and T1 share a storage
-// S0 and T1 later points to a different storage S1 then all Tensors which
-// point to either S0 or S1 are considered to have the same identity. (Since
-// profiler cannot reason beyond that.)
-//
-// The profiler will handle lifetime analysis to ensure that identities do
-// not run afoul of the ABA problem. This does, however, mean that identities
-// can only be assigned when memory profiling is enabled. (And we cannot
-// handle ABA for TensorImpl as those allocations are not instrumented.)
-using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
-
-struct TORCH_API RawTensorMetadata {
-  RawTensorMetadata() = default;
-  RawTensorMetadata(const RawTensorMetadata&) = default;
-  explicit RawTensorMetadata(const at::Tensor& t);
-  TensorImplAddress impl_;
   StorageImplData data_;
 
   // Device is separated into DeviceType and DeviceIndex as Device
@@ -93,13 +56,34 @@ struct TORCH_API RawTensorMetadata {
   uint32_t dim_;
 };
 
-struct TensorMetadata : public RawTensorMetadata {
-  explicit TensorMetadata(const RawTensorMetadata& r) : RawTensorMetadata(r) {}
-  explicit TensorMetadata(const at::Tensor& t) : RawTensorMetadata(t) {}
+// Collected during profiling.
+struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
+  RawTensorMetadata() = default;
+  RawTensorMetadata(const RawTensorMetadata&) = default;
+  explicit RawTensorMetadata(const at::Tensor& t)
+      : RawTensorMetadataBase(t), weak_self_{WeakTensor(t)} {};
+
+  // Wrap in `c10::optional` to make `weak_self_` default constructable.
+  c10::optional<WeakTensor> weak_self_;
+};
+
+// Used during post processing.
+struct TensorMetadata : public RawTensorMetadataBase {
+  explicit TensorMetadata(const RawTensorMetadata& r)
+      : RawTensorMetadataBase(r),
+        weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))} {
+    SOFT_ASSERT(r.weak_self_.has_value());
+  }
+
   c10::Device device() const {
     return {device_type_, device_index_};
   }
 
+  TensorImplAddress impl() {
+    return weak_self_.get();
+  }
+
+  WeakTensor weak_self_;
   c10::optional<TensorID> id_;
 };
 
