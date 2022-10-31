@@ -498,7 +498,7 @@ class CodeGen(object):
                 if isinstance(meta_val, FakeTensor):
                     maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
                 elif isinstance(meta_val, py_sym_types):
-                    maybe_type_annotation = f': Sym({meta_val.expr})'
+                    maybe_type_annotation = f': Sym({meta_val})'
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
 
