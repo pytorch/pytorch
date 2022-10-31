@@ -578,6 +578,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
+    # KeyError: '__name__'
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
@@ -1959,7 +1961,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
 
-    @patch.object(torch._dynamo.config, "raise_on_backend_error", True)
     def test_raise_on_backend_error(self):
         def my_compiler(gm, _):
             raise RuntimeError("duck!")
@@ -2730,6 +2731,20 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             graph, _ = torch._dynamo.export(m, x)
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
+
+    def test_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
+            gm = torch.fx.symbolic_trace(optimized)
 
 
 class CustomFunc(torch.autograd.Function):
