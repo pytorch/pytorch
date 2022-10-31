@@ -127,6 +127,32 @@ void XNNGraph::checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph) {
       "the module contains the following unsupported ops:\n" + error.str());
 }
 
+std::string XNNGraph::serializedXNNGraph() {
+  std::vector<uint32_t> input_ids;
+  std::vector<uint32_t> output_ids;
+
+  for (auto val : _inputs) {
+    input_ids.push_back(_val_to_ids[val]);
+  }
+
+  for (auto val : _outputs) {
+    output_ids.push_back(_val_to_ids[val]);
+  }
+
+  return _serializer.finishAndSerialize(input_ids, output_ids);
+}
+
+std::vector<std::vector<long>> XNNGraph::getGraphOutputShapes() {
+  std::vector<std::vector<long>> output_shapes;
+  for (auto val : _outputs) {
+    auto tensor_ptr = val->type()->cast<TensorType>();
+    std::vector<long> sizes = tensor_ptr->sizes().concrete_sizes().value();
+    output_shapes.push_back(sizes);
+  }
+
+  return output_shapes;
+}
+
 void XNNGraph::defineAllNodes(std::shared_ptr<torch::jit::Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
   Node* node = nullptr;
@@ -152,6 +178,7 @@ void XNNGraph::defineAllNodes(std::shared_ptr<torch::jit::Graph>& graph) {
             input2_id,
             output_id,
             /*flags=*/0);
+        _serializer.serializeAddNode(input1_id, input2_id, output_id, 0);
         TORCH_CHECK(status == xnn_status_success, "failed to create add node");
         break;
       }
@@ -213,6 +240,14 @@ void XNNGraph::defineAllTensorValues() {
           /*external_id=*/ext_id,
           /*flags=*/flags,
           /*id_out=*/&id);
+      _serializer.serializeTensorValue(
+          xnn_datatype_fp32,
+          num_dims,
+          tensor_shape,
+          nullptr,
+          ext_id,
+          flags,
+          id);
       TORCH_CHECK(
           status == xnn_status_success,
           "failed to define xnn_tensor_id for: " + val->debugName());
