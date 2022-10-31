@@ -293,32 +293,37 @@ class MetaConverter:
                     # recreate this situation.
 
                     sizes, strides = sym_sizes_strides(t)
-                    if safe_is_leaf(t):
-                        # Leaf views that track view metadata are created by
-                        # creating a view inside a no_grad block
-                        with torch.no_grad():
-                            r = base.as_strided(sizes, strides, sym(t.storage_offset()))
-                        # As it's a leaf, we can directly assign requires_grad
-                        r.requires_grad = t.requires_grad
-                    else:
-                        if t._base.requires_grad == t.requires_grad:
-                            # Easy case, just run the view op
-                            with torch.enable_grad():
-                                r = base.as_strided(
-                                    sizes, strides, sym(t.storage_offset())
-                                )
-                        else:
-                            # Obscure case.  Create a leaf view and give it the
-                            # correct requires_grad, then do the final view.
-                            # NB: Can't have a non-leaf without requiring grad!
-                            assert t.requires_grad
+                    old_exclude = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
+                    torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, False)
+                    try:
+                        if safe_is_leaf(t):
+                            # Leaf views that track view metadata are created by
+                            # creating a view inside a no_grad block
                             with torch.no_grad():
-                                mid = base.view(base.shape)
-                            mid.requires_grad = t.requires_grad
-                            with torch.enable_grad():
-                                r = mid.as_strided(
-                                    sizes, strides, sym(t.storage_offset())
-                                )
+                                r = base.as_strided(sizes, strides, sym(t.storage_offset()))
+                            # As it's a leaf, we can directly assign requires_grad
+                            r.requires_grad = t.requires_grad
+                        else:
+                            if t._base.requires_grad == t.requires_grad:
+                                # Easy case, just run the view op
+                                with torch.enable_grad():
+                                    r = base.as_strided(
+                                        sizes, strides, sym(t.storage_offset())
+                                    )
+                            else:
+                                # Obscure case.  Create a leaf view and give it the
+                                # correct requires_grad, then do the final view.
+                                # NB: Can't have a non-leaf without requiring grad!
+                                assert t.requires_grad
+                                with torch.no_grad():
+                                    mid = base.view(base.shape)
+                                mid.requires_grad = t.requires_grad
+                                with torch.enable_grad():
+                                    r = mid.as_strided(
+                                        sizes, strides, sym(t.storage_offset())
+                                    )
+                    finally:
+                        torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old_exclude)
 
                 else:
                     is_leaf = safe_is_leaf(t)
@@ -397,7 +402,7 @@ class MetaConverter:
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             # This can be skipped if necessary for performance reasons
-            # assert_metadata_eq(assert_eq, t, r)
+            assert_metadata_eq(assert_eq, t, r)
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)
