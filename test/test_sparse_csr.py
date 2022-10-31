@@ -588,9 +588,6 @@ class TestSparseCompressed(TestCase):
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
-        if layout is torch.sparse_bsc:
-            self.skipTest(f"test requires conversion from Strided layout to {layout} layout")
-
         samples = list(op.sample_inputs(device, dtype))
 
         # Fail early to prevent silent success with this test
