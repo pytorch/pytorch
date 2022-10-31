@@ -413,6 +413,17 @@ def _make_elementwise_unary_reference(
     return inner
 
 
+def _make_alias(fn, name=None):
+    if name is None:
+        name = fn.__name__.split(".")[-1]
+
+    def _fn(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    _fn.__name__ = name
+    return _fn
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
 def abs(a):
     return prims.abs(a)
@@ -610,6 +621,10 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
+# alias
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -631,10 +646,6 @@ def i0(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def lgamma(a):
     return prims.lgamma(a)
-
-
-# alias
-mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
