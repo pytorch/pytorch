@@ -482,11 +482,6 @@ class FullyShardedDataParallel(nn.Module):
             _auto_wrap(auto_wrap_kwargs, fsdp_kwargs, FullyShardedDataParallel)
 
         _init_process_group_state(self, process_group)
-        # We clamp the strategy to `NO_SHARD` for world size of 1 since they
-        # are currently functionally equivalent. This may change if/when we
-        # integrate FSDP with MoE.
-        if self.world_size == 1:
-            sharding_strategy = ShardingStrategy.NO_SHARD
         backward_prefetch_limit = 1
         forward_prefetch_limit = 1
         _init_core_state(
@@ -515,9 +510,7 @@ class FullyShardedDataParallel(nn.Module):
             _check_orig_params_flattened(self, self._ignored_params)
             self._register_flat_param()
 
-        # TODO (revisit): I explicitly delete this because we do want to keep
-        # references to these from FSDP. I only added it to the state for
-        # convenience in this refactoring.
+        # Delete to avoid keeping references after the constructor
         delattr(self, "_ignored_params")
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
@@ -530,11 +523,6 @@ class FullyShardedDataParallel(nn.Module):
             _pre_load_state_dict_hook, with_module=True
         )
         self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
-
-    def _register_param_handle(self, handle: FlatParamHandle) -> None:
-        """Registers the parameter handle to this FSDP instance."""
-        if handle not in self._handles:
-            self._handles.append(handle)
 
     def _unshard(
         self,
