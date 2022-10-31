@@ -712,6 +712,20 @@ class TestHistogramObserver(QuantizationTestCase):
 
         self.assertEqual(ref_qparams, my_qparams)
 
+    def test_histogram_observer_extreme_inputs(self):
+        """
+        Ensures that the HistogramObserver is able to work correctly in
+        a rare case: extreme samll max values
+        """
+        obs = HistogramObserver()
+        test_input = torch.tensor(
+            [0.0, 0.0, 4.58e-41, 4.58e-41]
+        )
+        # Make sure it runs, two passes are required based on the behavior of forward func
+        # The first pass initializes min_val&max_val, and second pass calls _adjust_min_max
+        obs(test_input)
+        obs(test_input)
+
 
 class TestFakeQuantize(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
@@ -864,7 +878,7 @@ class TestDistributed(QuantizationTestCase):
                 if epoch >= 1:
                     model.apply(torch.ao.quantization.disable_observer)
                 if epoch >= 2:
-                    model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
+                    model.apply(torch.ao.nn.intrinsic.qat.freeze_bn_stats)
                 quant_model = copy.deepcopy(model.module)
                 quant_model = torch.ao.quantization.convert(quant_model.eval().cpu(), inplace=False)
                 with torch.no_grad():
