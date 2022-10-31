@@ -36,7 +36,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
-from .exc import unimplemented, Unsupported
+from .exc import BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
 from .output_graph import GraphCompileReason, OutputGraph
 from .replay_record import DummyModule, ExecutionRecorder
@@ -320,7 +320,10 @@ class InstructionTranslatorBase(object):
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
             getattr(self, inst.opname)(inst)
+
             return inst.opname != "RETURN_VALUE"
+        except BackendCompilerFailed:
+            raise
         except Unsupported as exc:
             exc.real_stack.append(self.frame_summary())
             if self.empty_checkpoint():
@@ -349,10 +352,11 @@ class InstructionTranslatorBase(object):
                 and self.step()
             ):
                 pass
+        except BackendCompilerFailed:
+            raise
         except Exception as e:
             if config.replay_record_enabled:
                 e.exec_record = self.exec_recorder.get_record()
-
             raise
         finally:
             # Cleanup the outputGraph to delete the held tensors. We perform the
@@ -1340,7 +1344,8 @@ class InstructionTranslatorBase(object):
 
         if fake_tensors_available:
             with torch._subclasses.FakeTensorMode(
-                throw_on_data_dependent_ops=True
+                throw_on_data_dependent_ops=True,
+                shape_env=output.shape_env,
             ) as fake_mode:
                 pass
             self._fake_mode = fake_mode
