@@ -45,14 +45,14 @@ def calculate_shards(
     ]
     for test in sorted_tests:
         if must_serial(test):
-            min_sharded_job = sorted(sharded_jobs, key=lambda j: j.get_total_time())[0]
+            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
             min_sharded_job.serial.append(test)
         else:
-            min_sharded_job = sorted(sharded_jobs, key=lambda j: j.get_total_time())[0]
+            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
             min_sharded_job.parallel.append(test)
 
     # Round robin the unknown jobs starting with the smallest shard
-    index = sorted(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())[0]
+    index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
     for test in unknown_tests:
         sharded_jobs[index].serial.append(test)
         index = (index + 1) % num_shards

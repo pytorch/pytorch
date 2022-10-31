@@ -98,14 +98,6 @@ class vTensor final {
       const TensorOptions& options,
       const StorageType storage_type = StorageType::TEXTURE_3D);
 
-  // Constructor with strides
-  vTensor(
-      api::Context* context,
-      IntArrayRef sizes,
-      IntArrayRef strides,
-      const TensorOptions& options,
-      const StorageType storage_type = StorageType::TEXTURE_3D);
-
   // Default constructor with quantization parameters
   vTensor(
       api::Context* const context,
@@ -114,6 +106,14 @@ class vTensor final {
       double q_scale,
       int64_t q_zero_point,
       const StorageType storage_type = StorageType::TEXTURE_3D);
+
+  // Used for passing buffer sizes and strides data to shaders
+  struct BufferMetadata {
+    api::utils::uvec4 sizes;
+    api::utils::uvec4 strides;
+    uint32_t ndim;
+    uint32_t buffer_length;
+  };
 
  private:
   // Tensor Options
@@ -129,11 +129,9 @@ class vTensor final {
   c10::SmallVector<int64_t, 6u> gpu_sizes_;
   c10::SmallVector<int64_t, 6u> gpu_strides_;
 
-  // sizes and strides in uvec4 format for convenience
-  api::utils::uvec4 sizes_uvec4_;
-  api::utils::uvec4 strides_uvec4_;
-  api::utils::uvec4 gpu_sizes_uvec4_;
-  api::utils::uvec4 gpu_strides_uvec4_;
+  // A Vulkan uniform buffer containing sizes and strides of the GPU buffer that
+  // can be passed into a shader.
+  api::UniformParamsBuffer metadata_uniform_;
 
   // Quantization params
   bool is_quantized_{false};
@@ -231,21 +229,19 @@ class vTensor final {
     return gpu_strides_;
   }
 
-  inline api::utils::uvec4 sizes_uvec4() const {
-    return sizes_uvec4_;
+  /*
+   * Get a uniform buffer containing sizes and strides information of the GPU
+   * buffer
+   */
+  inline api::VulkanBuffer& buffer_metadata() {
+    return metadata_uniform_.buffer();
   }
 
-  inline api::utils::uvec4 strides_uvec4() const {
-    return strides_uvec4_;
-  }
-
-  inline api::utils::uvec4 gpu_sizes_uvec4() const {
-    return gpu_sizes_uvec4_;
-  }
-
-  inline api::utils::uvec4 gpu_strides_uvec4() const {
-    return gpu_strides_uvec4_;
-  }
+  /*
+   * Constructs a BufferMetdata struct based on the original sizes and strides
+   * to pass into a shader.
+   */
+  BufferMetadata get_cpu_buffer_metadata() const;
 
   inline void set_is_quantized() {
     is_quantized_ = true;

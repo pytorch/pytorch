@@ -20,47 +20,6 @@ at::MemoryFormat get_memory_format(const TensorOptions& options) {
 }
 
 /*
- * Infers the memory format from the strides of a tensor.
- */
-at::MemoryFormat infer_memory_format(const IntArrayRef strides) {
-  int64_t ndim = strides.size();
-
-  // Check if the strides match Contiguous strides
-  bool like_contiguous = (strides[ndim - 1] == 1);
-  if (like_contiguous) {
-    for (int i = 0; i < ndim - 1; ++i) {
-      like_contiguous = (like_contiguous && (strides[i] >= strides[i + 1]));
-    }
-  }
-  if (like_contiguous) {
-    return at::MemoryFormat::Contiguous;
-  }
-
-  // Check if the strides match ChannelsLast strides for dim == 3
-  if (ndim == 3 && strides[0] == 1) {
-    bool like_channels_last = true;
-    like_channels_last = (like_channels_last && strides[1] >= strides[2]);
-
-    if (like_channels_last) {
-      return at::MemoryFormat::ChannelsLast;
-    }
-  }
-
-  // Check if the strides match ChannelsLast strides for dim == 4
-  if (ndim == 4 && strides[1] == 1) {
-    bool like_channels_last = true;
-    like_channels_last = (like_channels_last && strides[0] >= strides[2]);
-    like_channels_last = (like_channels_last && strides[2] >= strides[3]);
-
-    if (like_channels_last) {
-      return at::MemoryFormat::ChannelsLast;
-    }
-  }
-
-  TORCH_CHECK(false, "No memory format could not be inferred!");
-}
-
-/*
  * Calculates the strides of a contiguous tensor. empty_tensor_restride from
  * TensorImpl.h was used as a reference.
  */
@@ -235,28 +194,23 @@ api::utils::uvec3 create_image_extents(
   }
 }
 
-api::utils::uvec4 calc_sizes_uvec4(
+api::UniformParamsBuffer make_metadata_uniform(
+    api::Context* const context,
     const IntArrayRef sizes,
-    c10::optional<at::MemoryFormat> memory_format) {
-  TORCH_CHECK(sizes.size(), "Tensor must have 1 <= dim <= 4!");
-
-  uint32_t width = get_dim<Dim4D::Width>(sizes);
-  uint32_t height = get_dim<Dim4D::Height>(sizes);
-  uint32_t channels = get_dim<Dim4D::Channel>(sizes);
-  uint32_t batches = get_dim<Dim4D::Batch>(sizes);
-
-  if (sizes.size() > 2 && memory_format &&
-      *memory_format == at::MemoryFormat::ChannelsLast) {
-    channels = api::utils::align_up(channels, 4u);
-  } else {
-    width = api::utils::align_up(width, 4u);
+    const IntArrayRef strides,
+    const StorageType storage_type) {
+  if (storage_type != StorageType::BUFFER) {
+    return api::UniformParamsBuffer();
   }
 
-  return {width, height, channels, batches};
-}
+  vTensor::BufferMetadata metadata{
+      ops::make_nchw_uvec4(sizes),
+      ops::make_nchw_uvec4(strides),
+      api::utils::safe_downcast<uint32_t>(sizes.size()),
+      api::utils::safe_downcast<uint32_t>(c10::multiply_integers(sizes)),
+  };
 
-uint32_t buffer_length(const api::utils::uvec4 sizes) {
-  return sizes.data[0u] * sizes.data[1u] * sizes.data[2u] * sizes.data[3u];
+  return api::UniformParamsBuffer(context, metadata);
 }
 
 } // namespace
@@ -277,38 +231,12 @@ vTensor::vTensor(
       strides_{calc_strides(sizes, memory_format_, storage_type)},
       gpu_sizes_{calc_gpu_sizes(sizes, memory_format_, storage_type)},
       gpu_strides_{calc_strides(gpu_sizes_, memory_format_, storage_type)},
-      // Construct uvec4 sizes and strides
-      sizes_uvec4_{make_sizes_uvec4(sizes_)},
-      strides_uvec4_{make_strides_uvec4(strides_)},
-      gpu_sizes_uvec4_{make_sizes_uvec4(gpu_sizes_)},
-      gpu_strides_uvec4_{make_strides_uvec4(gpu_strides_)},
-      // Construct Tensor storage
-      view_(std::make_shared<vTensorStorage>(
+      // Vulkan uniform buffer containing sizes and stride info
+      metadata_uniform_{make_metadata_uniform(
           context,
-          storage_type,
           gpu_sizes_,
-          dtype())) {
-  ops::verify(options);
-}
-
-vTensor::vTensor(
-    api::Context* const context,
-    const IntArrayRef sizes,
-    const IntArrayRef strides,
-    const TensorOptions& options,
-    const StorageType storage_type)
-    : options_(options),
-      memory_format_{infer_memory_format(strides)},
-      // Calculate sizes and strides
-      sizes_{sizes},
-      strides_{calc_strides(sizes, memory_format_, storage_type)},
-      gpu_sizes_{calc_gpu_sizes(sizes, memory_format_, storage_type)},
-      gpu_strides_{calc_strides(gpu_sizes_, memory_format_, storage_type)},
-      // Construct uvec4 sizes and strides
-      sizes_uvec4_{make_sizes_uvec4(sizes_)},
-      strides_uvec4_{make_strides_uvec4(strides_)},
-      gpu_sizes_uvec4_{make_sizes_uvec4(gpu_sizes_)},
-      gpu_strides_uvec4_{make_strides_uvec4(gpu_strides_)},
+          gpu_strides_,
+          storage_type)},
       // Construct Tensor storage
       view_(std::make_shared<vTensorStorage>(
           context,
@@ -332,11 +260,12 @@ vTensor::vTensor(
       strides_{calc_strides(sizes, memory_format_, storage_type)},
       gpu_sizes_{calc_gpu_sizes(sizes, memory_format_, storage_type)},
       gpu_strides_{calc_strides(gpu_sizes_, memory_format_, storage_type)},
-      // Construct uvec4 sizes and strides
-      sizes_uvec4_{make_sizes_uvec4(sizes_)},
-      strides_uvec4_{make_strides_uvec4(strides_)},
-      gpu_sizes_uvec4_{make_sizes_uvec4(gpu_sizes_)},
-      gpu_strides_uvec4_{make_strides_uvec4(gpu_strides_)},
+      // Vulkan uniform buffer containing sizes and stride info
+      metadata_uniform_{make_metadata_uniform(
+          context,
+          gpu_sizes_,
+          gpu_strides_,
+          storage_type)},
       // Quantization params
       is_quantized_{true},
       q_scale_{q_scale},
@@ -386,6 +315,15 @@ api::VulkanBuffer& vTensor::buffer(
 
   view_->transition(pipeline_barrier, stage, access);
   return view_->buffer_;
+}
+
+vTensor::BufferMetadata vTensor::get_cpu_buffer_metadata() const {
+  return {
+      ops::make_nchw_uvec4(sizes_),
+      ops::make_nchw_uvec4(strides_),
+      api::utils::safe_downcast<uint32_t>(sizes_.size()),
+      api::utils::safe_downcast<uint32_t>(c10::multiply_integers(sizes_)),
+  };
 }
 
 //
@@ -579,9 +517,10 @@ void verify(const TensorOptions& options) {
       !options.has_layout() || (c10::kStrided == options.layout()),
       "'layout' tensor option is not yet supported under Vulkan!");
 
+  at::MemoryFormat memory_format = get_memory_format(options);
   TORCH_CHECK(
-      !options.has_memory_format() ||
-          (c10::MemoryFormat::Contiguous == options.memory_format_opt()),
+      memory_format == at::MemoryFormat::ChannelsLast ||
+          memory_format == at::MemoryFormat::Contiguous,
       "'memory_format' tensor option is not yet supported under Vulkan!");
 }
 

@@ -5,7 +5,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Copy.h>
-#include <ATen/native/vulkan/ops/Tensor.h>
 #include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
@@ -266,64 +265,7 @@ TEST_F(VulkanAPITest, copy_to_texture) {
 
   for (auto in_cpu : test_tensors) {
     at::Tensor in_vk_copied = in_cpu.vulkan();
-    ops::vTensor vten = ops::convert(in_vk_copied);
-
     at::Tensor out_copied = in_vk_copied.cpu();
-
-    const auto check_copy = almostEqual(out_copied, in_cpu);
-
-    if(!check_copy) {
-      std::cout << "Copy failed on size " << in_cpu.sizes()
-                << "with dtype" << in_cpu.dtype() << std::endl;
-    }
-
-    ASSERT_TRUE(check_copy);
-  }
-}
-
-TEST_F(VulkanAPITest, copy_to_buffer) {
-  using namespace at::native::vulkan;
-
-  at::Tensor test_tensors[] = {
-    // 4D
-    at::rand({7, 17, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    // 3D
-    at::rand({67, 134, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    // 2D
-    at::rand({229, 213}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    // 1D
-    at::rand({1902}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-  };
-
-  for (auto in_cpu : test_tensors) {
-    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, ops::StorageType::BUFFER);
-    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
-
-    const auto check_copy = almostEqual(out_copied, in_cpu);
-
-    if(!check_copy) {
-      std::cout << "Copy failed on size " << in_cpu.sizes()
-                << "with dtype" << in_cpu.dtype() << std::endl;
-    }
-
-    ASSERT_TRUE(check_copy);
-  }
-}
-
-TEST_F(VulkanAPITest, copy_to_buffer_channels_last) {
-  using namespace at::native::vulkan;
-
-  at::TensorOptions options(at::kCPU);
-  options = options.dtype(at::kFloat);
-
-  at::Tensor test_tensors[] = {
-    // 4D
-    at::rand({7, 17, 134, 213}, options).to(at::MemoryFormat::ChannelsLast),
-  };
-
-  for (auto in_cpu : test_tensors) {
-    ops::vTensor in_vk_copied = ops::to_vulkan(in_cpu, ops::StorageType::BUFFER);
-    at::Tensor out_copied = ops::from_vulkan(in_vk_copied);
 
     const auto check_copy = almostEqual(out_copied, in_cpu);
 
@@ -1506,6 +1448,36 @@ TEST_F(VulkanAPITest, hardshrink_) {
   }
 }
 
+TEST_F(VulkanAPITest, hardtanh) {
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 10;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::hardtanh(in_cpu, 3, 7);
+  const auto out_vulkan = at::hardtanh(in_vulkan, 3, 7);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, hardtanh_) {
+  auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 10;
+  auto a_vulkan = a_cpu.vulkan();
+
+  at::hardtanh_(a_cpu, 3, 7);
+  at::hardtanh_(a_vulkan, 3, 7);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
   c10::InferenceMode mode;
 
@@ -2285,6 +2257,38 @@ TEST_F(VulkanAPITest, mul_to_scalar_wrapped) {
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
     showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, relu) {
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::relu(in_cpu);
+  const auto out_vulkan = at::relu(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, relu_) {
+  auto a_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  auto a_vulkan = a_cpu.vulkan();
+
+  at::relu_(a_cpu);
+  at::relu_(a_vulkan);
+
+  const auto check = almostEqual(a_cpu, a_vulkan.cpu());
+
+  if (!check) {
+    showRtol(a_cpu, a_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);

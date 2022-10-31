@@ -107,18 +107,10 @@ uint32_t get_dim(const vTensor& v_in) {
 }
 
 /*
- * Utility function to construct a uvec4 from tensor.sizes() the first element
- * corresponds to the width, the second element corresponds to the height, and
- * so on.
+ * Given an IntArrayRef of up to 4 elements, constructs a uvec4 containing those
+ * elements in reverse order.
  */
-api::utils::uvec4 make_sizes_uvec4(const IntArrayRef sizes);
-
-/*
- * Utility function to construct a uvec4 from tensor.strides() the first element
- * corresponds to the width, the second element corresponds to the height, and
- * so on.
- */
-api::utils::uvec4 make_strides_uvec4(const IntArrayRef strides);
+api::utils::uvec4 make_nchw_uvec4(const IntArrayRef arr);
 
 inline c10::optional<Tensor> get_optional_tensor(
     const c10::impl::GenericList& gen_list,

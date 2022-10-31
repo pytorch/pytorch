@@ -147,14 +147,6 @@ void record_image_to_nchw_op(
       params.buffer());
 }
 
-struct ToFromBufferParams final {
-  api::utils::uvec4 out_sizes;
-  api::utils::uvec4 out_strides;
-  api::utils::uvec4 in_sizes;
-  api::utils::uvec4 in_strides;
-  api::utils::uvec2 buf_lengths;
-};
-
 void record_nchw_to_buffer_op(
     api::Context* const context,
     api::VulkanBuffer& src_buffer,
@@ -167,15 +159,9 @@ void record_nchw_to_buffer_op(
   api::utils::uvec3 global_size = {gpu_buf_len, 1u, 1u};
   api::utils::uvec3 local_size = {32u, 1u, 1u};
 
-  ToFromBufferParams block{
-      v_dst.gpu_sizes_uvec4(),
-      v_dst.gpu_strides_uvec4(),
-      v_dst.sizes_uvec4(),
-      v_dst.strides_uvec4(),
-      {gpu_buf_len, buf_len},
-  };
+  api::UniformParamsBuffer cpu_buffer_metadata(
+      context, v_dst.get_cpu_buffer_metadata());
 
-  api::UniformParamsBuffer params(context, block);
   context->submit_compute_job(
       // shader descriptor
       VK_KERNEL(buffer_to_buffer),
@@ -192,9 +178,9 @@ void record_nchw_to_buffer_op(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
+      v_dst.buffer_metadata(),
       src_buffer,
-      // params buffer
-      params.buffer());
+      cpu_buffer_metadata.buffer());
 }
 
 void record_buffer_to_nchw_op(
@@ -209,15 +195,9 @@ void record_buffer_to_nchw_op(
   api::utils::uvec3 global_size = {buf_len, 1u, 1u};
   api::utils::uvec3 local_size = {4u, 1u, 1u};
 
-  ToFromBufferParams block{
-      v_src.sizes_uvec4(),
-      v_src.strides_uvec4(),
-      v_src.gpu_sizes_uvec4(),
-      v_src.gpu_strides_uvec4(),
-      {buf_len, gpu_buf_len},
-  };
+  api::UniformParamsBuffer cpu_buffer_metadata(
+      context, v_src.get_cpu_buffer_metadata());
 
-  api::UniformParamsBuffer params(context, block);
   context->submit_compute_job(
       // shader descriptor
       VK_KERNEL(buffer_to_buffer),
@@ -231,12 +211,12 @@ void record_buffer_to_nchw_op(
       fence_handle,
       // shader arguments
       dst_buffer,
+      cpu_buffer_metadata.buffer(),
       v_src.buffer(
           pipeline_barrier,
           api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
-      // params buffer
-      params.buffer());
+      v_src.buffer_metadata());
 }
 
 } // namespace packing

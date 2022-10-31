@@ -2,8 +2,6 @@
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 
-#include <iostream>
-
 namespace at {
 namespace native {
 namespace vulkan {
@@ -225,7 +223,11 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
     }
     // CPU -> Vulkan
     else {
-      pack_cpu_to_vulkan(src, v_self);
+      if (v_self.storage_type() == StorageType::BUFFER) {
+        pack_cpu_to_vulkan(src, v_self);
+      } else {
+        pack_cpu_to_vulkan(src.contiguous(), v_self);
+      }
     }
   }
   // Vulkan -> X
@@ -254,7 +256,10 @@ ops::vTensor to_vulkan(at::Tensor& src, const StorageType storage_type) {
       "Vulkan to_vulkan(): input tensor must be a CPU tensor!")
 
   ops::vTensor v_ret{
-      api::context(), src.sizes(), src.strides(), src.options(), storage_type};
+      api::context(),
+      src.sizes(),
+      src.options().memory_format(src.suggest_memory_format()),
+      storage_type};
 
   ops::pack_cpu_to_vulkan(src, v_ret);
 

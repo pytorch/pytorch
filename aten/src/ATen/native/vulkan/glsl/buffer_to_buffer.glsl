@@ -3,7 +3,7 @@
 #define PRECISION $precision
 #define FORMAT $format
 
-#include <indexing.h>
+#include "indexing.h"
 
 layout(std430) buffer;
 
@@ -16,25 +16,34 @@ layout(set = 0, binding = 0) buffer PRECISION restrict writeonly OutBuffer {
 uOutput;
 
 /*
+ * Output Buffer Metadata
+ */
+layout(set = 0, binding = 1) uniform PRECISION restrict OutMeta {
+  uvec4 sizes;
+  uvec4 strides;
+  uint ndim;
+  uint buf_length;
+}
+uOutMeta;
+
+/*
  * Input Buffer
  */
-layout(set = 0, binding = 1) buffer PRECISION restrict readonly InBuffer {
+layout(set = 0, binding = 2) buffer PRECISION restrict readonly InBuffer {
   float data[];
 }
 uInput;
 
 /*
- * Params Buffer
+ * Input Buffer Metadata
  */
-layout(set = 0, binding = 2) uniform PRECISION restrict Block {
-  uvec4 out_sizes;
-  uvec4 out_strides;
-  uvec4 in_sizes;
-  uvec4 in_strides;
-  // x is the length of uOutput, y is the length of uInput
-  uvec2 buf_lengths;
+layout(set = 0, binding = 3) uniform PRECISION restrict InMeta {
+  uvec4 sizes;
+  uvec4 strides;
+  uint ndim;
+  uint buf_length;
 }
-uBlock;
+uInMeta;
 
 /*
  * Local Work Group Size
@@ -52,16 +61,16 @@ layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 void main() {
   const uint write_idx = ivec3(gl_GlobalInvocationID).x;
 
-  if (write_idx >= uBlock.buf_lengths.x) {
+  if (write_idx >= uOutMeta.buf_length) {
     return;
   }
 
   uvec4 write_coord =
-      idx_to_coord(write_idx, uBlock.out_strides, uBlock.out_sizes);
+      idx_to_coord(write_idx, uOutMeta.strides, uOutMeta.sizes);
 
   float outval = 0u;
-  if (all(lessThan(write_coord, uBlock.in_sizes))) {
-    uint read_idx = coord_to_idx(write_coord, uBlock.in_strides);
+  if (all(lessThan(write_coord, uInMeta.sizes))) {
+    uint read_idx = coord_to_idx(write_coord, uInMeta.strides);
     outval = uInput.data[read_idx];
   }
 

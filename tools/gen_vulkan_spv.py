@@ -24,7 +24,7 @@ typeIdMapping = {
     r"image[123]D\b": "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
     r"sampler[123]D\b": "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER",
     r"\bbuffer\b": "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER",
-    r"\buniform\b.*\bBlock\b": "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER",
+    r"\buniform\b": "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER",
 }
 
 def determineDescriptorType(lineStr):
