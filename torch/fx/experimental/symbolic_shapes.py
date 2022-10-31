@@ -271,6 +271,11 @@ unary_magic_methods = {
 
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
 
+magic_methods_on_builtins = {"min", "max"}
+magic_methods_on_math = {"min", "max"}
+always_float_magic_methods = {"truediv", "sym_float"}
+always_int_magic_methods = {"ceil", "floor"}
+
 def wrap_node(x):
     if not isinstance(x, SymNode):
         return x
@@ -287,7 +292,7 @@ def _make_node_magic(method, func):
     func = lru_cache(256)(func)
 
     def binary_magic_impl(self, other):
-        if method in ["min", "max"]:
+        if method in magic_methods_on_builtins:
             op = getattr(builtins, method)
         else:
             op = getattr(operator, method)
@@ -303,7 +308,7 @@ def _make_node_magic(method, func):
         out = func(expr, other_expr)
         out = sympy.expand(out)
         pytype: Type
-        if method in ["truediv"]:
+        if method in always_float_magic_methods:
             pytype = float
         else:
             pytype = self.pytype
@@ -314,7 +319,7 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         if SYM_FUNCTION_MODE:
-            if method in ["ceil", "floor"]:
+            if method in magic_methods_on_math:
                 op = getattr(math, method)
             elif method in ["sym_float", "sym_int"]:
                 op = getattr(sys.modules[__name__], method)
@@ -328,9 +333,9 @@ def _make_node_magic(method, func):
         out = func(expr)
         out = sympy.expand(out)
         pytype: Type
-        if method in ["ceil", "floor"]:
+        if method in always_int_magic_methods:
             pytype = int
-        elif method in ["sym_float"]:
+        elif method in always_float_magic_methods:
             pytype = float
         else:
             pytype = self.pytype

@@ -4,13 +4,21 @@
 from torch._C import _disabled_torch_function_impl
 import torch.fx
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, \
+    IS_WINDOWS, parametrize, instantiate_parametrized_tests
 import unittest
 import torch
 import operator
 import itertools
+import random
+import contextlib
+import math
+import builtins
+import atexit
 import io
+import os
 from torch.utils._pytree import tree_map
+from torch.fx.experimental import symbolic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -386,6 +394,143 @@ class f(torch.nn.Module):
         getitem_1: b8[s0 + s2, 2*s1] = native_dropout[1];  native_dropout = None
         return (getitem, getitem_1)""")  # noqa: B950
 
+# This environment variable controls whether or not we print expected failure
+# lists at the end of a test suite run.  The intended usage looks like this:
+#
+# 1. Run `PYTORCH_COLLECT_EXPECT=1 python test/test_dynamic_shapes.py -k TestSymNumberMagicMethods`.
+# 2. Given the printed xfail list, add them to the set expected_failure_sym_magic_methods.
+COLLECT_EXPECT = os.getenv('PYTORCH_COLLECT_EXPECT', '0') == '1'
+
+seen_failed = []
+def print_seen():
+    out = []
+    for key, reason in seen_failed:
+        # Make sure the generated line is lint clean
+        out.append(f"    {key},  # {reason}"[:120])
+
+    print("expected_failure_sym_magic_methods = {")
+    print("\n".join(out))
+    print("}")
+
+if COLLECT_EXPECT:
+    atexit.register(print_seen)
+
+expected_failure_sym_magic_methods = {
+}
+
+@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
+class TestSymNumberMagicMethods(TestCase):
+    def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
+        # Helper function
+        seed_node = (create_symint(shape_env, 1) / 1.).get_pyobj()
+
+        def get_sym_inp(inp):
+            if isinstance(inp, int):
+                return torch.SymInt(seed_node.to_node(inp))
+            else:
+                return torch.SymFloat(seed_node.to_node(inp))
+
+        def maybe_xfail(inp1, inp2):
+            key = (fn, type(inp1).__name__, type(inp2).__name__)
+            if COLLECT_EXPECT:
+                @contextlib.contextmanager
+                def context():
+                    try:
+                        yield
+                    except TypeError as e:
+                        seen_failed.append((key, str(e)))
+                return context()
+
+            if key in expected_failure_sym_magic_methods:
+                return self.assertRaises(TypeError)
+            else:
+                return contextlib.nullcontext()
+
+        # These functions might return plain int/float
+        has_valid_downcast = fn in ["min", "max"]
+        if fn in symbolic_shapes.magic_methods_on_builtins:
+            lambda_apply = getattr(builtins, fn)
+        elif fn in symbolic_shapes.magic_methods_on_math:
+            lambda_apply = getattr(math, fn)
+        else:
+            lambda_apply = getattr(operator, fn)
+
+        if fn in symbolic_shapes.always_float_magic_methods:
+            tp = "float"
+        elif fn in symbolic_shapes.always_int_magic_methods:
+            tp = "int"
+        elif is_unary_fn:
+            tp = "float" if isinstance(inp1, float) else "int"
+        else:
+            tp = "float" if any(isinstance(i, float) for i in [inp1, inp2]) else "int"
+
+        def guard_fn(v):
+            try:
+                return getattr(v.node, f"guard_{tp}")("", 0)
+            except Exception as e:
+                if has_valid_downcast:
+                    return v
+                else:
+                    raise e
+
+        # Get reference result
+        if is_unary_fn:
+            ref_out = lambda_apply(inp1)
+        else:
+            ref_out = lambda_apply(inp1, inp2)
+
+        # Symified first arg
+        sym_inp1 = get_sym_inp(inp1)
+        with maybe_xfail(sym_inp1, inp2):
+            if is_unary_fn:
+                out = lambda_apply(sym_inp1)
+            else:
+                out = lambda_apply(sym_inp1, inp2)
+            print(ref_out)
+            print(out)
+            self.assertEqual(guard_fn(out), ref_out)
+
+        if is_unary_fn:
+            return
+
+        # Symified second arg
+        sym_inp2 = get_sym_inp(inp2)
+        with maybe_xfail(inp1, sym_inp2):
+            out = lambda_apply(inp1, sym_inp2)
+            self.assertEqual(guard_fn(out), ref_out)
+
+        # Symified both args
+        with maybe_xfail(sym_inp1, sym_inp2):
+            out = lambda_apply(sym_inp1, sym_inp2)
+            self.assertEqual(guard_fn(out), ref_out)
+
+
+    @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
+    @parametrize("first_type", ["int", "float"])
+    @parametrize("second_type", ["int", "float"])
+    def test_method(self, fn, first_type, second_type):
+        if first_type == "float" and fn not in symbolic_shapes.float_magic_methods:
+            self.skipTest(f"{fn} is not a float magic method")
+
+        is_unary_fn = fn in symbolic_shapes.unary_magic_methods
+        # Second argument is ignored for unary function. So only run for one type
+        if is_unary_fn and second_type == "float":
+            self.skipTest(f"{fn} is unary and already tested")
+
+        # We could pass int/float directly for types but then the
+        # mangled test name is bad
+        inp1 = random.random() * 2.5
+        if first_type == "int":
+            inp1 = int(inp1)
+        inp2 = random.random() * 2.5
+        if second_type == "int":
+            inp2 = int(inp2)
+
+        shape_env = ShapeEnv()
+
+        self._do_test(fn, inp1, inp2, shape_env, is_unary_fn)
+
+instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
 if __name__ == '__main__':
     run_tests()
