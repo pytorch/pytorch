@@ -1362,7 +1362,7 @@ def _lcm(a: TensorLikeType, b: TensorLikeType):
     # Avoid division by zero in case gcd(0, 0) == 0
     g = torch.where(g == 0, 1, g)
     res = torch.abs(prims.div(a, g) * b)
-    return res if not promote_to_int else _maybe_convert_to_dtype(res, dtype)
+    return res if not promote_to_int else prims.convert_element_type(res, dtype)
 
 
 # TODO: add docstring
