@@ -138,7 +138,7 @@ bool check_fast_path_restrictions(
     return false;
   }
   for (int64_t i = 0; i < scalarList_.size(0); i++) {
-    scalarList.push_back(scalarList_.data_ptr<float>());
+    scalarList.push_back(scalarList_.data_ptr<float>() + 1);
   }
   return can_use_fast_route(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }

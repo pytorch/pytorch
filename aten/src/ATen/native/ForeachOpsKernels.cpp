@@ -205,7 +205,7 @@ std::vector<Tensor> foreach_tensor_##OP##_tensorlist_slow(TensorList input, Tens
   std::vector<Tensor> result;                                                                                                                           \
   for(const auto i : c10::irange(input.size())) {                                                                                                       \
     if (scalars.dim() == 0) {                                                                                                                           \
-      result.emplace_back(input[i].OP(tensors1[i], tensors2[i], scalars[0]));                                                                           \
+      result.emplace_back(input[i].OP(tensors1[i], tensors2[i], scalars.item()));                                                                       \
     } else {                                                                                                                                            \
       result.emplace_back(input[i].OP(tensors1[i], tensors2[i], scalars[i]));                                                                           \
     }                                                                                                                                                   \
@@ -219,9 +219,9 @@ void foreach_tensor_##OP##_tensorlist_slow_(TensorList input, TensorList tensors
                                                                                                                                                         \
   for(const auto i : c10::irange(input.size())) {                                                                                                       \
     if (scalars.dim() == 0) {                                                                                                                           \
-      input[i].OP##_(tensors1[i], tensors2[i], scalars[0]);                                                                                               \
+      input[i].OP##_(tensors1[i], tensors2[i], scalars.item());                                                                                         \
     } else {                                                                                                                                            \
-      input[i].OP##_(tensors1[i], tensors2[i], scalars[i]);                                                                                               \
+      input[i].OP##_(tensors1[i], tensors2[i], scalars[i]);                                                                                             \
     }                                                                                                                                                   \
   }                                                                                                                                                     \
 }                                                                                                                                                       \
