@@ -2445,6 +2445,9 @@ class FullyShardedDataParallel(nn.Module):
                 not submodule._hook_registered
             ), "communication hook can be only registered once"
             submodule._hook_registered = True
+            assert (
+                submodule._communication_hook == self._get_default_comm_hook()
+            ), f"communication hook should be default, but it is {submodule._communication_hook.__name__} instead"
             submodule._communication_hook_state = state
             submodule._communication_hook = hook
 
