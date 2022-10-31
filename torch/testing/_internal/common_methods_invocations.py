@@ -17048,6 +17048,10 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.softsign",
         supports_nvfuser=False,
         skips=(
+            # AssertionError: Tensor-likes are not close!
+            # Mismatched elements: 24 / 64 (37.5%)
+            # Greatest absolute difference: 2.0001220703125 at index (56,) (up to 1e-05 allowed)
+            # Greatest relative difference: 2.0 at index (40,) (up to 1.3e-06 allowed)
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref', dtypes=(torch.int8,)),
             DecorateInfo(
