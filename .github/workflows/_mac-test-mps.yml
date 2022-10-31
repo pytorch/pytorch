@@ -38,7 +38,8 @@ jobs:
           use-gha: true
 
       # This is copied from the main macos test workflow. It was missed in the earlier fix because macos M1
-      # runners are shared and not ephemeral
+      # runners are shared and not ephemeral, so the issue wasn't manifested if the runners with the fix were
+      # used
       - name: Install macOS homebrew dependencies
         run: |
           # Install dependencies
