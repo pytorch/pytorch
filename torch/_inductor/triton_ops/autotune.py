@@ -13,7 +13,7 @@ import torch
 from .. import config
 from ..ir import ReductionHint
 from ..triton_ops.mm_perf_model import estimate_matmul_time
-from ..utils import conditional_product, has_triton
+from ..utils import conditional_product, dynamo_utils, has_triton
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -136,6 +136,7 @@ class CachingAutotuner(KernelInterface):
 
         return do_bench(kernel_call)
 
+    @dynamo_utils.dynamo_timed
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         from ..compile_fx import clone_preserve_strides
@@ -343,7 +344,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=2) -> Config:
         r *= 2
 
     cfg = {"XBLOCK": x, "RBLOCK": r}
-    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 1), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, r) // 128, 2), 8))
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
