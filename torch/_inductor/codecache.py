@@ -22,6 +22,7 @@ import torch
 from torch.utils import cpp_extension
 
 from . import config, cuda_properties, exc
+from .triton import default_kernel_prefix
 
 LOCK_TIMEOUT = 600
 
@@ -228,7 +229,7 @@ def patch_triton_dir():
 class TritonCodeCache:
     @staticmethod
     def get_name(mod):
-        (name,) = [n for n in dir(mod) if n.startswith("triton__kernel")]
+        (name,) = [n for n in dir(mod) if n.startswith(default_kernel_prefix)]
         return name
 
     @classmethod
