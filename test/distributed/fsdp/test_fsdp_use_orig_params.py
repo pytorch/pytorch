@@ -14,7 +14,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.fully_sharded_data_parallel import clean_tensor_name
+from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -236,11 +236,12 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
 
+    @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy_str",
         ["no_shard", "shard_grad_op", "full_shard"],
     )
-    def _test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
+    def test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
         """
         Tests FSDP parity with DDP when using multiple parameter groups with
         different hyperparameter settings with CPU offloading enabled. This is
