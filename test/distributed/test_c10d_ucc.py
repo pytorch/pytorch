@@ -22,7 +22,6 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from test_c10d_common import (
-    LOOPBACK,
     gpus_for_rank,
     Task,
     ModuleForDdpCommHook,
@@ -408,7 +407,8 @@ class DistributedDataParallelTest(
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, devices)
 
-    # TODO: test_ucc_backend_2gpu_module and test_ucc_backend_4gpu_module require broadcast_coalesced which is not supported by ucc currently
+    # TODO: test_ucc_backend_2gpu_module and test_ucc_backend_4gpu_module 
+    # require broadcast_coalesced which is not supported by ucc currently
     @sandcastle_skip("requires broadcast coalesced, which is not supported by ucc currently")
     @requires_ucc()
     @skip_if_lt_x_gpu(4)
