@@ -139,14 +139,18 @@ class NaiveTypePropagator {
       case aten::log2:
       case aten::lgamma:
       case aten::exp:
+      case aten::exp2:
       case aten::expm1:
       case aten::erf:
       case aten::erfc:
+      case aten::erfinv:
       case aten::cos:
       case aten::acos:
+      case aten::acosh:
       case aten::cosh:
       case aten::sin:
       case aten::asin:
+      case aten::asinh:
       case aten::sinh:
       case aten::tan:
       case aten::atan:

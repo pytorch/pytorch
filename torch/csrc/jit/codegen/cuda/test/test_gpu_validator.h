@@ -398,7 +398,8 @@ void testValidate(
           aten_output_tensor.allclose(
               fusion_output_tensor.to(aten_output_tensor.dtype()),
               tolerance_values.second,
-              tolerance_values.first),
+              tolerance_values.first,
+              /*equal_nan=*/true),
           "\n",
           err_msg,
           "\nValidation error in output ",

@@ -30,7 +30,7 @@ namespace fuser {
 namespace cuda {
 
 constexpr auto kNumUnaryOps = 10;
-constexpr auto kNumUnaryFloatOps = 23;
+constexpr auto kNumUnaryFloatOps = 27;
 constexpr auto kNumUnaryIsOps = 6;
 
 constexpr auto kNumBinaryFloatOps = 3;
@@ -1189,14 +1189,18 @@ class IrParser {
         "aten::log2(Tensor self) -> Tensor",
         "aten::lgamma(Tensor self) -> Tensor",
         "aten::exp(Tensor self) -> Tensor",
+        "aten::exp2(Tensor self) -> Tensor",
         "aten::expm1(Tensor self) -> Tensor",
         "aten::erf(Tensor self) -> Tensor",
         "aten::erfc(Tensor self) -> Tensor",
+        "aten::erfinv(Tensor self) -> Tensor",
         "aten::cos(Tensor self) -> Tensor",
         "aten::acos(Tensor self) -> Tensor",
+        "aten::acosh(Tensor self) -> Tensor",
         "aten::cosh(Tensor self) -> Tensor",
         "aten::sin(Tensor self) -> Tensor",
         "aten::asin(Tensor self) -> Tensor",
+        "aten::asinh(Tensor self) -> Tensor",
         "aten::sinh(Tensor self) -> Tensor",
         "aten::tan(Tensor self) -> Tensor",
         "aten::atan(Tensor self) -> Tensor",
@@ -1218,14 +1222,18 @@ class IrParser {
                 {aten::log2, UnaryOpType::Log2},
                 {aten::lgamma, UnaryOpType::Lgamma},
                 {aten::exp, UnaryOpType::Exp},
+                {aten::exp2, UnaryOpType::Exp2},
                 {aten::expm1, UnaryOpType::Expm1},
                 {aten::erf, UnaryOpType::Erf},
                 {aten::erfc, UnaryOpType::Erfc},
+                {aten::erfinv, UnaryOpType::Erfinv},
                 {aten::cos, UnaryOpType::Cos},
                 {aten::acos, UnaryOpType::Acos},
+                {aten::acosh, UnaryOpType::Acosh},
                 {aten::cosh, UnaryOpType::Cosh},
                 {aten::sin, UnaryOpType::Sin},
                 {aten::asin, UnaryOpType::Asin},
+                {aten::asinh, UnaryOpType::Asinh},
                 {aten::sinh, UnaryOpType::Sinh},
                 {aten::tan, UnaryOpType::Tan},
                 {aten::tanh, UnaryOpType::Tanh},

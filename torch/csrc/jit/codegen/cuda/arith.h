@@ -185,9 +185,15 @@ TORCH_CUDA_CU_API TensorView* abs(TensorView*);
 // acos
 TORCH_CUDA_CU_API Val* acos(Val*);
 TORCH_CUDA_CU_API TensorView* acos(TensorView*);
+// acosh
+TORCH_CUDA_CU_API Val* acosh(Val*);
+TORCH_CUDA_CU_API TensorView* acosh(TensorView*);
 // asin
 TORCH_CUDA_CU_API Val* asin(Val*);
 TORCH_CUDA_CU_API TensorView* asin(TensorView*);
+// asinh
+TORCH_CUDA_CU_API Val* asinh(Val*);
+TORCH_CUDA_CU_API TensorView* asinh(TensorView*);
 // atan
 TORCH_CUDA_CU_API Val* atan(Val*);
 TORCH_CUDA_CU_API TensorView* atan(TensorView*);
@@ -206,6 +212,9 @@ TORCH_CUDA_CU_API TensorView* cosh(TensorView*);
 // exp
 TORCH_CUDA_CU_API Val* exp(Val*);
 TORCH_CUDA_CU_API TensorView* exp(TensorView*);
+// exp2
+TORCH_CUDA_CU_API Val* exp2(Val*);
+TORCH_CUDA_CU_API TensorView* exp2(TensorView*);
 // expm1
 TORCH_CUDA_CU_API Val* expm1(Val*);
 TORCH_CUDA_CU_API TensorView* expm1(TensorView*);
@@ -215,6 +224,12 @@ TORCH_CUDA_CU_API TensorView* erf(TensorView*);
 // erfc
 TORCH_CUDA_CU_API Val* erfc(Val*);
 TORCH_CUDA_CU_API TensorView* erfc(TensorView*);
+// erfinv
+TORCH_CUDA_CU_API Val* erfinv(Val*);
+TORCH_CUDA_CU_API TensorView* erfinv(TensorView*);
+// erfcinv
+TORCH_CUDA_CU_API Val* erfcinv(Val*);
+TORCH_CUDA_CU_API TensorView* erfcinv(TensorView*);
 // floor
 TORCH_CUDA_CU_API Val* floor(Val*);
 TORCH_CUDA_CU_API TensorView* floor(TensorView*);

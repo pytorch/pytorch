@@ -3479,7 +3479,9 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
   // which we still need to support. eg. gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
       OpTuple{at::acos, UnaryOpType::Acos, "acos"},
+      OpTuple{at::acosh, UnaryOpType::Acosh, "acosh"},
       OpTuple{at::asin, UnaryOpType::Asin, "asin"},
+      OpTuple{at::asinh, UnaryOpType::Asinh, "asinh"},
       OpTuple{at::atan, UnaryOpType::Atan, "atan"},
       // There does not appear to be an appropriate ATen function for atanh
       // OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
@@ -3503,6 +3505,10 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::isreal, UnaryOpType::IsReal, "isreal"},
   };
 
+  // There's no aten::erfcinv yet, but this function is useful
+  // for generating normal random numbers
+  auto aten_erfcinv = [](const at::Tensor& t) { return at::erfinv(1 - t); };
+
   // The following ops has no complex support in eager mode
   std::vector<OpTuple> ops_without_complex{
       OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
@@ -3511,11 +3517,14 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"},
       OpTuple{at::round, UnaryOpType::Round, "round"},
       OpTuple{at::relu, UnaryOpType::Relu, "relu"},
+      OpTuple{at::exp2, UnaryOpType::Exp2, "exp2"},
       OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
       OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
       OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::erf, UnaryOpType::Erf, "erf"},
       OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
+      OpTuple{at::erfinv, UnaryOpType::Erfinv, "erfinv"},
+      OpTuple{aten_erfcinv, UnaryOpType::Erfcinv, "erfcinv"},
       OpTuple{at::isneginf, UnaryOpType::IsNegInf, "isneginf"},
       OpTuple{at::isposinf, UnaryOpType::IsPosInf, "isposinf"},
   };
