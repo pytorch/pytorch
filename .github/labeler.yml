@@ -7,3 +7,11 @@
 "module: inductor":
 - torch/_inductor/**
 - test/inductor/**
+
+"ciflow/inductor":
+- torch/_dynamo/**
+- torch/_inductor/**
+- benchmarks/dynamo/**
+- torch/_subclasses/fake_tensor.py
+- torch/_subclasses/fake_utils.py
+- torch/_subclasses/meta_utils.py
