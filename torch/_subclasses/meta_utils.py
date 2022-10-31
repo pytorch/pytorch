@@ -397,7 +397,7 @@ class MetaConverter:
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
             # This can be skipped if necessary for performance reasons
-            assert_metadata_eq(assert_eq, t, r)
+            # assert_metadata_eq(assert_eq, t, r)
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)
