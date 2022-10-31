@@ -107,19 +107,18 @@ COMPLEX_TYPES = (
 )
 
 
-# Copied from functorch: functorch/test/common_utils.py
-# A named tuple for storing information about a test case to skip
-DecorateMeta = namedtuple(
-    "DecorateMeta",
-    [
-        "op_name",
-        "variant_name",
-        "decorator",
-        "device_type",
-        "dtypes",
-        "reason",
-    ],
-)
+@dataclasses.dataclass
+class DecorateMeta:
+    """A dataclass for storing information about a test case to skip or xfail.
+
+    Adapted from functorch: functorch/test/common_utils.py
+    """
+    op_name: str
+    variant_name: str
+    decorator: Callable
+    device_type: Optional[str]
+    dtypes: Optional[Collection[torch.dtype]]
+    reason: str
 
 
 def xfail(

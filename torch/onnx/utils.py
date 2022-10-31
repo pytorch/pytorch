@@ -90,7 +90,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
         )
     originally_training: bool = False
 
-    if not isinstance(model, torch.jit.ScriptFunction):
+    if hasattr(model, "training"):
         originally_training = model.training
 
         # ONNX opset 12 has better support for training amenable models, with updated
@@ -119,10 +119,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     try:
         yield
     finally:
-        if not (
-            isinstance(model, torch.jit.ScriptFunction)
-            or mode == _C_onnx.TrainingMode.PRESERVE
-        ):
+        if hasattr(model, "training") and not mode == _C_onnx.TrainingMode.PRESERVE:
             model.train(originally_training)
 
 
@@ -1836,7 +1833,7 @@ def _run_symbolic_function(
     else:
         ns_op_name = node_kind
 
-    namespace, op_name = ns_op_name.split("::")
+    namespace, op_name = jit_utils.parse_node_kind(ns_op_name)
 
     graph_context = jit_utils.GraphContext(
         graph=graph,
@@ -1890,8 +1887,7 @@ def _run_symbolic_function(
             )
 
         raise errors.UnsupportedOperatorError(
-            domain,
-            op_name,
+            symbolic_function_name,
             opset_version,
             symbolic_function_group.get_min_supported()
             if symbolic_function_group
@@ -1934,7 +1930,7 @@ def _verify_custom_op_name(symbolic_name: str):
             "alphanumerical characters"
         )
 
-    ns, _ = symbolic_name.split("::")
+    ns, _ = jit_utils.parse_node_kind(symbolic_name)
     if ns == "onnx":
         raise ValueError(
             f"Failed to register operator {symbolic_name}. {ns} domain cannot be modified."
