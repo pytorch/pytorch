@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 import math
 from torch.backends.cuda import sdp_kernel
+import torch.optim as optim
 
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -68,6 +69,59 @@ class TestTransformers(NNTestCase):
             output_mask_TxT = output_mask_TxT.transpose(0, 1)  # [N, T, D]
 
             self.assertEqual(output_mask_4d, output_mask_TxT)
+
+    @parametrize("device", device_list)
+    def test_train_with_pad_and_catch_error(self, device):
+        iters = 100
+        pad_mask = torch.tensor([[1, 1, 0, 0]], dtype=torch.bool).to(device)
+        layer = nn.TransformerEncoderLayer(
+            d_model=2,
+            dim_feedforward=4,
+            nhead=2,
+            batch_first=True,
+            activation="gelu",
+            dropout=0,
+        )
+        criterion = nn.MSELoss()
+        encoder = nn.TransformerEncoder(layer, 2).to(device)
+        optimizer = optim.SGD(encoder.parameters(), lr=0.1, momentum=0.9)
+        encoder.train()
+        for i in range(iters):
+            encoder.train()
+            optimizer.zero_grad()
+            inputs = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
+
+            outputs = encoder(inputs, src_key_padding_mask=pad_mask)
+
+            loss = criterion(outputs[:, 0:2, :], inputs[:, 0:2, :])
+            loss.backward()
+            optimizer.step()
+
+            with torch.no_grad():
+                test = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
+
+                # Expect uint8 type not supported
+                ex = None
+                try:
+                    test_train_uint8 = encoder(test, src_key_padding_mask=pad_mask.to(torch.uint8))
+                except AssertionError as e:
+                    continue
+                self.assertFalse(e, "Failed to catch unsupported uint8 type exception")
+
+                test_train_bool = encoder(test, src_key_padding_mask=pad_mask)
+                encoder.eval()
+
+                # Expect long type not supported
+                ex = None
+                try:
+                    test_eval_uint8 = encoder(test, src_key_padding_mask=pad_mask.to(torch.int64))
+                except AssertionError as e:
+                    continue
+                self.assertFalse(e, "Failed to catch unsupported Long type exception")
+
+                test_eval_bool = encoder(test, src_key_padding_mask=pad_mask)
+                l1_bool = nn.L1Loss()(test_train_bool[:, 0:2, :], test_eval_bool[:, 0:2, :]).item()
+                self.assertTrue(l1_bool < 1e-4, "Eval/Train difference in pad_mask BOOL")
 
     @parametrize("device", device_list)
     @parametrize("nhead", [1, 4, 8])
@@ -967,12 +1021,12 @@ class TestTransformers(NNTestCase):
         def make_tensor(*size, device=device, dtype=dtype):
             return torch.randn(size, device=device, dtype=dtype)
 
-        with sdp_kernel(enable_flash=False, enable_math=False):
+        with sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=False):
             q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
             self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
                                    lambda: torch.nn.functional._scaled_dot_product_attention(q, k, v))
 
-        with sdp_kernel(enable_flash=True, enable_math=False):
+        with sdp_kernel(enable_flash=True, enable_mem_efficient=False, enable_math=False):
             # Failures for invalid input
 
             # Dim is not 4
@@ -981,14 +1035,19 @@ class TestTransformers(NNTestCase):
                 q, k, v, None, 0.0, False, False))
 
             # Xformers can now cover this case but will add back in next PR
-            # # Invalid last_dim size
-            # q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
-            # self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
-            #     q, k, v, None, 0.0, False, False))
+            # Invalid last_dim size
+            q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
 
             # Invalid dtype
             q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float64), make_tensor(
                 2, 2, 3, 16, dtype=torch.float64), make_tensor(2, 2, 3, 16, dtype=torch.float64)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float32), make_tensor(
+                2, 2, 3, 16, dtype=torch.float32), make_tensor(2, 2, 3, 16, dtype=torch.float32)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
