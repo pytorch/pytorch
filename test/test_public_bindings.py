@@ -261,7 +261,7 @@ class TestPublicBindings(TestCase):
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
-
+            "VULKAN_AUTOMATIC_GPU_TRANSFER",
             "wait",
             "Tag",
         }

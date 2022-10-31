@@ -9,4 +9,5 @@ enum class MobileOptimizerType : int8_t {
   FUSE_ADD_RELU,
   HOIST_CONV_PACKED_PARAMS,
   CONV_1D_TO_2D,
+  VULKAN_AUTOMATIC_GPU_TRANSFER,
 };

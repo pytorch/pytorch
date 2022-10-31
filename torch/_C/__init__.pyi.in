@@ -178,6 +178,7 @@ INSERT_FOLD_PREPACK_OPS: MobileOptimizerType
 REMOVE_DROPOUT: MobileOptimizerType
 FUSE_ADD_RELU: MobileOptimizerType
 HOIST_CONV_PACKED_PARAMS: MobileOptimizerType
+VULKAN_AUTOMATIC_GPU_TRANSFER: MobileOptimizerType
 
 def fork(*args: Any, **kwargs: Any) -> Future: ...
 def wait(fut: Future) -> Any: ...
