@@ -160,10 +160,32 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);                                                                                       \
 }
 
+#define FOREACH_POINTWISE_OP_TENSORLIST(NAME, OP)                                                                                                        \
+std::vector<Tensor> foreach_tensor_##NAME##_tensorlist_cuda(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {  \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
+                                                                                                                                                         \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral_tensor(input, /* includeBool */ true)) {                               \
+        return at::native::foreach_tensor_##NAME##_tensorlist_slow(input, tensors1, tensors2, scalars);                                                  \
+    }                                                                                                                                                    \
+                                                                                                                                                         \
+    return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalars);                                                                                 \
+}                                                                                                                                                        \
+                                                                                                                                                         \
+void foreach_tensor_##NAME##_tensorlist_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {                \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
+                                                                                                                                                         \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral_tensor(input, /* includeBool */ true)) {                               \
+        return at::native::foreach_tensor_##NAME##_tensorlist_slow_(input, tensors1, tensors2, scalars);                                                 \
+    }                                                                                                                                                    \
+                                                                                                                                                         \
+    foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);                                                                                       \
+}
+
 FOREACH_POINTWISE_OP_SCALAR(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
+FOREACH_POINTWISE_OP_TENSORLIST(addcdiv, std::divides);
 
 
 // Why bool tensors are pushed to slowpath?
