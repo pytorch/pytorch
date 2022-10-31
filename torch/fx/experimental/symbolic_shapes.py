@@ -195,45 +195,6 @@ class SymNode:
     def bool_(self):
         return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
 
-
-if HAS_SYMPY:
-    class FloorDiv(sympy.Function):
-        """
-        We maintain this so that:
-        1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
-        2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
-        """
-        nargs = (2,)
-
-        def _sympystr(self, printer):
-            lhs = self.args[0]
-            rhs = self.args[1]
-            lhs_str = printer._print(lhs)
-            rhs_str = printer._print(rhs)
-            if precedence(lhs) < precedence(sympy.div):
-                lhs_str = f"({lhs_str})"
-            if precedence(rhs) < precedence(sympy.div):
-                rhs_str = f"({rhs_str})"
-
-            return f"{lhs_str}//{rhs_str}"
-
-        @classmethod
-        def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
-            if divisor == 1:
-                return base
-            if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-                return base // divisor
-            if isinstance(base, FloorDiv):
-                return FloorDiv(base.args[0], base.args[1] * divisor)
-
-            gcd = sympy.gcd(base, divisor)
-            if gcd != 1:
-                return FloorDiv(
-                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-                )
-
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
@@ -242,7 +203,7 @@ reflectable_magic_methods = {
     'mod': lambda a, b: a % b,
     'pow': lambda a, b: a ** b,
     'truediv': lambda a, b: a / b,
-    'floordiv': lambda a, b: FloorDiv(a, b),
+    'floordiv': lambda a, b: a // b,
 }
 
 def _nyi():
@@ -265,6 +226,7 @@ magic_methods = {
 
 unary_magic_methods = {
     'sym_float',
+    'sym_int',
     'ceil',
     'neg',
 }
@@ -272,9 +234,12 @@ unary_magic_methods = {
 float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
 
 magic_methods_on_builtins = {"min", "max"}
-magic_methods_on_math = {"min", "max"}
+magic_methods_on_math = {"min", "max", "ceil", "floor"}
+magic_methods_on_submodule = {"sym_float", "sym_int"}
+
 always_float_magic_methods = {"truediv", "sym_float"}
-always_int_magic_methods = {"ceil", "floor"}
+always_int_magic_methods = {"ceil", "floor", "floordiv"}
+always_bool_magic_methods = {"eq", "gt", "lt", "le", "ge"}
 
 def wrap_node(x):
     if not isinstance(x, SymNode):
@@ -321,7 +286,7 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             if method in magic_methods_on_math:
                 op = getattr(math, method)
-            elif method in ["sym_float", "sym_int"]:
+            elif method in magic_methods_on_submodule:
                 op = getattr(sys.modules[__name__], method)
             else:
                 op = getattr(operator, method)

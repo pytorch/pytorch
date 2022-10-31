@@ -416,6 +416,8 @@ if COLLECT_EXPECT:
     atexit.register(print_seen)
 
 expected_failure_sym_magic_methods = {
+    ('floordiv', 'int', 'SymFloat'),  # unsupported operand type(s) for //: 'int' and 'SymFloat'
+    ('mod', 'int', 'SymFloat'),  # unsupported operand type(s) for %: 'int' and 'SymFloat'
 }
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -452,6 +454,8 @@ class TestSymNumberMagicMethods(TestCase):
             lambda_apply = getattr(builtins, fn)
         elif fn in symbolic_shapes.magic_methods_on_math:
             lambda_apply = getattr(math, fn)
+        elif fn in symbolic_shapes.magic_methods_on_submodule:
+            lambda_apply = getattr(symbolic_shapes, fn)
         else:
             lambda_apply = getattr(operator, fn)
 
@@ -466,7 +470,10 @@ class TestSymNumberMagicMethods(TestCase):
 
         def guard_fn(v):
             try:
-                return getattr(v.node, f"guard_{tp}")("", 0)
+                if fn in symbolic_shapes.always_bool_magic_methods:
+                    return bool(v)
+                else:
+                    return getattr(v.node, f"guard_{tp}")("", 0)
             except Exception as e:
                 if has_valid_downcast:
                     return v
