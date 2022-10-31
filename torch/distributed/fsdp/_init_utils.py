@@ -419,22 +419,8 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
     Returns the fully prefixed names of all buffers in the module hierarchy
     rooted at ``root_module`` as a class:`set`.
     """
-
-    def module_fn(module: nn.Module, prefix: str, buffer_names: Set[str]):
-        for buffer_name, _ in module.named_buffers(recurse=False):
-            # Clean module wrapper prefixes in case of nested wrapping
-            prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
-            buffer_names.add(prefixed_buffer_name)
-
-    def return_fn(buffer_names: Set[str], *args):
-        return buffer_names
-
-    buffer_names: Set[str] = set()
-    return _apply_to_modules(
-        root_module,
-        module_fn,
-        return_fn,
-        buffer_names,
+    return set(
+        clean_tensor_name(buffer_name) for buffer_name, _ in root_module.named_buffers()
     )
 
 
