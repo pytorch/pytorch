@@ -17,7 +17,6 @@ from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
-from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import ConstantSource, LocalSource, Source
 from .utils import (
@@ -195,62 +194,7 @@ class OutputGraph(fx.Tracer):
             )
 
     def register_attr_or_module(self, mod: torch.nn.Module, *names, **options):
-        if is_dynamic_nn_module(mod):
-            return variables.UnspecializedNNModuleVariable(mod, **options)
-
-        options = dict(options)
-        options["guards"] = set(options.get("guards", []))
-        source: Source = options.get("source", None)
-        if isinstance(mod, torch.Tensor):
-            if source:
-                options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
-
-            def wrap_name(module_key):
-                return TensorVariable.create(
-                    self,
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
-                    example_value=mod,
-                    **options,
-                )
-
-        elif isinstance(mod, torch.nn.Module):
-            assert isinstance(mod, torch.nn.Module)
-            options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
-
-            def wrap_name(module_key):
-                return NNModuleVariable(type(mod), module_key, **options)
-
-        else:
-
-            def wrap_name(module_key):
-                self.output.update_co_names(module_key)
-                self.root_globals[module_key] = mod
-                return VariableBuilder(self, ConstantSource(source_name=module_key))(
-                    mod
-                )
-
-        for k, v in self.nn_modules.items():
-            if v is mod:
-                # it already exists
-                return wrap_name(k)
-
-        # create a new unique name
-        name = "_".join(map(str, names))
-        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
-        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
-        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
-        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
-
-        if not name or not name[0].isalpha():
-            name = "sub" + name
-        base = name
-        for i in itertools.count():
-            if name not in self.nn_modules:
-                self.nn_modules[name] = mod
-                return wrap_name(name)
-            name = f"{base}_{i}"
-
-        raise AssertionError("unreachable")
+        return variables.UnspecializedNNModuleVariable(mod, **options)
 
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None

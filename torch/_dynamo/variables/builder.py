@@ -13,7 +13,7 @@ from functorch.experimental.ops import PyOperator
 
 import torch
 
-from .. import config, mutation_guard, replay_record, skipfiles
+from .. import config, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
 from ..exc import unimplemented
 from ..guards import GuardBuilder, GuardSource
@@ -267,30 +267,18 @@ class VariableBuilder:
 
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
-            if mutation_guard.is_dynamic_nn_module(value):
-                # created dynamically, don't specialize on it
-                result = UnspecializedNNModuleVariable(
-                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
-                )
-                if not SideEffects.cls_supports_mutation_side_effects(type(value)):
-                    # don't allow STORE_ATTR mutation with custom __setattr__
-                    return result
-                return self.tx.output.side_effects.track_object_existing(
-                    self.source, value, result
-                )
-            elif issubclass(
-                value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
-            ):
-                return UnspecializedNNModuleVariable(
-                    value, guards=make_guards(GuardBuilder.TYPE_MATCH)
-                )
-            else:
-                return self.tx.output.register_attr_or_module(
-                    value,
-                    self.name,
-                    source=self.get_source(),
-                    # Guards are added inside register_attr_or_module
-                )
+            # created dynamically, don't specialize on it
+            result = UnspecializedNNModuleVariable(
+                value, guards=make_guards(GuardBuilder.TYPE_MATCH)
+            )
+            # TODO(whc) confirm this is equivalent to the previous special case for DDP
+            if not SideEffects.cls_supports_mutation_side_effects(type(value)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.tx.output.side_effects.track_object_existing(
+                self.source, value, result
+            )
+
         elif ConstantVariable.is_literal(value) or istype(
             value, (torch.Size, torch.device, torch.dtype)
         ):

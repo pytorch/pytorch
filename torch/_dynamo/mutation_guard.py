@@ -81,16 +81,6 @@ class GenerationTracker:
         )
 
 
-def is_dynamic_nn_module(obj):
-    """Check for nn.Modules() created dynamically or mutated"""
-    if hasattr(obj, "torchdynamo_force_dynamic"):
-        return obj.torchdynamo_force_dynamic
-    dyn = GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
-        obj
-    )
-    return dyn
-
-
 def install_generation_tagging_init():
     """
     Monkey patch torch.nn.Module.__init__ and torch.nn.Module.__setstate__
