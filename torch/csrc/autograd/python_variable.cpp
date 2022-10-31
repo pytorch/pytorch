@@ -2647,9 +2647,8 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
         "Cannot call numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return torch::is_symint(out) ? out.cast<c10::SymInt>()
+                               : c10::SymInt{py::cast<int64_t>(out)};
 }
 
 c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
@@ -2670,9 +2669,8 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
   if (out.is(py::none())) {
     return self->sym_storage_offset_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return torch::is_symint(out) ? out.cast<c10::SymInt>()
+                               : c10::SymInt{py::cast<int64_t>(out)};
 }
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
@@ -2702,9 +2700,8 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
-    auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
-        : c10::SymInt{py::cast<int64_t>(elm)};
+    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
+                                    : c10::SymInt{py::cast<int64_t>(elm)};
     symints.append(si.as_int_unchecked());
   }
 
