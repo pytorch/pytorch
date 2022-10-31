@@ -1542,28 +1542,29 @@ class CommonTemplate:
 
     @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
-        m = torch.nn.Sequential(
-            torch.nn.Conv2d(3, 3, 1, 1),
-            ToTuple(),
-        )
-        # only weight is channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last),
-            (torch.randn([2, 3, 16, 16]),),
-            check_lowp=False,
-        )
-        # only activation is channels_last
-        self.common(
-            m,
-            (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
-            check_lowp=False,
-        )
-        # activation and weight are all channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last),
-            (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
-            check_lowp=False,
-        )
+        for kernel_size in [1, 2]:
+            m = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 3, kernel_size, 1),
+                ToTuple(),
+            )
+            # only weight is channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last),
+                (torch.randn([2, 3, 16, 16]),),
+                check_lowp=False,
+            )
+            # only activation is channels_last
+            self.common(
+                m,
+                (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+                check_lowp=False,
+            )
+            # activation and weight are all channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last),
+                (torch.randn([2, 3, 16, 16]).to(memory_format=torch.channels_last),),
+                check_lowp=False,
+            )
 
     def test_conv2d_backward_channels_last(self):
         def fn(grad_output, inp, weight):
@@ -1595,25 +1596,34 @@ class CommonTemplate:
 
     @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv3d_channels_last(self):
-        m = torch.nn.Sequential(
-            torch.nn.Conv3d(3, 3, 1, 1),
-            ToTuple(),
-        )
-        # only weight is channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]),),
-        )
-        # only activation is channels_last
-        self.common(
-            m,
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
-        # activation and weight are all channels_last
-        self.common(
-            m.to(memory_format=torch.channels_last_3d),
-            (torch.randn([2, 3, 16, 16, 16]).to(memory_format=torch.channels_last_3d),),
-        )
+        for kernel_size in [1, 2]:
+            m = torch.nn.Sequential(
+                torch.nn.Conv3d(3, 3, kernel_size, 1),
+                ToTuple(),
+            )
+            # only weight is channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (torch.randn([2, 3, 16, 16, 16]),),
+            )
+            # only activation is channels_last
+            self.common(
+                m,
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
+            # activation and weight are all channels_last
+            self.common(
+                m.to(memory_format=torch.channels_last_3d),
+                (
+                    torch.randn([2, 3, 16, 16, 16]).to(
+                        memory_format=torch.channels_last_3d
+                    ),
+                ),
+            )
 
     def test_adaptive_avg_pool2d1(self):
         def fn(x):
