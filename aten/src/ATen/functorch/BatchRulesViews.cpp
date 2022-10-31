@@ -495,12 +495,10 @@ std::tuple<Tensor, optional<int64_t>> narrow_copy_batch_rule(
 {
   TORCH_INTERNAL_ASSERT(self_bdim.has_value());
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  std::cout << "hello" << std::endl;
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
-  std::cout << "logical_rank:" << logical_rank << std::endl;
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
-  std::cout << "dim:" << dim << std::endl;
   auto result = self_.narrow_copy_symint(dim, start, length);
+
   return std::make_tuple(result, 0);
 }
 
