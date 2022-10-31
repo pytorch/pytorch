@@ -23,6 +23,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.distributed.fsdp._common_utils import HandleTrainingState
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import (
@@ -33,7 +34,6 @@ from ._utils import (
     p_assert,
 )
 
-
 __all__ = [
     "FlatParameter",
     "FlatParamHandle",
@@ -42,7 +42,6 @@ __all__ = [
     "SharedParamInfo",
     "HandleConfig",
     "HandleShardingStrategy",
-    "HandleTrainingState",
 ]
 
 
@@ -102,14 +101,6 @@ class HandleShardingStrategy(Enum):
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
-
-
-class HandleTrainingState(Enum):
-    IDLE = auto()
-    FORWARD = auto()
-    BACKWARD_PRE = auto()
-    BACKWARD_POST = auto()
-    SUMMON_FULL_PARAMS = auto()
 
 
 @dataclass
@@ -1507,7 +1498,8 @@ class FlatParamHandle:
                 # memory and owns the gradient storage, so it will never
                 # require gradient writeback.
                 flat_param_grad = (
-                    flat_param.grad if self.uses_sharded_strategy or not self._config.offload_params
+                    flat_param.grad
+                    if self.uses_sharded_strategy or not self._config.offload_params
                     else flat_param._cpu_grad  # type: ignore[attr-defined]
                 )
                 needs_grad_writeback = flat_param_grad is None or not _same_storage(
