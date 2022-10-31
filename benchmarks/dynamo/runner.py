@@ -258,7 +258,10 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if testing == "performance" and compiler == "inductor":
+                    if testing == "performance" and compiler in (
+                        "inductor",
+                        "inductor_no_cudagraphs",
+                    ):
                         cmd = f"{cmd} --cold_start_latency"
                     lines.append(cmd)
                 lines.append("")
@@ -448,6 +451,8 @@ class ParsePerformanceLogs(Parser):
             df_copy = df_copy.sort_values(
                 by=list(reversed(self.compilers)), ascending=False
             )
+            if "inductor" in self.compilers:
+                df_copy = df_copy.sort_values(by="inductor", ascending=False)
             self.untouched_parsed_frames[suite][metric] = df_copy
 
             if testing == "performance":
@@ -468,6 +473,9 @@ class ParsePerformanceLogs(Parser):
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+
+            if "inductor" in self.compilers:
+                df = df.sort_values(by="inductor", ascending=False)
             self.parsed_frames[suite][metric] = df
 
     def get_passing_entries(self, compiler, df):
