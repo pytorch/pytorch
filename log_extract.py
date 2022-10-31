@@ -15,6 +15,12 @@ i = 0
 
 out = csv.writer(sys.stdout, dialect='excel')
 
+def normalize_file(f):
+    if "site-packages/" in f:
+        return f.split("site-packages/", 2)[1]
+    else:
+        return os.path.relpath(f)
+
 for bench, name, log in chunker(entries, 3):
     r = "UNKNOWN"
     explain = ""
@@ -25,7 +31,12 @@ for bench, name, log in chunker(entries, 3):
         r = "FAIL TIMEOUT"
     if "Accuracy failed" in log:
         r = "FAIL ACCURACY"
-    errors = re.findall(r'[A-Za-z]+Error: .+', log)
+    log = log.split("The above exception was the direct cause of the following exception")[0]
+    split = log.split("Traceback (most recent call last)", maxsplit=1)
+    if len(split) == 2:
+        log = split[1]
+    log = log.split("Original traceback:")[0]
+    errors = re.findall(r'[A-Za-z]+(?:Error|Exception): .+', log)
     if errors:
         r = "FAIL"
         explain = errors[-1]
@@ -33,17 +44,20 @@ for bench, name, log in chunker(entries, 3):
         if files:
             for f in reversed(files):
                 if f != "<string>":
-                    if "site-packages/" in f:
-                        component = f.split("site-packages/", 2)[1]
-                    else:
-                        component = os.path.relpath(f)
+                    component = normalize_file(f)
                     break
             else:
                 if "ERROR RUNNING GUARDS" in log or "NULL ERROR" in log:
                     component = "<dynamo guards>"
+    else:
+        m = re.search(r'File "([^"]+)", line ([0-9]+), in .+\n +(.+)\nAssertionError', log)
+        if m is not None:
+            r = "FAIL"
+            component = normalize_file(m.group(1))
+            explain = f"AssertionError on line {m.group(2)}: {m.group(3)}"
     if r == "UNKNOWN":
         c += 1
-    out.writerow([i, bench, name, "", r, component, explain])
+    out.writerow([bench, name, "", r, component, explain])
     i += 1
 
 if c:
