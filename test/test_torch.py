@@ -32,7 +32,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
@@ -4648,6 +4648,7 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -6823,6 +6824,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
