@@ -27,6 +27,8 @@
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/floor.h>
 #include <ATen/ops/floor_native.h>
+#include <ATen/ops/frac.h>
+#include <ATen/ops/frac_native.h>
 #include <ATen/ops/isinf.h>
 #include <ATen/ops/isinf_native.h>
 #include <ATen/ops/isnan.h>
@@ -169,6 +171,7 @@ COALESCED_UNARY_UFUNC(erf);
 COALESCED_UNARY_UFUNC(erfinv);
 COALESCED_UNARY_UFUNC(expm1);
 COALESCED_UNARY_UFUNC(floor);
+COALESCED_UNARY_UFUNC(frac);
 COALESCED_UNARY_UFUNC(log1p);
 COALESCED_UNARY_UFUNC(round);
 COALESCED_UNARY_UFUNC(sign);
