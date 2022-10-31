@@ -937,10 +937,10 @@ Tensor convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups);
 
 Tensor _convolution_jvp(
@@ -951,10 +951,10 @@ Tensor _convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups,
     bool benchmark,
     bool deterministic,
