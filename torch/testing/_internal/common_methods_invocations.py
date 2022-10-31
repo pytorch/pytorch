@@ -12605,8 +12605,7 @@ op_db: List[OpInfo] = [
                # The size of tensor a (0) must match the size of tensor b (5) at non-singleton dimension 1
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-           ),
-    ),
+           )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
