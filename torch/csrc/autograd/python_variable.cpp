@@ -831,8 +831,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // to delete this function entirely
   py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
   TORCH_CHECK_TYPE(
-      attr.ptr() == nullptr ||
-          attr.ptr() == torch::disabled_torch_dispatch_impl(),
+      attr.ptr() != nullptr &&
+          attr.ptr() != torch::disabled_torch_dispatch_impl(),
       ((PyTypeObject*)cls)->tp_name,
       " must define __torch_dispatch__");
 
