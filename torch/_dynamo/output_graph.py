@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch.nn
 from torch import fx
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
 from .bytecode_transformation import create_instruction, Instruction, unique_id
@@ -35,6 +36,11 @@ from .variables.tensor import (
 )
 
 log = logging.getLogger(__name__)
+
+
+@functools.lru_cache(None)
+def _step_logger():
+    return torchdynamo_logging.get_step_logger(log)
 
 
 @dataclass
@@ -64,11 +70,6 @@ class FakeRootModule(torch.nn.Module):
         return "FakeRootModule(...)"
 
 
-@functools.lru_cache(None)
-def _step_logger():
-    return torchdynamo_logging.get_step_logger(log)
-
-
 class OutputGraph(fx.Tracer):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -92,6 +93,8 @@ class OutputGraph(fx.Tracer):
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions = []
+        # Node => computed real value (see TensorVariable.get_real_value)
+        self.real_value_cache = {}
 
         # Not checkpointed
         self.compiler_fn = compiler_fn
@@ -102,6 +105,8 @@ class OutputGraph(fx.Tracer):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map = {}
+        self.shape_env = ShapeEnv() if config.dynamic_shapes else None
+        self.tensor_id_to_sym_shape_ref = {}
 
     @property
     def output(self):
@@ -139,6 +144,7 @@ class OutputGraph(fx.Tracer):
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
+                self.real_value_cache.pop(node, None)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -229,7 +235,12 @@ class OutputGraph(fx.Tracer):
                 return wrap_name(k)
 
         # create a new unique name
-        name = re.sub(r"[^a-zA-Z0-9]", "_", "_".join(map(str, names)))
+        name = "_".join(map(str, names))
+        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
@@ -315,6 +326,7 @@ class OutputGraph(fx.Tracer):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
@@ -380,13 +392,16 @@ class OutputGraph(fx.Tracer):
             for node in self.graph.nodes:
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
+            self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
         gm.recompile()
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
+
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
+
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
@@ -394,7 +409,7 @@ class OutputGraph(fx.Tracer):
             # the call to tabulate can cause a lot of memory to be allocated
             if config.log_level <= logging.INFO:
                 log.log(
-                    torchdynamo_logging.CODE,
+                    logging.CODE,
                     f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {format_graph_tabular(gm.graph)}\n",
                 )
         except ImportError:
@@ -410,18 +425,18 @@ class OutputGraph(fx.Tracer):
 
     def call_user_compiler(self, gm):
         try:
-            _step_logger()(logging.INFO, "calling compiler function")
+            name = (
+                self.compiler_fn.__name__
+                if hasattr(self.compiler_fn, "__name__")
+                else ""
+            )
+            _step_logger()(logging.INFO, f"calling compiler function {name}")
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
-            _step_logger()(logging.INFO, "done compiler function")
+            _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            log.warning("-" * 40 + "\n")
-            log.warning("TORCHDYNAMO: backend compiler failed\n")
-            log.warning(e, exc_info=True)
-            log.warning("-" * 40 + "\n")
             compiled_fn = gm.forward
-            if config.raise_on_backend_error:
-                raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def example_inputs(self):
@@ -452,6 +467,7 @@ class OutputGraph(fx.Tracer):
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
                 self.graph.erase_node(node)
+                self.real_value_cache.pop(node, None)
 
         self.graphargs = [arg for arg in self.graphargs if arg.uses > 0]
 
@@ -486,6 +502,7 @@ class OutputGraph(fx.Tracer):
         for node in self.graph.nodes:
             if "example_value" in node.meta:
                 del node.meta["example_value"]
+        self.real_value_cache.clear()
 
     def create_proxy(
         self,
