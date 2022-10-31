@@ -12,7 +12,6 @@ __all__ = [
     "disable_saved_tensors_hooks",
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
-    "AllowMutationOnSavedContext"
 ]
 
 class saved_tensors_hooks():
@@ -371,7 +370,7 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         rs = func(*args, **kwargs)
         return rs
 
-class AllowMutationOnSavedContext():
+class _AllowMutationOnSavedContext():
     def __init__(self):
         self.cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
@@ -392,13 +391,32 @@ def allow_mutation_on_saved_tensors():
     so the original version can still be used during backward. Normally, mutating a tensor
     saved for backward will result in an error raised when it's used during backward.
 
+    To ensure the correct behavior, both the forward and backward should be run under
+    the same context manager.
+
     returns:
-        An AllowMutationOnSavedContext object storeing the state managed by this
-        context manager useful for debugging purposes. It is cleared upon exit.
+        An _AllowMutationOnSavedContext object storing the state managed by this
+        context manager. This object can be useful for debugging purposes. The state
+        managed by the context manager is automatically cleared upon exiting.
+
+    Example::
+
+        >>> import torch
+        >>> with torch.autograd.graph.allow_mutation_on_saved_tensors():
+        ...     # forward
+        ...     a = torch.ones(2, 3, requires_grad=True)
+        ...     b = a.clone()
+        ...     out = (b**2).sum()
+        ...     b.sin_()
+        ...     # backward
+        ...     out.sum().backward()
+        ...
+        tensor([[0.8415, 0.8415, 0.8415],
+                [0.8415, 0.8415, 0.8415]], grad_fn=<SinBackward0>)
     """
     global _allow_mutation_on_saved_tensors_enabled
 
-    ctx = AllowMutationOnSavedContext()
+    ctx = _AllowMutationOnSavedContext()
 
     with _swap_with_cloned(ctx), _CloneArgBeforeMutateMode(ctx):
         try:
