@@ -9,7 +9,6 @@ import random
 import sys
 import tempfile
 from functools import reduce
-from itertools import groupby
 
 import torch
 import torch.distributed as c10d
@@ -35,9 +34,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_ucc,
     skip_if_lt_x_gpu,
-    simple_sparse_reduce_tests,
-    skip_if_win32,
-    create_device,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
@@ -45,7 +41,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     retry_on_connect_failures,
     sandcastle_skip,
-    sandcastle_skip_if,
 )
 
 
@@ -368,6 +363,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
     # TODO: test_barrier_implies_wait seems to fail even after Sergey's barrier blocking fix
 
+
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
@@ -574,7 +570,6 @@ class DistributedDataParallelTest(
             find_unused_parameters=True,
         )
         run_and_verify_grad(gpu_model)
-
 
     @requires_ucc()
     def test_ignored_output(self):
@@ -1003,6 +998,7 @@ class DistributedDataParallelTest(
         ddp_model.register_comm_hook(None, allreduce_hook_ucc)
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
+
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @property
