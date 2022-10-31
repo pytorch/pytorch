@@ -956,8 +956,8 @@ class BaseView(IRNode):
     def realize(self):
         return self.data.realize()
 
-    def realize_hint(self, is_output=False):
-        return self.data.realize_hint(is_output=is_output)
+    def realize_hint(self):
+        return self.data.realize_hint()
 
     def get_storage_numel(self):
         return self.data.get_storage_numel()
@@ -3505,13 +3505,11 @@ class StorageBox(MutableBox):
         self.data.name = V.graph.register_buffer(self.data)
         return self.data.name
 
-    def realize_hint(self, is_output=False):
+    def realize_hint(self):
         """
         Called on buffers we expect to be forced to realize later.
         """
-        if isinstance(self.data, (Pointwise, Reduction)) and (
-            self.num_reads() > 1 or is_output
-        ):
+        if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
             self.realize()
 
     def has_exceeded_max_reads(self):
