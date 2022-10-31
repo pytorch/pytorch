@@ -6,7 +6,6 @@ import sys
 full_log = open(sys.argv[1], 'r').read()
 
 entries = re.split(r"Running ([^.]+)\.\.\.", full_log)[1:]
-print(entries[:4])
 
 def chunker(seq, size):
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
