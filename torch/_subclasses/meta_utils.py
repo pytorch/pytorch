@@ -14,13 +14,16 @@ def safe_is_leaf(t):
         # inference mode can trigger this
         return False
 
+
 def safe_grad(t):
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
         return t.grad
 
+
 def assert_eq(a, b):
     assert a == b, f"{a} != {b}"
+
 
 def assert_metadata_eq(assert_eq, m1, m2):
     def go(m1, m2):
@@ -274,7 +277,7 @@ class MetaConverter:
                     # This is very tricky.  Naively, you might expect this
                     # to hold:
                     #
-                    #   if t.requires_grad and not safe_is_leaf(t) 
+                    #   if t.requires_grad and not safe_is_leaf(t)
                     #       assert t._base.requires_grad
                     #
                     # But it's not true!  As you can see in the following
@@ -301,7 +304,9 @@ class MetaConverter:
                         if t._base.requires_grad == t.requires_grad:
                             # Easy case, just run the view op
                             with torch.enable_grad():
-                                r = base.as_strided(sizes, strides, sym(t.storage_offset()))
+                                r = base.as_strided(
+                                    sizes, strides, sym(t.storage_offset())
+                                )
                         else:
                             # Obscure case.  Create a leaf view and give it the
                             # correct requires_grad, then do the final view.
@@ -311,7 +316,9 @@ class MetaConverter:
                                 mid = base.view(base.shape)
                             mid.requires_grad = t.requires_grad
                             with torch.enable_grad():
-                                r = mid.as_strided(sizes, strides, sym(t.storage_offset()))
+                                r = mid.as_strided(
+                                    sizes, strides, sym(t.storage_offset())
+                                )
 
                 else:
                     is_leaf = safe_is_leaf(t)
