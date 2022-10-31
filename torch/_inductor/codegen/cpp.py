@@ -311,6 +311,26 @@ class CppVecOverrides(OpOverrides):
     def square(a):
         return f"{a}.pow(2)"
 
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        vec_zero = f"decltype({x})(0)"
+        vec_one = f"decltype({x})(1)"
+        vec_minus_one = f"decltype({x})(-1)"
+        blendv = f"decltype({x})::blendv({vec_one}, {vec_minus_one}, {x} < {vec_zero})"
+        blendv_var_one = V.kernel.cse.newvar()
+        code.writeline(f"auto {blendv_var_one} = {blendv};")
+
+        # auto tmp6 = tmp4 == 0 ? 0 : tmp5;
+        blendv = (
+            f"decltype({x})::blendv({blendv_var_one}, {vec_zero}, {x} == {vec_zero})"
+        )
+        blendv_var_zero_one = V.kernel.cse.newvar()
+        code.writeline(f"auto {blendv_var_zero_one} = {blendv};")
+        V.kernel.compute.splice(code)
+        return blendv_var_zero_one
+
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
@@ -472,6 +492,17 @@ class CppOverrides(OpOverrides):
     def sigmoid(x):
         x = ops.exp(f"-{x}")
         return f"1 / (1 + {x})"
+
+    @staticmethod
+    def sign(x):
+        code = BracesBuffer()
+        # auto tmp5 = tmp4 < 0 ? -1 : 1;
+        blendv_var_one = V.kernel.cse.newvar()
+        blendv_var_zero_one = V.kernel.cse.newvar()
+        code.writeline(f"auto {blendv_var_one} = {x} < 0 ? -1 : 1;")
+        code.writeline(f"auto {blendv_var_zero_one} = {x} == 0 ? 0 : {blendv_var_one};")
+        V.kernel.compute.splice(code)
+        return blendv_var_zero_one
 
 
 class CppKernel(Kernel):

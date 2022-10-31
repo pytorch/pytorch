@@ -4218,6 +4218,7 @@ if HAS_CPU:
                 x = torch.trunc(x)
                 x = torch.lgamma(x)
                 x = torch.fmod(x, x2)
+                x = torch.sign(x)
                 res = x + x2
                 return (res,)
 
