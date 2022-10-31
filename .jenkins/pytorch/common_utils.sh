@@ -101,6 +101,12 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_torchaudio() {
+  local commit
+  commit=$(get_pinned_commit text)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+}
+
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
