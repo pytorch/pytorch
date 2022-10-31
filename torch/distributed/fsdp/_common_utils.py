@@ -3,10 +3,11 @@ This file includes private common utilities for FSDP.
 """
 
 from enum import auto, Enum
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Union
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
+import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
@@ -14,6 +15,17 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
+
+
+class FSDPState:
+    """
+    This encompasses all FSDP state.
+    """
+
+
+# We leverage Python's dynamic attribute definition to unify the state
+# management for the wrapper and non-wrapper approaches.
+_State = Union[nn.Module, FSDPState]
 
 
 class TrainingState(Enum):
