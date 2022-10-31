@@ -420,7 +420,7 @@ def _pre_backward_hook(
         # attach it to the outermost backward graph task so that it is called
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
-            _register_post_backward_callback(state)
+            _register_post_backward_final_callback(state)
             _clear_grads_if_needed(_all_handles(state))
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
@@ -665,12 +665,13 @@ def _low_precision_hook_enabled(state: _State) -> bool:
 
 @no_type_check
 @torch.no_grad()
-def _post_backward_callback(
+def _post_backward_final_callback(
     state: _State,
 ):
     """
     This waits for the post-backward to finish and performs some final cleanup.
-    This should only be called on the root FSDP instance.
+    This runs at the end of the entire backward pass and should only be called
+    on the root FSDP instance.
     """
     p_assert(
         state._is_root,
@@ -1011,11 +1012,11 @@ def _register_post_backward_hooks(
 
 
 @no_type_check
-def _register_post_backward_callback(state: _State) -> None:
+def _register_post_backward_final_callback(state: _State) -> None:
     """
-    Registers the post-backward callback that runs at the end of the backward
-    pass. This should be called from the root FSDP instance at the beginning of
-    the pre-backward.
+    Registers the post-backward final callback that runs at the end of the
+    backward pass. This should be called from the root FSDP instance at the
+    beginning of the pre-backward.
     """
     p_assert(
         state._is_root,
@@ -1026,7 +1027,7 @@ def _register_post_backward_callback(state: _State) -> None:
     _assert_in_training_states(state, [TrainingState.IDLE])
     state._post_backward_callback_queued = True
     Variable._execution_engine.queue_callback(
-        functools.partial(_post_backward_callback, state)
+        functools.partial(_post_backward_final_callback, state)
     )
 
 
