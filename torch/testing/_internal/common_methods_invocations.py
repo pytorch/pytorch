@@ -12592,6 +12592,21 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
                DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
            )),
+    OpInfo('view_copy',
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           supports_out=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_view_copy,
+           skips=(
+               # view_copy does not support automatic differentiation for outputs with complex dtype
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
+               # The size of tensor a (0) must match the size of tensor b (5) at non-singleton dimension 1
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           ),
+    ),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
