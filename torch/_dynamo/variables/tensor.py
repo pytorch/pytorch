@@ -47,8 +47,8 @@ class _missing:
 
 
 def _run_node(output_graph, node, args, kwargs, nnmodule):
+    op = node.op
     try:
-        op = node.op
         if op == "call_function":
             return node.target(*args, **kwargs)
         elif op == "call_method":
@@ -59,8 +59,9 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
         elif op == "get_attr":
             return output_graph.get_submodule(node.target)
     except Exception as e:
+        breakpoint()
         raise RuntimeError(
-            f"Failed running {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
+            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
         ) from e
     raise AssertionError(op)
 
@@ -512,6 +513,7 @@ class TensorVariable(VariableTracker):
                     )
                     proxy.node.meta["example_value"] = element
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
+
             def extract(item):
                 if isinstance(item, ConstantVariable):
                     return item.value
