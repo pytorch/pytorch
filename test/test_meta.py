@@ -171,9 +171,10 @@ class TestMetaConverter(TestCase):
         m.check_for_expired_weak_storages()
         self.assertEqual(len(m.storage_memo), 0)
         li = []
+        r = []
         for i in range(4):
             li.append(torch.rand([i]))
-            m(li[-1])
+            r.append(m(li[-1]))
         self.assertEqual(len(m.tensor_memo), 4)
         del li
         self.assertEqual(len(m.tensor_memo), 0)
@@ -218,7 +219,6 @@ CHECK_STRIDES_SKIPS = {
     aten.div.Tensor_mode,
     aten.div.Tensor,
     aten.eq.Tensor,
-    aten.flip.default,
     aten.floor_divide.default,
     aten.fmax.default,
     aten.fmin.default,
@@ -247,7 +247,6 @@ CHECK_STRIDES_SKIPS = {
     aten.pow.Tensor_Tensor,
     aten.prelu.default,
     aten.remainder.Tensor,
-    aten.rot90.default,
     aten.rsub.Tensor,
     aten.special_xlog1py.default,
     aten.special_zeta.default,
