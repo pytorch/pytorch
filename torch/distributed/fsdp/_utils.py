@@ -114,4 +114,4 @@ def p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
         print(s)
         traceback.print_stack()
         if raise_assertion_error:
-            raise AssertionError
+            raise AssertionError(s)
