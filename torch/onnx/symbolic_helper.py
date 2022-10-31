@@ -493,11 +493,8 @@ def _is_scalar_list(x: _C.Value) -> bool:
     x_type = _as_list_type(x.type())
     if x_type is None:
         return False
-    element_type = str(x_type.getElementType())
-    return (
-        _type_utils.valid_torch_name(element_type)
-        and _type_utils.JitScalarType.from_name(element_type).onnx_compatible()
-    )
+    scalar_type = _type_utils.JitScalarType.from_value(x)
+    return scalar_type.onnx_compatible()
 
 
 @_beartype.beartype
@@ -508,7 +505,7 @@ def _is_tuple_construct(x: _C.Value) -> bool:
 @_beartype.beartype
 def is_complex_value(x: _C.Value) -> bool:
     assert _is_value(x)
-    return _type_utils.JitScalarType.from_name(x.type().scalarType()) in {
+    return _type_utils.JitScalarType.from_value(x) in {
         _type_utils.JitScalarType.COMPLEX32,
         _type_utils.JitScalarType.COMPLEX64,
         _type_utils.JitScalarType.COMPLEX128,
@@ -672,14 +669,10 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
     index_scalar_type = _type_utils.JitScalarType.from_value(
         index, _type_utils.JitScalarType.UNDEFINED
     )
-    if (
-        index_scalar_type == _type_utils.JitScalarType.UNDEFINED
-        or index_scalar_type
-        not in {
-            _type_utils.JitScalarType.INT64,
-            _type_utils.JitScalarType.INT,
-        }
-    ):
+    if index_scalar_type not in {
+        _type_utils.JitScalarType.INT64,
+        _type_utils.JitScalarType.INT,
+    }:
         index = g.op("Cast", index, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -1254,7 +1247,7 @@ def _arange_cast_helper(
                     != _type_utils.JitScalarType.INT64
                 ):
                     return False
-            except errors.OnnxExporterError:
+            except (errors.OnnxExporterError, errors.SymbolicValueError):
                 pass
         return True
 

@@ -56,10 +56,16 @@ class JitScalarType(enum.IntEnum):
 
     Use ``JitScalarType`` to convert from torch and JIT scalar types to ONNX scalar types.
 
-    Examples::
-        >>> # xdoctest: +IGNORE_WANT("win32 has different output")
-        >>> JitScalarType.from_name("Float").onnx_type()
+    Examples:
+        >>> JitScalarType.from_value(torch.ones(1, 2)).onnx_type()
         TensorProtoDataType.FLOAT
+
+        >>> JitScalarType.from_value(torch_c_value_with_type_float).onnx_type()
+        TensorProtoDataType.FLOAT
+
+        >>> JitScalarType.from_dtype(torch.get_default_dtype).onnx_type()
+        TensorProtoDataType.FLOAT
+
     """
 
     # Order defined in https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
@@ -83,7 +89,7 @@ class JitScalarType(enum.IntEnum):
 
     @classmethod
     @_beartype.beartype
-    def from_name(
+    def _from_name(
         cls, name: Union[ScalarName, TorchName, Optional[str]]
     ) -> JitScalarType:
         """Convert a JIT scalar type or torch type name to ScalarType.
@@ -100,20 +106,20 @@ class JitScalarType(enum.IntEnum):
             JitScalarType
 
         Raises:
-            ValueError: if name is not a valid scalar type name or if it is None.
+           OnnxExporterError: if name is not a valid scalar type name or if it is None.
         """
         if name is None:
-            raise ValueError("Scalar type name cannot be None")
+            raise errors.OnnxExporterError("Scalar type name cannot be None")
         if valid_scalar_name(name):
             return _SCALAR_NAME_TO_TYPE[name]  # type: ignore[index]
         if valid_torch_name(name):
             return _TORCH_NAME_TO_SCALAR_TYPE[name]  # type: ignore[index]
 
-        raise ValueError(f"Unknown torch or scalar type: '{name}'")
+        raise errors.OnnxExporterError(f"Unknown torch or scalar type: '{name}'")
 
     @classmethod
     @_beartype.beartype
-    def from_dtype(cls, dtype: torch.dtype) -> JitScalarType:
+    def from_dtype(cls, dtype: Optional[torch.dtype]) -> JitScalarType:
         """Convert a torch dtype to JitScalarType.
 
         Note: DO NOT USE this API when `dtype` comes from a `torch._C.Value.type()` calls.
@@ -128,10 +134,10 @@ class JitScalarType(enum.IntEnum):
             JitScalarType
 
         Raises:
-            ValueError: if dtype is not a valid torch.dtype or if it is None.
+            OnnxExporterError: if dtype is not a valid torch.dtype or if it is None.
         """
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
-            raise ValueError(f"Unknown dtype: {dtype}")
+            raise errors.OnnxExporterError(f"Unknown dtype: {dtype}")
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
     # TODO: `value: torch._C.Value` type annotation raises (CI machines only):
@@ -140,7 +146,7 @@ class JitScalarType(enum.IntEnum):
     @classmethod
     @_beartype.beartype
     def from_value(cls, value, default=None) -> JitScalarType:
-        """Create a JitScalarType from a torch._C.Value's underlying scalar type.
+        """Create a JitScalarType from an value's scalar type.
 
         Args:
             value: A `Union[torch._C.Value, torch.Tensor]` object to fetch scalar type from.
@@ -170,18 +176,22 @@ class JitScalarType(enum.IntEnum):
         if isinstance(value, torch.Tensor):
             return cls.from_dtype(value.dtype)
         if isinstance(value.type(), torch.ListType):
-            return cls.from_dtype(value.type().getElementType().dtype())
+            try:
+                return cls.from_dtype(value.type().getElementType().dtype())
+            except RuntimeError:
+                return cls._from_name(str(value.type().getElementType()))
 
         # value must be a non-list torch._C.Value scalar
         scalar_type = value.type().scalarType()
         if scalar_type is not None:
-            return cls.from_name(scalar_type)
+            return cls._from_name(scalar_type)
 
         # When everything fails... try to default
         if default is not None:
             return default
         raise errors.SymbolicValueError(
-            f"Cannot determine scalar type for this '{type(value.type())}' instance.",
+            f"Cannot determine scalar type for this '{type(value.type())}' instance and "
+            "a default value was not provided.",
             value,
         )
 
@@ -204,7 +214,9 @@ class JitScalarType(enum.IntEnum):
     def onnx_type(self) -> _C_onnx.TensorProtoDataType:
         """Convert a JitScalarType to an ONNX data type."""
         if self not in _SCALAR_TYPE_TO_ONNX:
-            raise ValueError(f"Scalar type {self} cannot be converted to ONNX")
+            raise errors.OnnxExporterError(
+                f"Scalar type {self} cannot be converted to ONNX"
+            )
         return _SCALAR_TYPE_TO_ONNX[self]
 
     @_beartype.beartype
