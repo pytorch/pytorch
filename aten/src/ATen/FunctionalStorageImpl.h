@@ -89,6 +89,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   size_t generation() const {
     return generation_;
   }
+  void freeze() {
+    frozen_ = true;
+  }
 
   ~FunctionalStorageImpl() override = default;
 
@@ -107,6 +110,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // alias. It is used to determine if a given tensor is "up to date", or if it
   // needs to be regenerated from the alias.
   size_t generation_ = 0;
+  // If frozen, no more mutations are allowed on this storage.  Once frozen, a
+  // storage cannot be unfrozen.
+  bool frozen_ = false;
 };
 
 } // namespace functionalization
