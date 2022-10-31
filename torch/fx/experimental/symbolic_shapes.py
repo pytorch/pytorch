@@ -156,7 +156,7 @@ class SymNode:
 
     def wrap_float(self, num):
         assert isinstance(num, float)
-        return SymNode(sympy.Integer(num), self.shape_env, float, constant=num)
+        return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
         return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)

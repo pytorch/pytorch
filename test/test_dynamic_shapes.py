@@ -486,8 +486,6 @@ class TestSymNumberMagicMethods(TestCase):
                 out = lambda_apply(sym_inp1)
             else:
                 out = lambda_apply(sym_inp1, inp2)
-            print(ref_out)
-            print(out)
             self.assertEqual(guard_fn(out), ref_out)
 
         if is_unary_fn:
