@@ -2229,14 +2229,15 @@ add_docstr_all(
 get_device() -> Device ordinal (Integer)
 
 For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
-For CPU tensors, an error is thrown.
+For CPU tensors, this function returns `-1`.
 
 Example::
 
     >>> x = torch.randn(3, 4, 5, device='cuda:0')
     >>> x.get_device()
     0
-    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+    >>> x.cpu().get_device()
+    -1
 """,
 )
 
