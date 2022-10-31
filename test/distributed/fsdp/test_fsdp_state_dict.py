@@ -11,7 +11,9 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
     checkpoint_wrapper,
+    CheckpointImpl,
 )
 from torch.distributed.fsdp import (
     CPUOffload,
@@ -109,10 +111,22 @@ class TestFSDPStateDict(FSDPTest):
     def world_size(self):
         return 2
 
-    def _broadcast_state_dict(self, state_dict):
+    def _broadcast_state_dict(self, model, state_dict):
+        if not isinstance(model, FSDP):
+            # For non-FSDP root, some parts of the model state on rank 0 may
+            # not be on CPU, so we move everything to CPU to avoid issues like:
+            # https://github.com/pytorch/pytorch/issues/77113.
+            for param_name, param in state_dict.items():
+                if param.device != torch.device("cpu"):
+                    state_dict[param_name] = param.cpu()
+
         olist = [state_dict if self.rank == 0 else None]
         dist.broadcast_object_list(olist)
-        return olist[0]
+        state_dict = olist[0]
+        # Ensure that the state is on CUDA
+        for param_name in state_dict.keys():
+            state_dict[param_name] = state_dict[param_name].cuda()
+        return state_dict
 
     def _compare_models(self, model, model_new, assert_fn, check_fp16=False):
         assert assert_fn in (self.assertEqual, self.assertNotEqual)
@@ -220,30 +234,118 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
-    @parametrize("checkpoint_wrap", ["first", "second", "both"])
+    @parametrize(
+        "checkpoint_wrap",
+        ["source", "dest", "both", "source_after_wrap", "both_after_wrap"],
+    )
+    @parametrize("rank0_only_and_offload", [False, True])
     def test_fsdp_state_dict_with_activation_checkpoint(
-        self, state_dict_type, checkpoint_wrap
+        self, state_dict_type, checkpoint_wrap, rank0_only_and_offload
     ):
         """Tests saving the state dict, zeroing a target model's parameters, and
         loading the state dict, where the source and target models may have a
         checkpoint wrapper."""
+
+        def apply_ac_to_linears(model) -> None:
+            non_reentrant_wrapper = partial(
+                checkpoint_wrapper,
+                offload_to_cpu=False,
+                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            )
+            apply_activation_checkpointing(
+                model,
+                checkpoint_wrapper_fn=non_reentrant_wrapper,
+                check_fn=lambda submodule: isinstance(submodule, nn.Linear),
+            )
+
         for model_call in [
             partial(self._get_simple_model),
             partial(self._get_simple_nested_model),
         ]:
-            model = model_call(checkpoint_wrap=(checkpoint_wrap in ["first", "both"]))
-            with FSDP.state_dict_type(model, STATE_DICT_MAPPING[state_dict_type]):
+            model = model_call(checkpoint_wrap=(checkpoint_wrap in ("source", "both")))
+            if checkpoint_wrap in ("source_after_wrap", "both_after_wrap"):
+                apply_ac_to_linears(model)
+            with self._get_state_dict_mgr(
+                model, state_dict_type, rank0_only_and_offload
+            ):
                 state_dict = _gather_state_dict(_get_state_dict(model, False, False))
                 # Possibly wrap new model in activation checkpoint wrapper to test save/
                 # load with this wrapper
                 model_new = model_call(
-                    checkpoint_wrap=(checkpoint_wrap in ["second", "both"])
+                    checkpoint_wrap=(checkpoint_wrap in ("dest", "both"))
                 )
+                if checkpoint_wrap == "both_after_wrap":
+                    apply_ac_to_linears(model_new)
                 _zero_model(model_new)
                 self._compare_models(model, model_new, self.assertNotEqual)
+                if rank0_only_and_offload:
+                    state_dict = self._broadcast_state_dict(model, state_dict)
                 # Would fail if checkpoint_wrapper did not correctly implement state_dict pre/post hooks
                 model_new.load_state_dict(state_dict, strict=True)
                 self._compare_models(model, model_new, self.assertEqual)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
+    @parametrize("rank0_only_and_offload", [False, True])
+    def test_state_dict_with_manual_ac_wrapper(
+        self,
+        state_dict_type: str,
+        rank0_only_and_offload: bool,
+    ):
+        """
+        Tests saving and loading a state dict for a model manually wrapped with
+        ``FSDP(CheckpointWrapper(module))``, where the ``CheckpointWrapper`` is
+        wrapped before FSDP.
+
+        TODO: Investigate why the test above does not cover everything in this
+        test and de-duplicate afterwards.
+        """
+        if state_dict_type == "sharded_state_dict" and rank0_only_and_offload:
+            return  # not supported
+        model_ac = TransformerWithSharedParams.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+        )
+        # Manually wrap FSDP without AC
+        model_no_ac = deepcopy(model_ac)
+        for i, layer in enumerate(model_no_ac.transformer.encoder.layers):
+            model_no_ac.transformer.encoder.layers[i] = FSDP(layer)
+        for i, layer in enumerate(model_no_ac.transformer.decoder.layers):
+            model_no_ac.transformer.decoder.layers[i] = FSDP(layer)
+        model_no_ac.transformer = FSDP(model_no_ac.transformer)
+
+        # Manually wrap FSDP with AC as `FSDP(CheckpointWrapper(module))`
+        for i, layer in enumerate(model_ac.transformer.encoder.layers):
+            layer = checkpoint_wrapper(layer)
+            model_ac.transformer.encoder.layers[i] = FSDP(layer)
+        for i, layer in enumerate(model_ac.transformer.decoder.layers):
+            layer = checkpoint_wrapper(layer)
+            model_ac.transformer.decoder.layers[i] = FSDP(layer)
+        model_ac.transformer = FSDP(model_ac.transformer)
+
+        # Save, load, and compare the two models
+        with self._get_state_dict_mgr(
+            model_no_ac, state_dict_type, rank0_only_and_offload
+        ):
+            state_dict_no_ac = model_no_ac.state_dict()
+        with self._get_state_dict_mgr(
+            model_ac, state_dict_type, rank0_only_and_offload
+        ):
+            state_dict_ac = model_ac.state_dict()
+        self.assertEqual(state_dict_ac.keys(), state_dict_no_ac.keys())
+        if rank0_only_and_offload:
+            state_dict_no_ac = self._broadcast_state_dict(model_no_ac, state_dict_no_ac)
+            state_dict_ac = self._broadcast_state_dict(model_ac, state_dict_ac)
+        with self._get_state_dict_mgr(
+            model_no_ac, state_dict_type, rank0_only_and_offload
+        ):
+            model_no_ac.load_state_dict(state_dict_no_ac)
+        with self._get_state_dict_mgr(
+            model_ac, state_dict_type, rank0_only_and_offload
+        ):
+            model_ac.load_state_dict(state_dict_ac)
+        self._compare_models(model_ac, model_no_ac, self.assertEqual)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
@@ -417,17 +519,7 @@ class TestFSDPStateDict(FSDPTest):
 
             # Verify parameters are the same in the new model.
             if state_dict_rank0_and_offload:
-                # Broadcast the state dict and move it back to GPU in
-                # preparation for loading.
-                if not isinstance(model, FSDP):
-                    # Move everything to CPU to avoid running into
-                    # https://github.com/pytorch/pytorch/issues/77113, some params
-                    # will still be on GPU for non FSDP root modules.
-                    for k in fsdp_state_dict.keys():
-                        fsdp_state_dict[k] = fsdp_state_dict[k].cpu()
-                fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
-                for key in fsdp_state_dict.keys():
-                    fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
+                fsdp_state_dict = self._broadcast_state_dict(model, fsdp_state_dict)
             with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
                 model_new.load_state_dict(fsdp_state_dict, strict=True)
 
@@ -494,11 +586,7 @@ class TestFSDPStateDict(FSDPTest):
 
         # Load state_dict into zeroed model
         if state_dict_rank0_and_offload:
-            # Broadcast the state dict and move it back to GPU in
-            # preparation for loading.
-            state_dict = self._broadcast_state_dict(state_dict)
-            for key in state_dict.keys():
-                state_dict[key] = state_dict[key].cuda()
+            state_dict = self._broadcast_state_dict(model, state_dict)
 
         with FSDP.state_dict_type(model, STATE_DICT_MAPPING[state_dict_type]):
             model.load_state_dict(state_dict, strict=True)
@@ -675,17 +763,7 @@ class TestFSDPStateDict(FSDPTest):
         # Load fsdp's full state dict into the local and verify params are as
         # expected.
         if state_dict_rank0_and_offload:
-            # Broadcast + CUDA state_dict
-            if not isinstance(model, FSDP):
-                # Some portions of the model on rank 0 might not be on CPU,
-                # move everything to CPU to avoid running into
-                # https://github.com/pytorch/pytorch/issues/77113.
-                for k, t in fsdp_state_dict.items():
-                    if t.device != torch.device("cpu"):
-                        fsdp_state_dict[k] = t.cpu()
-            fsdp_state_dict = self._broadcast_state_dict(fsdp_state_dict)
-            for key in fsdp_state_dict.keys():
-                fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
+            fsdp_state_dict = self._broadcast_state_dict(model, fsdp_state_dict)
 
         # if self.rank == 0:
         blank_local_model.load_state_dict(fsdp_state_dict, strict=True)
