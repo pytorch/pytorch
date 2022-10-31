@@ -1650,13 +1650,20 @@ def _avg_pool(name, tuple_fn):
         )
         assert isinstance(padding, tuple)
         adjusted_padding = padding
+        # Although onnx::AvgPool provides count_include_pad,
+        # The corner case of Average Pooling with ceil_mode on
+        # PyTorch allows sliding window go off bound, which leads to
+        # this accommodation.
+        # More detail on https://github.com/pytorch/pytorch/issues/57178
         if count_include_pad:
-            input = g.op(
+            input = _op_with_optional_float_cast(
+                g,
                 "Pad",
                 input,
                 pads_i=((0,) * 2 + padding) * 2,
                 mode_s="constant",
                 value_f=0.0,
+                opset_before=11,
             )
             adjusted_padding = (0,) * len(padding)
         if ceil_mode:
