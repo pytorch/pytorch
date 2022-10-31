@@ -162,9 +162,8 @@ function checkout_install_torchdeploy() {
   pushd ..
   git clone --recurse-submodules https://github.com/pytorch/multipy.git
   pushd multipy
-  # with ABI flag change
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--abicxx"
+  pip install -e . --install-option="--cudatests"
   popd
   popd
 }
@@ -173,6 +172,7 @@ function test_torch_deploy(){
  pushd ..
  pushd multipy
  ./multipy/runtime/build/test_deploy
+ ./multipy/runtime/build/test_deploy_gpu
  popd
  popd
 }
