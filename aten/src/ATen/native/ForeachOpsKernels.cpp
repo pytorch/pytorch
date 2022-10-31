@@ -198,6 +198,26 @@ void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors
   }                                                                                                                                                     \
 }                                                                                                                                                       \
 
+#define FOREACH_POINTWISE_OP_TENSORLIST(OP)                                                                                                             \
+std::vector<Tensor> foreach_tensor_##OP##_tensorlist_slow(TensorList input, TensorList tensors1, TensorList tensors2, TensorList scalars) {             \
+  check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                   \
+                                                                                                                                                        \
+  std::vector<Tensor> result;                                                                                                                           \
+  for(const auto i : c10::irange(input.size())) {                                                                                                       \
+    result.emplace_back(input[i].OP(tensors1[i], tensors2[i], scalars[i]));                                                                             \
+  }                                                                                                                                                     \
+                                                                                                                                                        \
+  return result;                                                                                                                                        \
+}                                                                                                                                                       \
+                                                                                                                                                        \
+void foreach_tensor_##OP##_tensorlist_slow_(TensorList input, TensorList tensors1, TensorList tensors2, at::ArrayRef<Scalar> scalars) {                 \
+  check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                   \
+                                                                                                                                                        \
+  for(const auto i : c10::irange(input.size())) {                                                                                                       \
+    input[i].OP##_(tensors1[i], tensors2[i], scalars[i]);                                                                                               \
+  }                                                                                                                                                     \
+}                                                                                                                                                       \
+
 FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
 
@@ -248,6 +268,8 @@ FOREACH_POINTWISE_OP_SCALAR(addcmul);
 
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
+
+FOREACH_POINTWISE_OP_TENSORLIST(addcdiv);
 
 // NOTE(crcrpar): It didn't seem feasible to use `self[i]` as both the first and the last
 // arguments of `maximum_out` and `minimum_out` so I tentatively embarrassingly get and copy
