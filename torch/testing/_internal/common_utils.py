@@ -1430,6 +1430,7 @@ class CudaNonDefaultStream():
         for d in range(torch.cuda.device_count()):
             self.beforeStreams.append(torch.cuda.current_stream(d))
             deviceStream = torch.cuda.Stream(device=d)
+            self.beforeStreams[-1].synchronize()
             torch._C._cuda_setStream(deviceStream._cdata)
         torch._C._cuda_setDevice(beforeDevice)
 
@@ -2497,7 +2498,7 @@ class TestCase(expecttest.TestCase):
             # This emulates unittest.TestCase's behavior if a custom message passed and
             # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
             # is True (default)
-            msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
+            msg=(lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
