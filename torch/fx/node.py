@@ -115,7 +115,7 @@ class Node:
       following the Python calling convention
     - ``call_module`` applies a module in the module hierarchy's ``forward()`` method to given arguments. ``name`` is
       as previous. ``target`` is the fully-qualified name of the module in the module hierarchy to call.
-      ``args`` and ``kwargs`` represent the arguments to invoke the module on, *including the self argument*.
+      ``args`` and ``kwargs`` represent the arguments to invoke the module on, *excluding the self argument*.
     - ``call_method`` calls a method on a value. ``name`` is as similar. ``target`` is the string name of the method
       to apply to the ``self`` argument. ``args`` and ``kwargs`` represent the arguments to invoke the module on,
       *including the self argument*
