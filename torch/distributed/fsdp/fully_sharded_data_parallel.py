@@ -27,7 +27,6 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -39,7 +38,13 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.utils import _sync_params_and_buffers, _to_kwargs
+from torch.distributed.fsdp._common_utils import HandleTrainingState, TrainingState
+from torch.distributed.fsdp._runtime_utils import (
+    _clear_grads_if_needed,
+    _prepare_forward_inputs,
+    _wait_for_computation_stream,
+)
+from torch.distributed.utils import _sync_params_and_buffers
 
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
@@ -72,7 +77,6 @@ from .flat_param import (
     FlatParamHandle,
     HandleConfig,
     HandleShardingStrategy,
-    HandleTrainingState,
 )
 from .wrap import (
     _or_policy,
@@ -106,7 +110,6 @@ __all__ = [
     "LocalStateDictConfig",
     "ShardedStateDictConfig",
     "OptimStateKeyType",
-    "TrainingState_",
     "clean_tensor_name",
 ]
 
@@ -255,24 +258,6 @@ class BackwardPrefetch(Enum):
     BACKWARD_PRE = auto()
     BACKWARD_POST = auto()
     # TODO, BACKWARD_PRE_CPU, prefetch full parameters and keep them in the CPU memory
-
-
-class TrainingState_(Enum):
-    """
-    Simple enum to indicate what state FSDP is in. Used for asserting
-    to make sure APIs are called in the correct state.
-    ..note::
-        ``BACKWARD_PRE`` and ``BACKWARD_POST`` states are used to ensure we
-        receives backward hooks in the correct order. It is used to catch
-        unexpected order of hooks being called (likely due to our
-        hook registration logic or autograd engine logic changes).
-    """
-
-    IDLE = auto()
-    FORWARD = auto()
-    BACKWARD_PRE = auto()
-    BACKWARD_POST = auto()
-    SUMMON_FULL_PARAMS = auto()
 
 
 class StateDictType(Enum):
@@ -1056,7 +1041,7 @@ class FullyShardedDataParallel(nn.Module):
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
-        self.training_state = TrainingState_.IDLE
+        self.training_state = TrainingState.IDLE
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
         self.forward_prefetch = forward_prefetch
@@ -1693,6 +1678,18 @@ class FullyShardedDataParallel(nn.Module):
             and (not root_only or submodule.check_is_root())
         ]
 
+    @staticmethod
+    def _fsdp_handles(module: nn.Module) -> List[FlatParamHandle]:
+        """
+        Returns all nested FSDP instances' handles in the module hierarchy
+        rooted at ``module``.
+        """
+        return [
+            handle
+            for fsdp_module in FullyShardedDataParallel.fsdp_modules(module)
+            for handle in fsdp_module._handles
+        ]
+
     def apply(self, fn: Callable[[nn.Module], None]) -> "FullyShardedDataParallel":
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
@@ -1709,7 +1706,7 @@ class FullyShardedDataParallel(nn.Module):
             Module: self
         """
         uninitialized = self._is_root is None
-        self._assert_state(TrainingState_.IDLE)
+        self._assert_state(TrainingState.IDLE)
         with self._summon_full_params(recurse=False, writeback=True):
             ret = super().apply(fn)
 
@@ -1756,31 +1753,6 @@ class FullyShardedDataParallel(nn.Module):
             self._communication_hook is not None
             and self._communication_hook in LOW_PRECISION_HOOKS
         )
-
-    def _cast_fp_inputs_to_dtype(
-        self, dtype: torch.dtype, *args: Any, **kwargs: Any
-    ) -> Tuple[Any, Any]:
-        """
-        Casts floating point tensors in ``args`` and ``kwargs`` to the
-        precision given by ``dtype``, while respecting the existing
-        ``requires_grad`` on the tensors.
-        """
-
-        def cast_fn(x: torch.Tensor) -> torch.Tensor:
-            if not torch.is_floating_point(x):
-                return x
-            y = x.to(dtype)
-            # Explicitly copy over `requires_grad` since this runs inside
-            # `torch.no_grad()`
-            if x.is_leaf:
-                y.requires_grad = x.requires_grad
-            return y
-
-        with torch.no_grad():
-            return (
-                _apply_to_tensors(cast_fn, args),
-                _apply_to_tensors(cast_fn, kwargs),
-            )
 
     def _cast_buffers(
         self,
@@ -1880,7 +1852,7 @@ class FullyShardedDataParallel(nn.Module):
         # The following logic is only run on the root FSDP instance since it
         # will set `_is_root=False` for the non-root instances
         self._is_root = True
-        self._assert_state(TrainingState_.IDLE)
+        self._assert_state(TrainingState.IDLE)
         self._init_streams()
         self._cast_buffers(recurse=True)
         for handle in self._handles:
@@ -2039,21 +2011,6 @@ class FullyShardedDataParallel(nn.Module):
         # Stream for pre-unshard logic, namely allocations and writes for
         # CPU offloading (H2D copy) and mixed precision (low precision cast).
         self._streams["pre_unshard"] = torch.cuda.Stream()
-
-    def _wait_for_previous_optim_step(self) -> None:
-        """
-        The root :class:`FullyShardedDataParallel` instance needs to
-        synchronize with the default stream to ensure that the previous
-        optimizer step is done.
-        """
-        if not self._is_root:
-            return
-        current_stream = torch.cuda.current_stream()
-        self._streams["unshard"].wait_stream(current_stream)
-        # Having the pre-all-gather stream wait for the current stream even if
-        # we do not leverage the pre-all-gather stream is tolerable since this
-        # only runs once per iteration
-        self._streams["pre_unshard"].wait_stream(current_stream)
 
     def _prefetch_handles(
         self,
@@ -2272,9 +2229,7 @@ class FullyShardedDataParallel(nn.Module):
             module_name = f"{module_name}."
         # Activation checkpoint adds a prefix that has to be
         # removed as well.
-        module_name = module_name.replace(
-            f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
-        )
+        module_name = module_name.replace(_CHECKPOINT_PREFIX, "")
         return module_name
 
     @property
@@ -2337,7 +2292,8 @@ class FullyShardedDataParallel(nn.Module):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         self._lazy_init()
-        self._clear_grads_if_needed()
+        if self._is_root:
+            _clear_grads_if_needed(self._fsdp_handles(self))
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             # Get config args
             full_state_dict_config = (
@@ -2354,7 +2310,7 @@ class FullyShardedDataParallel(nn.Module):
                     offload_to_cpu=offload_to_cpu,
                     rank0_only=rank0_only,
                 )
-                if self.training_state != TrainingState_.SUMMON_FULL_PARAMS
+                if self.training_state != TrainingState.SUMMON_FULL_PARAMS
                 else contextlib.suppress()
             )
             with summon_ctx:
@@ -2448,7 +2404,7 @@ class FullyShardedDataParallel(nn.Module):
             module (nn.Module): Unused; expected by the hook signature.
             input (Any): Unused; expected by the hook signature.
         """
-        self.training_state = TrainingState_.FORWARD
+        self.training_state = TrainingState.FORWARD_BACKWARD
         self._exec_order_data.record_pre_forward(handles, self.training)
         for handle in handles:
             handle._training_state = HandleTrainingState.FORWARD
@@ -2507,29 +2463,10 @@ class FullyShardedDataParallel(nn.Module):
         # Register pre-backward hooks to unshard the flattened parameters
         # for the gradient computation (if needed)
         output = self._register_pre_backward_hooks(output, handles)
-        self.training_state = TrainingState_.IDLE
+        self.training_state = TrainingState.IDLE
         for handle in handles:
             handle._training_state = HandleTrainingState.IDLE
         return output
-
-    def _cast_forward_inputs(self, *args, **kwargs):
-        """Moves the forward inputs to the compute device and casts them to the
-        appropriate dtype if needed."""
-        # TODO: Do not use the side stream for tensor copies for now;
-        # investigate the perf with/without it
-        # TODO: For mixed precision, move the inputs to the compute device and
-        # cast to reduced-precision in a single `to()` call
-        args, kwargs = _to_kwargs(args, kwargs, self.compute_device.index, False)
-        args = args[0]
-        kwargs = kwargs[0]
-        if self._mixed_precision_enabled_for_params():
-            input_dtype = self.mixed_precision.param_dtype
-            args, kwargs = self._cast_fp_inputs_to_dtype(
-                input_dtype,
-                *args,
-                **kwargs,
-            )
-        return args, kwargs
 
     def _fsdp_root_pre_forward(self, *args, **kwargs):
         """
@@ -2547,24 +2484,21 @@ class FullyShardedDataParallel(nn.Module):
                 handles_key = tuple(fsdp_module._handles)
                 if handles_key:
                     self._needs_pre_forward_unshard[handles_key] = True
-        self._wait_for_previous_optim_step()
-        self._clear_grads_if_needed()
-        args, kwargs = self._cast_forward_inputs(*args, **kwargs)
+        _wait_for_computation_stream(
+            torch.cuda.current_stream(),
+            self._streams["unshard"],
+            self._streams["pre_unshard"],
+        )
+        _clear_grads_if_needed(self._fsdp_handles(self))
+        input_dtype = (
+            self.mixed_precision.param_dtype
+            if self._mixed_precision_enabled_for_params()
+            else None
+        )
+        args, kwargs = _prepare_forward_inputs(
+            self.compute_device, input_dtype, *args, **kwargs
+        )
         return args, kwargs
-
-    def _clear_grads_if_needed(self):
-        """
-        Iterates over all handles to clear original parameter gradients if
-        needed. See :meth:`FlatParamHandle._clear_grads_if_needed` for details.
-        Since this method's CPU overhead is minimal, we may call throughout
-        FSDP methods, which may serve as callsites to free the gradient memory
-        earlier.
-        """
-        if not self._use_orig_params or not self._is_root:
-            return
-        for fsdp_module in self.fsdp_modules(self):
-            for handle in fsdp_module._handles:
-                handle._clear_grads_if_needed()
 
     @staticmethod
     @contextlib.contextmanager
@@ -2706,14 +2640,15 @@ class FullyShardedDataParallel(nn.Module):
 
         torch.cuda.synchronize()
         self._lazy_init()
-        self._assert_state([TrainingState_.IDLE])
+        self._assert_state([TrainingState.IDLE])
         for handle in self._handles:
             assert handle._training_state == HandleTrainingState.IDLE
-        self.training_state = TrainingState_.SUMMON_FULL_PARAMS
+        self.training_state = TrainingState.SUMMON_FULL_PARAMS
         for handle in self._handles:
             handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 
-        self._clear_grads_if_needed()
+        if self._is_root:
+            _clear_grads_if_needed(self._fsdp_handles(self))
         free_unsharded_flat_params = [
             handle.needs_unshard() for handle in self._handles
         ]
@@ -2732,7 +2667,7 @@ class FullyShardedDataParallel(nn.Module):
             try:
                 yield
             finally:
-                self.training_state = TrainingState_.IDLE
+                self.training_state = TrainingState.IDLE
                 for handle in self._handles:
                     handle._training_state = HandleTrainingState.IDLE
         else:
@@ -2758,7 +2693,7 @@ class FullyShardedDataParallel(nn.Module):
                     self._reshard(self._handles, free_unsharded_flat_params)
                     if with_grads:
                         self._reshard_grads(self._handles)
-                    self.training_state = TrainingState_.IDLE
+                    self.training_state = TrainingState.IDLE
                     for handle in self._handles:
                         handle._training_state = HandleTrainingState.IDLE
 
@@ -2936,7 +2871,7 @@ class FullyShardedDataParallel(nn.Module):
         when inside the :meth:`summon_full_params` context manager.
         """
         should_clean_name = (
-            self.training_state == TrainingState_.SUMMON_FULL_PARAMS
+            self.training_state == TrainingState.SUMMON_FULL_PARAMS
             or self._use_orig_params
         )
         for buffer_name, buffer in super().named_buffers(*args, **kwargs):
@@ -2957,7 +2892,7 @@ class FullyShardedDataParallel(nn.Module):
         when inside the :meth:`summon_full_params` context manager.
         """
         should_clean_name = (
-            self.training_state == TrainingState_.SUMMON_FULL_PARAMS
+            self.training_state == TrainingState.SUMMON_FULL_PARAMS
             or self._use_orig_params
         )
         for param_name, param in super().named_parameters(*args, **kwargs):
@@ -3013,10 +2948,10 @@ class FullyShardedDataParallel(nn.Module):
                 # that it is called after all backward calls complete
                 if self._is_root and not self._post_backward_callback_queued:
                     self._queue_wait_for_post_backward()
-                    self._clear_grads_if_needed()
+                    _clear_grads_if_needed(self._fsdp_handles(self))
                 elif _handles_key:
-                    self._assert_state([TrainingState_.IDLE])
-                self.training_state = TrainingState_.BACKWARD_PRE
+                    self._assert_state([TrainingState.IDLE])
+                self.training_state = TrainingState.FORWARD_BACKWARD
                 # Queueing the post-backward callback is the only logic that is
                 # not per-handle in the pre-backward hook, so we can return
                 # early here if there are no handles.
@@ -3109,12 +3044,12 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel._post_backward_hook"
         ):
-            # First hook callback will see PRE state. If we have multiple params,
-            # then subsequent hook callbacks will see POST state.
-            self._assert_state(
-                [TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST]
+            self._assert_state([TrainingState.FORWARD_BACKWARD])
+            self.training_state = TrainingState.FORWARD_BACKWARD
+            p_assert(
+                handle._training_state == HandleTrainingState.BACKWARD_PRE,
+                f"Expects `BACKWARD_PRE` state but got {handle._training_state}",
             )
-            self.training_state = TrainingState_.BACKWARD_POST
             handle._training_state = HandleTrainingState.BACKWARD_POST
 
             if (
@@ -3287,7 +3222,7 @@ class FullyShardedDataParallel(nn.Module):
         However, if a low precision communication hook is registered, then this
         dtype cast happens in the hook instead.
         """
-        self._assert_state(TrainingState_.BACKWARD_POST)
+        self._assert_state(TrainingState.FORWARD_BACKWARD)
         if not self._low_precision_hook_enabled() and (
             self._mixed_precision_enabled_for_params()
             or self._mixed_precision_enabled_for_reduce()
@@ -3314,7 +3249,7 @@ class FullyShardedDataParallel(nn.Module):
         )
         if self._post_backward_callback_queued:
             return
-        self._assert_state([TrainingState_.IDLE])
+        self._assert_state([TrainingState.IDLE])
         self._post_backward_callback_queued = True
         Variable._execution_engine.queue_callback(self._wait_for_post_backward)
 
@@ -3408,7 +3343,7 @@ class FullyShardedDataParallel(nn.Module):
             _catch_all_reshard(m)
             _finalize_params(m)
             m._ran_pre_backward_hook.clear()
-            m.training_state = TrainingState_.IDLE
+            m.training_state = TrainingState.IDLE
             for handle in m._handles:
                 handle._training_state = HandleTrainingState.IDLE
             m._handles_prefetched.clear()
@@ -3447,12 +3382,12 @@ class FullyShardedDataParallel(nn.Module):
         # TODO (linjianma): Patch the forward of each model in the keys
         # of fsdp_wrap_map based on the information above.
 
-    def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
+    def _assert_state(self, state: Union[TrainingState, List[TrainingState]]) -> None:
         """Assert we are in the given state."""
         # Since assert can be turned off and this error checking
         # is really important, we use explicit error checking
         # and raise a ValueError if needed.
-        if isinstance(state, TrainingState_):
+        if isinstance(state, TrainingState):
             state = [state]
         if self.training_state not in state:
             msg = (
@@ -3490,7 +3425,7 @@ class FullyShardedDataParallel(nn.Module):
             raise RuntimeError(
                 "`no_sync()` on inner FSDP instances is not supported. Please call `no_sync()` on root FSDP module."
             )
-        self._assert_state(TrainingState_.IDLE)
+        self._assert_state(TrainingState.IDLE)
         old_flags = []
         for m in self.modules():
             if isinstance(m, FullyShardedDataParallel):
@@ -3534,12 +3469,16 @@ class FullyShardedDataParallel(nn.Module):
             collective communications.
         """
         self._lazy_init()
-        self._wait_for_previous_optim_step()
         if not self._is_root:
             raise RuntimeError(
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
             )
-        self._assert_state(TrainingState_.IDLE)
+        self._assert_state(TrainingState.IDLE)
+        _wait_for_computation_stream(
+            torch.cuda.current_stream(),
+            self._streams["unshard"],
+            self._streams["pre_unshard"],
+        )
 
         max_norm = float(max_norm)
         norm_type = float(norm_type)
@@ -4395,5 +4334,5 @@ def clean_tensor_name(tensor_name: str) -> str:
     # as it increases coupling between CheckpointWrapper and FSDP. This is also not
     # scalable for additional wrapped modules, we should come up with a general solution
     # for this issue.
-    tensor_name = tensor_name.replace(_CHECKPOINT_PREFIX + ".", "")
+    tensor_name = tensor_name.replace(_CHECKPOINT_PREFIX, "")
     return tensor_name
