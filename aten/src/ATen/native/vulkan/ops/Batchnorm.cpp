@@ -163,6 +163,7 @@ BatchNormPackedContext::BatchNormPackedContext(
     unpacked_.emplace_back(bias_opt);
     unpacked_.emplace_back(running_mean_opt);
     unpacked_.emplace_back(running_var_opt);
+    unpacked_.emplace_back(eps);
   }
 }
 
@@ -200,9 +201,9 @@ Tensor run_batchnorm_context(
       batchnorm_context->get_val(BatchNormPackedContext::ListArgs::kWeight)
           .toTensor());
 
-  const vTensor& v_bias =
-      convert(batchnorm_context->get_val(BatchNormPackedContext::ListArgs::kBias)
-                  .toTensor());
+  const vTensor& v_bias = convert(
+      batchnorm_context->get_val(BatchNormPackedContext::ListArgs::kBias)
+          .toTensor());
 
   const vTensor& v_running_mean = convert(
       batchnorm_context->get_val(BatchNormPackedContext::ListArgs::kRunningMean)

@@ -293,8 +293,8 @@ script::Module vulkanOptimizeForMobile(
   auto cloned_module = m.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm(cloned_module);
-  vulkanInsertPrePackedOps(cloned_module);
   cloned_module = freeze_module(cloned_module, preserved_methods);
+  vulkanInsertPrePackedOps(cloned_module);
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
