@@ -5,7 +5,6 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
-    cast,
     Dict,
     Generator,
     Iterator,

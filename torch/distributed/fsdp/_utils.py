@@ -1,7 +1,7 @@
 import dataclasses
 import traceback
 from collections import OrderedDict
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Set, Tuple, Union
 
 import torch
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -152,7 +152,7 @@ def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
     with no_dispatch():
-        tensor.record_stream(stream)
+        tensor.record_stream(cast(torch._C.Stream, stream))
 
 
 def p_assert(cond: Any, s: Any, raise_assertion_error: bool = True) -> None:
