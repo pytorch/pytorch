@@ -42,7 +42,7 @@ def deprecated(since: str, removed_in: str, instructions: str):
         )
 
         # Split docstring at first occurrence of newline
-        summary_and_body = docstring.split("\n", 1)
+        summary_and_body = docstring.split("\n\n", 1)
 
         if len(summary_and_body) > 1:
             summary, body = summary_and_body

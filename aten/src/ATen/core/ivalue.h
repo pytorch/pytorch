@@ -425,6 +425,7 @@ public:
   at::Tensor& toTensor() &;
   const at::Tensor& toTensor() const&;
   at::TensorImpl* unsafeToTensorImpl() const {
+    TORCH_INTERNAL_ASSERT(isTensor());
     return payload.as_tensor.unsafeGetTensorImpl();
   }
 
