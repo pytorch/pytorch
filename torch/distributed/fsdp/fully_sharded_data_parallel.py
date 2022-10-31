@@ -43,7 +43,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
     _init_core_state,
-    _init_ignored_modules_and_params,
+    _init_ignored_module_states,
     _init_module_and_device_state,
     _init_param_handle_from_params,
     _init_prefetching_state,
@@ -455,7 +455,7 @@ class FullyShardedDataParallel(nn.Module):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
 
-        _init_ignored_modules_and_params(self, module, ignored_modules)
+        _init_ignored_module_states(self, module, ignored_modules)
 
         if auto_wrap_policy is not None:
             auto_wrap_kwargs = {
@@ -506,7 +506,7 @@ class FullyShardedDataParallel(nn.Module):
             param_init_fn,
             sync_module_states,
         )
-        _init_prefetching_state(self)
+        _init_prefetching_state(self, backward_prefetch, forward_prefetch)
         _init_runtime_state(self)
         self._fsdp_wrapped_module = module
         _init_param_handle_from_params(self, self._managed_params, module)

@@ -162,8 +162,8 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
-    # Invariant: `self.params` contains exactly the `FlatParameter`s of the
-    # handles in `self._handles`
+    # Invariant: `state.params` contains exactly the `FlatParameter`s of the
+    # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
     state._handles = _handles
     params: List[FlatParameter] = []
@@ -194,9 +194,13 @@ def _init_runtime_state(
 
 
 @no_type_check
-def _init_prefetching_state(state: _State) -> _State:
-    state.backward_prefetch = BackwardPrefetch.BACKWARD_PRE
-    state.forward_prefetch = False
+def _init_prefetching_state(
+    state: _State,
+    backward_prefetch: BackwardPrefetch,
+    forward_prefetch: bool,
+) -> _State:
+    state.backward_prefetch = backward_prefetch
+    state.forward_prefetch = forward_prefetch
     _handles_prefetched: Dict[_HandlesKey, bool] = {}
     state._handles_prefetched = _handles_prefetched
     # Used for guarding against mistargeted backward prefetches
@@ -212,24 +216,6 @@ def _init_prefetching_state(state: _State) -> _State:
 
 def _init_state_dict_state(state: _State) -> _State:
     # TODO: after rebase
-    return state
-
-
-def _init_param_handles_from_module(
-    state: _State,
-    root_module: nn.Module,
-    auto_wrap_policy: Callable,
-    ignored_modules: Set[nn.Module],
-    ignored_params: Set[nn.Parameter],
-) -> _State:
-    params_per_wrapped_module = _get_params_per_wrapped_module(
-        root_module,
-        auto_wrap_policy,
-        ignored_modules,
-        ignored_params,
-    )
-    for params in params_per_wrapped_module:
-        _init_param_handle_from_params(state, params, root_module)
     return state
 
 
