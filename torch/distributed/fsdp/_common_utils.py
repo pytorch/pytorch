@@ -51,6 +51,11 @@ class HandleTrainingState(Enum):
     SUMMON_FULL_PARAMS = auto()
 
 
+def _is_composable(state: _State):
+    # TODO: This is a temporary hack for differentiate between code paths.
+    return not isinstance(state, nn.Module)
+
+
 def clean_tensor_name(tensor_name: str) -> str:
     """
     Cleans the parameter or buffer name by removing any module wrapper
