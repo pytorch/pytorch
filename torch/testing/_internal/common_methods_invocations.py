@@ -7016,9 +7016,10 @@ def error_inputs_poisson_nll_loss(op_info, device, **kwargs):
                      error_regex='abc is not valid')
     # invalid input shapes
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
-                     error_regex=(r'The size of tensor a \(5\) must match the '
+                     error_regex=(r'(Attempting to broadcast a dimension of length|'
+                                  r'The size of tensor a \(5\) must match the '
                                   r'size of tensor b \(4\) at non-singleton '
-                                  r'dimension 1'))
+                                  r'dimension 1)'))
 
 def error_inputs_soft_margin_loss(op_info, device, **kwargs):
     make = partial(make_tensor, device=device, dtype=torch.float32)
@@ -7030,9 +7031,10 @@ def error_inputs_soft_margin_loss(op_info, device, **kwargs):
                      error_regex='abc is not a valid value for reduction')
     # invalid input shapes
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
-                     error_regex=(r'The size of tensor a \(4\) must match the '
+                     error_regex=(r'(Attempting to broadcast a dimension of length|'
+                                  r'The size of tensor a \(4\) must match the '
                                   r'size of tensor b \(5\) at non-singleton '
-                                  r'dimension 1'))
+                                  r'dimension 1)'))
 
 def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, with_distance=False, **kwargs):
     make = partial(make_tensor, (S, M), device=device, dtype=dtype, requires_grad=requires_grad)
@@ -7064,18 +7066,21 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
          dict(),
          RuntimeError,
-         (r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
-          r"at non-singleton dimension 1")),
+         (r'(Attempting to broadcast a dimension of length|'
+          r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
+          r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 5), make_input(3, 4)),
          dict(),
          RuntimeError,
-         (r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
-          r"at non-singleton dimension 1")),
+         (r'(Attempting to broadcast a dimension of length|'
+          r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
+          r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 4), make_input(3, 5)),
          dict(),
          RuntimeError,
-         (r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
-          r"at non-singleton dimension 1")),
+         (r'(Attempting to broadcast a dimension of length|'
+          r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
+          r"at non-singleton dimension 1)")),
 
         # different dimensions
         (make_input(3,), (make_input(3, 4), make_input(3, 4)),
@@ -7234,9 +7239,11 @@ def error_inputs_l1_loss(op_info, device, **kwargs):
                      error_regex='abc is not a valid value for reduction')
     # invalid input shapes
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
-                     error_regex=(r'The size of tensor a \(4\) must match the '
+                     error_regex=(r'(Attempting to broadcast a dimension of length|'
+                                  r'The size of tensor a \(4\) must match the '
                                   r'size of tensor b \(5\) at non-singleton '
-                                  r'dimension 1'))
+                                  r'dimension 1)')
+                     )
 
 def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
@@ -17101,7 +17108,7 @@ python_ref_db = [
         "_refs.add",
         torch_opinfo_name="add",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -17139,7 +17146,7 @@ python_ref_db = [
         torch_opinfo_name="div",
         torch_opinfo_variant_name="no_rounding_mode",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
@@ -17167,7 +17174,7 @@ python_ref_db = [
         torch_opinfo_name="div",
         torch_opinfo_variant_name="trunc_rounding",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
     ),
@@ -17176,7 +17183,7 @@ python_ref_db = [
         torch_opinfo_name="div",
         torch_opinfo_variant_name="floor_rounding",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
     ),
@@ -17198,7 +17205,7 @@ python_ref_db = [
         torch_opinfo_name="floor_divide",
         rhs_make_tensor_kwargs=dict(exclude_zero=True),
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         # bfloat16 floor_divide compared with a float32 reference works inconsistently
@@ -17326,7 +17333,7 @@ python_ref_db = [
         "_refs.mul",
         torch_opinfo_name="mul",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         skips=(
             # Reference result was farther (0.0) from the precise computation
@@ -17413,14 +17420,14 @@ python_ref_db = [
         "_refs.sub",
         torch_opinfo_name="sub",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
         torch_opinfo_name="true_divide",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         skips=(
             # Reference result was farther (0.7433461727239705) from the precise
