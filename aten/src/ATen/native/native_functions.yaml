@@ -1885,6 +1885,7 @@
   dispatch:
     SparseCPU, SparseCUDA: div_sparse
     ZeroTensor: div_zerotensor
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_div_Tensor
   tags: canonical
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -1932,6 +1933,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_div_Scalar
   tags: canonical
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -2334,6 +2336,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: expm1_out
+    MPS: expm1_out_mps
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
 
@@ -13276,7 +13279,8 @@
 - func: _native_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, bool need_weights=True, bool average_attn_weights=True, int? mask_type=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention
+    CPU, NestedTensorCPU: native_multi_head_attention_cpu
+    CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
