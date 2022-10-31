@@ -407,7 +407,7 @@ class DistributedDataParallelTest(
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, devices)
 
-    # TODO: test_ucc_backend_2gpu_module and test_ucc_backend_4gpu_module 
+    # TODO: test_ucc_backend_2gpu_module and test_ucc_backend_4gpu_module
     # require broadcast_coalesced which is not supported by ucc currently
     @sandcastle_skip("requires broadcast coalesced, which is not supported by ucc currently")
     @requires_ucc()
