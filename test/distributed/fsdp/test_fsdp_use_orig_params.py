@@ -8,16 +8,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import BackwardPrefetch, CPUOffload
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import ShardingStrategy
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    clean_tensor_name,
+from torch.distributed.fsdp import (
+    BackwardPrefetch,
+    CPUOffload,
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import (
-    always_wrap_policy,
-    transformer_auto_wrap_policy,
-)
+from torch.distributed.fsdp._common_utils import clean_tensor_name
+from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -28,10 +26,10 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -238,11 +236,12 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             sharding_strategy=sharding_strategy,
         )
 
+    @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy_str",
         ["no_shard", "shard_grad_op", "full_shard"],
     )
-    def _test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
+    def test_diff_hyperparams_cpu_offload(self, sharding_strategy_str: str):
         """
         Tests FSDP parity with DDP when using multiple parameter groups with
         different hyperparameter settings with CPU offloading enabled. This is
@@ -361,11 +360,14 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         ddp_model = self._get_ddp_transformer(find_unused_params=True)
         ddp_param_groups = self._get_param_groups(ddp_model)
         assert len(ddp_param_groups) == 3, f"{len(ddp_param_groups)}"
-        fsdp_model, _ = self._get_fsdp_transformer_and_optim(  # ignore returned optimizer
+        (
+            fsdp_model,
+            _,
+        ) = self._get_fsdp_transformer_and_optim(  # ignore returned optimizer
             cuda_init_mode=CUDAInitMode.CUDA_BEFORE,
             init_optim_before_wrap=False,
             optim_class=torch.optim.Adam,  # ignored
-            multi_tensor=False,            # ignored
+            multi_tensor=False,  # ignored
             sharding_strategy=sharding_strategy,
             backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
             cpu_offload=None,
@@ -386,7 +388,9 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         ]
 
         for optim_ctor, ddp_param_group, fsdp_param_group in zip(
-            optim_ctors, ddp_param_groups[:2], fsdp_param_groups[:2],
+            optim_ctors,
+            ddp_param_groups[:2],
+            fsdp_param_groups[:2],
         ):
             ddp_optims.append(optim_ctor(ddp_param_group["params"]))
             fsdp_optims.append(optim_ctor(fsdp_param_group["params"]))
@@ -406,7 +410,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                         has_weight = True
                     elif "bias" in fqn and param.numel() > 0:
                         has_bias = True
-                has_both |= (has_weight and has_bias)
+                has_both |= has_weight and has_bias
         assert has_both, (
             f"Rank {self.rank} does not have a `FlatParameter` with both a "
             "weight and a bias in its shard, meaning that this test is vacuous"
@@ -440,7 +444,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         # Check that FSDP correctly exposes gradients even after forward
         # (namely, `None` for weights and non-`None` for biases)
         for (ddp_n, ddp_p), (fsdp_n, fsdp_p) in zip(
-            ddp_model.module.named_parameters(), fsdp_model.named_parameters(),
+            ddp_model.module.named_parameters(),
+            fsdp_model.named_parameters(),
         ):
             self.assertEqual(ddp_n, fsdp_n)
             if fsdp_p.numel() == 0:

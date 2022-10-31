@@ -25,7 +25,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
     "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node",
-    "sym_sqrt"
+    "sym_sqrt",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -166,7 +166,7 @@ class SymNode:
         return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
-        return self
+        return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
 
     def str(self):
         return f"{self.expr}"
