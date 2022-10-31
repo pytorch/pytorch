@@ -269,6 +269,7 @@ void vulkanRunCanonicalOptimizations(script::Module& module) {
 
 script::Module vulkanOptimizeForMobile(
     const script::Module& m,
+    const std::set<MobileOptimizerType>& optimization_blocklist,
     const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
