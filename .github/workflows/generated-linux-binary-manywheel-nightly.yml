@@ -25,6 +25,10 @@ env:
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-manywheel
   BUILDER_ROOT: /builder
+  CU117_DEPENDENCIES: "nvidia-cuda-runtime-cu11==11.7.99;\
+                       nvidia-cudnn-cu11==8.5.0.96;\
+                       nvidia-cublas-cu11==11.10.3.66;\
+                       nvidia-nccl-cu11==2.14.3"
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
