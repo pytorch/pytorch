@@ -1367,6 +1367,8 @@ def freeze_rng_state():
         #
         # In the long run torch.cuda.set_rng_state should probably be
         # an operator.
+        #
+        # NB: Mode disable is to avoid running cross-ref tests on thes seeding
         with no_dispatch(), disable_functorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
@@ -1430,6 +1432,7 @@ class CudaNonDefaultStream():
         for d in range(torch.cuda.device_count()):
             self.beforeStreams.append(torch.cuda.current_stream(d))
             deviceStream = torch.cuda.Stream(device=d)
+            self.beforeStreams[-1].synchronize()
             torch._C._cuda_setStream(deviceStream._cdata)
         torch._C._cuda_setDevice(beforeDevice)
 

@@ -12,6 +12,9 @@
 - torch/_dynamo/**
 - torch/_inductor/**
 - benchmarks/dynamo/**
+- torch/_subclasses/fake_tensor.py
+- torch/_subclasses/fake_utils.py
+- torch/_subclasses/meta_utils.py
 
 "module: cpu":
 - aten/src/ATen/cpu/**
