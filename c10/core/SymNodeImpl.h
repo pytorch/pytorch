@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/SymFloatNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -10,13 +9,12 @@
 
 namespace c10 {
 
-class SymInt;
-class SymIntNodeImpl;
+class SymNodeImpl;
+using SymNode = c10::intrusive_ptr<SymNodeImpl>;
 
-class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
+class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
  public:
-  c10::SymInt toSymInt();
-  virtual ~SymIntNodeImpl(){};
+  virtual ~SymNodeImpl(){};
 
   template <typename T>
   c10::intrusive_ptr<T> dyn_cast() const {
@@ -24,64 +22,85 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   }
 
   // these could be pure virtual when we implement LTC versions
-  virtual SymIntNode add(const SymIntNode& other) {
+  virtual bool is_int() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode sub(const SymIntNode& other) {
+  virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode mul(const SymIntNode& other) {
+  virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymFloatNode truediv(const SymIntNode& other) {
+  virtual SymNode sub(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode floordiv(const SymIntNode& other) {
+  virtual SymNode mul(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode mod(const SymIntNode& other) {
+  virtual SymNode truediv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode eq(const SymIntNode& other) {
+  virtual SymNode pow(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode ne(const SymIntNode& other) {
+  virtual SymNode floordiv(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode gt(const SymIntNode& other) {
+  virtual SymNode mod(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode lt(const SymIntNode& other) {
+  virtual SymNode eq(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode le(const SymIntNode& other) {
+  virtual SymNode ne(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode ge(const SymIntNode& other) {
+  virtual SymNode gt(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode ceil() {
+  virtual SymNode lt(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode neg() {
+  virtual SymNode le(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode min(const SymIntNode& other) {
+  virtual SymNode ge(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode max(const SymIntNode& other) {
+  virtual SymNode ceil() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode clone() {
+  virtual SymNode floor() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymFloatNode sym_float() {
+  virtual SymNode neg() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode min(const SymNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode max(const SymNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode clone() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode sym_int() {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymIntNode wrap(int64_t num) {
+  virtual SymNode sym_float() {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymNode wrap_int(int64_t num) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode wrap_float(double num) {
     TORCH_CHECK(false, "NYI");
   };
   virtual int64_t guard_int(const char* file, int64_t line) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   };
   virtual int64_t int_() {
