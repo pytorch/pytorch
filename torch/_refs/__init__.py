@@ -222,6 +222,7 @@ __all__ = [
     "diag",
     "diagonal",
     "diagonal_copy",
+    "diagonal_scatter",
     "dsplit",
     "dstack",
     "expand",
@@ -857,6 +858,7 @@ def _make_elementwise_binary_reference(
     has_out=True,
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
+    supports_two_python_scalars=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"),
@@ -876,8 +878,11 @@ def _make_elementwise_binary_reference(
                 "Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!"
             )
 
-        # TODO: enable this for operations that support it, like add
-        if isinstance(a, Number) and isinstance(b, Number):
+        if (
+            not supports_two_python_scalars
+            and isinstance(a, Number)
+            and isinstance(b, Number)
+        ):
             raise ValueError(
                 f"Receive two Number inputs to an elementwise binary operation {prim}!"
             )
@@ -912,11 +917,6 @@ def add(
     """
     Reference implementation of torch.add
     """
-
-    if isinstance(a, Number) and isinstance(b, Number):
-        raise ValueError(
-            "Receive two Number inputs to an elementwise binary operation!"
-        )
 
     a, b = _maybe_broadcast(a, b)
 
@@ -1189,6 +1189,7 @@ floor_divide = _make_elementwise_binary_reference(
     _floor_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.floor_divide,
+    supports_two_python_scalars=True,
 )
 
 
@@ -1463,6 +1464,7 @@ minimum = _make_elementwise_binary_reference(
 mul = _make_elementwise_binary_reference(
     prims.mul,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_two_python_scalars=True,
 )
 
 # TODO: add docstring
@@ -1519,11 +1521,6 @@ def sub(
     Reference implementation of torch.sub
     """
 
-    if isinstance(a, Number) and isinstance(b, Number):
-        raise ValueError(
-            "Receive two Number inputs to an elementwise binary operation!"
-        )
-
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
@@ -1546,6 +1543,7 @@ true_divide = _make_elementwise_binary_reference(
     prims.div,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
+    supports_two_python_scalars=True,
 )
 
 
@@ -1589,6 +1587,7 @@ trunc_divide = _make_elementwise_binary_reference(
     _trunc_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # CompositeImplicitAutograd
+    supports_two_python_scalars=True,
 )
 
 #
@@ -1952,6 +1951,7 @@ def _reduction(
     dtype: Optional[torch.dtype] = None,  # should be specified for ops that support it
     out: Optional[Tensor] = None,
     output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
+    exact_dtype: bool = False,
 ) -> TensorLikeType:  # it is usually SAME, but I want
     # ref writers to actually think about what to put here
     assert isinstance(a, TensorLike)
@@ -1998,7 +1998,7 @@ def _reduction(
                 "Expected the dtype of reduction result and out to match"
             )
         out = _maybe_resize_out(out, result.shape)
-        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
+        return _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
 
     if result.dtype != result_dtype and result_dtype is not None:
         result = prims.convert_element_type(result, result_dtype)
@@ -2171,6 +2171,7 @@ def amin(
         out=out,
         has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+        exact_dtype=True,
     )
 
 
@@ -2195,6 +2196,7 @@ def amax(
         out=out,
         has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
+        exact_dtype=True,
     )
 
 
@@ -2208,6 +2210,7 @@ def _dim_var_dispatch(dim=None, unbiased=None):
     return dim, unbiased
 
 
+@register_decomposition(torch.ops.aten.var)
 @out_wrapper()
 def var(
     a: TensorLikeType,
@@ -3294,7 +3297,10 @@ def index_add(
     *,
     alpha: NumberType = 1,
 ):
-    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
+    # index_add always returns a new contiguous tensor
+    return x.clone(memory_format=torch.contiguous_format).index_add_(
+        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+    )
 
 
 @register_decomposition(torch.ops.aten.index_select)
@@ -3510,6 +3516,26 @@ def diag(
         return torch.diag_embed(self, offset)
     else:
         return torch.diagonal_copy(self, offset)
+
+
+@register_decomposition(torch.ops.aten.diagonal_scatter)
+@out_wrapper()
+def diagonal_scatter(
+    input: TensorLikeType,
+    src: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    out = input.clone()
+    diag = out.diagonal(offset, dim1, dim2)
+    check(
+        diag.shape == src.shape,
+        lambda: "expected src to have a size equal to the diagonal of the input."
+        f"Got {src.shape} for a diagonal of shape {diag.shape}",
+    )
+    copy_to(diag, src)
+    return out
 
 
 @register_decomposition(torch.ops.aten.diagonal)
