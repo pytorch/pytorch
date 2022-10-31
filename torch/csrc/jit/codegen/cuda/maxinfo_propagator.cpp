@@ -116,7 +116,7 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
       insertNextHop(NextHopWithInfo(
           NextHop(NextHopType::C_AS_P, next_hop.to, consumer_tv),
           next_hop_info.info_to,
-          computeInfoCasP(next_hop.to, consumer_tv, next_hop_info.info_to)));
+          computeInfoP2C(next_hop.to, consumer_tv, next_hop_info.info_to)));
     }
 
     for (auto producer_tv : ir_utils::producerTvsOf(next_hop.to)) {
@@ -126,7 +126,7 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
       insertNextHop(NextHopWithInfo(
           NextHop(NextHopType::P_AS_C, next_hop.to, producer_tv),
           next_hop_info.info_to,
-          computeInfoPasC(next_hop.to, producer_tv, next_hop_info.info_to)));
+          computeInfoC2P(next_hop.to, producer_tv, next_hop_info.info_to)));
     }
   }
 }
@@ -147,6 +147,9 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
       case NextHopType::P_AS_C:
         propagator->propagateC2P(next_hop.from, next_hop.to);
         break;
+      default:
+        TORCH_INTERNAL_ASSERT(
+            false, "Unknown next hop type in MaxInfoSpanningTree::traverse.");
     }
   }
   propagator->tearDown();
@@ -230,7 +233,7 @@ std::unordered_set<IterDomain*> mapRFactorToRoot(
 // the consumer's root domain. The computed info will be represented by root
 // domain as root domain contains the raw information.
 std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree::
-    computeInfoCasP(
+    computeInfoP2C(
         TensorView* from,
         TensorView* to,
         std::shared_ptr<Information> from_info) const {
@@ -287,7 +290,7 @@ std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree:
 // to the producer's rfactor domain. The computed info will be represented by
 // rfactor domain as rfactor domain contains the raw information.
 std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree::
-    computeInfoPasC(
+    computeInfoC2P(
         TensorView* from,
         TensorView* to,
         std::shared_ptr<Information> from_info) const {
@@ -397,13 +400,48 @@ MaxRootDomainInfoSpanningTree::getReferenceRootIDInfo(
 
 // Given the preserved reference root ID info of a tensor, compute
 // the corresponding info in its sibling. Since info has nothing to do with
-// replay state, so sibling info is always identical by definition.
+// replay state, so sibling info is always identical by definition, except that
+// we need to replace the IDs stored in the info with the corresponding IDs in
+// `to`.
 std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree::
     computeInfoSibling(
         TensorView* from,
         TensorView* to,
         std::shared_ptr<Information> from_info) const {
-  return from_info;
+  RootDomainInfo result;
+
+  const auto& from_root_id_info =
+      std::dynamic_pointer_cast<RootDomainInfo>(from_info)->info;
+
+  const auto& from_root_dom = from->getRootDomain();
+  const auto& to_root_dom = to->getRootDomain();
+  const auto& from_rfactor_dom = from->getMaybeRFactorDomain();
+  const auto& to_rfactor_dom = to->getMaybeRFactorDomain();
+
+  TORCH_INTERNAL_ASSERT(from->hasRFactor() == to->hasRFactor());
+  TORCH_INTERNAL_ASSERT(from_root_dom.size() == to_root_dom.size());
+  TORCH_INTERNAL_ASSERT(from_rfactor_dom.size() == to_rfactor_dom.size());
+
+  std::unordered_map<IterDomain*, IterDomain*> id_map;
+  for (auto i : c10::irange(from_root_dom.size())) {
+    id_map[from_root_dom.at(i)] = to_root_dom.at(i);
+  }
+  if (from->hasRFactor()) {
+    for (auto i : c10::irange(from_rfactor_dom.size())) {
+      id_map[from_rfactor_dom.at(i)] = to_rfactor_dom.at(i);
+    }
+  }
+
+  for (auto& from_info : from_root_id_info) {
+    result.info.emplace_back();
+    RootIDInfo& to_info = result.info.back();
+    to_info.is_complete = from_info.is_complete;
+    to_info.is_rfactor = from_info.is_rfactor;
+    for (auto from_id : from_info.mapped_ids) {
+      to_info.mapped_ids.emplace(id_map.at(from_id));
+    }
+  }
+  return std::make_shared<RootDomainInfo>(std::move(result));
 }
 
 void SpanningTreePrinter::propagateC2P(TensorView* from, TensorView* to) {

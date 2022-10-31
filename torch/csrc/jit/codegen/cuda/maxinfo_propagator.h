@@ -29,7 +29,7 @@ namespace cuda {
  * MaxInfoSpanningTree::Information and implement `operator<` which is used to
  * tell which path contains more information, and `operator bool` which is used
  * to tell if there is any information stored. You also need to implement
- * computeInfoPasC, computeInfoCasP, and computeInfoSibling, which are the
+ * computeInfoC2P, computeInfoP2C, and computeInfoSibling, which are the
  * functions that compute information of the `to` tensor from the information of
  * the `from` tensor.
  */
@@ -120,11 +120,11 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
   void compute_spanning_tree();
 
  protected:
-  virtual std::shared_ptr<Information> computeInfoPasC(
+  virtual std::shared_ptr<Information> computeInfoC2P(
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const = 0;
-  virtual std::shared_ptr<Information> computeInfoCasP(
+  virtual std::shared_ptr<Information> computeInfoP2C(
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const = 0;
@@ -203,11 +203,11 @@ class TORCH_CUDA_CU_API MaxRootDomainInfoSpanningTree
     bool operator<(const Information& r) const override;
   };
 
-  virtual std::shared_ptr<Information> computeInfoPasC(
+  virtual std::shared_ptr<Information> computeInfoC2P(
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const override;
-  virtual std::shared_ptr<Information> computeInfoCasP(
+  virtual std::shared_ptr<Information> computeInfoP2C(
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const override;
