@@ -251,13 +251,10 @@ test_dynamo_shard() {
 
 
 test_inductor() {
-  echo "TODO: enable inductor unit tests"
-  # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
-
-  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
-  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
-  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
-  # PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
+  python test/test_modules.py --verbose
+  # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
+  # seen intest_ops_gradients.py
+  # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
 }
 
 test_inductor_huggingface_shard() {
@@ -281,7 +278,7 @@ test_inductor_timm_shard() {
   TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/timm_models.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 8 --partition-id "$1" \
+    --device cuda --inductor --float32 --total-partitions 5 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_timm_"$1".csv
 }
@@ -294,7 +291,7 @@ test_inductor_torchbench_shard() {
   TEST_REPORTS_DIR=/tmp/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   python benchmarks/dynamo/torchbench.py --ci --training --accuracy \
-    --device cuda --inductor --float32 --total-partitions 2 --partition-id "$1" \
+    --device cuda --inductor --float32 --total-partitions 1 --partition-id "$1" \
     --output "$TEST_REPORTS_DIR"/inductor_torchbench_"$1".csv
   python benchmarks/dynamo/check_csv.py -f "$TEST_REPORTS_DIR"/inductor_torchbench_"$1".csv
 }
@@ -754,15 +751,33 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 # Inductor CI sharding:
 # 1: unit test
 # 2: Huggingface
-# 3-10: TIMM
-# 11-12: TorchBench
-elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER == 11 && $NUM_TEST_SHARDS -gt 1 ]]; then
+# 3-7: TIMM
+# 8: TorchBench
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  test_inductor
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_huggingface
+  test_inductor_huggingface_shard 0
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 8 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  install_filelock
+  install_triton
+  install_timm
+  id=$((SHARD_NUMBER-3))
+  test_inductor_timm_shard $id
+elif [[ "${TEST_CONFIG}" == *inductor* && $SHARD_NUMBER -lt 9 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchtext
   install_torchvision
   install_filelock
   install_triton
   checkout_install_torchbench
-  id=$((SHARD_NUMBER-11))
+  id=$((SHARD_NUMBER-8))
   test_inductor_torchbench_shard $id
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
