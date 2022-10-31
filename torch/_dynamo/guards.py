@@ -644,7 +644,9 @@ class CheckFunctionManager:
                     if obj_expr not in expr_to_tensor_ref:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
-            finished_expressions.append(f"isinstance({name}, torch.Tensor)")
+            finished_expressions.append(
+                f"___check_type_id(id(type({name})), {id(type(torch.Tensor))})"
+            )
 
         guard_expression = self.output_graph.shape_env.get_guard_expr()
         expr_as_str = guard_printer.doprint(guard_expression)

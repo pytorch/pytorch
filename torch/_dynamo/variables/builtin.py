@@ -366,7 +366,20 @@ class BuiltinVariable(VariableTracker):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
             )
-            return DynamicShapeVariable.create(tx, proxy, None, **options)
+            value = None
+            if self.fn == range:
+                assert len(kwargs) == 0
+
+                def guard_if_dyn(arg):
+                    if isinstance(arg, DynamicShapeVariable):
+                        expr = arg.dyn_shape.get_pyobj().expr
+                        return tx.output.shape_env.evaluate_expr(expr)
+                    return arg
+
+                args = [guard_if_dyn(arg) for arg in args]
+                value = self.fn(*args)
+
+            return DynamicShapeVariable.create(tx, proxy, value, **options)
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, a, b):
