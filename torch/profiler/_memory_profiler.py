@@ -161,7 +161,7 @@ class SchemaMatcher:
     """
 
     @classmethod
-    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> Tuple[bool, ...]:
+    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> Tuple[Optional[bool], ...]:
         """Determine which inputs may have mutated based on function schema.
 
         Note that we don't need to resolve down to a single schema to perform
@@ -176,7 +176,7 @@ class SchemaMatcher:
             for i, arg in enumerate(schema.arguments):
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
-        return tuple(mutable or (True for _ in t.inputs))
+        return tuple(mutable or (None for _ in t.inputs))
 
     @classmethod
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
@@ -298,24 +298,34 @@ class DataFlowNode:
     def _determine_edges(self) -> Dict[TensorKey, DataFlowEdge]:
         subtree = tuple(_utils.traverse_dfs([self._event]))
 
-        def zip_mutable(
-            t: _ExtraFields_TorchOp,
-        ) -> Iterator[Tuple[Optional[TensorKey], bool]]:
-            for i, mutable in zip(t.inputs, SchemaMatcher.inputs_are_mutable(t)):
-                if isinstance(i, _TensorMetadata):
-                    yield TensorKey.from_tensor(i), mutable
-                elif isinstance(i, list):
-                    for j in i:
-                        yield TensorKey.from_tensor(j), mutable
+        # Start by populating edges from op inputs and outputs.
+        mutable_by_key: Dict[Optional[TensorKey], Set[Optional[bool]]] = {}
+        for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
+            for op_input, mutable in zip(
+                op.inputs, SchemaMatcher.inputs_are_mutable(op)
+            ):
+                # Tensor
+                if isinstance(op_input, _TensorMetadata):
+                    key = TensorKey.from_tensor(op_input)
+                    mutable_by_key.setdefault(key, set()).add(mutable)
+
+                # TensorList
+                elif isinstance(op_input, list):
+                    for op_input_i in op_input:
+                        key = TensorKey.from_tensor(op_input_i)
+                        mutable_by_key.setdefault(key, set()).add(mutable)
 
         edges: DefaultDict[Optional[TensorKey], DataFlowEdge]
         edges = collections.defaultdict(DataFlowEdge)
-
-        # Start by populating edges from op inputs and outputs.
-        for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
-            for key, mutable in zip_mutable(op):
+        for key, mutable_set in mutable_by_key.items():
+            if key is not None:
                 edges[key].input_version = self._graph.lookup(key) if key else -1
-                edges[key].mutated = edges[key].mutated or mutable
+
+                # We consider an op to be mutated if we encounter a schema where it
+                # is a mutable argument OR if it is ambiguous. (We never explicitly
+                # see it in any schema.)
+                mutated = (True in mutable_set) or (tuple(mutable_set) == (None,))
+                edges[key].mutated = mutated
 
         # Then handle deletions. Note that deleting a Tensor implicitly adds
         # it as an input edge.
