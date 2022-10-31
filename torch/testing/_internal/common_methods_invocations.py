@@ -15603,7 +15603,8 @@ op_db: List[OpInfo] = [
         "nn.functional.alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -15617,9 +15618,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
             DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         dtypes=(torch.float16,), device_type='cpu'),
-            # RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
-            DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
                          dtypes=(torch.float16,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
@@ -16943,13 +16941,20 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.alpha_dropout",
         supports_nvfuser=False,
         decorators=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestCommon',
+                         'test_python_ref'),
             # AssertionError: Tensor-likes are not close!
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback'),
-            DecorateInfo(unittest.skip("Skipped!"),
-                         'TestCommon', 'test_python_ref_executor', device_type='cuda'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor', device_type='cuda'),
             # AssertionError: Tensor-likes are not close!
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
+                         'TestMathBits',
+                         'test_neg_view'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(

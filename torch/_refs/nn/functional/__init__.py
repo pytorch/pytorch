@@ -91,10 +91,10 @@ def alpha_dropout(
     alpha = 1.7580993408473766
 
     a = 1.0 / ((alpha * alpha * p + 1) ** 2 * (1 - p) ** 2)
-    b = refs.add(refs.mul(refs.add(-1, noise), alpha * a), alpha * a * p)
+    b = refs.mul(-1 + noise, alpha * a) + alpha * a * p
     noise = refs.mul(a, noise)
 
-    return refs.add(refs.mul(self, noise), b)
+    return refs.mul(self, noise) + b
 
 
 # celu is implemented specially because it has an alpha argument
