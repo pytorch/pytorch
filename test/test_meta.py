@@ -6,7 +6,7 @@ import os
 from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch._subclasses.meta_utils import MetaConverter
+from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
@@ -67,32 +67,7 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m2._version, m1._version)
 
     def assertMetadataMatches(self, m1, m2):
-        self.assertEqual(m1.dtype, m2.dtype)
-        self.assertEqual(m1.shape, m2.shape)
-        self.assertEqual(m1.requires_grad, m2.requires_grad)
-        self.assertEqual(m1.is_leaf, m2.is_leaf)
-        self.assertEqual(m1.grad_fn is None, m2.grad_fn is None)
-        self.assertEqual(m1.is_sparse, m2.is_sparse)
-        self.assertEqual(m1.is_inference(), m2.is_inference())
-        self.assertEqual(m1.is_conj(), m2.is_conj())
-        self.assertEqual(m1.is_neg(), m2.is_neg())
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
-            grad_not_none = m1.grad is not None
-        if grad_not_none:
-            self.assertMetadataMatches(m1.grad, m2.grad)
-        if m1.is_sparse:
-            self.assertEqual(m1.dense_dim(), m2.dense_dim())
-            self.assertEqual(m1.sparse_dim(), m2.sparse_dim())
-            self.assertEqual(m1.is_coalesced(), m2.is_coalesced())
-        else:
-            self.assertEqual(m1.stride(), m2.stride())
-            self.assertEqual(m1.storage_offset(), m2.storage_offset())
-            self.assertEqual(m1._is_view(), m2._is_view())
-            if m1._is_view():
-                self.assertMetadataMatches(m1._base, m2._base)
-        # TODO: test if is resizable (no direct query for this atm)
-        # TODO: audit AutogradMeta to see if it matches
+        assert_metadata_eq(self.assertEqual, m1, m2)
 
     def test_view_of_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
@@ -128,6 +103,21 @@ class TestMetaConverter(TestCase):
         self.assertMetadataMatches(m1, z1)
         self.assertMetadataMatches(m2, z2)
         self.assertSameVersionCounter(m1, m2)
+
+    def test_view_of_view_of_leaf(self):
+        x = torch.randn(8)
+        y = x.view(2, 4)
+        y.requires_grad = True
+        z = y.view(2, 2, 2)
+
+        to_meta = MetaConverter()
+        mx = to_meta(x)
+        mz = to_meta(z)
+
+        self.assertFalse(z.is_leaf)
+
+        self.assertMetadataMatches(mx, x)
+        self.assertMetadataMatches(mz, z)
 
     def test_leaf(self):
         x = torch.randn(4, requires_grad=True)

@@ -149,7 +149,7 @@ class FakeTensorConverter(object):
         # In principle preserving views should be OK, but in practice
         # AOTAutograd (or maybe autograd) seems to do the wrong thing.  See
         # https://github.com/pytorch/torchdynamo/issues/1815
-        self.meta_converter = MetaConverter(preserve_views=False)
+        self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
@@ -234,9 +234,7 @@ class FakeTensorConverter(object):
                     constant=t if make_constant else None,
                 )
 
-        out = self.meta_converter(
-            t, shape_env=shape_env, strict=True, callback=mk_fake_tensor
-        )
+        out = self.meta_converter(t, shape_env=shape_env, callback=mk_fake_tensor)
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
