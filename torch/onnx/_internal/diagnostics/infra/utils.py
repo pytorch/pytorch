@@ -20,7 +20,7 @@ def python_frame(frame: inspect.FrameInfo) -> _infra.StackFrame:
     )
 
 
-def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 64) -> _infra.Stack:
+def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16) -> _infra.Stack:
     """Returns the current Python call stack."""
     if frames_to_skip < 0:
         raise ValueError("frames_to_skip must be non-negative")

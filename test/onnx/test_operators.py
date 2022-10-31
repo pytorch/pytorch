@@ -17,11 +17,12 @@ import tempfile
 # Full diff for expect files
 import unittest
 
+import pytorch_test_common
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx
-
 from pytorch_test_common import (
     BATCH_SIZE,
     flatten,
@@ -70,7 +71,7 @@ class FuncModule(Module):
         return self.f(*itertools.chain(args, self.params))
 
 
-class TestOperators(common_utils.TestCase):
+class TestOperators(pytorch_test_common.ExportTestCase):
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()

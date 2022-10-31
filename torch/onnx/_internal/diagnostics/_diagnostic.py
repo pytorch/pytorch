@@ -12,7 +12,7 @@ from torch.utils import cpp_backtrace
 _ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
 
 
-def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 64):
+def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16):
     """Returns the current C++ call stack.
 
     This function utilizes `torch.utils.cpp_backtrace` to get the current C++ call stack.
@@ -54,10 +54,10 @@ class ExportDiagnostic(infra.Diagnostic):
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self._record_python_call_stack(frames_to_skip=1)
-        # self._record_cpp_call_stack(frames_to_skip=1)
+        self.record_python_call_stack(frames_to_skip=1)
+        self.record_cpp_call_stack(frames_to_skip=1)
 
-    def _record_python_call_stack(self, frames_to_skip) -> None:
+    def record_python_call_stack(self, frames_to_skip) -> None:
         """Records the current Python call stack in the diagnostic."""
         frames_to_skip += 1  # Skip this function.
         stack = infra_utils.python_call_stack(frames_to_skip=frames_to_skip)
@@ -65,7 +65,7 @@ class ExportDiagnostic(infra.Diagnostic):
         self.with_stack(stack)
         self.python_call_stack = stack
 
-    def _record_cpp_call_stack(self, frames_to_skip) -> None:
+    def record_cpp_call_stack(self, frames_to_skip) -> None:
         """Records the current C++ call stack in the diagnostic."""
         # No need to skip this function because python frame is not recorded
         # in cpp call stack.
