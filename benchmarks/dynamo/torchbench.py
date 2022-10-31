@@ -217,7 +217,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
-        if self.args.dashboard:
+        if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
