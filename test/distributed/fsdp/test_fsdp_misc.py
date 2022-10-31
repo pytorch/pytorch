@@ -1,36 +1,46 @@
 # Owner(s): ["oncall: distributed"]
 
-from copy import deepcopy
 import functools
 import sys
 from collections import namedtuple
 from contextlib import suppress
+from copy import deepcopy
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp import FlatParameter
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import ShardingStrategy, CPUOffload
-from torch.distributed.fsdp.wrap import (
-    always_wrap_policy,
-    transformer_auto_wrap_policy,
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+    apply_activation_checkpointing,
+    checkpoint_wrapper,
+    CheckpointImpl,
 )
+from torch.distributed.fsdp import (
+    CPUOffload,
+    FlatParameter,
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    FLAT_PARAM,
+    FSDP_WRAPPED_MODULE,
+)
+from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    _assert_module_states,
     CUDAInitMode,
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
     TransformerWithSharedParams,
-    _assert_module_states,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -71,9 +81,7 @@ class TestFSDPMisc(FSDPTest):
         t = torch.ones(1, device="cuda", requires_grad=True)
 
         MyOutputType = namedtuple(
-            "MyOutputType",
-            ["a", "b", "c", "d"],
-            defaults=(t, t, t, t)
+            "MyOutputType", ["a", "b", "c", "d"], defaults=(t, t, t, t)
         )
 
         inp = MyOutputType()
@@ -89,7 +97,6 @@ class TestFSDPMisc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_not_all_outputs_used_in_loss(self):
-
         class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -108,10 +115,7 @@ class TestFSDPMisc(FSDPTest):
                     full_param = param._full_param_padded
                     self.assertEqual(full_param.storage().size(), 0)
 
-                self.assertEqual(
-                    param.data_ptr(),
-                    param._local_shard.data_ptr()
-                )
+                self.assertEqual(param.data_ptr(), param._local_shard.data_ptr())
 
         def _check_equal(local, fsdp):
             with FSDP.summon_full_params(fsdp):
@@ -121,7 +125,7 @@ class TestFSDPMisc(FSDPTest):
         for sharding_strategy in [
             ShardingStrategy.FULL_SHARD,
             ShardingStrategy.SHARD_GRAD_OP,
-            ShardingStrategy.NO_SHARD
+            ShardingStrategy.NO_SHARD,
         ]:
             with self.subTest(sharding_strategy=sharding_strategy):
                 fsdp_ctor = functools.partial(FSDP, sharding_strategy=sharding_strategy)
@@ -160,14 +164,16 @@ class TestFSDPMisc(FSDPTest):
                     # Ensure at least some change from previous params, otherwise
                     # above check would be vacuously true.
                     self.assertTrue(
-                        any(not torch.equal(p1, p2) for p1, p2 in zip(prev_params, m_local.parameters()))
+                        any(
+                            not torch.equal(p1, p2)
+                            for p1, p2 in zip(prev_params, m_local.parameters())
+                        )
                     )
                     prev_params = [p.clone() for p in local_m.parameters()]
                     opt.zero_grad()
                     opt_local.zero_grad()
 
                 dist.barrier()
-
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
@@ -193,10 +199,10 @@ class TestFSDPMisc(FSDPTest):
         fsdp = FSDP(
             MyModel().cuda(),
             sharding_strategy=sharding_strategy,
-            auto_wrap_policy=always_wrap_policy
+            auto_wrap_policy=always_wrap_policy,
         )
-        x = torch.randn(10, 10, device='cuda')
-        y = torch.randn(10, 10, device='cuda')
+        x = torch.randn(10, 10, device="cuda")
+        y = torch.randn(10, 10, device="cuda")
         for i in range(4):
             if use_second_layer:
                 a, b = fsdp(x, y)
@@ -241,6 +247,7 @@ class TestFSDPMisc(FSDPTest):
         Ensures that even if device_id is specified but we have
         CPU offload, module is on CPU after init.
         """
+
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -256,7 +263,7 @@ class TestFSDPMisc(FSDPTest):
             model,
             auto_wrap_policy=always_wrap_policy,
             cpu_offload=CPUOffload(offload_params=True),
-            device_id=torch.cuda.current_device()
+            device_id=torch.cuda.current_device(),
         )
 
         cpu_device = torch.device("cpu")
@@ -281,7 +288,8 @@ class TestFSDPMisc(FSDPTest):
           without specifying a device ID (i.e. ``torch.device("cuda")``) warns
         """
         dev_id = (
-            torch.cuda.current_device() if use_index
+            torch.cuda.current_device()
+            if use_index
             else torch.device("cuda", torch.cuda.current_device())
         )
 
@@ -289,8 +297,7 @@ class TestFSDPMisc(FSDPTest):
             """Checks that the ``FlatParameter``s in ``module`` have device
             matching ``device_id``."""
             devices = {
-                p.device for p in module.parameters()
-                if isinstance(p, FlatParameter)
+                p.device for p in module.parameters() if isinstance(p, FlatParameter)
             }
             assert len(devices) > 0
             self.assertEqual(1, len(devices))
@@ -328,11 +335,10 @@ class TestFSDPMisc(FSDPTest):
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
                 CUDAInitMode.CUDA_BEFORE,
-                fsdp_kwargs={"device_id": torch.device("cuda")}
+                fsdp_kwargs={"device_id": torch.device("cuda")},
             )
         _check_device_matches(
-            nested_wrapped_module,
-            torch.device("cuda", torch.cuda.current_device())
+            nested_wrapped_module, torch.device("cuda", torch.cuda.current_device())
         )
 
     @skip_if_lt_x_gpu(2)
@@ -340,10 +346,9 @@ class TestFSDPMisc(FSDPTest):
         """Tests that specifying a ``device_id`` argument to FSDP for a GPU
         module that does not match the GPU device ID raises an error."""
         context = (
-            self.assertRaisesRegex(
-                ValueError,
-                f"cuda:{self.rank} vs cuda:0"
-            ) if self.rank != 0 else suppress()
+            self.assertRaisesRegex(ValueError, f"cuda:{self.rank} vs cuda:0")
+            if self.rank != 0
+            else suppress()
         )
         with context:
             NestedWrappedModule.init(
@@ -360,6 +365,7 @@ class TestFSDPMisc(FSDPTest):
     def test_multi_device_not_supported(self):
         """Tests that wrapping a multi-device module (i.e. with submodules on
         both GPU and CPU) with FSDP raises an error."""
+
         class MultiDeviceModule(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -392,11 +398,14 @@ class TestFSDPMisc(FSDPTest):
         # is computed as torch.cuda.current_device when there are no params.
         no_params = nn.ReLU().cuda()
         context = (
-            self.assertRaisesRegex(
-                ValueError,
-                f"Inconsistent.*cuda:{self.rank} vs cuda:0"
+            (
+                self.assertRaisesRegex(
+                    ValueError, f"Inconsistent.*cuda:{self.rank} vs cuda:0"
+                )
             )
-        ) if self.rank != 0 else suppress()
+            if self.rank != 0
+            else suppress()
+        )
         with context:
             module = FSDP(no_params, device_id=0)
 
@@ -439,7 +448,7 @@ class TestFSDPMisc(FSDPTest):
         )
         with self.assertRaisesRegex(
             ValueError,
-            "Module has CPU parameters, but sync_module_states=True is specified."
+            "Module has CPU parameters, but sync_module_states=True is specified.",
         ):
             FSDP(nested_wrapped_module, self.process_group, sync_module_states=True)
 
@@ -457,6 +466,7 @@ class TestFSDPMisc(FSDPTest):
         FSDP broadcasts model from rank 0 to ensure it starts off with the same
         values.
         """
+
         class MyModel(nn.Module):
             def __init__(self, rank):
                 super().__init__()
@@ -467,19 +477,111 @@ class TestFSDPMisc(FSDPTest):
                 self.register_buffer("buffer", torch.ones(1) * rank)
 
         m = MyModel(self.rank).cuda()
-        _assert_module_states(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
+        _assert_module_states(
+            m, process_group=self.process_group, assert_fn=self.assertNotEqual
+        )
         # Passing sync_module_states into FSDP makes model the same during init.
         fsdp = FSDP(m, sync_module_states=True)
         with fsdp.summon_full_params(fsdp):
-            _assert_module_states(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
+            _assert_module_states(
+                fsdp, process_group=self.process_group, assert_fn=self.assertEqual
+            )
 
         # sync_module_states also works with CPU module with device_id passed in
         m = MyModel(self.rank)
-        _assert_module_states(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
+        _assert_module_states(
+            m, process_group=self.process_group, assert_fn=self.assertNotEqual
+        )
         # Passing sync_module_states into FSDP makes model the same during init.
         fsdp = FSDP(m, device_id=torch.cuda.current_device(), sync_module_states=True)
         with fsdp.summon_full_params(fsdp):
-            _assert_module_states(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
+            _assert_module_states(
+                fsdp, process_group=self.process_group, assert_fn=self.assertEqual
+            )
+
+    @skip_if_lt_x_gpu(2)
+    def test_change_wrapped_module_after_ctor(self):
+        """
+        Tests changing an FSDP instance's wrapped module after the FSDP
+        constructor.
+        """
+        dist.set_debug_level(dist.DebugLevel.DETAIL)
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq1 = nn.Sequential(
+                    nn.Linear(5, 5),
+                    nn.Linear(5, 5),
+                )
+                self.seq2 = nn.Sequential(nn.Linear(5, 5))
+                self.lin = nn.Linear(5, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.lin(self.relu(self.seq2(self.relu(self.seq1(x)))))
+
+        def get_fsdp_model():
+            fsdp_kwargs = {"use_orig_params": False}
+            model = Model().cuda()
+            model.seq1 = FSDP(model.seq1, **fsdp_kwargs)
+            model.seq2[0] = FSDP(model.seq2[0], **fsdp_kwargs)
+            model = FSDP(model, **fsdp_kwargs)
+            return model
+
+        # Wrap with `CheckpointWrapper` *after* FSDP construction
+        model = get_fsdp_model()
+        non_reentrant_wrapper = functools.partial(
+            checkpoint_wrapper,
+            offload_to_cpu=False,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+        )
+        apply_activation_checkpointing(
+            model,
+            checkpoint_wrapper_fn=non_reentrant_wrapper,
+            check_fn=lambda submodule: isinstance(submodule, nn.Linear),
+        )
+
+        # Check that `seq2[0]` only has a single `FlatParameter` registered and
+        # that it has the `CheckpointWrapper` prefix in its FQN since it was
+        # registered to the `Linear` wrapped module in the FSDP constructor and
+        # only wrapped with `CheckpointWrapper` after
+        seq2_0_named_params = list(model.seq2[0].named_parameters())
+        self.assertEqual(len(seq2_0_named_params), 1)
+        self.assertTrue(type(seq2_0_named_params[0][1]) is FlatParameter)
+        self.assertTrue(_CHECKPOINT_PREFIX in seq2_0_named_params[0][0])
+
+        # Trigger the re-registration via `_lazy_init()`, and check for a
+        # warning, which is only emitted for DETAIL
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The FSDP wrapped module changed from Linear.*to CheckpointWrapper",
+        ):
+            model._lazy_init()
+
+        # Check that now the `FlatParameter` is registered to the
+        # `CheckpointWrapper`, which is now the new wrapped module
+        seq2_0_named_params = list(model.seq2[0].named_parameters())
+        self.assertEqual(len(seq2_0_named_params), 1)
+        self.assertTrue(type(seq2_0_named_params[0][1]) is FlatParameter)
+        self.assertFalse(_CHECKPOINT_PREFIX in seq2_0_named_params[0][0])
+        self.assertFalse(isinstance(model.seq2[0].module, nn.Linear))
+
+        # Check that replacing a module *after* FSDP construction errors
+        model = get_fsdp_model()
+        # NOTE: Setting `model.seq2[0].module = nn.Linear(3, 3)` does not save
+        # to the FSDP instance's `module` attribute since `module` is a
+        # property, meaning that it would not actually change the wrapped
+        # module, so we use `setattr()` like in `_recursive_wrap()`.
+        setattr(model.seq2[0], FSDP_WRAPPED_MODULE, nn.Linear(3, 3))
+        with self.assertRaisesRegex(RuntimeError, "are invalid behavior"):
+            model._lazy_init()
+
+        # Check that deleting the `FlatParameter` errors
+        model = get_fsdp_model()
+        delattr(model.seq2[0].module, FLAT_PARAM)
+        with self.assertRaisesRegex(RuntimeError, "are invalid behavior"):
+            model._lazy_init()
 
 
 instantiate_parametrized_tests(TestFSDPMisc)

@@ -21,7 +21,7 @@ from .exc import (
 from .ir import Constant, FixedLayout, InputBuffer, TensorBox
 from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_logging, dynamo_utils
+from .utils import dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -40,11 +40,9 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
 
-        size = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in size
-        ]
+        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymIntNode) else i for i in stride
+            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
         ]
         return size, stride
 
@@ -339,7 +337,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(dynamo_logging.CODE, "Output code: %s", mod.__file__)
+        log.log(logging.CODE, "Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
