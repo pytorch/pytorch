@@ -13108,6 +13108,93 @@ class TestNNDeviceType(NNTestCase):
         s = exp.sum(dim=3, keepdim=True).expand(exp.size())
         return exp / s
 
+    def test_masked_softmax_mask_types_0_1(self, device):
+        # Test that mask type 0 (LxL attention mask) and mask type 1 (BxL padding mask)
+        # are processed correctly on the fast path and the results match explicit slow
+        # calculation.
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+
+        for (B, num_heads, L) in sizes:
+
+            # mask_type == 0 => attention mask of shape LxL
+            src_mask_orig = torch.randint(0, 2, (L, L)).bool()
+            src_mask = src_mask_orig.reshape(1, 1, L, L).expand(B, num_heads, L, L).bool()
+
+            # mask_type == 1 => padding mask of shape BxL
+            src_key_padding_mask_orig = torch.randint(0, 2, (B, L)).bool()
+            src_key_padding_mask = src_key_padding_mask_orig.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+
+            masks = [(src_mask_orig, src_mask, 0), (src_key_padding_mask_orig, src_key_padding_mask, 1)]
+            for dim in [0, 3]:
+                for mask_orig, mask, mask_type in masks:
+                    if (self.device_type == "cuda") and (num_heads % 2) and (mask_type == 1):
+                        # CUDA path doesn't support padding mask when the number of heads is odd
+                        continue
+                    input = torch.randn((B, num_heads, L, L))
+                    if (self.device_type == "cuda"):
+                        input = input.cuda()
+                        mask = mask.cuda()
+                        mask_orig = mask_orig.cuda()
+                    native_res = torch._masked_softmax(input, mask_orig, dim, mask_type)
+                    mask = ~mask
+
+                    def slow_masked_softmax(input, mask):
+                        exp = torch.exp(input)
+                        exp = exp * mask
+                        s = exp.sum(dim=dim, keepdim=True).expand(exp.size())
+                        return exp / s
+
+                    pt_res = slow_masked_softmax(input, mask)
+                    pt_res = torch.nan_to_num(pt_res)
+
+                    mask_not = mask.logical_not()
+                    # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
+                    # Converts rows with all True's to False
+                    mask_out = mask_not.all(dim, keepdim=True).expand(mask_not.shape)
+                    self.assertEqual(
+                        pt_res.masked_fill(mask_out, 0),
+                        native_res.masked_fill(mask_out, 0),
+                        exact_dtype=True
+                    )
+
+    @onlyCUDA
+    def test_masked_softmax_devices_parity(self):
+        # Test that softmax with mask type 0 (LxL attention mask) and mask type 1 (BxL padding mask)
+        # gives the same result on CPU and on CUDA
+
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for (B, num_heads, L) in sizes:
+            # mask_type == 0 => attention mask of shape LxL
+            src_mask = torch.randint(0, 2, (L, L)).bool()
+            # mask_type == 1 => padding mask of shape BxL
+            src_key_padding_mask = torch.randint(0, 2, (B, L)).bool()
+            masks = [(src_mask, 0), (src_key_padding_mask, 1)]
+            input = torch.randn((B, num_heads, L, L))
+            for dim in [0, 3]:
+                for mask, mask_type in masks:
+                    if (num_heads % 2) and (mask_type == 1):
+                        # CUDA path doesn't support padding mask when the number of heads is odd
+                        continue
+
+                    def softmax_on_device(mask, input, device):
+                        # Compute softmax on a given device
+                        input_device = input.to(device)
+                        mask_device = mask.to(device)
+                        softmax_res = torch._masked_softmax(input_device, mask_device, dim, mask_type)
+                        if mask_type == 0:
+                            mask_expanded = mask_device.reshape(1, 1, L, L).expand(B, num_heads, L, L).bool()
+                        else:
+                            mask_expanded = mask_device.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+                        # In result, should only fill the entirely masked out rows since those are non-deterministic (*may* be 0)
+                        # Fill rows with all True's with 0
+                        mask_out = mask_expanded.all(dim, keepdim=True).expand(mask_expanded.shape)
+                        softmax_res = softmax_res.masked_fill(mask_out, 0)
+                        return softmax_res
+
+                    cpu_res = softmax_on_device(mask, input, "cpu")
+                    cuda_res = softmax_on_device(mask, input, "cuda")
+                    self.assertEqual(cpu_res, cuda_res, exact_dtype=True)
+
     def test_masked_softmax(self, device):
         sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
         for (B, num_heads, L) in sizes:
@@ -15463,13 +15550,25 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.double)
     def test_transformerencoderlayer_fast_path(self, device, dtype):
+        """
+        Test transformer fast path on CPU with different valid mask types and shapes
+        """
         model = torch.nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True, device=device, dtype=dtype)
-        src = torch.rand(32, 10, 512)
-        src_mask = torch.zeros(10, 10).to(torch.bool)
-
         model.eval()
+
+        # Batched inputs
+        src = torch.rand(32, 10, 512)
+
+        # Attention mask of shape (src_len, src_len)
+        src_mask = torch.zeros(10, 10).to(torch.bool)
         with torch.no_grad():
-            model(src, src_mask)
+            model(src, src_mask=src_mask)
+
+        # Padding mask of shape (batch_size, src_len)
+        src_key_padding_mask = torch.zeros(32, 10).to(torch.bool)
+        with torch.no_grad():
+            model(src, src_key_padding_mask=src_key_padding_mask)
+
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.half, torch.float)
