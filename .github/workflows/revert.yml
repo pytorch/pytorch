@@ -7,7 +7,7 @@ on:
 jobs:
   do_revert:
     name: try_revert_pr_${{ github.event.client_payload.pr_num }}
-    runs-on: linux.large.ephemeral
+    runs-on: linux.20_04.4x
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
