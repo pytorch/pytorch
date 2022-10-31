@@ -6711,19 +6711,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
-    def test_poisson_nll_loss_reduction_modes(self):
-        input = torch.tensor([0.5, 1.5, 2.5])
-        target = torch.tensor([1., 2., 3.])
-        component_wise_loss = torch.exp(input) - target * input
-        self.assertEqual(component_wise_loss,
-                         F.poisson_nll_loss(input, target, reduction='none'))
-        self.assertEqual(torch.sum(component_wise_loss),
-                         F.poisson_nll_loss(input, target, reduction='sum'))
-        self.assertEqual(torch.mean(component_wise_loss),
-                         F.poisson_nll_loss(input, target, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'total is not a valid value for reduction'):
-            F.poisson_nll_loss(input, target, reduction='total')
-
     def test_gaussian_nll_loss_reduction_modes(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
@@ -14921,6 +14908,16 @@ class TestNNDeviceType(NNTestCase):
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
+        x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
+        out = torch.nn.functional.interpolate(x.to(memory_format=torch.channels_last), scale_factor=2, mode='nearest')
+        out_ref = torch.nn.functional.interpolate(x, scale_factor=2, mode='nearest')
+        del x
+        self.assertTrue(torch.allclose(out, out_ref))
 
     def _slow_masked_softmax(self, input, mask):
         exp = torch.exp(input)
