@@ -102,6 +102,18 @@ class TestFunctionalization(TestCase):
             return z2
         self.assert_functionalization(f, torch.ones(4))
 
+    def test_freeze(self):
+        def f(x):
+            y = x.clone()
+            z = y[0]
+            torch._freeze_functional_tensor(y)
+            x.add_(1)
+            self.assertRaises(RuntimeError, lambda: y.add_(1))
+            self.assertRaises(RuntimeError, lambda: z.add_(1))
+            return z
+
+        _functionalize(f, reapply_views=True)(torch.ones(3, 3))
+
     def test_view_clone_view_inplace(self):
         def f(input):
             shape = [1, 1024, 128, 128]
