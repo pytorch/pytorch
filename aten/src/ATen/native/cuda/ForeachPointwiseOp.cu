@@ -119,38 +119,15 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 
 template<template<class> class Op>
 void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList tensors2, const Tensor& scalars_) {
-    std::vector<std::vector<at::Tensor>> tensor_lists;
-    tensor_lists.reserve(3);
-    tensor_lists.emplace_back(input.vec());
-    tensor_lists.emplace_back(tensors1.vec());
-    tensor_lists.emplace_back(tensors2.vec());
-    std::vector<c10::Scalar> scalars;
-    for (int64_t i = 0; i < scalars_.size(0); i++) {
-      scalars.push_back(scalars_.data_ptr<float>() + i);
-    }
-    foreach_pointwise_op_(input, tensors1, tensors2, scalars);
+    // We know this conversion will succeed because of the fast path check.
+    auto scalars = convert_tensor_to_scalar_list(scalars_);
+    foreach_pointwise_op_(input, tensors1, tensors2, *scalars);
 }
 
 template<template<class> class Op>
-etd::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, const Tensor& scalars) {
-    std::vector<std::vector<at::Tensor>> tensor_lists;
-    tensor_lists.reserve(4);
-    std::vector<at::Tensor> vec_res;
-    vec_res.reserve(input.size());
-    for (const auto& t: input) {
-        vec_res.emplace_back(at::native::empty_like(t));
-    }
-
-    tensor_lists.emplace_back(input.vec());
-    tensor_lists.emplace_back(tensors1.vec());
-    tensor_lists.emplace_back(tensors2.vec());
-    tensor_lists.emplace_back(std::move(vec_res));
-
-    std::vector<c10::Scalar> scalars;
-    for (int64_t i = 0; i < scalars_.size(0); i++) {
-      scalars.push_back(scalars_.data_ptr<float>() + i);
-    }
-
+std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, const Tensor& scalars_) {
+    // We know this conversion will succeed because of the fast path check.
+    auto scalars = convert_tensor_to_scalar_list(scalars_);
     return foreach_pointwise_op(input, tensors1, tensors2, scalars);
 }
 

@@ -199,19 +199,18 @@ void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors
 }
 
 #define FOREACH_POINTWISE_OP_TENSOR(OP)                                 \
-  std::vector<Tensor> foreach_tensor_##OP##_tensorlist_slow(            \
+  std::vector<Tensor> foreach_tensor_##OP##_tensor_slow(                \
       TensorList input,                                                 \
       TensorList tensors1,                                              \
       TensorList tensors2,                                              \
       Tensor scalars_) {                                                \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars); \
-                                                                        \
     auto scalars = convert_tensor_to_scalar_list(scalars_);             \
     return foreach_tensor_##OP##_scalarlist_slow(                       \
         input, tensors1, tensors2, scalars);                            \
   }                                                                     \
                                                                         \
-  void foreach_tensor_##OP##_tensorlist_slow_(                          \
+  void foreach_tensor_##OP##_tensor_slow_(                              \
       TensorList input,                                                 \
       TensorList tensors1,                                              \
       TensorList tensors2,                                              \
@@ -273,7 +272,7 @@ FOREACH_POINTWISE_OP_SCALAR(addcmul);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 
-FOREACH_POINTWISE_OP_TENSORLIST(addcdiv);
+FOREACH_POINTWISE_OP_TENSOR(addcdiv);
 
 // NOTE(crcrpar): It didn't seem feasible to use `self[i]` as both the first and the last
 // arguments of `maximum_out` and `minimum_out` so I tentatively embarrassingly get and copy
