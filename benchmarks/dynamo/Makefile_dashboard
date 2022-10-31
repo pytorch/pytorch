@@ -5,16 +5,20 @@ PIP ?= python -m pip
 clone-deps:
 	(cd ../../.. \
 		&& (test -e torchvision || git clone --recursive https://github.com/pytorch/vision torchvision) \
+		&& (test -e torchdata || git clone --recursive https://github.com/pytorch/data.git torchdata) \
 		&& (test -e torchtext || git clone --recursive https://github.com/pytorch/text torchtext) \
+		&& (test -e torchaudio || git clone --recursive https://github.com/pytorch/text torchaudio) \
 		&& (test -e detectron2 || git clone --recursive https://github.com/facebookresearch/detectron2) \
 		&& (test -e torchbenchmark || git clone --recursive https://github.com/pytorch/benchmark torchbenchmark) \
 		&& (test -e triton || git clone --recursive https://github.com/openai/triton.git) \
 	)
 
-pull-deps:
+pull-deps: clone-deps
 	echo $(TRITON_VERSION)
 	(cd ../../../torchvision    && git pull && git submodule update --init --recursive)
+	(cd ../../../torchdata      && git pull && git submodule update --init --recursive)
 	(cd ../../../torchtext      && git pull && git submodule update --init --recursive)
+	(cd ../../../torchaudio      && git pull && git submodule update --init --recursive)
 	(cd ../../../detectron2     && git pull && git submodule update --init --recursive)
 	(cd ../../../torchbenchmark && git pull && git submodule update --init --recursive)
 	(cd ../../../triton         && git checkout master && git pull && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
@@ -28,7 +32,9 @@ build-deps: clone-deps
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
 	(cd ../../../torchvision && python setup.py clean && python setup.py develop)
+	(cd ../../../torchdata && python setup.py install)
 	(cd ../../../torchtext   && python setup.py clean && python setup.py develop)
+	(cd ../../../torchaudio   && python setup.py clean && python setup.py develop)
 	(cd ../../../detectron2  && python setup.py clean && python setup.py develop)
 	(cd ../../../torchbenchmark && python install.py --continue_on_fail)
 	(cd ../../../triton/python && python setup.py clean && python setup.py develop)
