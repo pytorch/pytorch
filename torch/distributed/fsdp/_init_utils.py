@@ -19,10 +19,7 @@ import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
-from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
-from torch.distributed.fsdp._wrap_utils import _get_params_per_wrapped_module
-from torch.distributed.fsdp.api import (
+from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _get_param_to_unflat_param_names,
     _is_fsdp_flattened,
@@ -30,7 +27,10 @@ from torch.distributed.fsdp.api import (
     clean_tensor_name,
     TrainingState,
 )
-from torch.distributed.fsdp.common_utils import (
+from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
+from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
+from torch.distributed.fsdp._wrap_utils import _get_params_per_wrapped_module
+from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
     MixedPrecision,
