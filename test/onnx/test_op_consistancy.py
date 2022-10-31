@@ -407,6 +407,7 @@ class TestConsistency(common_utils.TestCase):
 
     This is a parameterized test suite.
     """
+
     @common_device_type.ops(OPS_DB, allowed_dtypes=SUPPORTED_DTYPES)
     @common_utils.parametrize("opset", TESTED_OPSETS)
     @skip_ops(
