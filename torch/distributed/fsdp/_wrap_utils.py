@@ -1,9 +1,7 @@
-import collections
 import functools
 import warnings
-from typing import Any, Callable, Deque, Dict, List, Set
+from typing import Any, Dict
 
-import torch.nn as nn
 from torch.distributed.fsdp._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,

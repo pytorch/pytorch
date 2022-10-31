@@ -29,7 +29,6 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
-from torch.distributed.fsdp._wrap_utils import _get_params_per_wrapped_module
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
