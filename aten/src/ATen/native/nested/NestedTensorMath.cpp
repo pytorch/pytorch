@@ -18,14 +18,6 @@
 namespace at {
 namespace native {
 
-namespace {
-template <typename Func>
-Tensor map_nt(const Tensor& nt, Func f) {
-  auto* nt_impl = get_nested_tensor_impl(nt);
-  const auto& sizes = nt_impl->get_nested_size_tensor();
-  return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
-}
-
 int64_t num_bytes(IntArrayRef sizes) {
   // 0-dim Tensors have torch.Size of .size() 0, but carry 1 memory.
   // Empty 1-dim Tensors (torch.tensor([])) have torch.Size of .size() 1,
