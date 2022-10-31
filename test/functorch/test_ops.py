@@ -9,7 +9,8 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
+    IS_ARM64, parametrize, TEST_WITH_ASAN
 import torch
 from torch import Tensor
 import functools
@@ -823,6 +824,7 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
         decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
+        decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
 
