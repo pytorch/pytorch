@@ -4,7 +4,6 @@
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
-conda install -y six
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
   pip install hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba==0.56.0" psutil "scipy==1.9.0"
 else
@@ -172,12 +171,6 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
-test_dynamo() {
-  pushd ../torchdynamo
-  pytest test
-  popd
-}
-
 if [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
@@ -190,11 +183,9 @@ elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
     test_custom_backend
   fi
 else
-  checkout_install_torchdynamo
   test_python_all
   test_libtorch
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend
-  test_dynamo
 fi

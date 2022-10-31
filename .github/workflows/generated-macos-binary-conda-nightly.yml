@@ -69,6 +69,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -93,11 +94,16 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -108,7 +114,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: conda-py3_7-cpu
@@ -173,6 +179,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -197,11 +204,16 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -212,7 +224,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: conda-py3_8-cpu
@@ -277,6 +289,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -301,11 +314,16 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -316,7 +334,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: conda-py3_9-cpu
@@ -381,6 +399,7 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -405,11 +424,16 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        run: |
-          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-          sudo chmod +x /usr/local/bin/sccache
-          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -420,7 +444,7 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v3
         if: always()
         with:
           name: conda-py3_10-cpu
