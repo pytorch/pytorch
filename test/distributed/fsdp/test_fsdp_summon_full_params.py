@@ -212,7 +212,7 @@ class TestSummonFullParams(FSDPTest):
 
         model = FSDP(MyModule()).cuda(self.rank)
         with self.assertRaisesRegex(
-            ValueError, "current state is TrainingState_.FORWARD"
+            ValueError, "current state is TrainingState.FORWARD"
         ):
             model(model)
 
@@ -231,7 +231,7 @@ class TestSummonFullParams(FSDPTest):
         output.register_hook(bad_backwards_hook)
 
         with self.assertRaisesRegex(
-            ValueError, "current state is TrainingState_.BACKWARD_PRE"
+            ValueError, "current state is TrainingState.FORWARD_BACKWARD"
         ):
             output.backward()
 

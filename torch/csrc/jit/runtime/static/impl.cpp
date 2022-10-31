@@ -2062,7 +2062,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   bool skip_check = !schema ||
       ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
        num_outputs() == 1);
-  if (!force_check && skip_check) {
+  if (!schema || (!force_check && skip_check)) {
     if (!schema) {
       VLOG(2) << "Detected that op schema is null";
       return true;
