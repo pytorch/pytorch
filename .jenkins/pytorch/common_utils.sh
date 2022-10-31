@@ -164,7 +164,7 @@ function checkout_install_torchdeploy() {
   pushd multipy
   # with ABI flag change
   python multipy/runtime/example/generate_examples.py
-  pip install -e . --install-option="--abicxx"
+  pip install -e --build-arg BUILD_CUDA_TESTS=1 .
   popd
   popd
 }
@@ -173,6 +173,7 @@ function test_torch_deploy(){
  pushd ..
  pushd multipy
  ./multipy/runtime/build/test_deploy
+ ./multipy/runtime/build/test_deploy_gpu
  popd
  popd
 }
