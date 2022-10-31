@@ -937,10 +937,6 @@ class FakeTensorMode(TorchDispatchMode):
             nonlocal has_scalar_only_inputs
             if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
                 if common_device is None:
-<<<<<<< HEAD
-                    common_device = FakeTensor._find_common_device(func, args, kwargs)
-                return converter.from_meta_and_device(self, e, device or common_device)
-=======
                     (
                         common_device,
                         has_scalar_only_inputs,
@@ -955,7 +951,6 @@ class FakeTensorMode(TorchDispatchMode):
                     return converter.from_meta_and_device(
                         self, e, device or common_device
                     )
->>>>>>> master
             else:
                 return e
 
@@ -971,13 +966,10 @@ class FakeTensorMode(TorchDispatchMode):
             aten.as_strided_.default,
             aten.zeros.default,
             aten.detach.default,
-<<<<<<< HEAD
             aten.zero.default,
             aten.resize_.default,
             aten._fused_moving_avg_obs_fq_helper_functional.default,
             aten._sparse_coo_tensor_with_dims_and_tensors.default,
-=======
->>>>>>> master
             aten.set_.source_Storage_storage_offset,
         ]
 
