@@ -1253,7 +1253,7 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
-          // Writting an empty file is a noop
+          // Writing an empty file is a noop
           if (size == 0) {
             return size;
           }
