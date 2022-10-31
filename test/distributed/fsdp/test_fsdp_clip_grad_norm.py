@@ -8,8 +8,8 @@ from typing import Union
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
@@ -23,9 +23,9 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 if not dist.is_available():
@@ -53,6 +53,7 @@ class TestClipGradNorm(FSDPTest):
         Tests that calling ``clip_grad_norm_()`` on a non-root FSDP instance
         raises an error.
         """
+
         class Model(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -132,18 +133,26 @@ class TestClipGradNorm(FSDPTest):
         # Multiply gradients by a large factor to ensure that gradients will
         # actually be clipped
         for param in itertools.chain(ddp_model.parameters(), fsdp_model.parameters()):
-            if param.grad is not None:  # gradients may be `None` for `use_orig_params=True`
+            if (
+                param.grad is not None
+            ):  # gradients may be `None` for `use_orig_params=True`
                 param.grad *= LARGE_FACTOR
-        orig_ddp_grads = [param.grad.detach().clone() for param in ddp_model.parameters()]
+        orig_ddp_grads = [
+            param.grad.detach().clone() for param in ddp_model.parameters()
+        ]
         orig_fsdp_grads = [
             param.grad.detach().clone() if param.grad is not None else None
             for param in fsdp_model.parameters()
         ]
 
         ddp_total_norm = torch.nn.utils.clip_grad_norm_(
-            ddp_model.parameters(), max_norm=max_norm, norm_type=norm_type,
+            ddp_model.parameters(),
+            max_norm=max_norm,
+            norm_type=norm_type,
         )
-        fsdp_total_norm = fsdp_model.clip_grad_norm_(max_norm=max_norm, norm_type=norm_type)
+        fsdp_total_norm = fsdp_model.clip_grad_norm_(
+            max_norm=max_norm, norm_type=norm_type
+        )
         self.assertEqual(ddp_total_norm, fsdp_total_norm)
 
         # Check that the gradients were modified by `clip_grad_norm_()`
