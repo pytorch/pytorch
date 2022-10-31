@@ -58,18 +58,5 @@ Tensor NestedTensor_tanh(const Tensor& self) {
   return map_nt(self, at::tanh);
 }
 
-Tensor& fill_nested_(Tensor& self, const Scalar& value) {
-  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.fill_(value);
-  return self;
-}
-
-Tensor& fill_nested_(Tensor& self, const Tensor& value) {
-  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.fill_(value);
-  return self;
-}
-
-
 } // namespace native
 } // namespace at

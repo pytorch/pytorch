@@ -195,5 +195,17 @@ Tensor& NestedTensor_mul__Scalar(Tensor& self, const Scalar& other) {
   return NestedTensor_mul__Tensor(self, wrapped_scalar_tensor(other));
 }
 
+Tensor& fill_nested_(Tensor& self, const Scalar& value) {
+  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
+  self_buf.fill_(value);
+  return self;
+}
+
+Tensor& fill_nested_(Tensor& self, const Tensor& value) {
+  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
+  self_buf.fill_(value);
+  return self;
+}
+
 } // namespace native
 } // namespace at
