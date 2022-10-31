@@ -82,7 +82,6 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
@@ -94,12 +93,14 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.8
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
       - name: Start monitoring script
         id: monitor-script
@@ -113,6 +114,7 @@ jobs:
         run: |
           # Install dependencies
           brew install libomp
+          brew link --force libomp
 
       - name: Parse ref
         id: parse-ref

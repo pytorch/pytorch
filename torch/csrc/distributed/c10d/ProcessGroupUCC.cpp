@@ -169,6 +169,11 @@ void read_config() {
   for (auto op : parse_blocking_wait(blocking_wait_str)) {
     torch_ucc_config.blocking_wait[(std::uint8_t)op] = true;
   }
+  // barrier is always blocking
+  torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;
+
+  // barrier is always blocking
+  torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;
 
   //barrier is always blocking
   torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;

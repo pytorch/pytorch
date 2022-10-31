@@ -75,13 +75,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(cosine_embedding_loss);
   OP_DECOMPOSE(cosine_similarity);
   OP_DECOMPOSE(cov);
-  OP_DECOMPOSE(cross_entropy_loss);
+  m.impl("cross_entropy_loss", native::cross_entropy_loss_symint);
   OP_DECOMPOSE2(cumulative_trapezoid, x);
   OP_DECOMPOSE2(cumulative_trapezoid, dx);
   OP_DECOMPOSE2(dsplit, int);
   OP_DECOMPOSE2(dsplit, array);
   OP_DECOMPOSE(det);
-  m.impl("diag_backward", native::diag_backward_symint);
   OP_DECOMPOSE(diff);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
@@ -129,6 +128,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index_select_backward", native::index_select_backward_symint);
   OP_DECOMPOSE(inner);
   OP_DECOMPOSE(inverse);
+  OP_DECOMPOSE(concatenate);
   OP_DECOMPOSE(instance_norm);
   OP_DECOMPOSE(kron);
   OP_DECOMPOSE(l1_loss);
@@ -173,9 +173,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(frobenius_norm, dim);
   OP_DECOMPOSE2(nuclear_norm, dim);
   OP_DECOMPOSE(nuclear_norm);
-  OP_DECOMPOSE(nll_loss_nd);
-  OP_DECOMPOSE(nll_loss);
-  OP_DECOMPOSE(nll_loss2d);
+  m.impl("nll_loss_nd", native::nll_loss_nd_symint);
+  m.impl("nll_loss", native::nll_loss_symint);
+  m.impl("nll_loss2d", native::nll_loss2d_symint);
   OP_DECOMPOSE2(not_equal, Tensor );
   OP_DECOMPOSE(outer);
   OP_DECOMPOSE(pairwise_distance);
@@ -242,7 +242,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(where, ScalarSelf);
   OP_DECOMPOSE(orgqr);
   OP_DECOMPOSE2(unflatten, int);
-  OP_DECOMPOSE(_convolution_double_backward);
+  m.impl("_convolution_double_backward", native::_convolution_double_backward);
   OP_DECOMPOSE(conv_transpose1d);
   OP_DECOMPOSE2(conv_transpose2d, input);
   OP_DECOMPOSE2(conv_transpose3d, input);
@@ -256,8 +256,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   OP_DECOMPOSE(linalg_diagonal);
-  OP_DECOMPOSE(pad);
-  OP_DECOMPOSE(_pad_circular);
+  OP_DECOMPOSE(diagonal_copy);
+  m.impl("pad", native::pad_symint);
+  m.impl("_pad_circular", native::_pad_circular_symint);
   OP_DECOMPOSE(t_);
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
