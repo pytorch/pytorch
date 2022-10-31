@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda11.6-py3.10-gcc7-sm86
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -30,8 +30,9 @@ jobs:
           { config: "inductor", shard: 6, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor", shard: 7, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor", shard: 8, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
 
-  pytorch-linux-bionic-cuda11.6-py3.10-gcc7-sm86-inductor-test:
+  linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
     name: cuda11.6-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_6-py3_10-gcc7-inductor-build
