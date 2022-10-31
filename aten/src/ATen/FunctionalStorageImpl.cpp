@@ -92,6 +92,7 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
 }
 
 void FunctionalStorageImpl::add_update(const Tensor& updated_val, const std::vector<ViewMeta>& metas) {
+  TORCH_CHECK(!frozen_, "cannot mutate tensors with frozen storage");
   updates_.push_back({updated_val, metas});
   generation_++;
 }
