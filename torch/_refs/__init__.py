@@ -1151,7 +1151,7 @@ def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
 
     # Convert truncation to flooring:
     offset = (torch.signbit(a) != torch.signbit(b)).logical_and(torch.fmod(a, b) != 0)
-    return prims.div(a, b) - prims.convert_element_type(offset, a.dtype)
+    return prims.div(a, b) - _maybe_convert_to_dtype(offset, a.dtype)
 
 
 def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
@@ -1351,6 +1351,8 @@ def isclose(
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
     dtype = a.dtype
+    # promoting to int32 to maintain 100% consistency with C++ and to
+    # prevent overflow in case of int8 and int16
     promote_to_int = dtype in (torch.int8, torch.int16)
     if promote_to_int:
         a = prims.convert_element_type(a, torch.int32)
@@ -2838,10 +2840,10 @@ def native_layer_norm(
     elif weight is not None and bias is not None:
         out = out * weight + bias
 
-    out = prims.convert_element_type(out, input.dtype)
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     if input.device.type == "cpu":
-        mean = prims.convert_element_type(mean, input.dtype)
-        rstd = prims.convert_element_type(rstd, input.dtype)
+        mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
+        rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
 
 
