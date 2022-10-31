@@ -426,8 +426,16 @@ void NodeToONNX(
 
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*g, n->scope());
+
+    // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+    // Python. Check #87343 for details.
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        g, new_block, n, py_inputs, env, operator_export_type);
+        g->shared_from_this(),
+        new_block,
+        n,
+        py_inputs,
+        env,
+        operator_export_type);
 
     // Find new nodes that have been created by _run_symbolic_function and
     // propagate metadata
@@ -530,8 +538,11 @@ void NodeToONNX(
               opset_version,
               pyobj.attr("symbolic"),
               /* custom */ true);
+
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_method")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           op->name(),
           pyobj.attr("symbolic"),
           py_symbolic_args);
@@ -542,8 +553,10 @@ void NodeToONNX(
       Node* n = static_cast<Node*>(op);
       n->s_(attr::name, op->name());
       // Call symbolic function
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_function")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           new_block,
           n,
           py_symbolic_args,
