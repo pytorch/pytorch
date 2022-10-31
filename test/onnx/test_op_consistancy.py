@@ -397,8 +397,8 @@ class TestConsistency(common_utils.TestCase):
             requires_grad=False,
         )
 
-        for i, (opset, cpu_sample) in enumerate(
-            itertools.product(TESTED_OPSETS, samples)
+        for opset, (i, cpu_sample) in itertools.product(
+            TESTED_OPSETS, enumerate(samples)
         ):
             # Provide the repr to subtest because tensors are not serializable in parallel test runs
             with self.subTest(
