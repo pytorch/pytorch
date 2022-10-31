@@ -62,6 +62,7 @@ UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
     'abs',
     'conj_physical',
     'neg',
+    'positive'
 ]
 
 # This should be just an import from test_linalg instead of code duplication
