@@ -377,13 +377,13 @@ struct PermuteOpRecord : RecordFunctor {
   PermuteOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
-      std::vector<int64_t>& order)
+      std::vector<int64_t>& dims)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
             "ops.permute",
             RecordType::PermuteOp),
-        order_(std::move(order)) {}
+        dims_(std::move(dims)) {}
   virtual ~PermuteOpRecord() = default;
   virtual RecordFunctor* clone() final {
     return new PermuteOpRecord(*this);
@@ -391,11 +391,11 @@ struct PermuteOpRecord : RecordFunctor {
 
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    size_t order_hash = 0;
-    for (auto dim : order_) {
-      order_hash ^= static_cast<size_t>(dim);
+    size_t dims_hash = 0;
+    for (auto dim : dims_) {
+      dims_hash ^= static_cast<size_t>(dim);
     }
-    return result | (order_hash & 0xffff);
+    return result | (dims_hash & 0xffff);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -403,10 +403,10 @@ struct PermuteOpRecord : RecordFunctor {
     if (auto child_ptr = dynamic_cast<const PermuteOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       if (result) {
-        result = (order_.size() == child_ptr->order_.size());
+        result = (dims_.size() == child_ptr->dims_.size());
         if (result) {
-          for (size_t i = 0; i < order_.size(); ++i) {
-            if (order_[i] != child_ptr->order_[i]) {
+          for (size_t i = 0; i < dims_.size(); ++i) {
+            if (dims_[i] != child_ptr->dims_[i]) {
               result = false;
               break;
             }
@@ -420,15 +420,15 @@ struct PermuteOpRecord : RecordFunctor {
   void operator()(FusionDefinition& fd) final {
     auto arg =
         fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output = Nvf::permute(arg, order_);
+    auto output = Nvf::permute(arg, dims_);
     fd.setFusionState(outputs_.at(0).index, output);
   }
 
   virtual void print(std::ostream& os, bool close_function = true) const {
     RecordFunctor::print(os, false);
-    os << ", order=[";
+    os << ", dims=[";
     bool first_arg = true;
-    for (auto dim : order_) {
+    for (auto dim : dims_) {
       if (first_arg) {
         first_arg = false;
       } else {
@@ -444,7 +444,7 @@ struct PermuteOpRecord : RecordFunctor {
 
  private:
   //! Represents the mapping from the original shape to the new shape
-  std::vector<int64_t> order_;
+  std::vector<int64_t> dims_;
 };
 
 struct SqueezeOpRecord : RecordFunctor {

@@ -1191,17 +1191,15 @@ void initNvFuserPythonBindings(PyObject* module) {
       "permute",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg,
-         std::vector<int64_t>& order) -> nvfuser::Tensor {
+         std::vector<int64_t>& dims) -> nvfuser::Tensor {
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::PermuteOpRecord(
-            {fd->recordingState(arg())},
-            {fd->recordingState(output())},
-            order));
+            {fd->recordingState(arg())}, {fd->recordingState(output())}, dims));
         return output;
       },
       py::arg("arg"),
-      py::arg("order"),
+      py::arg("dims"),
       py::return_value_policy::reference);
 
   nvf_ops.def(
