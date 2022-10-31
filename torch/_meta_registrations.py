@@ -255,9 +255,6 @@ def meta__fused_moving_avg_obs_fq_helper(
     per_row_fake_quant=False,
     symmetric_quant=False,
 ):
-    print("per_row_fake_quant", per_row_fake_quant)
-    print("symmetric_quant", symmetric_quant)
-
     check(
         ch_axis < self.dim(),
         lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
