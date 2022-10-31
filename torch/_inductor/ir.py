@@ -2264,7 +2264,7 @@ class ExternKernel(InputsKernel):
         # freeze layout otherwise our output stride calculation might
         # become incorrect
         for x in tensor_args:
-            is_storage_and_layout(x)
+            if is_storage_and_layout(x):
                 as_storage_and_layout(x, freeze=True)
 
         # We don't have generic shape formulas, so just burn in the
