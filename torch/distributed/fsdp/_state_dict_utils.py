@@ -16,6 +16,7 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
+from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
@@ -70,7 +71,7 @@ def _full_post_state_dict_hook(
     for fqn, param_name, module_name in module._param_fqns:
         fqn = f"{prefix}{fqn}"
         clean_key = fqn
-        clean_prefix = fsdp_file.clean_tensor_name(prefix)
+        clean_prefix = clean_tensor_name(prefix)
         # Strip prefix out of key if needed as buffer names and param names
         # do not have prefix considered as they are not computed in `state_dict`
         # call.
