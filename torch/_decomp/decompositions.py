@@ -110,19 +110,6 @@ def softplus_backward(out_grad: Tensor, x: Tensor, beta: float, threshold: float
     return torch.where((x * beta) > threshold, out_grad, out_grad * z / (z + 1.0))
 
 
-@register_decomposition(aten.elu)
-@pw_cast_for_opmath
-def elu(
-    self: Tensor, alpha: float = 1, scale: float = 1, input_scale: float = 1
-) -> Tensor:
-    negcoef = alpha * scale
-    poscoef = scale
-    negiptcoef = input_scale
-    return torch.where(
-        self > 0, self * poscoef, (torch.exp(self * negiptcoef) - 1) * negcoef
-    )
-
-
 @register_decomposition(aten.elu_backward)
 @pw_cast_for_opmath
 def elu_backward(
