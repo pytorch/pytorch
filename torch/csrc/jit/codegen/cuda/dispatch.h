@@ -98,7 +98,6 @@ class Swizzle2D;
 namespace kir {
 class Predicate;
 class TensorIndex;
-class IntPair;
 
 class Allocate;
 class BlockSync;
@@ -115,8 +114,6 @@ class GroupedGridWelford;
 class AllocateFusedReduction;
 class InitMagicZero;
 class UpdateMagicZero;
-class Swizzle2DInt;
-class PairSelect;
 
 } // namespace kir
 
@@ -144,7 +141,6 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
 
   virtual void handle(const kir::Predicate*);
   virtual void handle(const kir::TensorIndex*);
-  virtual void handle(const kir::IntPair*);
 
   // Exprs
   virtual void handle(const FullOp* stmt);
@@ -188,8 +184,6 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const kir::GridWelford*);
   virtual void handle(const kir::GroupedGridWelford*);
   virtual void handle(const kir::AllocateFusedReduction*);
-  virtual void handle(const kir::Swizzle2DInt*);
-  virtual void handle(const kir::PairSelect*);
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
@@ -214,7 +208,6 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
 
   virtual void handle(kir::Predicate*);
   virtual void handle(kir::TensorIndex*);
-  virtual void handle(kir::IntPair*);
 
   // Exprs
   virtual void handle(FullOp* stmt);
@@ -258,8 +251,6 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(kir::GridWelford* stmt);
   virtual void handle(kir::GroupedGridWelford* stmt);
   virtual void handle(kir::AllocateFusedReduction* stmt);
-  virtual void handle(kir::Swizzle2DInt* stmt);
-  virtual void handle(kir::PairSelect* stmt);
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public OptOutConstDispatch {
@@ -325,7 +316,6 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
 
   virtual void mutate(kir::Predicate*);
   virtual void mutate(kir::TensorIndex*);
-  virtual void mutate(kir::IntPair*);
 
   // Exprs
   virtual void mutate(FullOp*);
@@ -369,8 +359,6 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(kir::GridWelford*);
   virtual void mutate(kir::GroupedGridWelford*);
   virtual void mutate(kir::AllocateFusedReduction*);
-  virtual void mutate(kir::Swizzle2DInt*);
-  virtual void mutate(kir::PairSelect*);
 
  protected:
   void removeExpr(IrContainer*, Expr*);

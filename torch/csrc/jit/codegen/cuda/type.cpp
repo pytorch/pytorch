@@ -271,8 +271,6 @@ static const char* val_type2string(ValType t) {
       return "Predicate";
     case ValType::TensorIndex:
       return "TensorIndex";
-    case ValType::IntPair:
-      return "IntPair";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
   }

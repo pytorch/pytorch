@@ -33,8 +33,7 @@ enum class ValType {
   Scalar,
   NamedScalar,
   Predicate,
-  TensorIndex,
-  IntPair
+  TensorIndex
 };
 
 // Manual - The user provides the Bool value. Predicate generation is bypassed.

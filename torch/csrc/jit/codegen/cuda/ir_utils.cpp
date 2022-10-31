@@ -941,8 +941,7 @@ struct ReplaceValInIndexVal : public OptInDispatch {
 
   void handle(Val* val) override {
     TORCH_INTERNAL_ASSERT(
-        val->isA<Int>() || val->isA<Bool>() || val->isA<NamedScalar>() ||
-            val->isA<kir::IntPair>(),
+        val->isA<Int>() || val->isA<Bool>() || val->isA<NamedScalar>(),
         "Invalid Val type: ",
         val->toString());
 
@@ -1018,36 +1017,6 @@ struct ReplaceValInIndexVal : public OptInDispatch {
         top->toInlineString());
     auto out = IrBuilder::create<Int>(c10::nullopt);
     IrBuilder::create<TernaryOp>(top->getTernaryOpType(), out, in1, in2, in3);
-    last_visited_val_ = out;
-  }
-
-  // Clone expression after recurisvely replacing inputs
-  void handle(kir::Swizzle2DInt* swizzle_2d) override {
-    handle(swizzle_2d->inX());
-    auto in_x = last_visited_val_;
-    handle(swizzle_2d->inY());
-    auto in_y = last_visited_val_;
-    auto out = IrBuilder::create<kir::IntPair>();
-
-    // Extents are assumed constant in swizzle so no need to
-    //  duplicate their graphs.
-    IrBuilder::create<kir::Swizzle2DInt>(
-        out,
-        in_x,
-        in_y,
-        swizzle_2d->extentX(),
-        swizzle_2d->extentY(),
-        swizzle_2d->swizzleType());
-    last_visited_val_ = out;
-  }
-
-  void handle(kir::PairSelect* pair_select) override {
-    handle(pair_select->in()->asVal());
-    auto in = last_visited_val_;
-    TORCH_INTERNAL_ASSERT(pair_select->out()->isA<Int>());
-    auto out = IrBuilder::create<Int>(c10::nullopt);
-    IrBuilder::create<kir::PairSelect>(
-        out, in->as<kir::IntPair>(), pair_select->selection());
     last_visited_val_ = out;
   }
 

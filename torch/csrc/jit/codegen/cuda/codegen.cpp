@@ -371,8 +371,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     std::stringstream name;
     if (val->isA<TensorView>()) {
       name << "T";
-    } else if (val->isA<kir::IntPair>()) {
-      name << "ip";
     } else {
       name << typePrefix(val->dtype());
     }
@@ -2627,50 +2625,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const kir::UpdateMagicZero*) final {
     indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
-  }
-
-  void handle(const kir::Swizzle2DInt* swizzle_2d) {
-    TORCH_INTERNAL_ASSERT(print_inline_);
-    TORCH_INTERNAL_ASSERT(
-        swizzle_2d->swizzleType() != Swizzle2DType::NoSwizzle,
-        "Swizzle type undefined.");
-    if (print_inline_) {
-      code_ << swizzle_2d->swizzleType() << "({" << gen(swizzle_2d->inX())
-            << "," << gen(swizzle_2d->inY()) << "} , "
-            << "{" << gen(swizzle_2d->extentX()) << ","
-            << gen(swizzle_2d->extentY()) << "})";
-    }
-  }
-
-  void handle(const kir::IntPair* int_pair) {
-    const auto def = int_pair->definition();
-    TORCH_INTERNAL_ASSERT(
-        def != nullptr, "no support for un-inlined int pair yet.");
-    code_ << gen(def);
-  }
-
-  void handle(const kir::PairSelect* pair_select) {
-    if (print_inline_) {
-      code_ << gen(pair_select->in());
-    } else {
-      indent() << gen(pair_select->out()) << " = " << gen(pair_select->in());
-    }
-
-    switch (pair_select->selection()) {
-      case kir::PairSelect::Selection::X:
-        code_ << ".x";
-        break;
-      case kir::PairSelect::Selection::Y:
-        code_ << ".y";
-        break;
-      default:
-        TORCH_INTERNAL_ASSERT(false, "unknown select")
-        break;
-    }
-
-    if (!print_inline_) {
-      code_ << ";\n";
-    }
   }
 
  private:

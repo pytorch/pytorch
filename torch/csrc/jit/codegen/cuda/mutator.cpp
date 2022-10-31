@@ -634,15 +634,6 @@ void OptOutMutator::mutate(kir::GroupedGridWelford*) {
 void OptOutMutator::mutate(kir::AllocateFusedReduction*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
-void OptOutMutator::mutate(kir::Swizzle2DInt*) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
-void OptOutMutator::mutate(kir::PairSelect*) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
-void OptOutMutator::mutate(kir::IntPair*) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
-}
 
 void OptOutMutator::removeExpr(IrContainer* container, Expr* expr) {
   container->removeExpr(expr);
