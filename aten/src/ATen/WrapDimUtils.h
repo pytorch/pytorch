@@ -85,7 +85,7 @@ inline int64_t _legacy_cat_wrap_dim(
     int64_t dim,
     const std::vector<std::vector<T>>& tensor_sizes) {
   for (auto& sizes : tensor_sizes) {
-    if (sizes == std::vector<T>({0})) {
+    if (sizes.size() == 1 && sizes[0] == 0) {
       continue;
     }
     return maybe_wrap_dim(dim, sizes.size());
