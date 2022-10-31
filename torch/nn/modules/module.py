@@ -1356,7 +1356,8 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
         if not with_kwargs:
-            def f(m, inp, kwargs): hook(m, inp), kwargs
+            def f(m, inp, kwargs):
+                hook(m, inp), kwargs
             hook = f
         self._forward_pre_hooks[handle.id] = hook
         if prepend:
@@ -1403,7 +1404,8 @@ class Module:
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
         if not with_kwargs:
-            def f(m, inp, out, kwargs): hook(m, inp, out)
+            def f(m, inp, out, kwargs):
+                hook(m, inp, out)
             hook = f
         self._forward_hooks[handle.id] = hook
         if prepend:
