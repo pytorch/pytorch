@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     shell,
     set_cwd,
     parser as common_parser,
+    is_slow_gradcheck_env,
 )
 import torch.distributed as dist
 from torch.multiprocessing import get_context
@@ -628,6 +629,9 @@ def run_doctests(test_module, test_directory, options):
     Assumes the incoming test module is called doctest, and simply executes the
     xdoctest runner on the torch library itself.
     """
+    # Maybe there's a better place to do this skip?
+    if is_slow_gradcheck_env():
+        return 1
     import xdoctest
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
