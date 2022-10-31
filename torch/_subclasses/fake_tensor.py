@@ -146,9 +146,6 @@ class FakeTensorConverter(object):
     constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
 
     def __init__(self):
-        # In principle preserving views should be OK, but in practice
-        # AOTAutograd (or maybe autograd) seems to do the wrong thing.  See
-        # https://github.com/pytorch/torchdynamo/issues/1815
         self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
