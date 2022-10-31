@@ -1,0 +1,8 @@
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+
+namespace xnnpack;
+
+enum xnn_value_type : short {
+  xnn_value_type_invalid = 0,
+  xnn_value_type_dense_tensor = 1,
+}
