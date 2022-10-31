@@ -78,6 +78,11 @@ def _get_submodule_to_states(
     submodule key. Sibling submodules cannot be grouped together. Each
     parameter and each buffer in the module tree appears exactly once in the
     returned dict. The returned dict is ordered by increasing tree depth.
+
+    If a parameter is shared among multiple wrapped submodules, then it is
+    assigned to the lowest common ancestor (LCA) wrapped module. A mapped-to
+    list may be empty, either because the wrapped module truly has no
+    parameters or because its parameters were assigned to the LCA.
     """
     # Record the modules to wrap without actually wrapping
     wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
