@@ -535,7 +535,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
-static constexpr const char* indexKey = "Profiler Event Index";
+static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,

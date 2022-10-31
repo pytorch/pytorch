@@ -1761,7 +1761,7 @@ class TestTorchTidyProfiler(TestCase):
         with profile(profile_memory=True, record_shapes=True) as p:
             for _ in range(repeats):
                 torch.ones((1,))
-                gc.collect()
+            gc.collect()
 
         roots = p.profiler.kineto_results.experimental_event_tree()
         id_set = set()
