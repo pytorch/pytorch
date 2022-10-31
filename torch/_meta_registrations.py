@@ -659,7 +659,9 @@ def meta_adaptive_avg_pool2d(self, output_size):
     memory_format = utils.suggest_memory_format(self)
     # need to set memory_format to preserve the memory format of the input
     # channel last input should have channel last output
-    return torch.empty(output_shape, dtype=self.dtype, device=self.device, memory_format=memory_format)
+    return torch.empty(
+        output_shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
 
 
 @register_meta(aten._adaptive_avg_pool3d.default)
