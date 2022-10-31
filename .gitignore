@@ -338,3 +338,6 @@ third_party/glog/
 
 # Virtualenv
 venv/
+
+# Log files
+*.log
