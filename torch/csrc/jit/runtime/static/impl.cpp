@@ -172,7 +172,6 @@ void OptimizeGraph(
   UseVariadicStack(graph);
   EliminateTrivialEquallySplit(graph);
   EliminateExtraPermuteOps(graph);
-  PrepackWeights(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(
@@ -199,6 +198,7 @@ void OptimizeGraph(
     }
     FuseListUnpack(graph);
     RemoveUnnecessaryOutputs(graph);
+    PrepackWeights(graph);
 #endif
   }
 
