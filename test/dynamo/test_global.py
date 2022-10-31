@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 
@@ -43,7 +44,7 @@ def reset_name():
     _name = 0
 
 
-class TestGlobals(torch._dynamo.testing.TestCase):
+class TestGlobals(torch._dynamo.test_case.TestCase):
     def test_store_global_1(self):
         def fn(x):
             global g_counter
@@ -227,6 +228,6 @@ class TestGlobals(torch._dynamo.testing.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()
