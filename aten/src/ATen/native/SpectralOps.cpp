@@ -1095,7 +1095,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     input = input.unsqueeze(0);
   }
 
-  input = as_complex(input.transpose(1, 2));  // size: (channel, n_frames, fft_size, 2)
+  input = as_complex(input.transpose(1, 2));  // size: (channel, n_frames, fft_size)
 
   const fft_norm_mode norm = normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n;
   if (return_complex) {
@@ -1119,7 +1119,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     /*dim=*/1,
     /*size=*/n_fft,
     /*step=*/hop_length);
-  window_tmp = window_tmp.pow(2).expand({1, n_frames, n_fft});  // size: (1, n_fft, n_frames)
+  window_tmp = window_tmp.pow(2).expand({1, n_frames, n_fft});  // size: (1, n_frames, n_fft)
   Tensor window_envelop = at::unfold_backward(
     window_tmp,
     /*input_sizes=*/{1, expected_output_signal_len},
