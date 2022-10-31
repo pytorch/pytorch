@@ -65,34 +65,6 @@ class TestMetaConverter(TestCase):
         self.assertNotEqual(m1._version, vc)
         self.assertEqual(m2._version, m1._version)
 
-    def assertMetadataMatches(self, m1, m2):
-        self.assertEqual(m1.dtype, m2.dtype)
-        self.assertEqual(m1.shape, m2.shape)
-        self.assertEqual(m1.requires_grad, m2.requires_grad)
-        self.assertEqual(m1.is_leaf, m2.is_leaf)
-        self.assertEqual(m1.grad_fn is None, m2.grad_fn is None)
-        self.assertEqual(m1.is_sparse, m2.is_sparse)
-        self.assertEqual(m1.is_inference(), m2.is_inference())
-        self.assertEqual(m1.is_conj(), m2.is_conj())
-        self.assertEqual(m1.is_neg(), m2.is_neg())
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
-            grad_not_none = m1.grad is not None
-        if grad_not_none:
-            self.assertMetadataMatches(m1.grad, m2.grad)
-        if m1.is_sparse:
-            self.assertEqual(m1.dense_dim(), m2.dense_dim())
-            self.assertEqual(m1.sparse_dim(), m2.sparse_dim())
-            self.assertEqual(m1.is_coalesced(), m2.is_coalesced())
-        else:
-            self.assertEqual(m1.stride(), m2.stride())
-            self.assertEqual(m1.storage_offset(), m2.storage_offset())
-            self.assertEqual(m1._is_view(), m2._is_view())
-            if m1._is_view():
-                self.assertMetadataMatches(m1._base, m2._base)
-        # TODO: test if is resizable (no direct query for this atm)
-        # TODO: audit AutogradMeta to see if it matches
-
     def test_view_of_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
         y = x.neg()
@@ -101,14 +73,9 @@ class TestMetaConverter(TestCase):
         to_meta = MetaConverter()
         m1 = to_meta(z1)
         m2 = to_meta(z2)
-
-        # check the test is actually testing what it claims
+        self.assertEqual(m1.shape, z1.shape)
         self.assertTrue(m1._is_view())
         self.assertFalse(m1._base.is_leaf)
-
-        self.assertIsNot(m1, m2)
-        self.assertMetadataMatches(m1, z1)
-        self.assertMetadataMatches(m2, z2)
         self.assertSameVersionCounter(m1, m2)
 
     def test_view_of_leaf(self):
@@ -118,117 +85,34 @@ class TestMetaConverter(TestCase):
         to_meta = MetaConverter()
         m1 = to_meta(z1)
         m2 = to_meta(z2)
-
-        # check the test is actually testing what it claims
+        self.assertEqual(m1.shape, z1.shape)
         self.assertTrue(m1._is_view())
         self.assertTrue(m1._base.is_leaf)
-
-        self.assertIsNot(m1, m2)
-        self.assertMetadataMatches(m1, z1)
-        self.assertMetadataMatches(m2, z2)
         self.assertSameVersionCounter(m1, m2)
 
     def test_leaf(self):
         x = torch.randn(4, requires_grad=True)
         to_meta = MetaConverter()
         m = to_meta(x)
-
-        # check the test is actually testing what it claims
+        self.assertEqual(m.shape, x.shape)
         self.assertTrue(m.is_leaf)
         self.assertTrue(m.requires_grad)
-
-        self.assertMetadataMatches(m, x)
 
     def test_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
         y = x.neg()
         to_meta = MetaConverter()
         m = to_meta(y)
-
-        # check the test is actually testing what it claims
+        self.assertEqual(m.shape, y.shape)
         self.assertFalse(m.is_leaf)
         self.assertTrue(m.requires_grad)
-
-        self.assertMetadataMatches(m, y)
 
     def test_requires_grad_false(self):
         x = torch.randn(4, requires_grad=False)
         to_meta = MetaConverter()
         m = to_meta(x)
-
-        # check the test is actually testing what it claims
+        self.assertEqual(m.shape, x.shape)
         self.assertFalse(m.requires_grad)
-
-        self.assertMetadataMatches(m, x)
-
-    def test_channels_last(self):
-        x = torch.empty(2, 3, 4, 5, memory_format=torch.channels_last)
-        to_meta = MetaConverter()
-        m = to_meta(x)
-
-        # check the test is actually testing what it claims
-        self.assertTrue(m.is_leaf)
-
-        self.assertMetadataMatches(m, x)
-
-    def test_channels_last_leaf(self):
-        x = torch.empty(2, 3, 4, 5, memory_format=torch.channels_last, requires_grad=True)
-        to_meta = MetaConverter()
-        m = to_meta(x)
-
-        # check the test is actually testing what it claims
-        self.assertTrue(m.requires_grad)
-        self.assertTrue(m.is_leaf)
-
-        self.assertMetadataMatches(m, x)
-
-    def test_channels_last_non_leaf(self):
-        x = torch.empty(2, 3, 4, 5, memory_format=torch.channels_last, requires_grad=True)
-        y = x + 2
-
-        # sanity
-        self.assertEqual(x.stride(), y.stride())
-        self.assertFalse(y.is_leaf)
-
-        to_meta = MetaConverter()
-        m = to_meta(y)
-
-        # check the test is actually testing what it claims
-        self.assertTrue(m.requires_grad)
-        self.assertFalse(m.is_leaf)
-
-        self.assertMetadataMatches(m, y)
-
-        # Check that we can autograd with m as input without erroring;
-        # see https://github.com/pytorch/pytorch/issues/87956
-        loss = m.sum()
-        torch.autograd.grad(loss, m)
-
-    def test_empty_strided_non_dense_leaf(self):
-        x = torch.empty_strided((2, 2), (4, 2), requires_grad=True)
-
-        to_meta = MetaConverter()
-        m = to_meta(x)
-
-        # check the test is actually testing what it claims
-        self.assertTrue(m.requires_grad)
-        self.assertTrue(m.is_leaf)
-
-        self.assertMetadataMatches(m, x)
-
-    def test_non_leaf_torture(self):
-        x = torch.empty(20, requires_grad=True)
-        with torch.no_grad():
-            x.set_(x.storage(), 10, (2,), (2,))
-
-        to_meta = MetaConverter()
-        m = to_meta(x)
-
-        # check the test is actually testing what it claims
-        self.assertTrue(m.requires_grad)
-        self.assertTrue(m.is_leaf)
-
-        self.assertMetadataMatches(m, x)
 
     # NB: complex stuff is not actually exercised right now because
     # we have a blanket exclusion for complex conversion
@@ -237,30 +121,41 @@ class TestMetaConverter(TestCase):
         x = torch.randn(4, dtype=torch.complex64)
         y = torch.view_as_real(x)
         m = MetaConverter()(y)
-        self.assertMetadataMatches(m, y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.stride(), y.stride())
+        self.assertEqual(m.dtype, y.dtype)
 
     def test_complex_noncontiguous_bug(self):
         x = torch.randn((2, 2, 4, 9), dtype=torch.complex32)[:, 0, :, :]
         m = MetaConverter()(x)
-        self.assertMetadataMatches(m, x)
+        self.assertEqual(m.shape, x.shape)
+        self.assertEqual(m.stride(), x.stride())
+        self.assertEqual(m.dtype, x.dtype)
 
     def test_view_as_complex(self):
         x = torch.randn((4, 2), dtype=torch.float32)
         y = torch.view_as_complex(x)
         m = MetaConverter()(y)
-        self.assertMetadataMatches(m, y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.stride(), y.stride())
+        self.assertEqual(m.dtype, y.dtype)
 
     def test_view_dtype(self):
         x = torch.randn(4, dtype=torch.float32)
         y = x.view(dtype=torch.int32)
         m = MetaConverter()(y)
-        self.assertMetadataMatches(m, y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.stride(), y.stride())
+        self.assertEqual(m.dtype, y.dtype)
 
     def test_imag(self):
         x = torch.randn(4, dtype=torch.complex64)
         y = x.imag
         m = MetaConverter()(y)
-        self.assertMetadataMatches(m, y)
+        self.assertEqual(m.shape, y.shape)
+        self.assertEqual(m.dtype, y.dtype)
+        self.assertEqual(m.stride(), y.stride())
+        self.assertEqual(m.storage_offset(), y.storage_offset())
 
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
@@ -774,12 +669,7 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
-        if (
-            torch.jit.is_tracing() or isinstance(func, torch.ScriptMethod) or
-            # meta converter doesn't work correctly when no_dispatch() is on, so
-            # skip running the crossref test in this case
-            torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python)
-        ):
+        if torch.jit.is_tracing() or isinstance(func, torch.ScriptMethod):
             return func(*args, **kwargs)
 
         if self.dtype in meta_function_skips.get(func, set()):
