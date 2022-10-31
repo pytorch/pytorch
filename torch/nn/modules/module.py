@@ -1355,11 +1355,11 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-        if not with_kwargs:
-            def f(m, inp, kwargs=None):
-                hook(m, inp), kwargs
-            hook = f
-        self._forward_pre_hooks[handle.id] = hook
+        @functools.wraps(hook)
+        def hook_wrapper(m, inp, kwargs):
+            return hook(m, inp), kwargs
+
+        self._forward_pre_hooks[handle.id] = hook if with_kwargs else hook_wrapper
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
@@ -1403,11 +1403,11 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        if not with_kwargs:
-            def f(m, inp, out, kwargs=None):
-                hook(m, inp, out)
-            hook = f
-        self._forward_hooks[handle.id] = hook
+        @functools.wraps(hook)
+        def hook_wrapper(m, inp, out, kwargs):
+            return hook(m, inp, out)
+
+        self._forward_hooks[handle.id] = hook if with_kwargs else hook_wrapper
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
