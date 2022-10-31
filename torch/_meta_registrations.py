@@ -1105,7 +1105,7 @@ def meta_relu_(self):
 
 @register_meta(aten.index_put.default)
 def meta_index_put(self, indices, values, accumulate=False):
-    return self.new_empty(self.size())
+    return torch.empty_like(self)
 
 
 @register_meta(aten.masked_fill_.Scalar)
@@ -1658,19 +1658,8 @@ def activate_meta():
             "aten::clone",  # causing infinite recursion
             "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite  # noqa: B950
             "aten::randn",  # pin_memory parameter is not supported!, test_proxy_tensor.py -k test_make_fx_symbolic_exhaustive_randn_cpu_float32  # noqa: B950
-            "aten::zeros.names",  # TypeError: zeros() got an unexpected keyword argument 'names', inductor/test_torchinductor.py -k test_zeros_cpu  # noqa: B950
-            "aten::empty.names",  # TypeError: empty() got an unexpected keyword argument 'names', inductor/test_torchinductor.py -k test_zeros_cpu  # noqa: B950
-            "aten::add.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::sub.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::mul.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_both_scalars  # noqa: B950
-            "aten::div.Tensor",  # ValueError: Receive two Number inputs to an elementwise binary operation! test_fake_tensor.py -k test_scalar_inputs  # noqa: B950
-            "aten::div.Tensor_mode",  # ValueError: Receive two Number inputs to an elementwise binary operation! inductor/test_torchinductor.py -k test_div8_cpu  # noqa: B950
-            "aten::diag_embed",  # Stride mismatch! test_ops.py -k test_fake_autocast_diag_embed_cuda_float32  # noqa: B950
-            "aten::copy_",  # Exception not raiseed, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
+            "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64  # noqa: B950
             "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32  # noqa: B950
-            "aten::masked_fill.Scalar",  # Stride mismatch! test_ops.py -k test_fake_crossref_backward_amp_nanquantile_cuda_float32  # noqa: B950
-            "aten::tril",  # Stride mismatch! test_ops.py -k test_fake_crossref_backward_amp_ormqr_cuda_float32  # noqa: B950
-            "aten::triu",  # Stride mismatch! test_ops.py -k test_fake_crossref_backward_amp_lu_solve_cuda_float32  # noqa: B950
             "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32  # noqa: B950
         }:
             pass
