@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import itertools
 import os
 import random
 import sys
@@ -55,15 +56,12 @@ except (ImportError, AssertionError) as e:
 
 HAS_CPU = False
 try:
-    if IS_FBCODE:
-        raise torch._inductor.exc.CppCompileError
-
     from subprocess import CalledProcessError
 
     from torch._inductor.codecache import CppCodeCache
 
     CppCodeCache.load("")
-    HAS_CPU = True
+    HAS_CPU = not IS_FBCODE
 except (
     CalledProcessError,
     OSError,
@@ -1292,6 +1290,65 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    # For gpu path, there has a accurcy issue,
+    # see https://github.com/pytorch/pytorch/issues/87745.
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_unary(self):
+        def _unary_list():
+            unary_list = [
+                torch.nn.ReLU(),
+                torch.nn.Sigmoid(),
+                torch.nn.Tanh(),
+                torch.nn.Hardswish(),
+                torch.nn.LeakyReLU(0.1, inplace=False),
+                torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
+                torch.nn.GELU(approximate="none"),
+                torch.nn.GELU(approximate="tanh"),
+            ]
+            return unary_list
+
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        options = itertools.product(
+            _unary_list(),
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            test_memory_format,
+        )
+
+        for (
+            unary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 112, 112)
+            mod = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                unary_fn,
+            ).eval()
+
+            # TODO: add bf16 test for cpu path?
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            self.common(
+                mod,
+                (v,),
+            )
+
     def test_gather1(self):
         def fn(a, b):
             return (
@@ -2137,6 +2194,17 @@ class CommonTemplate:
             atol=1e-5,
             rtol=3e-05,
         )
+
+    def test_pow3(self):
+        # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
+        def fn(x):
+            z = torch.tensor(0.123, device=self.device)
+            w = z + x
+            return torch.pow(w, 0.5)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        input = torch.rand(())
+        self.assertTrue(same(opt(input), fn(input)))
 
     def test_glu(self):
         def fn(x):
@@ -3940,29 +4008,23 @@ class CommonTemplate:
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
+        dtypes = [
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64,
+        ]
 
-        inputs = (
-            rand_strided((2, 3), (3, 1), device="cuda"),
-            rand_strided((), (), device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-
-    @requires_cuda()
-    def test_unspec_inputs_fp16(self):
-        def fn(x, y):
-            return x + y, x * y, x / y
-
-        opt = torch._dynamo.optimize("inductor")(fn)
-
-        inputs = (
-            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
-            rand_strided((), (), dtype=torch.float16, device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        for d in dtypes:
+            inputs = (
+                rand_strided((2, 3), (3, 1), dtype=torch.float32, device="cuda"),
+                rand_strided((), (), dtype=d, device="cpu"),
+            )
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
+            inputs = (inputs[1], inputs[0])
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
