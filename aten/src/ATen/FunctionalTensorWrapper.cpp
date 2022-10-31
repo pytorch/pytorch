@@ -49,10 +49,11 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // we need to know if we're dispatching to AutogradCPU or AutogradXLA).
   // Instead, it's sufficient to remove the `Dense` dispatch key,
   // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
-  key_set_ = key_set_.remove(c10::DispatchKey::Dense);
+  // key_set_ = key_set_.remove(c10::DispatchKey::Dense);
   // We override a bunch of _custom(), so make sure they get called
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
+  set_custom_device(true);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -331,6 +332,9 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
+c10::Device FunctionalTensorWrapper::device_custom() const {
+  return value_.unsafeGetTensorImpl()->device();
+}
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sizes();
 }
