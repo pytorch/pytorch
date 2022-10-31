@@ -321,13 +321,65 @@ class AotPrimsNvfuser(AotAutogradStrategy):
 aot_prims_nvfuser = AotPrimsNvfuser.compile_fn
 
 
-def prims_executor(gm, inputs, *, executor):
+def _has_incompatible_cudagraph_ops(gm):
+    from torchinductor.utils import (
+        has_incompatible_cudagraph_ops as has_incompatible_cudagraph_ops_inductor,
+    )
+
+    result = has_incompatible_cudagraph_ops_inductor(gm)
+    if result:
+        return result
+
+    incompatible = [
+        "aten.index_put.default",
+    ]
+    for node in gm.graph.nodes:
+        if str(node.target) in incompatible:
+            return True
+
+    # A workaround for
+    # https://github.com/csarofeen/pytorch/issues/2106
+    is_any_ones = any(
+        node.target == torch.ops.aten.ones.default for node in gm.graph.nodes
+    )
+    is_any_zeros = any(
+        node.target == torch.ops.aten.zeros.default for node in gm.graph.nodes
+    )
+    if is_any_ones and is_any_zeros:
+        return True
+
+    mutated_inputs = find_input_mutations(gm.graph)
+    if len(mutated_inputs) > 0:
+        return True
+
+    return False
+
+
+def _replace_cpu_with_cuda(gm):
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            new_kwargs = dict(node.kwargs)
+            if new_kwargs.get("device", False) and new_kwargs["device"].type == "cpu":
+                new_kwargs["device"] = torch.device("cuda")
+            node.kwargs = new_kwargs
+    gm.recompile()
+    return gm
+
+
+def prims_executor(gm, inputs, *, executor, num_fixed=0, cudagraphs):
     # This function is called once per forward/backward pass of a graph in AOT
     # Autograd. We use it to set up the nvFuser-specific FX graph and return
     # execute function.
+    from torch._inductor.compile_fx import align_inputs, cudagraphify
     from torch._prims.context import TorchRefsNvfuserCapabilityMode
     from torch._prims.executor import execute
     from torch.fx.experimental.proxy_tensor import make_fx
+    from functorch.compile import make_boxed_func
+
+    # cudagraphify fails if intermediate tensors are CPU and there's an attempt
+    # to send them to CUDA
+    if cudagraphs:
+        gm = _replace_cpu_with_cuda(gm)
 
     # First we trace the graph conditionally decomposing nodes
     # that can be sent to the nvfuser executor
@@ -335,28 +387,71 @@ def prims_executor(gm, inputs, *, executor):
         prim_gm = make_fx(gm)(*inputs)
 
     # Then we return a callable that executes the "prim_gm" graph
-    return partial(execute, prim_gm, executor=executor)
+    # return partial(execute, prim_gm, executor=executor)
+    run = partial(execute, prim_gm, executor=executor)
+    run = make_boxed_func(run)
+
+    if _has_incompatible_cudagraph_ops(prim_gm) or not cudagraphs:
+        return run
+
+    try:
+        # Inductor's cudagraphify has hardcoded alignment constant for Triton
+        # We don't need it here, so we just set it to 1
+        old_alignment = torch._inductor.compile_fx.ALIGNMENT
+        torch._inductor.compile_fx.ALIGNMENT = 1
+        cudagraphed_fn = cudagraphify(run, inputs, range(num_fixed))
+        result = align_inputs(cudagraphed_fn, inputs, range(num_fixed))
+        result._boxed_call = True
+    finally:
+        torch._inductor.compile_fx.ALIGNMENT = old_alignment
+    return result
 
 
-def create_nvprims_backend(*, executor):
+def create_nvprims_backend(*, executor, cudagraphs):
     class NvPrims(AotAutogradStrategy):
         def __init__(self, gm: torch.fx.GraphModule, example_inputs):
             super(NvPrims, self).__init__(gm, example_inputs)
             self.executor = executor
+            self.cudagraphs = cudagraphs
+            self.num_example_inputs = len(example_inputs)
 
         def candidate(self):
+            def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+                num_fixed = len(example_inputs) - self.num_example_inputs
+                return partial(
+                    prims_executor,
+                    executor=self.executor,
+                    num_fixed=num_fixed,
+                    cudagraphs=self.cudagraphs,
+                )(model, example_inputs)
+
+            def bw_compiler(model: torch.fx.GraphModule, example_inputs):
+                from torchinductor.compile_fx import count_tangents
+
+                num_fixed = count_tangents(model)
+                return partial(
+                    prims_executor,
+                    executor=self.executor,
+                    num_fixed=num_fixed,
+                    cudagraphs=self.cudagraphs,
+                )(model, example_inputs)
+
             return BACKENDS["aot_autograd"](
                 self.gm,
                 self.example_inputs,
-                fw_compiler=partial(prims_executor, executor=self.executor),
-                bw_compiler=partial(prims_executor, executor=self.executor),
+                fw_compiler=fw_compiler,
+                bw_compiler=bw_compiler,
             )
 
     return NvPrims
 
 
-aot_nvprims_nvfuser = create_nvprims_backend(executor="nvfuser").compile_fn
-aot_nvprims_aten = create_nvprims_backend(executor="aten").compile_fn
+aot_nvprims_nvfuser = create_nvprims_backend(
+    executor="nvfuser", cudagraphs=True
+).compile_fn
+aot_nvprims_aten = create_nvprims_backend(
+    executor="aten", cudagraphs=True
+).compile_fn
 
 
 def cloner(t):
