@@ -4,9 +4,9 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/events.h>
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
-#include <torch/csrc/profiler/events.h>
 
 namespace torch {
 namespace profiler {
