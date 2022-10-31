@@ -43,8 +43,7 @@ for name, log in chunker(entries, 2):
                     component = "<dynamo guards>"
     if r == "UNKNOWN":
         c += 1
-    if r == "FAIL":
-        out.writerow([name, "", r, component, explain])
+    out.writerow([name, "", r, component, explain])
 
 if c:
     print(f"failed to classify {c} entries", file=sys.stderr)
