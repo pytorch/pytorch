@@ -270,7 +270,7 @@ class MetaConverter:
                     # metadata anyway.  Do this by reenabling the
                     # ADInplaceOrView key.  This is kind of a hack.
                     old_exclude = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
-                    #torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, False)
+                    torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, False)
                     try:
 
                         if base.dtype == t.dtype:
