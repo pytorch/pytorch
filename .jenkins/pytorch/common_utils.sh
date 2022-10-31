@@ -103,7 +103,7 @@ function get_pinned_commit() {
 
 function install_torchaudio() {
   local commit
-  commit=$(get_pinned_commit text)
+  commit=$(get_pinned_commit audio)
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
 }
 
