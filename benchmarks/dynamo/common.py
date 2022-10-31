@@ -1208,7 +1208,7 @@ class BenchmarkRunner:
             print("RUNNING ON BRANCH:", branch)
         mode = "train" if self.args.training else "eval"
         prefix = f"{current_device:4} {mode:5} {current_name:34}"
-        print(f"Running {current_name}...", file=sys.stderr)
+        print(f"Running {os.path.basename(sys.argv[0])} {current_name}...", file=sys.stderr)
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment
