@@ -1367,6 +1367,8 @@ def freeze_rng_state():
         #
         # In the long run torch.cuda.set_rng_state should probably be
         # an operator.
+        #
+        # NB: Mode disable is to avoid running cross-ref tests on thes seeding
         with no_dispatch(), disable_functorch():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
