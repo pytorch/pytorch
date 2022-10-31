@@ -123,8 +123,34 @@ bool check_fast_path_restrictions(
     return true;
 }
 
+bool check_fast_path_restrictions(
+  ArrayRef<TensorList> tensorLists,
+  const Tensor& scalarList_ = {},
+  bool does_op_promote_integer_inputs_to_float = false) {
+  std::vector<c10::Scalar> scalarList;
+  if (scalarList.device() != c10::kCPU) {
+    return false;
+  }
+  if (scalarList.dtype() != c10:kFloat) {
+    return false;
+  }
+  if (!scalarList.is_contiguous()) {
+    return false;
+  }
+  for (int64_t i = 0; i < scalarList_.size(0); i++) {
+    scalarList.push_back(scalarList_.data_ptr<float>());
+  }
+  return can_use_fast_route(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
+}
+
 bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
                         ArrayRef<Scalar> scalarList = {},
+                        bool does_op_promote_integer_inputs_to_float = false) {
+  return check_fast_path_restrictions(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
+}
+
+bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
+                        const Tensor& scalarList = {},
                         bool does_op_promote_integer_inputs_to_float = false) {
   return check_fast_path_restrictions(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
