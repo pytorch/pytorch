@@ -3039,7 +3039,8 @@ torch.cuda.synchronize()
         x = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
         y = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
 
-        for dtype in (torch.float16, torch.bfloat16):
+        dtypes = (torch.float16, torch.bfloat16) if TEST_BF16 else (torch.float16,)
+        for dtype in dtypes:
             with torch.cuda.amp.autocast(dtype=dtype):
                 output = mymm(x, y)
                 self.assertTrue(output.dtype is dtype)
