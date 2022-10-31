@@ -330,7 +330,7 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             if method in ["ceil", "floor"]:
                 op = getattr(math, method)
-            elif method == "sqrt":
+            elif method == "sym_sqrt":
                 op = sym_sqrt
             elif method in ["sym_float", "sym_int"]:
                 op = getattr(sys.modules[__name__], method)
