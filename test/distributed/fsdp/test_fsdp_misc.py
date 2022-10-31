@@ -405,7 +405,7 @@ class TestFSDPMisc(FSDPTest):
         module is on CPU after FSDP initialization, albeit after loging a
         warning, and that FSDP moves CPU input to GPU before the forward."""
         torch.cuda.set_device(self.rank)
-        regex = "Module is put on CPU"
+        regex = "passed-in `module` is on CPU"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
         )
@@ -437,8 +437,7 @@ class TestFSDPMisc(FSDPTest):
             CUDAInitMode.CUDA_NEVER,
         )
         with self.assertRaisesRegex(
-            ValueError,
-            "Module has CPU parameters, but sync_module_states=True is specified.",
+            ValueError, "The module has CPU parameters when `sync_module_states=True`"
         ):
             FSDP(nested_wrapped_module, self.process_group, sync_module_states=True)
 

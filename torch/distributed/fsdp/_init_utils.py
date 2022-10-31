@@ -10,6 +10,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Type,
     Union,
 )
 
@@ -29,6 +30,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._exec_order_utils import _ExecOrderData
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
+from torch.distributed.fsdp._wrap_utils import _get_submodule_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
@@ -97,12 +99,9 @@ def _init_ignored_module_states(
 
 
 @no_type_check
-def _init_module_and_device_state(
+def _init_buffer_state(
     state: _State,
     module: nn.Module,
-    device_id: Optional[Union[int, torch.device]],
-    param_init_fn: Optional[Callable[[nn.Module], None]],
-    sync_module_states: bool,
 ) -> _State:
     state._buffer_names = _get_buffer_names(module)
     # Save a mapping from fully prefixed buffer name to its original dtype
@@ -110,27 +109,6 @@ def _init_module_and_device_state(
     # their original dtype for model checkpointing
     _buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
     state._buffer_name_to_orig_dtype = _buffer_name_to_orig_dtype
-    _check_single_device_module(module, state._ignored_params)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    _materialize_module(
-        module,
-        param_init_fn,
-        state._ignored_params,
-        device_from_device_id,
-        lambda _: True,
-    )
-    # TODO: We need to skip this for functional-like to avoid moving the entire
-    # unsharded module onto GPU before any sharding.
-    _move_module_to_device(module, state._ignored_params, device_from_device_id)
-    state.compute_device = _get_compute_device(
-        module,
-        state._ignored_params,
-        device_from_device_id,
-        state.rank,
-    )
-    state._managed_params = list(_get_orig_params(module, state._ignored_params))
-    if sync_module_states:
-        _sync_module_states(module, state._managed_params, state.process_group)
     return state
 
 
@@ -219,6 +197,105 @@ def _init_state_dict_state(state: _State) -> _State:
 
 
 @no_type_check
+def _init_param_handle_from_module(
+    state: _State,
+    root_module: nn.Module,
+    device_id: Optional[Union[int, torch.device]],
+    param_init_fn: Optional[Callable[[nn.Module], None]],
+    sync_module_states: bool,
+    module_wrapper_cls: Type,
+) -> _State:
+    """
+    Initializes a ``FlatParamHandle`` from a module ``root_module``. This is
+    the module wrapper code path.
+    """
+    _check_single_device_module(root_module, state._ignored_params)
+    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
+    _materialize_module(
+        root_module,
+        param_init_fn,
+        state._ignored_params,
+        device_from_device_id,
+        lambda k: not isinstance(k, module_wrapper_cls),
+    )
+    # TODO: Investigate refactoring `_move_module_to_device()` to
+    # `_move_states_to_device()` to avoid the `device_id` + CPU offload hack
+    _move_module_to_device(root_module, state._ignored_params, device_from_device_id)
+    state.compute_device = _get_compute_device(
+        root_module,
+        state._ignored_params,
+        device_from_device_id,
+        state.rank,
+    )
+    managed_params = list(_get_orig_params(root_module, state._ignored_params))
+    if sync_module_states:
+        _sync_module_params_and_buffers(
+            root_module, managed_params, state.process_group
+        )
+    _init_param_handle_from_params(state, managed_params, root_module)
+    return state
+
+
+@no_type_check
+def _init_param_handles_from_module(
+    state: _State,
+    root_module: nn.Module,
+    auto_wrap_policy: Callable,
+    device_id: Optional[Union[int, torch.device]],
+    param_init_fn: Optional[Callable[[nn.Module], None]],
+    sync_module_states: bool,
+) -> _State:
+    """
+    Initializes all ``FlatParamHandle`` s from a module ``root_module``. This
+    is the non-module-wrapper code path.
+    """
+    submodule_to_states = _get_submodule_to_states(
+        root_module,
+        auto_wrap_policy,
+        state._ignored_modules,
+        state._ignored_params,
+    )
+    _check_single_device_module(root_module, state._ignored_params)
+    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
+    # Initialize and shard `FlatParamHandle`s one by one following bottom-up
+    # order (hence the `reversed`) to avoid increasing peak GPU memory usage
+    materialized_module = False
+    for submodule, (params, buffers, param_names, buffer_names) in reversed(
+        submodule_to_states.items()
+    ):
+        materialized_module |= _materialize_module(
+            submodule,
+            param_init_fn,
+            state._ignored_params,
+            device_from_device_id,
+            lambda _: True,
+        )
+        if materialized_module:
+            # Materializing from meta device can change the parameter/buffer
+            # variables, so reacquire references
+            params = [submodule.get_parameter(param_name) for param_name in param_names]
+            buffers = [
+                submodule.get_buffer(buffer_name) for buffer_name in buffer_names
+            ]
+        _move_states_to_device(params, buffers, device_from_device_id)
+        if not hasattr(state, "compute_device"):  # only need to set once
+            state.compute_device = _get_compute_device(
+                submodule,
+                state._ignored_params,
+                device_from_device_id,
+                state.rank,
+            )
+        if sync_module_states:
+            _sync_module_states(params, buffers, state.process_group)
+        # Pass `root_module` to have internal FQN metadata prefix starting from
+        # it instead of `submodule`
+        _init_param_handle_from_params(state, params, root_module)
+    # Reverse to preserve top-down order like `_fsdp_handles()`
+    state._handles.reverse()
+    return state
+
+
+@no_type_check
 def _init_param_handle_from_params(
     state: _State,
     params: List[nn.Parameter],
@@ -226,8 +303,6 @@ def _init_param_handle_from_params(
 ):
     if len(params) == 0:
         return
-    # TODO: Move module to GPU if needed (for non-wrapper code path) -- we need
-    # to fuse this method with `_init_module_and_device_state()`
     handle_config = HandleConfig(
         SHARDING_STRATEGY_MAP[state.sharding_strategy],
         state.cpu_offload.offload_params,
@@ -245,7 +320,6 @@ def _init_param_handle_from_params(
     )
     # TODO: Can simplify call `shard()` in the `FlatParamHandle` ctor
     handle.shard()
-    assert handle.flat_param not in state.params
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
@@ -397,7 +471,7 @@ def _materialize_module(
     ignored_params: Set[nn.Parameter],
     device_from_device_id: Optional[torch.device],
     deferred_init_check_fn: Callable,
-) -> None:
+) -> bool:
     """
     Materializes the wrapped module ``module`` in place if needed: either
     if the module has parameters that use meta device or are torchdistX
@@ -409,12 +483,17 @@ def _materialize_module(
     it is not ``None`` or the current device otherwise and calls
     ``reset_parameters()``, and for torchdistX fake tensors, this calls
     ``deferred_init.materialize_module()``.
+
+    Returns:
+        bool: ``True`` if ``module`` was materialized and ``False`` if this was
+        a no-op.
     """
-    is_meta_module = any(p.is_meta for p in _get_orig_params(module, ignored_params))
+    managed_params = _get_orig_params(module, ignored_params)
+    is_meta_module = any(param.is_meta for param in managed_params)
     is_torchdistX_deferred_init = (
         not is_meta_module
         and _TORCHDISTX_AVAIL
-        and any(fake.is_fake(p) for p in _get_orig_params(module, ignored_params))
+        and any(fake.is_fake(param) for param in managed_params)
     )
     if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
         if not callable(param_init_fn):
@@ -422,6 +501,7 @@ def _materialize_module(
                 f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
             )
         param_init_fn(module)
+        return True
     elif is_meta_module:
         # Run default meta device initialization
         materialization_device = device_from_device_id or torch.device(
@@ -438,16 +518,19 @@ def _materialize_module(
                 "module implements a `reset_parameters()` method."
             )
             raise e
+        return True
     elif is_torchdistX_deferred_init:
         # Run default torchdistX initialization
         deferred_init.materialize_module(module, check_fn=deferred_init_check_fn)
+        return True
+    return False
 
 
 def _move_module_to_device(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
     device_from_device_id: Optional[torch.device],
-):
+) -> None:
     """
     Moves ``module`` depending on ``device_from_device_id`` and its current
     device. This includes moving ignored modules' parameters.
@@ -459,10 +542,10 @@ def _move_module_to_device(
 
     Precondition: ``_check_single_device_module()``.
     """
-    cpu_device = torch.device("cpu")
     param = next(_get_orig_params(module, ignored_params), None)
     if param is None:
         return  # no original parameters to manage
+    cpu_device = torch.device("cpu")
     if device_from_device_id is not None:
         if param.device == cpu_device:
             # NOTE: This includes moving ignored modules' parameters.
@@ -479,13 +562,47 @@ def _move_module_to_device(
                         for handle in submodule._handles:
                             handle.flat_param_to(torch.device("cpu"))
     elif param.device == cpu_device:
-        warnings.warn(
-            "Module is put on CPU and will thus have flattening and sharding"
-            " run on CPU, which is less efficient than on GPU. We recommend passing in "
-            "`device_id` argument which will enable FSDP to put module on GPU device,"
-            " module must also be on GPU device to work with `sync_module_states=True` flag"
-            " which requires GPU communication."
-        )
+        _warn_cpu_init()
+
+
+def _move_states_to_device(
+    params: List[nn.Parameter],
+    buffers: List[torch.Tensor],
+    device_from_device_id: Optional[torch.device],
+) -> None:
+    """
+    Precondition: ``_check_single_device_module()``.
+    """
+    if len(params) == 0 and len(buffers) == 0:
+        return
+    if len(params) > 0:
+        current_device = params[0].device
+    elif len(buffers) > 0:
+        current_device = buffers[0].device
+    cpu_device = torch.device("cpu")
+    if device_from_device_id is not None:
+        # Move the parameters and buffers like the `.data` code path in
+        # `nn.Module._apply()`, which underlies `nn.Module.to()`
+        for param in params:
+            with torch.no_grad():
+                param.data = param.to(device_from_device_id)
+                if param.grad is not None:
+                    param.grad.data = param.grad.to(device_from_device_id)
+        for buffer in buffers:
+            buffer.data = buffer.to(device_from_device_id)
+    elif current_device == cpu_device:
+        _warn_cpu_init()
+
+
+def _warn_cpu_init():
+    warnings.warn(
+        "The passed-in `module` is on CPU and will thus have FSDP's sharding "
+        "initialization run on CPU, which may be slower than on GPU. We "
+        "recommend passing in the `device_id` argument for FSDP to move "
+        "`module` to GPU for the sharding initialization. `module` must also "
+        "be on GPU device to work with the `sync_module_states=True` flag "
+        "since that requires GPU communication."
+    )
 
 
 def _get_compute_device(
@@ -522,7 +639,8 @@ def _get_compute_device(
     return compute_device
 
 
-def _sync_module_states(
+# TODO: See how to deprecate!
+def _sync_module_params_and_buffers(
     module: nn.Module,
     params: List[nn.Parameter],
     process_group: dist.ProcessGroup,
@@ -534,12 +652,7 @@ def _sync_module_states(
     Precondition: ``sync_module_states == True`` and ``self.process_group`` has
     been set.
     """
-    if params and any(param.device == torch.device("cpu") for param in params):
-        raise ValueError(
-            "Module has CPU parameters, but sync_module_states=True is specified."
-            "This only works for GPU module, please specify `device_id` argument or move"
-            " module to GPU before init."
-        )
+    _check_params_for_sync_module_states(params)
     module_states: List[torch.Tensor] = []
     # TODO (awgu): When exposing the original parameters, we need to also
     # use this attribute to prevent re-synchronizing parameters.
@@ -555,6 +668,37 @@ def _sync_module_states(
         PARAM_BROADCAST_BUCKET_SIZE,
         src=0,
     )
+
+
+def _sync_module_states(
+    params: List[nn.Parameter],
+    buffers: List[torch.Tensor],
+    process_group: dist.ProcessGroup,
+) -> None:
+    _check_params_for_sync_module_states(params)
+    # Assumes that each call to this method passes in disjoint `params` and
+    # and `buffers` across calls, so there is no chance of re-synchronizing
+    params_and_buffers = [param.detach() for param in params] + [
+        buffer.detach() for buffer in buffers
+    ]
+    _sync_params_and_buffers(
+        process_group,
+        params_and_buffers,
+        PARAM_BROADCAST_BUCKET_SIZE,
+        src=0,
+    )
+
+
+def _check_params_for_sync_module_states(
+    params: List[nn.Parameter],
+) -> None:
+    if params and any(param.device == torch.device("cpu") for param in params):
+        raise ValueError(
+            "The module has CPU parameters when `sync_module_states=True`, "
+            "which only works when all parameters are on GPU. Please specify "
+            "the `device_id` argument or move the module to GPU before passing "
+            "into FSDP."
+        )
 
 
 def _get_orig_params(
