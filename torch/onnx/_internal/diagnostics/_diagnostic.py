@@ -55,7 +55,7 @@ class ExportDiagnostic(infra.Diagnostic):
     ) -> None:
         super().__init__(*args, **kwargs)
         self._record_python_call_stack(frames_to_skip=1)
-        self._record_cpp_call_stack(frames_to_skip=1)
+        # self._record_cpp_call_stack(frames_to_skip=1)
 
     def _record_python_call_stack(self, frames_to_skip) -> None:
         """Records the current Python call stack in the diagnostic."""
