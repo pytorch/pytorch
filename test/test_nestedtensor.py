@@ -756,11 +756,15 @@ class TestNestedTensorDeviceType(TestCase):
                           torch.tanh_,
                           torch.neg])
     def test_activations(self, device, func):
-        nt = random_nt(device, torch.float32, 3, (4, 4))
+        nt, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7), device=device, dtype=torch.float32)
         nested_result = func(nt)
         self.assertTrue(nested_result.is_nested)
         for t, t_res in zip(nt.unbind(), nested_result.unbind()):
             self.assertEqual(func(t), t_res)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "NestedTensor must be contiguous to get buffer.",
+            lambda: func(nt_noncontiguous))
 
     @dtypes(*floating_types_and_half())
     def test_nested_tensor_chunk(self, device, dtype):
