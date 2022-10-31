@@ -5,16 +5,17 @@ import sys
 
 full_log = open(sys.argv[1], 'r').read()
 
-entries = re.split(r"Running ([^.]+)\.\.\.", full_log)[1:]
+entries = re.split(r"Running (torchbench|huggingface|timm_models)\.py ([^.]+)\.\.\.", full_log)[1:]
 
 def chunker(seq, size):
     return (seq[pos:pos + size] for pos in range(0, len(seq), size))
 
 c = 0
+i = 0
 
 out = csv.writer(sys.stdout, dialect='excel')
 
-for name, log in chunker(entries, 2):
+for bench, name, log in chunker(entries, 3):
     r = "UNKNOWN"
     explain = ""
     component = ""
@@ -42,7 +43,8 @@ for name, log in chunker(entries, 2):
                     component = "<dynamo guards>"
     if r == "UNKNOWN":
         c += 1
-    out.writerow([name, "", r, component, explain])
+    out.writerow([i, bench, name, "", r, component, explain])
+    i += 1
 
 if c:
     print(f"failed to classify {c} entries", file=sys.stderr)
