@@ -46,7 +46,7 @@ def reset():
 def list_backends():
     """
     Return valid strings that can be passed to:
-        @torchdynamo.optimize(<backend>)
+        @torch._dynamo.optimize(<backend>)
         def foo(...):
            ....
     """
@@ -60,9 +60,9 @@ def allow_in_graph(fn):
     Customize which functions TorchDynamo will include in the generated
     graph.  Similar to torch.fx.wrap().
 
-        torchdynamo.allow_in_graph(my_custom_function)
+        torch._dynamo.allow_in_graph(my_custom_function)
 
-        @torchdynamo.optimize(...)
+        @torch._dynamo.optimize(...)
         def fn(a):
             x = torch.add(x, 1)
             x = my_custom_function(x)
@@ -78,6 +78,7 @@ def allow_in_graph(fn):
     assert callable(fn), "allow_in_graph expects a callable"
     allowed_functions._allowed_function_ids.add(id(fn))
     allowed_functions._disallowed_function_ids.remove(id(fn))
+    return fn
 
 
 def disallow_in_graph(fn):
@@ -85,9 +86,9 @@ def disallow_in_graph(fn):
     Customize which functions TorchDynamo will exclude in the generated
     graph and force a graph break on.
 
-        torchdynamo.disallow_in_graph(torch.sub)
+        torch._dynamo.disallow_in_graph(torch.sub)
 
-        @torchdynamo.optimize(...)
+        @torch._dynamo.optimize(...)
         def fn(a):
             x = torch.add(x, 1)
             x = torch.sub(x, 1)
@@ -104,3 +105,10 @@ def disallow_in_graph(fn):
     assert callable(fn), "disallow_in_graph expects a callable"
     allowed_functions._allowed_function_ids.remove(id(fn))
     allowed_functions._disallowed_function_ids.add(id(fn))
+    return fn
+
+
+@disallow_in_graph
+def graph_break():
+    """Force a graph break"""
+    pass

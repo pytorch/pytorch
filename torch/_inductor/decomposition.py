@@ -3,8 +3,6 @@ import logging
 import math
 import numbers
 
-from functorch._src.aot_autograd import aot_autograd_decompositions
-
 import torch
 import torch._decomp as decomp
 from torch import Tensor
@@ -83,31 +81,35 @@ decompositions = get_decompositions(
         aten._reshape_alias,
         aten.select_backward,
         aten.select_scatter,
+        aten.sgn,
         aten.sigmoid_backward,
+        aten.silu,
         aten.silu_backward,
         aten.slice_backward,
-        aten.sgn,
-        aten.std_mean.correction,
         aten._softmax,
         aten._softmax_backward_data,
+        aten.softplus,
+        aten.softplus_backward,
         aten.stack,
+        aten.std_mean.correction,
         aten.t,
         aten.tanh_backward,
         aten.threshold_backward,
         aten.transpose.int,
         aten.tril.default,
+        aten.unfold,
+        aten.unfold_backward,
         aten.upsample_bilinear2d.vec,
         aten.upsample_nearest2d_backward,
     ]
 )
-decompositions.update(aot_autograd_decompositions)
 
 
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
             log.warning(f"duplicate decomp: {ops}")
-    return decomp.register_decomposition(ops, decompositions, disable_meta=True)
+    return decomp.register_decomposition(ops, decompositions)
 
 
 @register_decomposition([aten.clamp])
@@ -195,9 +197,12 @@ def rsub(a, b):
 def masked_fill(value, mask, other):
     if isinstance(other, numbers.Number):
         other = torch.tensor(other, dtype=value.dtype, device=value.device)
+    assert other.numel() == 1 and other.ndim == 0
     if other.device != value.device and other.numel() == 1:
         other = other.to(value.device)
-    value, mask, other = torch.broadcast_tensors(value, mask, other)
+    if other.dtype != value.dtype:
+        # TODO: error out on improper complex conversions
+        other = other.to(value.dtype)
     return torch.where(mask, other, value)
 
 
@@ -299,6 +304,12 @@ def bernoulli(self, *, generator=None):
     return torch.rand_like(self, dtype=torch.float32) < self
 
 
+@register_decomposition([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
+
+
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
@@ -306,7 +317,7 @@ turning them on and off via `config.fallback_random`.
 """
 extra_random_decomps = get_decompositions([aten.native_dropout])
 register_extra_random_decomp = functools.partial(
-    decomp.register_decomposition, registry=extra_random_decomps, disable_meta=True
+    decomp.register_decomposition, registry=extra_random_decomps
 )
 
 

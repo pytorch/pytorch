@@ -16,15 +16,17 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
+import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from torch._dynamo import bytecode_transformation
+from torch._dynamo import bytecode_transformation, graph_break
 from torch._dynamo.testing import (
     CompileCounter,
     requires_static_shapes,
     same,
     unsupported,
 )
+from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -34,7 +36,7 @@ def my_custom_function(x):
     return x + 1
 
 
-class MiscTests(torch._dynamo.testing.TestCase):
+class MiscTests(torch._dynamo.test_case.TestCase):
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -576,6 +578,8 @@ class MiscTests(torch._dynamo.testing.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
+    # KeyError: '__name__'
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
@@ -1170,6 +1174,25 @@ class MiscTests(torch._dynamo.testing.TestCase):
             self.assertFalse(True)
         except torch._dynamo.exc.Unsupported as e:
             self.assertIn("call torch._dynamo.disable() wrapped function", str(e))
+
+    def test_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.optimize(cnts)
+        def fn(x):
+            x = torch.cos(x)
+            x = torch.cos(x)
+            torch._dynamo.graph_break()
+            x = torch.cos(x)
+            x = torch.cos(x)
+            graph_break()
+            x = torch.cos(x)
+            x = torch.cos(x)
+            return x
+
+        fn(torch.randn(4, 5))
+        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.op_count, 6)
 
     def test_torch_size(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1938,7 +1961,6 @@ class MiscTests(torch._dynamo.testing.TestCase):
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
 
-    @patch.object(torch._dynamo.config, "raise_on_backend_error", True)
     def test_raise_on_backend_error(self):
         def my_compiler(gm, _):
             raise RuntimeError("duck!")
@@ -2413,6 +2435,7 @@ class MiscTests(torch._dynamo.testing.TestCase):
             fn(torch.randn(10), torch.randn(10))
             self.assertEqual(cur_len, len(log))
 
+    @patch.object(torch._dynamo.config, "print_graph_breaks", True)
     def test_duplicate_graph_break_warning(self):
         @torch._dynamo.optimize("eager")
         def f1(a, b):
@@ -2661,6 +2684,68 @@ class MiscTests(torch._dynamo.testing.TestCase):
         m = Mod()
         graph, _ = torch._dynamo.export(m, torch.randn(3, 3))
 
+    def test_nn_sequential_invocation(self):
+        with freeze_rng_state():
+
+            class TestModel(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linears = torch.nn.Sequential(
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                    )
+
+                def forward(self, x):
+                    all_but_last = self.linears[:-1]
+                    return all_but_last(x)
+
+            m = TestModel()
+            x = torch.rand((2, 2))
+            real = m(x)
+            graph, _ = torch._dynamo.export(m, x)
+            dynamo_result = graph(x)
+            self.assertTrue(same(real, dynamo_result))
+
+    def test_nn_sequential_invocation_reposition_indices(self):
+        with freeze_rng_state():
+
+            class TestModel(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linears = torch.nn.Sequential(
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                    )
+
+                def forward(self, x):
+                    all_but_last = self.linears[1:3]
+                    return all_but_last(x)
+
+            m = TestModel()
+            x = torch.rand((2, 2))
+            real = m(x)
+            graph, _ = torch._dynamo.export(m, x)
+            dynamo_result = graph(x)
+            self.assertTrue(same(real, dynamo_result))
+
+    def test_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
+            gm = torch.fx.symbolic_trace(optimized)
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod
@@ -2719,6 +2804,6 @@ class TestTracer(JitTestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
+    from torch._dynamo.test_case import run_tests
 
     run_tests()
