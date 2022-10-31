@@ -754,13 +754,13 @@ class TORCH_API For : public StmtNode<For> {
         stop_(stop),
         loop_options_(std::move(loop_options)) {
     if (!var) {
-      throw malformed_input("invalid Var in For loop", var);
+      throw malformed_input("invalid Var in For loop");
     } else if (!start) {
-      throw malformed_input("invalid Start in For loop", start);
+      throw malformed_input("invalid Start in For loop");
     } else if (!stop) {
-      throw malformed_input("invalid Stop in For loop", stop);
+      throw malformed_input("invalid Stop in For loop");
     } else if (!body || body->get_parent()) {
-      throw malformed_input("invalid Body in For loop", body);
+      throw malformed_input("invalid Body in For loop");
     }
 
     BlockPtr b = to<Block>(body);
