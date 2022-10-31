@@ -258,11 +258,12 @@ def fresh_inductor_cache(cache_entries=None):
                 yield
                 if isinstance(cache_entries, dict):
                     assert len(cache_entries) == 0, "expected empty cache_entries dict"
-                    files = os.listdir(triton_cache_dir)
-                    cache_entries.update(
-                        {
-                            f: os.path.getsize(os.path.join(triton_cache_dir, f))
-                            for f in files
-                            if ".lock" not in f
-                        }
-                    )
+                    if os.path.exists(triton_cache_dir):
+                        files = os.listdir(triton_cache_dir)
+                        cache_entries.update(
+                            {
+                                f: os.path.getsize(os.path.join(triton_cache_dir, f))
+                                for f in files
+                                if ".lock" not in f
+                            }
+                        )
