@@ -3223,7 +3223,7 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
 @register_decomposition(torch.ops.aten.index_copy)
 @out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
-    return x.clone().index_copy_(dim, index, tensor)
+    return x.clone(memory_format=torch.contiguous_format).index_copy_(dim, index, tensor)
 
 
 @register_decomposition(torch.ops.aten.index_copy_)
