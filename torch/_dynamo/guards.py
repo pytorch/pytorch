@@ -644,9 +644,9 @@ class CheckFunctionManager:
                     if obj_expr not in expr_to_tensor_ref:
                         expr_to_tensor_ref[obj_expr] = {}
                     expr_to_tensor_ref[obj_expr][tensor_ref] = ""
-            finished_expressions.append(
-                f"___check_type_id(id(type({name})), {id(type(torch.Tensor))})"
-            )
+            # finished_expressions.append(
+            #     f"___check_type_id(id(type({name})), {id(type(torch.Tensor))})"
+            # )
 
         guard_expression = self.output_graph.shape_env.get_guard_expr()
         expr_as_str = guard_printer.doprint(guard_expression)
@@ -700,13 +700,6 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names:
-            symbolic_shape_expression = self._parse_symbolic_shape_expressions(
-                tensor_check_names, tensor_check_ids
-            )
-            if symbolic_shape_expression:
-                code_parts.append(symbolic_shape_expression)
-                verbose_code_parts.append(symbolic_shape_expression)
-
             tensor_check_examples = (
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
@@ -721,6 +714,12 @@ class CheckFunctionManager:
                 tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
             verbose_code_parts.append(f"___check_tensors_verbose({verbose_args})")
+            symbolic_shape_expression = self._parse_symbolic_shape_expressions(
+                tensor_check_names, tensor_check_ids
+            )
+            if symbolic_shape_expression:
+                code_parts.append(symbolic_shape_expression)
+                verbose_code_parts.append(symbolic_shape_expression)
 
         def direct_equality(a, b):
             return a == b
