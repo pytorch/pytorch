@@ -113,6 +113,7 @@ torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
+minifier_launcher.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml
 env
@@ -334,3 +335,9 @@ buck-out/
 # Downloaded libraries
 third_party/ruy/
 third_party/glog/
+
+# Virtualenv
+venv/
+
+# Log files
+*.log

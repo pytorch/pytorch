@@ -335,8 +335,8 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymIntNode",
-    "SymFloatNode",
+    "SymInt",
+    "SymFloat",
 ]
 
 # The suffix(es) of source filenames.
@@ -396,8 +396,34 @@ todo_include_todos = True
 # Disable docstring inheritance
 autodoc_inherit_docstrings = False
 
-# Disable displaying type annotations, these can be very verbose
-autodoc_typehints = 'none'
+# Show type hints in the description
+autodoc_typehints = 'description'
+
+# Add parameter types if the parameter is documented in the docstring
+autodoc_typehints_description_target = 'documented_params'
+
+# Type aliases for common types
+# Sphinx type aliases only works with Postponed Evaluation of Annotations
+# (PEP 563) enabled (via `from __future__ import annotations`), which keeps the
+# type annotations in string form instead of resolving them to actual types.
+# However, PEP 563 does not work well with JIT, which uses the type information
+# to generate the code. Therefore, the following dict does not have any effect
+# until PEP 563 is supported by JIT and enabled in files.
+autodoc_type_aliases = {
+    "_size_1_t": "int or tuple[int]",
+    "_size_2_t": "int or tuple[int, int]",
+    "_size_3_t": "int or tuple[int, int, int]",
+    "_size_4_t": "int or tuple[int, int, int, int]",
+    "_size_5_t": "int or tuple[int, int, int, int, int]",
+    "_size_6_t": "int or tuple[int, int, int, int, int, int]",
+    "_size_any_opt_t": "int or None or tuple",
+    "_size_2_opt_t": "int or None or 2-tuple",
+    "_size_3_opt_t": "int or None or 3-tuple",
+    "_ratio_2_t": "float or tuple[float, float]",
+    "_ratio_3_t": "float or tuple[float, float, float]",
+    "_ratio_any_t": "float or tuple",
+    "_tensor_list_t": "Tensor or tuple[Tensor]",
+}
 
 # Enable overriding of function signatures in the first line of the docstring.
 autodoc_docstring_signature = True

@@ -514,7 +514,7 @@ class TestFxComposability(TestCase):
         # that none were lost during prepare
         self.assertTrue(hasattr(fqn_to_module(mod, "0.0"), "parametrizations"))
         self.assertTrue(hasattr(fqn_to_module(mod, "5"), "parametrizations"))
-        self.assertTrue(isinstance(fqn_to_module(mod, "5"), torch.nn.intrinsic.qat.LinearReLU))
+        self.assertTrue(isinstance(fqn_to_module(mod, "5"), torch.ao.nn.intrinsic.qat.LinearReLU))
 
         # check that correct observers were inserted and that matching
         # occured successfully

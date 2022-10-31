@@ -1,3 +1,4 @@
+import operator
 from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
@@ -29,7 +30,7 @@ else:
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
         "use_python_fusion_cache": True,
-        "allow_single_op_fusion": True,
+        "allow_single_op_fusion": False,
     }
 )
 
@@ -89,7 +90,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
-        if node.op == "call_function" and "getitem" in node.name:
+        if node.op == "call_function" and node.target == operator.getitem:
             continue
         if (
             node.op == "call_function"
@@ -152,7 +153,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
             def call_function(self, target, args, kwargs):
                 # This handles tuple unpacking
-                if "getitem" in str(target):
+                if target == operator.getitem:
                     assert isinstance(args[0], tuple)
                     return target(*args, **kwargs)
                 args = tuple(map(_to_nvfuser_constant, args))
@@ -237,10 +238,9 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
                 )
                 is not None
             )
-        return (
-            node.op == "call_function"
-            and getattr(node.target, "impl_nvfuser", None) is not None
-            or "getitem" in node.name  # getitem is a special case
+        return node.op == "call_function" and (
+            getattr(node.target, "impl_nvfuser", None) is not None
+            or node.target == operator.getitem
         )
 
 
@@ -268,11 +268,56 @@ class NvfuserGraphModule(torch.nn.Module):
         )
 
 
+# A set of operators that are supported by nvFuser
+# but should not form a fusion group solely on their own
+_non_compute_ops = [
+    "torch.ops." + str(getattr(torch.ops.nvprims, prim).default)
+    for prim in dir(torch.ops.nvprims)
+    if isinstance(getattr(torch.ops.nvprims, prim), torch._ops.OpOverloadPacket)
+    and getattr(torch.ops.nvprims, prim).return_type
+    == torch._prims_common.RETURN_TYPE.VIEW
+]
+
+_allowed_single_node_partition_ops = [
+    "torch.ops.nvprims.native_batch_norm.default",
+    "torch.ops.nvprims.var_mean.default",
+    "torch.ops.nvprims.var_mean.main",
+]
+
+
+def _remove_empty_like_fill(gm: GraphModule):
+    # Remove empty_like + fill nodes that prevent lowering to nvprims
+    # This is a workaround for nonoptimal traces of C++ code `(1 - tensor)`
+    # https://github.com/pytorch/pytorch/issues/86612
+
+    # Here when we see a `sub` node, we check if the first input is a result of
+    # filling a tensor with a scalar
+    # If so, we replace the first argument of the `sub` node with a scalar
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if node.target == torch.ops.nvprims.sub.default:
+                # check if the first argument is a fill
+                if (
+                    isinstance(node.args[0], torch.fx.Node)
+                    and node.args[0].op == "call_function"
+                    and node.args[0].target == torch.ops.aten.fill.Scalar
+                ):
+                    # Replace the first argument with the second argument of fill
+                    # aten.fill.Scalar(tensor, scalar)
+                    fill_node = node.args[0]
+                    scalar = fill_node.args[1]
+                    node.args = (scalar, *node.args[1:])
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return gm
+
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache(maxsize=1024)  # type: ignore[arg-type]
 def maybe_partition_graph(
     gm: GraphModule, allow_single_op_fusion: bool, use_python_fusion_cache: bool
 ):
+    gm = _remove_empty_like_fill(gm)
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = list(
         filter(lambda n: n.op == "call_function", gm.graph.nodes)
@@ -297,7 +342,11 @@ def maybe_partition_graph(
         # CapabilityBasedPartitioner modifies the graph in-place so we need to make a copy of the graph
         gm = deepcopy(gm)
         partitioner = CapabilityBasedPartitioner(
-            gm, supported_ops, allows_single_node_partition=allow_single_op_fusion
+            gm,
+            supported_ops,
+            allows_single_node_partition=allow_single_op_fusion,
+            non_compute_ops=_non_compute_ops,
+            allowed_single_node_partition_ops=_allowed_single_node_partition_ops,
         )
         partitions = partitioner.propose_partitions()
         if len(partitions) == 0:
@@ -322,6 +371,16 @@ def maybe_partition_graph(
                     NvfuserGraphModule(nvfuser_submodule, use_python_fusion_cache),
                 )
 
+        # Go through the graph and replace all the nodes that were converted to
+        # nvprims but won't be sent to nvFuser with a call to PyTorch's eager
+        # mode. This is necessary because torch.ops.* have higher overhead than
+        # calling the eager mode directly.
+        for node in partitioned_graph.graph.nodes:
+            if node.op == "call_function" and str(node.target).startswith("nvprims."):
+                if getattr(node.target, "impl_aten", None) is not None:
+                    node.target = node.target.impl_aten
+        partitioned_graph.graph.eliminate_dead_code()
+        partitioned_graph.recompile()
         return partitioned_graph, any_unsupported
     else:
         return gm, any_unsupported
