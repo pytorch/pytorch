@@ -5,7 +5,8 @@
 
 import dataclasses
 import re
-from typing import Any, Dict, Iterable, Sequence, Tuple, Union
+import typing
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
 
 import torch
 from torch import _C
@@ -306,3 +307,28 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
             else:
                 kind = "i"
     return getattr(node, f"{kind}_")(name, value)
+
+
+# TODO: Expose this to user when migrating symbolic helper functions to here.
+@_beartype.beartype
+def _is_tensor(x: _C.Value) -> bool:
+    return x.type().isSubtypeOf(_C.TensorType.get())
+
+
+@_beartype.beartype
+def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
+    if not _is_tensor(value):
+        return None
+    tensor_type = typing.cast(_C.TensorType, value.type())
+    return tensor_type.device()
+
+
+@_beartype.beartype
+def parse_node_kind(kind: str) -> Tuple[str, str]:
+    """Parse node kind into domain and Op name."""
+    if "::" not in kind:
+        raise ValueError(f"Node kind: {kind} is invalid. '::' is not in node kind.")
+    domain, opname = kind.split("::", 1)
+    if "::" in opname:
+        raise ValueError(f"Node kind: {kind} is invalid. '::' should only apear once.")
+    return domain, opname

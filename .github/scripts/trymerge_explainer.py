@@ -11,7 +11,7 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 OFFICE_HOURS_LINK = "https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours"
 CONTACT_US = f"Questions? Feedback? Please reach out to the [PyTorch DevX Team]({OFFICE_HOURS_LINK})"
 ALTERNATIVES = (
-    "Learn more about merging in the [wiki]({BOT_COMMANDS_WIKI})."
+    f"Learn more about merging in the [wiki]({BOT_COMMANDS_WIKI})."
 )
 
 
