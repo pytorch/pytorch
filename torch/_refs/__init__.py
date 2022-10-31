@@ -2589,7 +2589,7 @@ def constant_pad_nd(
     if value == 0 and input.dtype == torch.bool:
         value = False
     # torch.fill isn't typed to allow complex values
-    output = torch.fill(output, value)  # type: ignore[arg-type]
+    output = torch.fill(output, value)
 
     c_output = output
     for i in range(l_diff, l_inp):
