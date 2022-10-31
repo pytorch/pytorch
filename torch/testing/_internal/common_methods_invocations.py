@@ -10762,6 +10762,9 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.complex32: tol(atol=5e-2, rtol=5e-2)}),
                    "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
                DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
+                   "TestMathBits", "test_conj_view", device_type='cuda'),
+               DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=9e-2, rtol=9e-2), }),
                    'TestCommon', 'test_complex_half_reference_testing')],
            skips=(
