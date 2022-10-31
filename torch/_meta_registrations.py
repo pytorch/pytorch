@@ -655,7 +655,9 @@ def meta_adaptive_avg_pool2d(self, output_size):
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
-    return self.new_empty(self.shape[:-2] + tuple(output_size))
+    output_shape = self.shape[:-2] + tuple(output_size)
+    memory_format = utils.suggest_memory_format(self)
+    return self.new_empty(output_shape).to(memory_format=memory_format)
 
 
 @register_meta(aten._adaptive_avg_pool3d.default)

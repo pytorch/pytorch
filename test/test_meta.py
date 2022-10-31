@@ -252,14 +252,7 @@ CHECK_STRIDES_SKIPS = {
     aten.xlogy.Tensor,
 
     # channel_last and channel_last_3d related failures
-    aten.constant_pad_nd.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.constant_pad_nd.default,
     aten.convolution.default,
-    aten.convolution.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.upsample_bilinear2d.vec,
-    aten.constant_pad_nd.default,
     aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
