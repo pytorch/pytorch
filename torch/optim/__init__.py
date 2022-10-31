@@ -21,6 +21,7 @@ from .nadam import NAdam
 from .lbfgs import LBFGS
 from . import lr_scheduler
 from . import swa_utils
+from .lars import LARS
 
 del adadelta
 del adagrad
@@ -36,3 +37,4 @@ del rmsprop
 del optimizer
 del nadam
 del lbfgs
+del lars

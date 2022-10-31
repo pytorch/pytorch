@@ -1786,6 +1786,49 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(RuntimeError, "`fused` does not support `differentiable`"):
                 optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
+    def test_lars(self):
+        # ASK: What's the reason behind two identical calls? (See SGD tests)
+        self._test_basic_cases(
+            lambda weight, bias, maximize: optim.LARS([weight, bias], lr=1e-3, maximize=maximize),
+            constructor_accepts_maximize=True, constructor_accepts_foreach=False,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, maximize: optim.LARS(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, maximize=maximize),
+            constructor_accepts_maximize=True, constructor_accepts_foreach=False,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, maximize: optim.LARS(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                lr=1e-3, maximize=maximize),
+            constructor_accepts_maximize=True, constructor_accepts_foreach=False,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, maximize: optim.LARS(
+                self._build_params_dict_single(weight, bias, lr=1e-2), maximize=maximize),
+            constructor_accepts_maximize=True, constructor_accepts_foreach=False,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, maximize:
+            optim.LARS([weight, bias], lr=1e-3, momentum=0.5, weight_decay=1, dampening=0.0, nesterov=True, maximize=maximize),
+            constructor_accepts_maximize=True, constructor_accepts_foreach=False,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, maximize:
+            optim.LARS([weight, bias], lr=1e-3, trust_coefficient=0.01, eps=1e-5, maximize=maximize),
+            constructor_accepts_maximize=True, constructor_accepts_foreach=False,
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid learning rate: -0.1"):
+            optim.LARS(None, lr=-0.1)
+        with self.assertRaisesRegex(ValueError, "Invalid weight decay value: -0.5"):
+            optim.LARS(None, lr=1e-2, weight_decay=-0.5)
+        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+            optim.LARS(None, lr=1e-2, momentum=-0.5)
+        with self.assertRaisesRegex(ValueError, "Nesterov momentum requires a momentum and zero dampening"):
+            optim.LARS(None, lr=1e-2, nesterov=True, momentum=0.1, dampening=0.1)
+        with self.assertRaisesRegex(ValueError, "Nesterov momentum requires a momentum and zero dampening"):
+            optim.LARS(None, lr=1e-2, nesterov=True, momentum=0.0, dampening=0.0)
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
@@ -4541,6 +4584,14 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
+    def test_lars(self):
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state = {'momentum_buffer': mbuff}
+        gradcheck(_diff_fn, (p, grad, state, torch.optim.LARS, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
 
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
