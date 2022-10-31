@@ -1111,7 +1111,8 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     out = alpha * torch.mm(mat1, mat2)
     if beta == 0:
         return out
-    return beta * self + out
+    # The output of addmm is contiguous, so we use `out`, which is contigous, as the first argument for add
+    return out + beta * self
 
 
 # This computes the mean and variance along the specifized normalization dims,
