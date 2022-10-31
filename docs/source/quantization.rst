@@ -356,17 +356,17 @@ QAT API Example::
   # 'qnnpack' for mobile inference. Other quantization configurations such
   # as selecting symmetric or assymetric quantization and MinMax or L2Norm
   # calibration techniques can be specified here.
-  model_fp32.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+  model_fp32.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
 
   # fuse the activations to preceding layers, where applicable
   # this needs to be done manually depending on the model architecture
-  model_fp32_fused = torch.quantization.fuse_modules(model_fp32,
+  model_fp32_fused = torch.ao.quantization.fuse_modules_qat(model_fp32,
       [['conv', 'bn', 'relu']])
 
   # Prepare the model for QAT. This inserts observers and fake_quants in
   # the model needs to be set to train for QAT logic to work
   # the model that will observe weight and activation tensors during calibration.
-  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused.train())
+  model_fp32_prepared = torch.ao.quantization.prepare_qat(model_fp32_fused.train())
 
   # run the training loop (not shown)
   training_loop(model_fp32_prepared)
