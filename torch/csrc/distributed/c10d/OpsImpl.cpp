@@ -219,6 +219,22 @@ reduce_scatter_cuda_(
       output_tensors, work);
 }
 
+c10::intrusive_ptr<Work> barrier_cpu(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<int64_t>& device_ids,
+    int64_t timeout) {
+  return process_group->barrier(
+      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
+}
+
+c10::intrusive_ptr<Work> barrier_cuda(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<int64_t>& device_ids,
+    int64_t timeout) {
+  return process_group->barrier(
+      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
+}
+
 // register functions to dispatcher
 namespace {
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -286,6 +302,15 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("reduce_scatter_", reduce_scatter_cuda_);
 }
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("barrier", barrier_cpu);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("barrier", barrier_cuda);
+}
+
 } // namespace
 
 } // namespace ops
