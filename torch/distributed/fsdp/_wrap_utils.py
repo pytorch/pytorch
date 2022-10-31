@@ -1,7 +1,6 @@
-import collections
 import functools
 import warnings
-from typing import Any, Callable, Deque, Dict, List, Set, Tuple
+from typing import Any, Callable, Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -14,6 +13,20 @@ from torch.distributed.fsdp.wrap import (
     _recursive_wrap,
     _wrap_batchnorm_individually,
 )
+
+
+class SubmoduleState(NamedTuple):
+    """
+    Submodule state for ``_get_submodule_to_states()``, representing a logical
+    grouping (e.g. parameters to be flattened together).
+    """
+
+    params: List[nn.Parameter]
+    buffers: List[torch.Tensor]
+    # Parameter and buffer names are prefixed starting from the submodule,
+    # which is not necessarily the root module
+    param_names: List[str]
+    buffer_names: List[str]
 
 
 def _auto_wrap(
@@ -63,26 +76,22 @@ def _get_submodule_to_states(
     auto_wrap_policy: Callable,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
-) -> Dict[
-    nn.Module, Tuple[List[nn.Parameter], List[torch.Tensor], List[str], List[str]]
-]:
+) -> Dict[nn.Module, SubmoduleState]:
     """
     Returns a mapping from submodule to its parameters, buffers, parameter
-    names, and buffer names, where each entry logically represents a wrapping
+    names, and buffer names, where each entry logically represents a grouping
     according to the given auto wrap policy and ignored modules/parameters.
-    However, this method does not actually perform any explicit module
-    wrapping.
+    However, this method does not actually perform any module wrapping.
 
-    The mapping values are aligned to module tree boundaries, meaning that they
-    are exactly the parameters of the subtree rooted at the corresponding
-    submodule key. Sibling submodules cannot be grouped together. Each
-    parameter and each buffer in the module tree appears exactly once in the
-    returned dict. The returned dict is ordered by increasing tree depth.
+    The mapped-to values are the states from the subtree rooted at the
+    corresponding submodule key, excluding child submodules in the mapping and
+    ignored state. Sibling submodules cannot be grouped together. The parameter
+    and buffer names are prefixed starting from the submodule.
 
-    If a parameter is shared among multiple wrapped submodules, then it is
-    assigned to the lowest common ancestor (LCA) wrapped module. A mapped-to
-    list may be empty, either because the wrapped module truly has no
-    parameters or because its parameters were assigned to the LCA.
+    Each non-ignored parameter and buffer appears exactly once in the returned
+    ``dict``, and the ``dict`` is ordered by increasing tree depth. A mapped-to
+    parameter list may be empty if the submodule has no parameters or if its
+    parameters were assigned to a parent submodule instead.
     """
     # Record the modules to wrap without actually wrapping
     wrapped_modules: List[nn.Module] = []  # these are only logically wrapped
@@ -101,18 +110,20 @@ def _get_submodule_to_states(
 
     submodule_to_states = collections.OrderedDict()
     visited_params = set()
+    for ignored_param in ignored_params:
+        visited_params.add(ignored_param)
     visited_buffers = set()
-    # Constructing `wrapped_modules` with `_recursive_wrap()` orders the
-    # modules following a post-order traversal. We record parameters in
-    # `params_per_wrapped_module` using a reverse post-ordering, which is a
-    # topological sort, so that each shared parameter is guaranteed to be
-    # grouped with its lowest common ancestor module's parameters.
+    # Constructing `wrapped_modules` with `_recursive_wrap()` follows a
+    # post-order traversal. We record state in `submodule_to_states` using a
+    # reverse post-ordering since that is a topological sort. This assigns
+    # parent-child shared parameters to the parent submodule.
+    # TODO: To handle sibling shared parameters, we need to pre-compute the
+    # shared parameters and assign them to the LCA submodule manually.
     wrapped_modules.reverse()
     wrapped_modules_set = set(wrapped_modules)
     for submodule in wrapped_modules:
-        # Perform a BFS from `module_to_wrap` and record all untraversed
-        # parameters that are not already associated with another module in
-        # `wrapped_modules`.
+        # Perform a BFS from `submodule` and record all unvisited state that is
+        # not already associated with another module in `wrapped_modules`.
         queue: Deque[Tuple[nn.Module, str]] = collections.deque()
         queue.append((submodule, ""))
         params: List[nn.Parameter] = []
@@ -134,7 +145,9 @@ def _get_submodule_to_states(
             for child_module_name, child_module in module.named_children():
                 if child_module not in wrapped_modules_set:
                     queue.append((child_module, prefix + child_module_name + "."))
-        submodule_to_states[submodule] = (params, buffers, param_names, buffer_names)
+        submodule_to_states[submodule] = SubmoduleState(
+            params, buffers, param_names, buffer_names
+        )
     return submodule_to_states
 
 
