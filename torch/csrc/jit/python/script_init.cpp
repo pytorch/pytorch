@@ -112,7 +112,7 @@ struct PythonResolver : public Resolver {
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
@@ -153,7 +153,7 @@ struct PythonResolver : public Resolver {
     }
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
-    if (obj.is(py::none())) {
+    if (obj.is_none()) {
       return nullptr;
     }
 
@@ -366,7 +366,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const ResolutionCallback& rcb,
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
-  if (signature.is(py::none())) {
+  if (signature.is_none()) {
     throw ErrorReport(overload_decl.range())
         << "Must explicitly add type annotations to overloaded functions";
   }
@@ -1869,7 +1869,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          const py::dict& extra_files) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1889,7 +1889,7 @@ void initJitScriptBindings(PyObject* module) {
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1909,7 +1909,7 @@ void initJitScriptBindings(PyObject* module) {
          const py::dict& extra_files) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1924,7 +1924,7 @@ void initJitScriptBindings(PyObject* module) {
       "_load_for_lite_interpreter",
       [](const std::string& filename, py::object map_location) {
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
@@ -1936,7 +1936,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const std::string& buffer, py::object map_location) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
-        if (!map_location.is(py::none())) {
+        if (!map_location.is_none()) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
