@@ -47,6 +47,7 @@ nn/qat/ @jerryzh168
 # or remove yourself from it.
 /torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu @kwen2501
 /torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu @kwen2501
+/torch/distributed/_composable @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu @kwen2501 @yhcharles
 /torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu @kwen2501
 
 # Distributed tests
