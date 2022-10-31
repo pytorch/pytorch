@@ -130,6 +130,9 @@ class elementwise_type_promotion_wrapper(object):
 
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
+    if out.shape == shape:
+        return out
+
     if out.numel() == 0:
         return out.resize_(shape)
 
