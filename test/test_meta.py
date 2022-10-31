@@ -203,6 +203,7 @@ CHECK_STRIDES_SKIPS = {
     aten._linalg_svd.default,
     aten._scaled_dot_product_attention_forward.default,
     aten.add.Tensor,
+    aten.addmm.default,
     aten.atan2.default,
     aten.binary_cross_entropy.default,
     aten.bitwise_and.Tensor,
@@ -1161,7 +1162,7 @@ class TestMeta(TestCase):
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, inps[0].shape)
 
-    def test_fill_alias_relationship(self):
+    def test_fill__alias_relationship(self):
         inps = torch.rand(2**52, device='meta')
         r = torch.ops.aten.fill_(inps, 1.0)
         # aten.fill_ returns an aliase
@@ -1170,6 +1171,20 @@ class TestMeta(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
+
+    # opinfo test is using aten.fill_, it's not testing aten.fill
+    @onlyCUDA
+    def test_fill_stride(self):
+        to_meta = MetaConverter()
+        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
+
+        for args in get_strided_args(sample_args):
+            meta_args = to_meta(args)
+            ref_out = torch.ops.aten.fill(*args)
+            meta_out = torch.ops.aten.fill(*meta_args)
+            self.assertEqual(ref_out.size(), meta_out.size())
+            self.assertEqual(ref_out.stride(), meta_out.stride())
+
 
     def test_map_location_deserialize(self):
         import io
