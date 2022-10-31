@@ -42,6 +42,7 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp._init_utils import (
     _check_orig_params_flattened,
+    _get_default_comm_hook,
     _init_core_state,
     _init_ignored_module_states,
     _init_module_and_device_state,
@@ -3096,7 +3097,7 @@ class FullyShardedDataParallel(nn.Module):
             ), "communication hook can be only registered once"
             submodule._hook_registered = True
             assert (
-                submodule._communication_hook == self._get_default_comm_hook()
+                submodule._communication_hook == _get_default_comm_hook(self.sharding_strategy)
             ), f"communication hook should be default, but it is {submodule._communication_hook.__name__} instead"
             submodule._communication_hook_state = state
             submodule._communication_hook = hook
