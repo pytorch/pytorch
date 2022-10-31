@@ -17,14 +17,7 @@
 
 namespace at {
 namespace native {
-
 namespace {
-template <typename Func>
-Tensor map_nt(const Tensor& nt, Func f) {
-  auto* nt_impl = get_nested_tensor_impl(nt);
-  const auto& sizes = nt_impl->get_nested_size_tensor();
-  return at::detail::make_tensor<NestedTensorImpl>(f(nt_impl->get_buffer()), sizes);
-}
 
 int64_t num_bytes(IntArrayRef sizes) {
   // 0-dim Tensors have torch.Size of .size() 0, but carry 1 memory.
@@ -88,46 +81,6 @@ std::vector<at::Tensor> NestedTensor_unbind(
     result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets[i]);
   }
   return result_tensors;
-}
-
-Tensor& NestedTensor_relu_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
-  check_numel_equals_buffer_size(self_ptr);
-  auto buffer = self_ptr->get_buffer();
-  at::relu_(buffer);
-  return self;
-}
-
-Tensor NestedTensor_relu(const Tensor& self) {
-  return map_nt(self, at::relu);
-}
-
-Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
-  auto self_ptr = get_nested_tensor_impl(self);
-  check_numel_equals_buffer_size(self_ptr);
-  auto buffer = self_ptr->get_buffer();
-  at::gelu_(buffer, approximate);
-  return self;
-}
-
-Tensor NestedTensor_gelu(const Tensor& self, c10::string_view approximate) {
-  return map_nt(
-      self,
-      [approximate](const Tensor& buffer) {
-        return at::gelu(buffer, approximate);
-      });
-}
-
-Tensor& NestedTensor_tanh_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
-  check_numel_equals_buffer_size(self_ptr);
-  auto buffer = self_ptr->get_buffer();
-  at::tanh_(buffer);
-  return self;
-}
-
-Tensor NestedTensor_tanh(const Tensor& self) {
-  return map_nt(self, at::tanh);
 }
 
 Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask, bool mask_check) {
@@ -467,183 +420,6 @@ Tensor NestedTensor_embedding(
       result_buffer.reshape({-1}), std::move(new_sizes));
 }
 
-std::pair<NestedTensorImpl*, NestedTensorImpl*>
-get_elementwise_nested_tensor_impl(
-    const Tensor& self,
-    const Tensor& other,
-    const std::string& op_name) {
-  if (self.is_nested() && !(other.is_nested())) {
-    TORCH_CHECK(
-        false,
-        "Expected both self and other to be nested, but got a nested self and non-nested other");
-  } else if (!(self.is_nested()) && other.is_nested()) {
-    TORCH_CHECK(
-        false,
-        "Expected both self and other to be nested, but got a non-nested self and nested other");
-  } else if (!(self.is_nested()) || !(other.is_nested())) {
-    TORCH_CHECK(
-        false,
-        "Expected both self and other to be nested, but got a non-nested self and non-nested other");
-  }
-
-  auto self_ptr = get_nested_tensor_impl(self);
-  auto other_ptr = get_nested_tensor_impl(other);
-
-  TORCH_CHECK(
-      self.dim() == other.dim(),
-      op_name,
-      " does not support broadcasting when given a NestedTensor");
-  TORCH_CHECK(
-      at::equal(
-          self_ptr->get_nested_size_tensor(),
-          other_ptr->get_nested_size_tensor()),
-      op_name,
-      " does not support broadcasting when given a NestedTensor");
-  TORCH_CHECK(
-      at::equal(
-          self_ptr->get_nested_stride_tensor(),
-          other_ptr->get_nested_stride_tensor()),
-      op_name,
-      " requires strides to match when given NestedTensors");
-  auto self_offsets = self_ptr->get_storage_offsets();
-  auto other_offsets = other_ptr->get_storage_offsets();
-  bool offsets_match = true;
-  for (size_t i = 0; i < self_offsets.size(); i++) {
-    offsets_match = offsets_match && (self_offsets[i] == other_offsets[i]);
-  }
-  TORCH_CHECK(
-      offsets_match,
-      op_name,
-      " requires offsets to match when given NestedTensors");
-  return std::make_pair(self_ptr, other_ptr);
-}
-
-template <typename Func>
-Tensor NestedTensor_elementwise_Tensor(
-    const Tensor& self,
-    const Tensor& other,
-    const std::string& op_name,
-    Func f) {
-  // self is a scalar
-  if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
-    auto other_impl = get_nested_tensor_impl(other);
-    return wrap_buffer(
-      f(self, other_impl->get_unsafe_storage_as_tensor()),
-      other_impl->get_nested_size_tensor().clone(),
-      other_impl->get_nested_stride_tensor().clone(),
-      other_impl->get_storage_offsets()
-    );
-  }
-  // other is a scalar
-  if (!other.is_nested() && other.dim() == 0 && other.numel() == 1) {
-    auto self_impl = get_nested_tensor_impl(self);
-    return wrap_buffer(
-      f(self_impl->get_unsafe_storage_as_tensor(), other),
-      self_impl->get_nested_size_tensor().clone(),
-      self_impl->get_nested_stride_tensor().clone(),
-      self_impl->get_storage_offsets()
-    );
-  }
-  NestedTensorImpl* self_impl = nullptr;
-  NestedTensorImpl* other_impl = nullptr;
-  std::tie(self_impl, other_impl) =
-      get_elementwise_nested_tensor_impl(self, other, op_name);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
-  return wrap_buffer(
-      f(self_impl->get_unsafe_storage_as_tensor(),
-        other_impl->get_unsafe_storage_as_tensor()),
-      self_impl->get_nested_size_tensor(),
-      self_impl->get_nested_stride_tensor(),
-      self_impl->get_storage_offsets());
-}
-
-Tensor NestedTensor_add_Tensor(
-    const Tensor& self,
-    const Tensor& other,
-    const Scalar& alpha) {
-  return NestedTensor_elementwise_Tensor(
-      self, other, "add", [alpha](const Tensor& b1, const Tensor& b2) {
-        return at::add(b1, b2, alpha);
-      });
-}
-
-Tensor NestedTensor_mul_Tensor(const Tensor& self, const Tensor& other) {
-  return NestedTensor_elementwise_Tensor(
-      self, other, "mul", [](const Tensor& b1, const Tensor& b2) {
-        return at::mul(b1, b2);
-      });
-}
-
-// Only usable on the C++ side; scalars are converted to tensors coming from Python.
-Tensor NestedTensor_mul_Scalar(const Tensor& self, const Scalar& other) {
-  return NestedTensor_mul_Tensor(self, wrapped_scalar_tensor(other));
-}
-
-Tensor NestedTensor_div_Tensor(const Tensor& self, const Tensor& other) {
-  return NestedTensor_elementwise_Tensor(
-      self, other, "div", [](const Tensor& b1, const Tensor& b2) {
-        return at::div(b1, b2);
-      });
-}
-
-// Only usable on the C++ side; scalars are converted to tensors coming from Python.
-Tensor NestedTensor_div_Scalar(const Tensor& self, const Scalar& other) {
-  return NestedTensor_div_Tensor(self, wrapped_scalar_tensor(other));
-}
-
-template <typename Func>
-Tensor& NestedTensor_elementwise__Tensor(
-    Tensor& self,
-    const Tensor& other,
-    const std::string& op_name,
-    Func f) {
-  // self is a scalar
-  if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
-    auto other_impl = get_nested_tensor_impl(other);
-    f(self, other_impl->get_buffer());
-    return self;
-  }
-  // other is a scalar
-  if (!other.is_nested() && other.dim() == 0 && other.numel() == 1) {
-    auto self_impl = get_nested_tensor_impl(self);
-    f(self_impl->get_buffer(), other);
-    return self;
-  }
-  NestedTensorImpl* self_impl = nullptr;
-  NestedTensorImpl* other_impl = nullptr;
-  std::tie(self_impl, other_impl) =
-      get_elementwise_nested_tensor_impl(self, other, op_name);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
-  const auto& nt_self = *self_impl;
-  const auto& nt_other = *other_impl;
-  f(nt_self.get_buffer().view({-1}), nt_other.get_buffer().view({-1}));
-  return self;
-}
-
-Tensor& NestedTensor_add__Tensor(
-    Tensor& self,
-    const Tensor& other,
-    const Scalar& alpha) {
-  return NestedTensor_elementwise__Tensor(
-      self, other, "add_", [alpha](const Tensor& b1, const Tensor& b2) {
-        return b1.add_(b2, alpha);
-      });
-}
-
-Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
-  return NestedTensor_elementwise__Tensor(
-      self, other, "mul_", [](const Tensor& b1, const Tensor& b2) {
-        return b1.mul_(b2);
-      });
-}
-
-// Only usable on the C++ side; scalars are converted to tensors coming from Python.
-Tensor& NestedTensor_mul__Scalar(Tensor& self, const Scalar& other) {
-  return NestedTensor_mul__Tensor(self, wrapped_scalar_tensor(other));
-}
-
 // Very rudimentary sum_dim for prototyping with torch_scatter.segment_reduce.
 Tensor NestedTensor_sum_dim_CPU(
     const Tensor& self,
@@ -833,6 +609,7 @@ Tensor softmax_nested(
   return output;
 }
 
+<<<<<<< HEAD
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   if (self.is_nested() && !mat2.is_nested()) {
     AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
@@ -1163,6 +940,8 @@ Tensor& matmul_out_nested(const Tensor& tensor1, const Tensor& tensor2, Tensor& 
   return result;
 }
 
+=======
+>>>>>>> ba26bc0fc266ddb58ec199349d2c93c7a905dfd0
 Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto self_ptr = get_nested_tensor_impl(self);
   // check input dimensions
