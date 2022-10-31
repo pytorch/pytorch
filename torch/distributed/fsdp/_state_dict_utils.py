@@ -94,7 +94,7 @@ def _common_summon_pre_state_dict_hook(
     rank0_only: bool,
 ) -> None:
     """
-    Performs the pre-state_dict tasks sharded by all state_dict types that require
+    Performs the pre-state_dict tasks shared by all state_dict types that require
     ``summon_full_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this hook.
     """
     _enter_full_param_ctx(
