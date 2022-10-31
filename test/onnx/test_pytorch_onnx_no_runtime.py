@@ -35,6 +35,7 @@ def export_to_onnx(
     mocks: Optional[Iterable] = None,
     operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
     opset_version: int = GLOBALS.export_onnx_opset_version,
+    **torch_onnx_export_kwargs,
 ) -> onnx.ModelProto:
     """Exports `model(input)` to ONNX and returns it.
 
@@ -47,6 +48,7 @@ def export_to_onnx(
         mocks: list of mocks to use during export
         operator_export_type: export type as described by `torch.onnx.export(...operator_export_type,...)`
         opset_version: ONNX opset version as described by `torch.onnx.export(...opset_version,...)`
+        torch_onnx_export_kwargs: extra torch.onnx.export kwargs arguments
     Returns:
         A valid ONNX model (`onnx.ModelProto`)
     """
@@ -63,6 +65,7 @@ def export_to_onnx(
             f,
             operator_export_type=operator_export_type,
             opset_version=opset_version,
+            **torch_onnx_export_kwargs,
         )
 
     # Validate ONNX graph before returning it
