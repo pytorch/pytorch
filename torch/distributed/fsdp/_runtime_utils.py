@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
+    _is_composable,
     _State,
     TrainingState,
 )
@@ -200,11 +201,8 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             state._queue_wait_for_post_backward()
-            # TODO: Use temporary hack to get all handles
             all_handles = (
-                state._fsdp_handles(state)
-                if isinstance(state, nn.Module)  # `FullyShardedDataParallel`
-                else state._handles
+                state._fsdp_handles(state) if _is_composable(state) else state._handles
             )
             _clear_grads_if_needed(all_handles)
         elif _handles_key:
