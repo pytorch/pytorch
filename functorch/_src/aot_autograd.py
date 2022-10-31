@@ -18,7 +18,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
-from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
@@ -212,6 +211,13 @@ def create_joint_forward_backward(fn):
 
         orig_outs = [defun(t) for t in outs]
         orig_grads = [defun(t) for t in grads]
+
+        if any(g is None for g in orig_grads):
+            warnings.warn(
+                "AOTAutograd compiled a function which has unused inputs "
+                "that have requires_grad=True; this could indicate an "
+                "AOTAutograd bug."
+            )
 
         return orig_outs, orig_grads
 
