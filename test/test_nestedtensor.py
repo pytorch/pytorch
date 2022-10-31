@@ -311,7 +311,8 @@ class TestNestedTensor(TestCase):
                      torch.nn.functional.gelu,
                      torch._C._nn.gelu_,
                      torch.tanh,
-                     torch.tanh_):
+                     torch.tanh_,
+                     torch.neg):
             t = torch.tensor([-1, 0, 1], dtype=torch.float)
             nt = torch.nested.nested_tensor([t])
             nested_result = func(nt)
