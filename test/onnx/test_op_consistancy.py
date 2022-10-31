@@ -22,7 +22,6 @@ import dataclasses
 import io
 import itertools
 import unittest
-from collections import namedtuple
 from typing import (
     AbstractSet,
     Callable,
@@ -113,6 +112,7 @@ class DecorateMeta:
 
     Adapted from functorch: functorch/test/common_utils.py
     """
+
     op_name: str
     variant_name: str
     decorator: Callable
