@@ -2,14 +2,15 @@ import dataclasses
 import functools
 import itertools
 import logging
+import sys
 from typing import List
 
 import functorch
-from functorch.compile import make_boxed_compiler, min_cut_rematerialization_partition
+from functorch._src.aot_autograd import make_boxed_func
+from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._mode_utils import no_dispatch
 
 from . import config, overrides
 from .debug import DebugContext
@@ -62,12 +63,19 @@ def index_expanded_dims(t, expanded_dims):
 
 
 def complex_memory_overlap(t):
-    indexed_tensor = index_expanded_dims(t, get_expanded_dims(t))
-    return torch._debug_has_internal_overlap(indexed_tensor) != 0
-
-
-def is_unspec_input(t):
-    return t.device.type == "cpu" and t.dim() == 0
+    # if torch._debug_has_internal_overlap thinks this tensor potentially has
+    # memory overlap internally, let's dig deeper to find out whether it's true.
+    if torch._debug_has_internal_overlap(t) != 0:
+        strides = t.stride()
+        sizes = t.shape
+        indices = list(range(len(strides)))
+        indices = [x for _, x in sorted(zip(strides, indices))]
+        for i in range(len(strides)):
+            prev_stride = 1 if i == 0 else strides[indices[i - 1]]
+            prev_size = 1 if i == 0 else sizes[indices[i - 1]]
+            if strides[indices[i]] < prev_stride * prev_size:
+                return True
+    return False
 
 
 @functools.lru_cache(None)
@@ -76,7 +84,7 @@ def _step_logger():
 
 
 @DebugContext.wrap
-@no_dispatch()
+@dynamo_utils.disable_current_modes()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -86,7 +94,11 @@ def compile_fx_inner(
     graph_id=None,
 ):
     if dynamo_utils.count_calls(gm.graph) == 0:
-        return gm
+        return make_boxed_func(gm.forward)
+
+    # lift the maximum depth of the Python interpreter stack
+    # to adapt large/deep models
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 2000))
 
     _step_logger()(
         logging.INFO,
@@ -99,36 +111,40 @@ def compile_fx_inner(
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
+    shape_env = None
+    for inp in example_inputs:
+        if isinstance(inp, FakeTensor) and inp.fake_mode.shape_env is not None:
+            shape_env = inp.fake_mode.shape_env
 
-    graph = GraphLowering(gm, num_dynamic_inputs=len(example_inputs))
+    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         compiled_fn = graph.compile_to_fn()
 
-    complex_memory_overlap_inputs = any(
-        complex_memory_overlap(t) for t in example_inputs
-    )
-
-    if (
-        cudagraphs
-        and set(graph.device_types) == {"cuda"}
-        and not graph.mutated_inputs
-        and not has_incompatible_cudagraph_ops(gm)
-        and not complex_memory_overlap_inputs
-    ):
-        compiled_fn = cudagraphify(
-            compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+    if cudagraphs:
+        complex_memory_overlap_inputs = any(
+            complex_memory_overlap(t) for t in example_inputs
         )
-    elif cudagraphs:
-        BoxedBool.disable(cudagraphs)
 
-        if len(set(graph.device_types)) > 1:
-            log.warning("skipping cudagraphs due to multiple devices")
-        elif set(graph.device_types) == {"cuda"}:
-            if graph.mutated_inputs:
-                log.warning("skipping cudagraphs due to input mutation")
-            elif complex_memory_overlap_inputs:
-                log.warning("skipping cudagraphs due to complex input striding")
+        if (
+            set(graph.device_types) == {"cuda"}
+            and not graph.mutated_inputs
+            and not has_incompatible_cudagraph_ops(gm)
+            and not complex_memory_overlap_inputs
+        ):
+            compiled_fn = cudagraphify(
+                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+            )
+        else:
+            BoxedBool.disable(cudagraphs)
+
+            if len(set(graph.device_types)) > 1:
+                log.warning("skipping cudagraphs due to multiple devices")
+            elif set(graph.device_types) == {"cuda"}:
+                if graph.mutated_inputs:
+                    log.warning("skipping cudagraphs due to input mutation")
+                elif complex_memory_overlap_inputs:
+                    log.warning("skipping cudagraphs due to complex input striding")
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(
@@ -137,6 +153,9 @@ def compile_fx_inner(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
+
+    # aot autograd needs to know to pass in inputs as a list
+    result._boxed_call = True
     return result
 
 
@@ -159,14 +178,11 @@ def align_inputs(model, inputs, static_input_idxs=()):
     if len(check_inputs) == 0:
         return model
 
-    def run(*new_inputs):
+    def run(new_inputs):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
-                if isinstance(new_inputs, tuple):
-                    new_inputs = list(new_inputs)
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        new_inputs = [x.to("cuda") if is_unspec_input(x) else x for x in new_inputs]
-        return model(*new_inputs)
+        return model(new_inputs)
 
     return run
 
@@ -179,13 +195,13 @@ def cudagraphify(model, inputs, static_input_idxs=()):
 
     compiled_fn = None
 
-    def run(*new_inputs):
+    def run(new_inputs):
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
 
-        return compiled_fn(*new_inputs)
+        return compiled_fn(new_inputs)
 
     return run
 
@@ -222,11 +238,8 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
         return torch.as_strided(buffer, x.size(), x.stride())
 
     assert isinstance(inputs, (list, tuple))
-    # dynamo wraps unspec variable as 0 dim tensor on CPU, need to move to GPU explicitly
-    inputs = [x.to("cuda") if is_unspec_input(x) else x for x in inputs]
-
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x
+        static_input(x) if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
@@ -239,8 +252,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     torch.cuda.synchronize()
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
+    # copy static_inputs because it will be cleared in model
     with torch.cuda.stream(stream):
-        model(*static_inputs)
+        model(list(static_inputs))
     stream.synchronize()
     torch.cuda.current_stream().wait_stream(stream)
     torch.cuda.synchronize()
@@ -248,13 +262,13 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     # record
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph, stream=stream):
-        static_outputs = model(*static_inputs)
+        static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
 
     if config.size_asserts:
 
-        def run(*new_inputs):
+        def run(new_inputs):
             assert len(static_inputs) == len(new_inputs)
             for idx, (dst, src, expanded_dims) in enumerate(
                 zip(static_inputs, new_inputs, inps_expanded_dims)
@@ -268,6 +282,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
                     dst = index_expanded_dims(dst, expanded_dims)
                     src = index_expanded_dims(src, expanded_dims)
                     dst.copy_(src)
+            new_inputs.clear()
             graph.replay()
             return static_outputs
 
@@ -276,11 +291,12 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
             idx for idx in range(len(static_inputs)) if idx not in static_input_idxs
         ]
 
-        def run(*new_inputs):
+        def run(new_inputs):
             for idx in copy_indices:
                 src = index_expanded_dims(static_inputs[idx], inps_expanded_dims[idx])
                 dst = index_expanded_dims(new_inputs[idx], inps_expanded_dims[idx])
                 dst.copy_(src)
+            new_inputs.clear()
             graph.replay()
             return static_outputs
 
@@ -323,8 +339,9 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     with overrides.patch_functions():
         model_ = normalize_ir(model_, example_inputs_)
         model_ = overrides.replace_fx(model_)
+        model_ = overrides.fuse_fx(model_, example_inputs_)
     num_example_inputs = len(example_inputs_)
-    cudagraphs = BoxedBool(config.triton.cudagraphs)
+    cudagraphs = BoxedBool(config.triton.cudagraphs and not config.dynamic_shapes)
 
     graph_id = next(_graph_counter)
 
@@ -359,8 +376,8 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
         return aot_autograd(
             model_,
             example_inputs_,
-            fw_compiler=make_boxed_compiler(fw_compiler),
-            bw_compiler=make_boxed_compiler(bw_compiler),
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
             decompositions=select_decomp_table(),
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"

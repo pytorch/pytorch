@@ -95,6 +95,23 @@ def reference_inputs_gaussian_window(op_info, device, dtype, requires_grad, **kw
         yield SampleInput(size, sym=True, **kw)
 
 
+def reference_inputs_kaiser_window(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
+
+    cases = (
+        (8, {"beta": 2}),
+        (16, {"beta": 12}),
+        (32, {"beta": 30}),
+        (64, {"beta": 35}),
+        (128, {"beta": 41.2}),
+        (256, {"beta": 100}),
+    )
+
+    for size, kw in cases:
+        yield SampleInput(size, sym=False, **kw)
+        yield SampleInput(size, sym=True, **kw)
+
+
 def error_inputs_window(op_info, device, *args, **kwargs):
     # Tests for windows that have a negative size
     yield ErrorInput(
@@ -153,6 +170,18 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
         SampleInput(3, std=-1, dtype=torch.float32, device=device, **kwargs),
         error_type=ValueError,
         error_regex="Standard deviation must be positive, got: -1 instead.",
+    )
+
+
+def error_inputs_kaiser_window(op_info, device, **kwargs):
+    # Yield common error inputs
+    yield from error_inputs_window(op_info, device, beta=12, **kwargs)
+
+    # Tests for negative beta
+    yield ErrorInput(
+        SampleInput(3, beta=-1, dtype=torch.float32, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="beta must be non-negative, got: -1 instead.",
     )
 
 
@@ -291,6 +320,13 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_window,
         reference_inputs_func=reference_inputs_window,
         error_inputs_func=error_inputs_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
@@ -300,6 +336,13 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, tau=2.78),
         reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
         error_inputs_func=error_inputs_exponential_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.gaussian",
@@ -309,5 +352,21 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, std=1.92),
         reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.kaiser",
+        ref=reference_signal_window(scipy.signal.windows.kaiser)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=partial(sample_inputs_window, beta=12.0),
+        reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
+        error_inputs_func=error_inputs_kaiser_window,
     ),
 ]

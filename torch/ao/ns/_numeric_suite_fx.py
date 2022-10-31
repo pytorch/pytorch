@@ -119,15 +119,11 @@ from .fx.ns_types import (
     NSResultsType,
     NSNodeTargetType,
 )
-
-from torch.ao.quantization import (
-    QConfigMapping,
-)
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
-from torch.ao.quantization.fx.qconfig_mapping_utils import generate_qconfig_map
+from torch.ao.quantization.fx.qconfig_mapping_utils import generate_node_name_to_qconfig
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
@@ -138,6 +134,7 @@ from torch.ao.ns.fx.n_shadows_utils import (
     print_n_shadows_summary,
     handle_subgraph,
 )
+from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 
 from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
 
@@ -753,7 +750,7 @@ def extend_logger_results_with_comparison(
 def prepare_n_shadows_model(
     model: torch.nn.Module,
     example_inputs: Any,
-    qconfig_mappings: List[QConfigMapping],
+    qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
 ) -> torch.nn.Module:
     """
@@ -770,9 +767,9 @@ def prepare_n_shadows_model(
 
       args_kwargs_m -> op_m -> output_m
            |                        |
-           |---------------------------> mod_with_op_m_transformed_with_qconfig_i
+           |---------------------------> mod_with_op_m_transformed_with_qconfig_n
 
-    Where mod_with_op_m_transformed_with_qconfig_i is a submodule, and its
+    Where mod_with_op_m_transformed_with_qconfig_n is a submodule, and its
     inner graph looks like
 
     .. code::
@@ -790,8 +787,7 @@ def prepare_n_shadows_model(
     1. add deduplication for qconfigs per subgraph
     2. figure out a better way to name the output structure
     3. return a results data structure instead of printing it out
-    4. make specifying sets of QConfigMapping more user friendly
-    5. add examples to docblocks
+    4. add examples to docblocks
     """
 
     tracer = quantize_fx.QuantizationTracer([], [])
@@ -822,8 +818,8 @@ def prepare_n_shadows_model(
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
-    for qconfig_mapping in qconfig_mappings:
-        node_name_to_qconfig = generate_qconfig_map(
+    for qconfig_mapping in qconfig_multi_mapping.qconfig_mappings_list:
+        node_name_to_qconfig = generate_node_name_to_qconfig(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
         list_of_node_name_to_qconfig.append(node_name_to_qconfig)
 
@@ -838,7 +834,7 @@ def prepare_n_shadows_model(
             enumerate(subgraphs_dedup.items()):
         handle_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
-            qconfig_mappings, list_of_node_name_to_qconfig)
+            qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig)
 
     mt.recompile()
     return mt

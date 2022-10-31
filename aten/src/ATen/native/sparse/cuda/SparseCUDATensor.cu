@@ -7,6 +7,7 @@
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/SparseTensorUtils.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/accumulate.h>

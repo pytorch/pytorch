@@ -25,7 +25,6 @@ from ..qconfig import (
     QConfigAny,
 )
 from ..qconfig_mapping import (
-    _FIXED_QPARAMS_OP_TO_OBSERVER,
     QConfigMapping,
 )
 from ..qconfig_mapping_utils import (
@@ -33,7 +32,7 @@ from ..qconfig_mapping_utils import (
     update_qconfig_for_qat,
 )
 from .qconfig_mapping_utils import (
-    generate_qconfig_map,
+    generate_node_name_to_qconfig,
     update_qconfig_for_fusion,
 )
 
@@ -99,6 +98,7 @@ from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
+    get_fixed_qparams_op_to_overwrite_output_observer,
 )
 from ..backend_config import (
     BackendConfig,
@@ -841,7 +841,7 @@ def maybe_insert_observers_before_graph_output(
     graph_output_node: Node,
     output_quantized_idxs: List[int],
     node_name_to_target_dtype_info: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
-    qconfig_map: Dict[str, QConfigAny],
+    node_name_to_qconfig: Dict[str, QConfigAny],
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
@@ -870,7 +870,7 @@ def maybe_insert_observers_before_graph_output(
         maybe_node: Argument,
         target_dtype: torch.dtype,
         node_name_to_target_dtype_info: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
-        qconfig_map: Dict[str, QConfigAny],
+        node_name_to_qconfig: Dict[str, QConfigAny],
         model: torch.nn.Module,
         modules: Dict[str, torch.nn.Module],
         graph: Graph,
@@ -897,7 +897,7 @@ def maybe_insert_observers_before_graph_output(
                 maybe_node, modules, node_name_to_target_dtype_info)
             if this_node_dtype != target_dtype:
                 # insert observer
-                qconfig = qconfig_map.get(maybe_node.name)
+                qconfig = node_name_to_qconfig.get(maybe_node.name)
                 # TODO(future PR): see if we need to allow specifying qconfig
                 #   on output nodes, to remove the restriction below.
                 assert qconfig is not None, \
@@ -913,7 +913,7 @@ def maybe_insert_observers_before_graph_output(
             for inner_node in maybe_node:
                 results.append(_recursive_maybe_replace_node_with_obs(
                     inner_node, target_dtype, node_name_to_target_dtype_info,
-                    qconfig_map, model, modules, graph))
+                    node_name_to_qconfig, model, modules, graph))
             if isinstance(maybe_node, list):
                 return results
             else:
@@ -923,7 +923,7 @@ def maybe_insert_observers_before_graph_output(
             for k, inner_v in maybe_node.items():
                 results_dict[k] = _recursive_maybe_replace_node_with_obs(
                     inner_v, target_dtype, node_name_to_target_dtype_info,
-                    qconfig_map, model, modules, graph)
+                    node_name_to_qconfig, model, modules, graph)
             return results_dict
         else:
             return results
@@ -933,7 +933,7 @@ def maybe_insert_observers_before_graph_output(
         new_args.append(
             _recursive_maybe_replace_node_with_obs(
                 old_arg, output_target_dtype, node_name_to_target_dtype_info,
-                qconfig_map, model, modules, graph))
+                node_name_to_qconfig, model, modules, graph))
 
     graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
 
@@ -1121,7 +1121,7 @@ def insert_observers_for_model(
     model: GraphModule,
     modules: Dict[str, torch.nn.Module],
     matches: Dict[str, _MatchResultWithQConfig],
-    qconfig_map: Dict[str, QConfigAny],
+    node_name_to_qconfig: Dict[str, QConfigAny],
     graph: Graph,
     prepare_custom_config: PrepareCustomConfig,
     equalization_config_map: Dict[str, Any],
@@ -1284,7 +1284,7 @@ def insert_observers_for_model(
                         for user in node.args[0].users:
                             # Checks if there exists another user being quantized
                             is_user_quantized = (
-                                qconfig_map.get(user.name, None) is not None or
+                                node_name_to_qconfig.get(user.name, None) is not None or
                                 (user.op == 'call_module' and isinstance(modules[str(user.target)], ObserverBase))
                             )
                             if user != node and is_user_quantized:
@@ -1374,7 +1374,7 @@ def insert_observers_for_model(
                 else:  # output
                     maybe_insert_observers_before_graph_output(
                         node, output_quantized_idxs,
-                        node_name_to_target_dtype_info, qconfig_map,
+                        node_name_to_target_dtype_info, node_name_to_qconfig,
                         model, modules, graph)
 
         #
@@ -1392,7 +1392,10 @@ def insert_observers_for_model(
 
     return results_node
 
-def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, QConfigAny]):
+def _validate_fixed_qparams_qconfigs(
+        model: GraphModule,
+        node_name_to_qconfig: Dict[str, QConfigAny],
+        backend_config: BackendConfig):
     """
     Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
     """
@@ -1402,6 +1405,8 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
         float16_static_qconfig.activation,
     ]
     named_modules = dict(model.named_modules(remove_duplicate=False))
+    fixed_qparams_op_to_overwrite_output_observer = \
+        get_fixed_qparams_op_to_overwrite_output_observer(backend_config)
     for node in model.graph.nodes:
         if node.op == "call_function":
             module_type_or_function_or_method = node.target
@@ -1410,13 +1415,14 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
         else:
             module_type_or_function_or_method = None
 
-        if module_type_or_function_or_method in _FIXED_QPARAMS_OP_TO_OBSERVER:
+        if module_type_or_function_or_method in fixed_qparams_op_to_overwrite_output_observer:
             bad_observer = True
-            qconfig = qconfig_map.get(node.name, None)
+            qconfig = node_name_to_qconfig.get(node.name, None)
             if qconfig is None:
                 bad_observer = False
             else:
-                for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[module_type_or_function_or_method]]:
+                for observer_ctr in allowed_observer_ctrs + [
+                        fixed_qparams_op_to_overwrite_output_observer[module_type_or_function_or_method]]:
                     if obs_or_fq_ctr_equals(
                             qconfig.activation,
                             FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
@@ -1479,18 +1485,18 @@ def run_prepare_fx_on_standalone_modules(
 
 def save_state(
     observed: GraphModule,
-    qconfig_map: Dict[str, QConfigAny],
+    node_name_to_qconfig: Dict[str, QConfigAny],
     node_name_to_scope: Dict[str, Tuple[str, type]],
     prepare_custom_config: PrepareCustomConfig,
-    equalization_qconfig_map: Dict[str, Any],
+    equalization_node_name_to_qconfig: Dict[str, Any],
     qconfig_mapping: QConfigMapping,
     is_qat: bool,
     observed_node_names: Set[str],
 ) -> None:
-    observed._qconfig_map = qconfig_map  # type: ignore[assignment]
+    observed._node_name_to_qconfig = node_name_to_qconfig  # type: ignore[assignment]
     observed._prepare_custom_config = prepare_custom_config  # type: ignore[assignment]
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
-    observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
+    observed._equalization_node_name_to_qconfig = equalization_node_name_to_qconfig  # type: ignore[assignment]
     observed._qconfig_mapping = qconfig_mapping  # type: ignore[assignment]
     observed._is_qat = is_qat  # type: ignore[assignment]
     observed._observed_node_names = observed_node_names  # type: ignore[assignment]
@@ -1599,11 +1605,11 @@ def prepare(
     # }
     modules = dict(model.named_modules(remove_duplicate=False))
 
-    # fill qconfig_map, a map from node name to qconfig, used in find_matches
-    equalization_qconfig_map = generate_qconfig_map(
+    # fill node_name_to_qconfig, a map from node name to qconfig, used in find_matches
+    equalization_node_name_to_qconfig = generate_node_name_to_qconfig(
         model, modules, model.graph, _equalization_config, node_name_to_scope)
-    qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
-    _validate_fixed_qparams_qconfigs(model, qconfig_map)
+    node_name_to_qconfig = generate_node_name_to_qconfig(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
+    _validate_fixed_qparams_qconfigs(model, node_name_to_qconfig, backend_config)
 
     # match the patterns that will get quantized
     standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())
@@ -1617,7 +1623,7 @@ def prepare(
     # map qconfig instances to matches
     matches = {}
     for node_name, match_without_qconfig in matches_without_qconfig.items():
-        match_with_qconfig = (*match_without_qconfig, qconfig_map[node_name])
+        match_with_qconfig = (*match_without_qconfig, node_name_to_qconfig[node_name])
         matches[node_name] = match_with_qconfig
 
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
@@ -1632,17 +1638,17 @@ def prepare(
     observed_node_names: Set[str] = set()
 
     result_node = insert_observers_for_model(
-        model, modules, matches, qconfig_map,
+        model, modules, matches, node_name_to_qconfig,
         model.graph, prepare_custom_config,
-        equalization_qconfig_map,
+        equalization_node_name_to_qconfig,
         input_quantized_idxs,
         output_quantized_idxs,
         backend_config,
         observed_node_names,
         is_qat)
 
-    save_state(model, qconfig_map, node_name_to_scope,
-               prepare_custom_config, equalization_qconfig_map, qconfig_mapping, is_qat, observed_node_names)
+    save_state(model, node_name_to_qconfig, node_name_to_scope,
+               prepare_custom_config, equalization_node_name_to_qconfig, qconfig_mapping, is_qat, observed_node_names)
 
     preserved_attributes = set(prepare_custom_config.preserved_attributes)
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
