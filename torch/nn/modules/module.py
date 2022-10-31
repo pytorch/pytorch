@@ -1335,9 +1335,7 @@ class Module:
         kwargs given to the forward function and be expected to return them
         possibly modified:
 
-            hook_result = hook(self, input, kwargs)
-                if hook_result is not None:
-                    result, kwargs = hook_result
+            result, kwargs = hook(self, input, kwargs)
 
         Args:
             hook (Callable): The user defined hook to be registered.
@@ -1357,7 +1355,9 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
-        hook.with_kwargs = with_kwargs
+        if not with_kwargs:
+            def f(m, inp, kwargs): hook(m, inp), kwargs
+            hook = f
         self._forward_pre_hooks[handle.id] = hook
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1402,7 +1402,9 @@ class Module:
                 ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
-        hook.with_kwargs = with_kwargs
+        if not with_kwargs:
+            def f(m, inp, out, kwargs): hook(m, inp, out)
+            hook = f
         self._forward_hooks[handle.id] = hook
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1446,12 +1448,7 @@ class Module:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
             for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
-                if hasattr(hook, 'with_kwargs') and hook.with_kwargs:
-                    result = hook(self, input, kwargs)
-                    if result is not None:
-                        result, kwargs = result
-                else:
-                    result = hook(self, input)
+                result, kwargs = hook(self, input, kwargs)
                 if result is not None:
                     if not isinstance(result, tuple):
                         result = (result,)
@@ -1465,10 +1462,7 @@ class Module:
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks or self._forward_hooks:
             for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
-                if hasattr(hook, 'with_kwargs') and hook.with_kwargs:
-                    hook_result = hook(self, input, result, kwargs)
-                else:
-                    hook_result = hook(self, input, result)
+                hook_result = hook(self, input, result, kwargs)
                 if hook_result is not None:
                     result = hook_result
 

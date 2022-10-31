@@ -97,6 +97,16 @@ class KwargModel(nn.Module):
             x = x + bias
         return x
 
+    def internal_forward_hook(
+        self,
+        module: nn.Module,
+        inp: Tuple[torch.Tensor],
+        out: torch.Tensor,
+        kwargs: dict
+    ):
+        out = out + kwargs['bias']
+        return out
+
 
 def kwarg_forward_hook(
     self: TestCase,
@@ -250,6 +260,11 @@ class TestModuleHooks(TestCase):
         model.register_forward_hook(partial(kwarg_forward_hook, self, fired_hooks, model, 1), with_kwargs=True)
         out = model(x, bias=bias)
         self.assertEqual(fired_hooks, [0, 1])
+        self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
+
+        model = KwargModel()
+        model.register_forward_hook(model.internal_forward_hook, with_kwargs=True)
+        out = model(x, bias=bias)
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
