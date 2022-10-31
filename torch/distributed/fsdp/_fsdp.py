@@ -18,7 +18,12 @@ from torch.distributed.fsdp._runtime_utils import (
     _register_post_forward_hooks,
     _register_pre_forward_hooks,
 )
-from torch.distributed.fsdp.api import CPUOffload, MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp.api import (
+    BackwardPrefetch,
+    CPUOffload,
+    MixedPrecision,
+    ShardingStrategy,
+)
 
 
 def fully_sharded_data_parallel(
@@ -54,7 +59,7 @@ def fully_sharded_data_parallel(
         forward_prefetch_limit,
     )
     state = _init_runtime_state(state)
-    state = _init_prefetching_state(state)
+    state = _init_prefetching_state(state, BackwardPrefetch.BACKWARD_PRE, False)
     state = _init_buffer_state(state, module)
     state = _init_param_handles_from_module(
         state,
