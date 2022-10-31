@@ -2002,7 +2002,7 @@ def nll_loss_forward(
     elif ignore_index >= 0:
         total_weight = (target != ignore_index).sum().to(self)
     else:
-        total_weight = self.new_full((), result.numel())
+        total_weight = self.new_full((), 1.0 * result.numel())
 
     if reduction == Reduction.SUM.value:
         result = result.sum()
