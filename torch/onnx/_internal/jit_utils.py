@@ -321,3 +321,14 @@ def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
         return None
     tensor_type = typing.cast(_C.TensorType, value.type())
     return tensor_type.device()
+
+
+@_beartype.beartype
+def parse_node_kind(kind: str) -> Tuple[str, str]:
+    """Parse node kind into domain and Op name."""
+    if "::" not in kind:
+        raise ValueError(f"Node kind: {kind} is invalid. '::' is not in node kind.")
+    domain, opname = kind.split("::", 1)
+    if "::" in opname:
+        raise ValueError(f"Node kind: {kind} is invalid. '::' should only apear once.")
+    return domain, opname
