@@ -249,6 +249,10 @@ test_dynamo_shard() {
   assert_git_not_dirty
 }
 
+test_inductor_distributed() {
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed
+  assert_git_not_dirty
+}
 
 test_inductor() {
   python test/test_modules.py --verbose
@@ -740,6 +744,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SH
   install_filelock
   install_triton
   test_inductor
+  test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock
