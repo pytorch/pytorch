@@ -157,17 +157,6 @@ c10::optional<std::vector<c10::Scalar>> convert_tensor_to_scalar_list(
   return scalarList;
 }
 
-bool check_fast_path_restrictions(
-  ArrayRef<TensorList> tensorLists,
-  const Tensor& scalarList_ = {},
-  bool does_op_promote_integer_inputs_to_float = false) {
-  auto maybe_scalarList = convert_tensor_to_scalar_list(scalarList_, tensorLists.size());
-  if (!maybe_scalarList) {
-    return false;
-  }
-  return can_use_fast_route(tensorLists, *maybe_scalarList, does_op_promote_integer_inputs_to_float);
-}
-
 bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
                         ArrayRef<Scalar> scalarList = {},
                         bool does_op_promote_integer_inputs_to_float = false) {
