@@ -185,7 +185,7 @@ class TestCommon(TestCase):
                 return arg.to(device='cpu')
             return arg
 
-        samples = op.sample_inputs(device, dtype)
+        samples = op.reference_inputs(device, dtype)
 
         for sample in samples:
             cpu_sample = sample.transform(to_cpu)
@@ -1674,7 +1674,6 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.var',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
