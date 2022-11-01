@@ -31,6 +31,7 @@ Scalars = (
     complex(1.0 - random.random(), 1.0 - random.random()),
 )
 
+
 def getScalarLists(N):
     return (
         ("int", [random.randint(0, 9) + 1 for _ in range(N)]),
@@ -41,7 +42,9 @@ def getScalarLists(N):
         ("mixed", [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]),
     )
 
+
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
+
 
 class RegularFuncWrapper:
 
@@ -87,6 +90,7 @@ class ForeachFuncWrapper:
             actual = self.func(*inputs, **kwargs)
         # note(mkozuki): inplace foreach functions are void functions.
         return inputs[0] if self._is_inplace else actual
+
 
 class TestForeach(TestCase):
 
@@ -159,7 +163,7 @@ class TestForeach(TestCase):
         inputs = [
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             [
-                make_tensor((N - i , 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
+                make_tensor((N - i, 1), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
             ],
         ]
         self._binary_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False)
@@ -302,6 +306,7 @@ class TestForeach(TestCase):
             self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath)
             for scalar in Scalars:
                 self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath, values=scalar)
+                self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalar))
             for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, True, disable_fastpath, values=scalarlist)
@@ -315,6 +320,7 @@ class TestForeach(TestCase):
             self._test_pointwise_op(device, dtype, op, N, False, False)
             for scalar in Scalars:
                 self._test_pointwise_op(device, dtype, op, N, False, False, values=scalar)
+                self._test_pointwise_op(device, dtype, op, N, False, False, values=torch.tensor(scalar))
             for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, False, False, values=scalarlist)
@@ -479,7 +485,6 @@ class TestForeach(TestCase):
         except RuntimeError as e:
             runtime_error = e
         self.assertIsNone(runtime_error)
-
 
     @skipIfTorchDynamo("Different error msgs, TODO")
     @ops(foreach_binary_op_db, dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
@@ -676,6 +681,7 @@ class TestForeach(TestCase):
         else:
             self.assertTrue(all(torch.isinf(e) for e in expect))
         self.assertEqual(expect, actual, equal_nan=False)
+
 
 instantiate_device_type_tests(TestForeach, globals())
 
