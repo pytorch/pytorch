@@ -46,13 +46,18 @@ struct ViewMeta {
   ViewMeta to_out_idx(int64_t out_idx);
 };
 
-// Alias represents the state shared by (potentially multiple) views of the same
-// tensor. For example, in the following code:
+// FunctionalStorageImpl is a subclass of StorageImpl used by the
+// functionalization pass. It has no underlying data (similar to meta storage).
+// It also knows how to reflect mutations to tensors in the absence of a valid
+// data pointer.
+//
+// A storage represents the state shared by (potentially multiple) views of the
+// same tensor. For example, in the following code:
 //
 // b = a.view1(...)
 // c = b.view2(...)
 // b.add_(1)
-// --> alias.add_update(b, {view1_meta})
+// --> storage.add_update(b, {view1_meta})
 //
 // The call to add_(1) will result in a call to alias.add_update(b,
 // {view1_meta}), queueing up the mutation from b onto the alias. Later, suppose
@@ -65,58 +70,49 @@ struct ViewMeta {
 // --> c.sync_()
 //     --> alias.apply_updates() // after this, the alias will be updated to
 //     reflect the mutation to b
-class Alias {
+struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
  public:
   struct Update {
     const at::Tensor new_val;
     const std::vector<ViewMeta> view_metas;
   };
-  explicit Alias(const at::Tensor& base);
-  const at::Tensor& base() const;
-  size_t generation() const {
-    return generation_;
-  }
-  void add_update(
-      const at::Tensor& updated_val,
-      const std::vector<ViewMeta>& metas);
-  bool apply_updates();
 
- private:
-  // NB: base_ should always point to a tensor BELOW the current
-  // functionalization layer. This is mainly to avoid reference cycles. e.g.
-  // given `b = a.view(...)` Both a.storage_ and b.storage_ are a
-  // FunctionStorageImpl containing an Alias, with contains a Tensor `base_`. In
-  // this case (where a and b are FunctionalTensorWrapper's), base_ should point
-  // not to a, but to a's unwrapped value, a.value_` See Note
-  // [Functionalization: Alias Removal] for a diagram that shows this visually.
-  at::Tensor base_;
-  std::vector<Update> updates_;
-  // generation_ gets incremented every time a mutation is queued onto the
-  // alias. It is used to determine if a given tensor is "up to date", or if it
-  // needs to be regenerated from the alias.
-  size_t generation_ = 0;
-};
-
-// FunctionalStorageImpl is a subclass of StorageImpl used by the
-// functionalization pass. It has no underlying data (similar to meta storage).
-// It also knows how to reflect mutations to tensors in the absence of a valid
-// data pointer. It does this by separately storing an Alias object, which knows
-// how to reflect mutations that may have happened to views of the original
-// tensor.
-struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   explicit FunctionalStorageImpl(const Tensor& value);
 
   void add_update(
       const Tensor& updated_val,
       const std::vector<ViewMeta>& view_metas);
   bool apply_updates();
-  const Tensor& base();
-  size_t generation() const;
+  const Tensor& base() {
+    return base_;
+  }
+  size_t generation() const {
+    return generation_;
+  }
+  void freeze() {
+    frozen_ = true;
+  }
 
   ~FunctionalStorageImpl() override = default;
 
  private:
-  at::functionalization::Alias alias_;
+  // NB: base_ should always point to a tensor BELOW the current
+  // functionalization layer. This is mainly to avoid reference cycles. e.g.
+  // given `b = a.view(...)` Both a.storage_ and b.storage_ are a
+  // FunctionStorageImpl containing an Walualias, with contains a Tensor
+  // `base_`. In this case (where a and b are FunctionalTensorWrapper's), base_
+  // should point not to a, but to a's unwrapped value, a.value_` See Note
+  // [Functionalization: Walualias Removal] for a diagram that shows this
+  // visually.
+  at::Tensor base_;
+  std::vector<Update> updates_;
+  // generation_ gets incremented every time a mutation is queued onto the
+  // alias. It is used to determine if a given tensor is "up to date", or if it
+  // needs to be regenerated from the alias.
+  size_t generation_ = 0;
+  // If frozen, no more mutations are allowed on this storage.  Once frozen, a
+  // storage cannot be unfrozen.
+  bool frozen_ = false;
 };
 
 } // namespace functionalization
