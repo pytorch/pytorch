@@ -4220,6 +4220,23 @@ class DistributedTest:
             )
             self._barrier()
 
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_ddp_zero_output_features(self):
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    self.net1 = nn.Linear(10, 10)
+                    self.relu = nn.ReLU()
+                    self.net2 = nn.Linear(10, 0)
+
+            model = ToyModel().to(self.rank)
+            ddp_model = nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
+
         @sandcastle_skip_if(
             BACKEND == "nccl",
             "Gloo-only test"
