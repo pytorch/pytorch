@@ -1367,68 +1367,54 @@ workflows:
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-x86_64-build
           context: org-member
-          filters:
-            branches:
-              only: nightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
           name: pytorch_ios_12_5_1_nightly_x86_64_build
-          use_coreml: "1"
-          use_metal: "1"
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-arm64-build
           context: org-member
-          filters:
-            branches:
-              only: nightly
           ios_arch: arm64
           ios_platform: OS
           name: pytorch_ios_12_5_1_nightly_arm64_build
-          use_coreml: "1"
-          use_metal: "1"
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_build:
           build_environment: libtorch-ios-full_jit-12.5.1-nightly-x86_64-build
           context: org-member
-          filters:
-            branches:
-              only: nightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "0"
           name: pytorch_ios_full_jit_12_5_1_nightly_x86_64_build
-          use_coreml: "1"
-          use_metal: "1"
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_build:
           build_environment: libtorch-ios-full_jit-12.5.1-nightly-arm64-build
           context: org-member
-          filters:
-            branches:
-              only: nightly
           ios_arch: arm64
           ios_platform: OS
           lite_interpreter: "0"
           name: pytorch_ios_full_jit_12_5_1_nightly_arm64_build
-          use_coreml: "1"
-          use_metal: "1"
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_upload:
           build_environment: libtorch-ios-12.5.1-nightly-binary-build-upload
           context: org-member
-          filters:
-            branches:
-              only: nightly
           requires:
             - pytorch_ios_12_5_1_nightly_x86_64_build
             - pytorch_ios_12_5_1_nightly_arm64_build
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_upload:
           build_environment: libtorch-ios-full_jit-12.5.1-nightly-binary-build-upload
           context: org-member
-          filters:
-            branches:
-              only: nightly
           lite_interpreter: "0"
           requires:
             - pytorch_ios_full_jit_12_5_1_nightly_x86_64_build
             - pytorch_ios_full_jit_12_5_1_nightly_arm64_build
+          use_coreml: "0"
+          use_metal: "0"
       - anaconda_prune:
           name: anaconda-prune-pytorch-nightly
           context: "org-member"

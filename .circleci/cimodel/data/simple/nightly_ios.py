@@ -43,7 +43,7 @@ class IOSNightlyJob:
             "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(".")),
             "requires": extra_requires,
             "context": "org-member",
-            "filters": {"branches": {"only": "nightly"}},
+            #"filters": {"branches": {"only": "nightly"}},
         }
 
         if not self.is_upload:
@@ -55,6 +55,9 @@ class IOSNightlyJob:
 
         if self.is_full_jit:
             props_dict["lite_interpreter"] = miniutils.quote(str(int(False)))
+
+        props_dict["use_metal"] = miniutils.quote(str(int(False)))
+        props_dict["use_coreml"] = miniutils.quote(str(int(False)))
 
         template_name = "_".join([
             "binary",
