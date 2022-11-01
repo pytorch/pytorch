@@ -1507,7 +1507,9 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Empty:
     {
-      Tensor weight_view; 
+      Tensor weight_view;
+      // Use permute and clone to avoid at::_unsafe_view(weight, -1) failure for non-contiguous cases where
+      // view size is not compatible with input tensor's size and stride.
       if(weight.is_contiguous()) {
         weight_view = at::_unsafe_view(weight, -1);
       } else if (weight.is_contiguous(at::MemoryFormat::ChannelsLast)) {
@@ -1517,6 +1519,7 @@ at::Tensor _convolution(
       } else {
         weight_view = at::_unsafe_view(weight.clone(at::MemoryFormat::Contiguous), -1);
       }
+
       output = (input.size(1) == 0) ? (input.view(-1) * weight_view) : (input * weight_view[0]);
       if (bias.defined()) {
         output.add_(bias[0]);
