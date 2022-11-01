@@ -99,7 +99,7 @@ class TestPublicBindings(TestCase):
             "device",
             "DeviceObjType",
             "DictType",
-            "DisableTorchFunction",
+            "DisableTorchFunctionSubclass",
             "DispatchKey",
             "DispatchKeySet",
             "dtype",
