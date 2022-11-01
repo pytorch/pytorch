@@ -365,13 +365,30 @@ class TestHooks(FSDPTest):
             fsdp_kwargs,
         )
         input = fsdp_model.module.get_input(torch.device("cuda"))
-        fsdp_model._register_pre_backward_hooks = mock.MagicMock(return_value=None)
-        fsdp_model._register_post_backward_hooks = mock.MagicMock(return_value=None)
-        self.assertFalse(fsdp_model._register_post_backward_hooks.called)
-        self.assertFalse(fsdp_model._register_pre_backward_hooks.called)
-        fsdp_model(*input)
-        self.assertTrue(fsdp_model._register_post_backward_hooks.called)
-        self.assertTrue(fsdp_model._register_pre_backward_hooks.called)
+
+        # Since `_register_pre_backward_hooks()` modifies the forward output,
+        # we cannot directly mock it. We implement our own counter instead.
+        orig_register_pre_backward_hooks = (
+            torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks
+        )
+        register_pre_backward_hooks_call_count = 0
+
+        def _register_pre_backward_hooks_with_count(*args, **kwargs):
+            nonlocal register_pre_backward_hooks_call_count
+            register_pre_backward_hooks_call_count += 1
+            return orig_register_pre_backward_hooks(*args, **kwargs)
+
+        with mock.patch(
+            "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
+            _register_pre_backward_hooks_with_count,
+        ), mock.patch(
+            "torch.distributed.fsdp._runtime_utils._register_post_backward_hooks"
+        ) as register_post_bwd_mock:
+            self.assertEqual(register_pre_backward_hooks_call_count, 0)
+            self.assertFalse(register_post_bwd_mock.called)
+            fsdp_model(*input)
+            self.assertTrue(register_pre_backward_hooks_call_count > 0)
+            self.assertTrue(register_post_bwd_mock.called)
 
 
 class TestNoGrad(FSDPTest):
