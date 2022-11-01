@@ -15,3 +15,37 @@
 - torch/_subclasses/fake_tensor.py
 - torch/_subclasses/fake_utils.py
 - torch/_subclasses/meta_utils.py
+
+"module: cpu":
+- aten/src/ATen/cpu/**
+- aten/src/ATen/native/cpu/**
+- aten/src/ATen/native/quantized/cpu/**
+- aten/src/ATen/native/Convolution*.cpp
+- aten/src/ATen/native/mkldnn/**
+- torch/cpu/**
+- torch/utils/mkldnn.py
+- test/test_mkldnn.py
+
+"module: mkldnn":
+- third_party/ideep
+- caffe2/ideep/**
+- caffe2/python/ideep/**
+- cmake/Modules/FindMKLDNN.cmake
+- third_party/mkl-dnn.BUILD
+- torch/csrc/jit/codegen/onednn/**
+- test/test_jit_llga_fuser.py
+
+"module: amp (automated mixed precision)":
+- torch/amp/**
+- aten/src/ATen/autocast_mode.*
+- torch/csrc/jit/passes/autocast.cpp
+- test/test_autocast.py
+
+"NNC":
+- torch/csrc/jit/tensorexpr/**
+
+"oncall: quantization":
+- torch/ao/quantization/**
+- torch/quantization/**
+- aten/src/ATen/quantized/**
+- aten/src/ATen/native/quantized/cpu/**
