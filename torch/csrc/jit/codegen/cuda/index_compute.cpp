@@ -792,15 +792,18 @@ IndexCompute IndexCompute::updateIndexCompute(
   std::unordered_set<IterDomain*> updated_zero_merged_in;
   std::unordered_map<IterDomain*, Val*> updated_halo_extent_map;
 
-  for (auto id_entry : id_map) {
-    IterDomain* prev_id = id_entry.first;
-    auto new_ids = id_entry.second;
+  // Multile IDs can map to the same ID, so loop over the mappings in
+  // a deterministic order to have deterministic indexing results
+  for (auto prev_id : getSortedKeys(id_map, Statement::lessThan)) {
+    const auto& new_ids = id_map.at(prev_id);
     for (auto new_id : new_ids.vector()) {
       if (index_map_.find(prev_id) != index_map_.end()) {
         updated_index_map[new_id] = index_map_.at(prev_id);
       }
 
-      updated_extent_map[new_id] = getExtent(prev_id);
+      if (extent_map_.find(prev_id) != extent_map_.end()) {
+        updated_extent_map[new_id] = getExtent(prev_id);
+      }
 
       if (zero_domains_.find(prev_id) != zero_domains_.end()) {
         updated_zero_domains.emplace(new_id);
