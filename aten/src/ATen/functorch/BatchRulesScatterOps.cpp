@@ -928,6 +928,11 @@ Tensor index_copy_decomp(
   return at::scatter(self, dim, index_, source);  ;
 }
 
+// Note [Fix vmap slice_scatter]
+// registers a decomposition for `slice_scatter` that calls into `slice.src`
+// *_scatter operators have some special semantics though, that we can't easily
+// through a decomposition: slice_scatter's output needs to have the same
+// size, size, strides and storage_offset as the input.
 Tensor slice_scatter_decomp(const Tensor &self, const Tensor &src,
                             int64_t dim, c10::optional<int64_t> start,
                             c10::optional<int64_t> end, int64_t step)
