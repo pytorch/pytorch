@@ -337,6 +337,8 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "modules":
+            return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "values":
