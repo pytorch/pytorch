@@ -1448,7 +1448,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = B(torch.randn(5))
         with A():
-            with torch._C.DisableTorchFunction():
+            with torch._C.DisableTorchFunctionSubclass():
                 self.assertNotIsInstance(torch.sum(x), B)
 
         self.assertTrue(called)
@@ -1460,7 +1460,7 @@ class TestTorchFunctionMode(TestCase):
             pass
 
         x = A(torch.randn(5))
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             g = torch._C._EnableTorchFunction()
             try:
                 self.assertIsInstance(torch.sum(x), A)

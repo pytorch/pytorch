@@ -704,7 +704,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         # Disable __torch_function__ here to prevent the clone of the
         # example tensor from going into the override.
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 

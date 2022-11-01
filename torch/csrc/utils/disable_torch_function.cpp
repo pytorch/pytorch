@@ -35,18 +35,20 @@ typedef struct {
   PyObject_HEAD
       /* Type-specific fields go here. */
       bool old_state;
-} DisableTorchFunction;
+} DisableTorchFunctionSubclass;
 
-PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
-  ((DisableTorchFunction*)self)->old_state =
+PyObject* DisableTorchFunctionSubclass__enter(
+    PyObject* self,
+    PyObject* unused) {
+  ((DisableTorchFunctionSubclass*)self)->old_state =
       at::impl::PythonTorchFunctionTLS::is_disabled();
   at::impl::PythonTorchFunctionTLS::set_disabled(true);
   Py_RETURN_NONE;
 }
 
-PyObject* DisableTorchFunction__exit(PyObject* self, PyObject* unused) {
+PyObject* DisableTorchFunctionSubclass__exit(PyObject* self, PyObject* unused) {
   at::impl::PythonTorchFunctionTLS::set_disabled(
-      ((DisableTorchFunction*)self)->old_state);
+      ((DisableTorchFunctionSubclass*)self)->old_state);
   Py_RETURN_NONE;
 }
 
@@ -58,16 +60,16 @@ PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject* unused) {
   }
 }
 
-static PyMethodDef DisableTorchFunction_methods[] = { // NOLINT
-    {"__enter__", DisableTorchFunction__enter, METH_NOARGS, nullptr},
-    {"__exit__", DisableTorchFunction__exit, METH_VARARGS, nullptr},
+static PyMethodDef DisableTorchFunctionSubclass_methods[] = { // NOLINT
+    {"__enter__", DisableTorchFunctionSubclass__enter, METH_NOARGS, nullptr},
+    {"__exit__", DisableTorchFunctionSubclass__exit, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
-PyTypeObject DisableTorchFunctionType = {
+PyTypeObject DisableTorchFunctionSubclassType = {
     PyVarObject_HEAD_INIT(
         nullptr,
-        0) "torch._C.DisableTorchFunction", /* tp_name */
-    sizeof(DisableTorchFunction), /* tp_basicsize */
+        0) "torch._C.DisableTorchFunctionSubclass", /* tp_name */
+    sizeof(DisableTorchFunctionSubclass), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
@@ -92,7 +94,7 @@ PyTypeObject DisableTorchFunctionType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    DisableTorchFunction_methods, /* tp_methods */
+    DisableTorchFunctionSubclass_methods, /* tp_methods */
     nullptr, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */
@@ -105,12 +107,12 @@ PyTypeObject DisableTorchFunctionType = {
     PyType_GenericNew, /* tp_new */
 };
 
-PyObject* THPModule_DisableTorchFunctionType() {
-  if (PyType_Ready(&DisableTorchFunctionType) < 0) {
+PyObject* THPModule_DisableTorchFunctionSubclassType() {
+  if (PyType_Ready(&DisableTorchFunctionSubclassType) < 0) {
     return nullptr;
   }
 
-  return (PyObject*)(&DisableTorchFunctionType);
+  return (PyObject*)(&DisableTorchFunctionSubclassType);
 }
 
 PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {

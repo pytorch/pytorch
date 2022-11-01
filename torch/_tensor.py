@@ -1297,7 +1297,7 @@ class Tensor(torch._C._TensorBase):
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunction():
+        with _C.DisableTorchFunctionSubclass():
             ret = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return ret
