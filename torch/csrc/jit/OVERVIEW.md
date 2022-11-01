@@ -894,7 +894,7 @@ def LSTMCellS(x, hx, cx, w_ih, w_hh, b_ih, b_hh):
     return hy, cy
 ```
 
-After going through the the frontend, we start with this unoptimized graph:
+After going through the frontend, we start with this unoptimized graph:
 
 ```
 graph(%x : Tensor,
