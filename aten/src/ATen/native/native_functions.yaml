@@ -13314,28 +13314,6 @@
   structured: True
   variants: function
 
-- func: _flash_scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal) -> Tensor
-  variants: function
-  dispatch:
-    CUDA: flash_scaled_dot_product_attention
-
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CUDA: _efficient_attention_forward
-
-- func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: transformer_decoder_only_layer_forward
-  autogen: _transformer_decoder_only_layer_fwd.out
-
-- func: _native_decoder_only_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None, bool need_weights=True, bool average_attn_weights=True) -> (Tensor, Tensor, Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_decoder_only_multi_head_attention
-  autogen: _native_decoder_only_multi_head_attention.out
-
 - func: special_bessel_j0(Tensor self) -> Tensor
   python_module: special
   structured_delegate: special_bessel_j0.out
