@@ -23,15 +23,13 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.distributed.fsdp._common_utils import (
+    _set_fsdp_flattened,
+    HandleTrainingState,
+)
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import (
-    _alloc_storage,
-    _free_storage,
-    _same_storage,
-    _set_fsdp_flattened,
-    p_assert,
-)
+from ._utils import _alloc_storage, _free_storage, _same_storage, p_assert
 
 __all__ = [
     "FlatParameter",
@@ -41,7 +39,6 @@ __all__ = [
     "SharedParamInfo",
     "HandleConfig",
     "HandleShardingStrategy",
-    "HandleTrainingState",
 ]
 
 
@@ -101,14 +98,6 @@ class HandleShardingStrategy(Enum):
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     NO_SHARD = auto()
-
-
-class HandleTrainingState(Enum):
-    IDLE = auto()
-    FORWARD = auto()
-    BACKWARD_PRE = auto()
-    BACKWARD_POST = auto()
-    SUMMON_FULL_PARAMS = auto()
 
 
 @dataclass
@@ -426,7 +415,10 @@ class FlatParamHandle:
                         else param_name
                     )
                     prefixed_param_names.append(prefixed_param_name)
-        assert requires_grad is not None
+        assert requires_grad is not None, (
+            "Passed-in `params` were not found in the module tree\n"
+            f"params: {params}\nmodule: {module}"
+        )
         self.flat_param = FlatParamHandle.flatten_params(
             params_to_flatten, requires_grad
         )
@@ -1814,3 +1806,9 @@ class FlatParamHandle:
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
         )
+
+
+# A handles key represents the group of `FlatParamHandle`s involved in a given
+# module's forward. These will be all-gathered together in the pre-forward and
+# pre-backward.
+_HandlesKey = Tuple[FlatParamHandle, ...]

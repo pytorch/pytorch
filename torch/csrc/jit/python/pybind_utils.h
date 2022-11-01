@@ -299,7 +299,7 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(TensorType::get());
   }
 
-  if (input.is(py::none())) {
+  if (input.is_none()) {
     return InferredType(NoneType::get());
   }
 
