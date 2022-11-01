@@ -21,8 +21,6 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import (
-    _make_elementwise_binary_reference,
-    _make_elementwise_unary_reference,
     _make_inplace,
 )
 

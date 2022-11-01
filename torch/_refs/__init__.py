@@ -394,18 +394,13 @@ def _make_elementwise_unary_reference(
             type_promotion_kind=type_promotion_kind,
         )
         def _ref(a: TensorLikeType) -> TensorLikeType:
-            if not isinstance(a, TensorLike):
-                raise RuntimeError(
-                    "Expected a tensor input for an elementwise unary operation!"
-                )
-
             if extra_meta is not None:
                 extra_meta(a)
 
             return prim(a)
 
         if aten_op is infer_aten_op:
-            aten_op = getattr(torch.ops.aten, prim.__name__)
+            aten_op = utils.get_aten_op(prim, prim.__name__)
         if aten_op is not None:
             register_decomposition(aten_op)(_ref)
 
@@ -414,9 +409,11 @@ def _make_elementwise_unary_reference(
     return inner
 
 
-def _make_alias(fn, name=None):
-    if name is None:
-        name = fn.__name__.split(".")[-1]
+def _make_alias(fn, name):
+    """
+    This function defines an alias of another function and sets its __name__argument
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    """
 
     def _fn(*args, **kwargs):
         return fn(*args, **kwargs)
@@ -428,6 +425,7 @@ def _make_alias(fn, name=None):
 def _make_inplace(fn):
     """
     Given a function with out variant (i.e. using `out_wrapper()), it returns its in-place variant
+    See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-do-in-place-operations-work-in-pytorch
     """
 
     # nb. We use the name of the first argument used in the unary references
@@ -882,8 +880,6 @@ def trunc(a):
 
 
 def _make_elementwise_binary_reference(
-    prim: Callable,
-    *,
     type_promotion_kind,
     aten_op=infer_aten_op,
     name=None,
@@ -892,49 +888,51 @@ def _make_elementwise_binary_reference(
     supports_rhs_python_scalar=True,
     supports_two_python_scalars=False,
 ) -> Callable:
-    @wraps(prim)
-    @elementwise_type_promotion_wrapper(
-        type_promoting_args=("a", "b"),
-        type_promotion_kind=type_promotion_kind,
-    )
-    def _ref(
-        a: Union[Tensor, NumberType],
-        b: Union[Tensor, NumberType],
-    ) -> Tensor:
-        if not supports_lhs_python_scalar and isinstance(a, Number):
-            raise ValueError(
-                "Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!"
+    def inner(prim: Callable):
+        nonlocal aten_op, name
+        if name is None:
+            name = prim.__name__
+
+        @wraps(prim)
+        @elementwise_type_promotion_wrapper(
+            type_promoting_args=("a", "b"),
+            type_promotion_kind=type_promotion_kind,
+        )
+        def _ref(
+            a: Union[Tensor, NumberType],
+            b: Union[Tensor, NumberType],
+        ) -> Tensor:
+            check(
+                supports_lhs_python_scalar or not isinstance(a, Number),
+                lambda: "{name}: Received a lhs Python scalar to an elementwise binary operation that does not accept lhs scalars!",
+                ValueError,
             )
-
-        if not supports_rhs_python_scalar and isinstance(b, Number):
-            raise ValueError(
-                "Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!"
+            check(
+                supports_rhs_python_scalar or not isinstance(b, Number),
+                lambda: "{name}: Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!",
+                ValueError,
             )
-
-        if (
-            not supports_two_python_scalars
-            and isinstance(a, Number)
-            and isinstance(b, Number)
-        ):
-            raise ValueError(
-                f"Receive two Number inputs to an elementwise binary operation {prim}!"
+            check(
+                supports_two_python_scalars
+                or not (isinstance(a, Number) and isinstance(b, Number)),
+                lambda: f"{name}: Receive two Number inputs to an elementwise binary operation!",
+                ValueError,
             )
+            a, b = _maybe_broadcast(a, b)
+            return prim(a, b)
 
-        a, b = _maybe_broadcast(a, b)
-        return prim(a, b)
+        if has_out:
+            _ref = out_wrapper()(_ref)
 
-    if has_out:
-        _ref = out_wrapper()(_ref)
+        _ref.__name__ = name
+        if aten_op is infer_aten_op:
+            aten_op = utils.get_aten_op(prim, name)
+        if aten_op is not None:
+            register_decomposition(aten_op)(_ref)
 
-    if not name:
-        name = prim.__name__.split(".")[0]
-    _ref.__name__ = name
-    if aten_op is infer_aten_op:
-        aten_op = getattr(torch.ops.aten, name)
-    if aten_op is not None:
-        register_decomposition(aten_op)(_ref)
+        return _ref
 
-    return _ref
+    return inner
 
 
 # Add has its own implementation because it has an alpha argument
@@ -974,8 +972,7 @@ def add(
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -985,8 +982,7 @@ def atan2(a, b):
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def bitwise_and(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
@@ -994,18 +990,15 @@ def bitwise_and(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 def bitwise_left_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.shift_left(a, b)
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def bitwise_or(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
@@ -1013,18 +1006,15 @@ def bitwise_or(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.bitwise_right_shift,  # prim/aten name mismatch
 )
 def bitwise_right_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.shift_right_arithmetic(a, b)
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def bitwise_xor(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
@@ -1032,8 +1022,7 @@ def bitwise_xor(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
 )
@@ -1080,8 +1069,7 @@ def div(
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1090,8 +1078,7 @@ def eq(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
 )
 def pow(
@@ -1171,8 +1158,7 @@ def float_power(
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_two_python_scalars=True,
 )
@@ -1243,10 +1229,8 @@ def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.fmax,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
@@ -1255,10 +1239,8 @@ def fmax(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.fmin,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
@@ -1267,10 +1249,8 @@ def fmin(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.fmod,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=True,
 )
@@ -1279,10 +1259,8 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.gcd,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
@@ -1291,8 +1269,7 @@ def gcd(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1301,8 +1278,7 @@ def ge(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1310,8 +1286,7 @@ def gt(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.gt(a, b)
 
 
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1324,8 +1299,7 @@ def heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
     return output
 
 
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1334,8 +1308,7 @@ def hypot(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.hypot(a, b)
 
 
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1344,8 +1317,7 @@ def igamma(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.igamma(a, b)
 
 
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1427,8 +1399,7 @@ def isclose(
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1450,8 +1421,7 @@ def lcm(a: TensorLikeType, b: TensorLikeType):
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1460,8 +1430,7 @@ def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 def logical_and(a: TensorLikeType, b: TensorLikeType):
@@ -1481,8 +1450,7 @@ def logical_not(a: TensorLikeType):
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 def logical_or(a: TensorLikeType, b: TensorLikeType):
@@ -1495,8 +1463,7 @@ def logical_or(a: TensorLikeType, b: TensorLikeType):
 
 # TODO: add docstring
 # TODO: skip unnecessary conversion of long to float
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 def logical_xor(a: TensorLikeType, b: TensorLikeType):
@@ -1508,8 +1475,7 @@ def logical_xor(a: TensorLikeType, b: TensorLikeType):
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1518,8 +1484,7 @@ def lt(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def maximum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
@@ -1527,8 +1492,7 @@ def maximum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def minimum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
@@ -1536,8 +1500,7 @@ def minimum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_two_python_scalars=True,
 )
@@ -1546,8 +1509,7 @@ def mul(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1556,8 +1518,7 @@ def ne(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1567,10 +1528,8 @@ def nextafter(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    aten_op=torch.ops.aten.remainder,
 )
 def remainder(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.remainder(a, b)
@@ -1626,8 +1585,7 @@ def sub(
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     name="true_divide",
     aten_op=None,  # CompositeImplicitAutograd
@@ -1663,8 +1621,7 @@ def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberT
 
 
 # TODO: add docstring
-@partial(
-    _make_elementwise_binary_reference,
+@_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # CompositeImplicitAutograd
     supports_two_python_scalars=False,
@@ -5044,7 +5001,10 @@ true_divide_ = _make_inplace(true_divide)
 trunc_ = _make_inplace(trunc)
 xlogy_ = _make_inplace(xlogy)
 
-# views
+# Views
+# We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
+# given that it does not reshape the input (it just copies the result into it)
+
 # conj_physical_ = _make_inplace(conj_physical)
 # squeeze_ = _make_inplace(squeeze)
 # t_ = _make_inplace(t)
