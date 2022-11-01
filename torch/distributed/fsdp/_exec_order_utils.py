@@ -7,8 +7,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
+    _all_handles,
     _get_param_to_unflat_param_names,
-    _is_composable,
     _State,
 )
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
@@ -87,16 +87,7 @@ class _ExecOrderData:
         self.rank = process_group.rank()
         self.world_size = process_group.size()
         # Fix an order over the handles, which should be the same across ranks
-        all_handles = (
-            [
-                handle
-                for fsdp_module in state.fsdp_modules(state)
-                for handle in fsdp_module._handles
-            ]
-            if not _is_composable(state)
-            else state._handles
-        )
-        for handle in all_handles:
+        for handle in _all_handles(state):
             index = len(self.all_handles)
             self.all_handles.append(handle)
             self.handle_to_handle_index[handle] = index
