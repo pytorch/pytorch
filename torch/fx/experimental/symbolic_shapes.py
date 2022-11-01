@@ -166,7 +166,7 @@ class SymNode:
         return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
-        return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
+        return self
 
     def str(self):
         return f"{self.expr}"
