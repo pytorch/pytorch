@@ -417,6 +417,9 @@ def create_nvprims_backend(*, executor, cudagraphs):
             self.num_example_inputs = len(example_inputs)
 
         def candidate(self):
+            from functorch.compile import aot_module_simplified
+
+            @torch._dynamo.disable
             def fw_compiler(model: torch.fx.GraphModule, example_inputs):
                 num_fixed = len(example_inputs) - self.num_example_inputs
                 return partial(
@@ -426,6 +429,7 @@ def create_nvprims_backend(*, executor, cudagraphs):
                     cudagraphs=self.cudagraphs,
                 )(model, example_inputs)
 
+            @torch._dynamo.disable
             def bw_compiler(model: torch.fx.GraphModule, example_inputs):
                 from torch._inductor.compile_fx import count_tangents
 
@@ -437,9 +441,8 @@ def create_nvprims_backend(*, executor, cudagraphs):
                     cudagraphs=self.cudagraphs,
                 )(model, example_inputs)
 
-            return BACKENDS["aot_autograd"](
+            return aot_module_simplified(
                 self.gm,
-                self.example_inputs,
                 fw_compiler=fw_compiler,
                 bw_compiler=bw_compiler,
             )
