@@ -3321,6 +3321,13 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
 
     # Ordered as input shape, num groups, and kwargs for eps
     cases: Tuple[Tuple[int], int, float] = (  # type: ignore[assignment]
+        ((20, 6, 10, 10), 3, {'eps' : 1e-5}),
+        # equivalent with InstanceNorm
+        # GroupNorm(C, num_groups=C) == InstanceNorm(num_features=C)
+        ((20, 6, 10, 10), 6, {'eps' : 1e-5}),
+        # equivalent with LayerNorm
+        # GroupNorm(C, num_groups=1, affine=False) == LayerNorm(normalized_shape=[C, H, W], elementwise_affine=False)
+        ((20, 6, 10, 10), 1, {'eps' : 1e-5}),
         ((1, 6, 3), 2, {'eps' : 0.5}),
         ((2, 6, 3), 2, {'eps' : -0.5}),
         ((1, 2), 1, {'eps' : 1e-5}),
@@ -3328,6 +3335,7 @@ def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
         ((S, S, S), 1, {'eps' : 0.5}),
     )
 
+    # num_channels is inferred to be input.shape[1] dimension
     for input_shape, num_groups, kwargs in cases:
         # Shape of weight and bias should be the same as num_channels
         channels = input_shape[1] if len(input_shape) > 1 else 0
