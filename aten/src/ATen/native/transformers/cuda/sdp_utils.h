@@ -189,28 +189,29 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
-  // Constraints specific to flash attention
-  static const std::vector<caffe2::ScalarType> flash_dtypes{
-      at::kHalf, at::kBFloat16};
-
   //  Define gate functions that determine if a flash kernel can be ran
-  std::vector<std::function<bool(sdp_params, bool)>> constraints{
+  constexpr std::array<bool(*)(sdp_params, bool), 7> constraints {{
       check_runtime_disabled_flash,
       check_tensor_shapes,
       check_for_attn_weights,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
-      check_for_seq_len_1_nested_tensor};
+      check_for_seq_len_1_nested_tensor}};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, flash_dtypes, debug)) {
-    return false;
+
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major >= 8) {
+    static const std::array<at::ScalarType, 2> sm80_flash_dtypes{at::kHalf, at::kBFloat16};
+    return check_tensor_dtype(params, sm80_flash_dtypes, debug);
+  } else {
+    static const std::array<at::ScalarType, 1> default_flash_dtypes{at::kHalf};
+    return check_tensor_dtype(params, default_flash_dtypes, debug);
   }
-  return true;
 }
 
 inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
