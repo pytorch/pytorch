@@ -285,8 +285,10 @@ class TestForeach(TestCase):
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         ]
-        self._pointwise_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False, values=values, custom_values_err=custom_values_err)
-        self._pointwise_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True, values=values, custom_values_err=custom_values_err)
+        self._pointwise_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False,
+                             values=values, custom_values_err=custom_values_err)
+        self._pointwise_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath,
+                             is_inplace=True, values=values, custom_values_err=custom_values_err)
 
         # Tests of implicit broadcasting
         inputs = [
@@ -298,7 +300,8 @@ class TestForeach(TestCase):
                 make_tensor((1, N - i), device=device, dtype=dtype, noncontiguous=not is_fastpath) for i in range(N)
             ],
         ]
-        self._pointwise_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath, is_inplace=False, values=values, custom_values_err=custom_values_err)
+        self._pointwise_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath,
+                             is_inplace=False, values=values, custom_values_err=custom_values_err)
         self._pointwise_test(
             dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True, values=values, custom_values_err=custom_values_err)
 
@@ -311,14 +314,14 @@ class TestForeach(TestCase):
             self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath)
             for scalar in Scalars:
                 self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath, values=scalar)
-                # Error message doesn't match regular addcdiv due to support for scalar packed as a Tensor.
-                self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalar),
-                                        custom_values_err="Expected packed scalar Tensor to be of dimension 1. Got 0 instead.",)
             for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, True, disable_fastpath, values=scalarlist)
                 self._test_pointwise_op(
                     device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist))
+                self._test_pointwise_op(
+                    device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist)[0],
+                    custom_values_err="Expected packed scalar Tensor to be of dimension 1. Got 0 instead.")
                 if device == "cuda":
                     self._test_pointwise_op(
                         device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist, device="cuda"),
@@ -337,7 +340,6 @@ class TestForeach(TestCase):
             self._test_pointwise_op(device, dtype, op, N, False, False)
             for scalar in Scalars:
                 self._test_pointwise_op(device, dtype, op, N, False, False, values=scalar)
-                self._test_pointwise_op(device, dtype, op, N, False, False, values=torch.tensor(scalar))
             for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, False, False, values=scalarlist)
