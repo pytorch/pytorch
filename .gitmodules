@@ -112,8 +112,8 @@
     url = https://github.com/houseroad/foxi.git
 [submodule "third_party/tbb"]
     path = third_party/tbb
-    url = https://github.com/01org/tbb
-    branch = tbb_2018
+	url = https://github.com/oneapi-src/oneTBB.git
+	branch = onetbb_2021
 [submodule "android/libs/fbjni"]
     ignore = dirty
     path = android/libs/fbjni
