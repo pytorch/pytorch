@@ -1069,11 +1069,6 @@ class MultiheadAttention(Module):
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
-        elif query is not key or key is not value:
-            # When lifting this restriction, don't forget to either
-            # enforce that the dtypes all match or test cases where
-            # they don't!
-            why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
         elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
         elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
@@ -1087,8 +1082,6 @@ class MultiheadAttention(Module):
             why_not_fast_path = "self.bias_k was not None"
         elif self.bias_v is not None:
             why_not_fast_path = "self.bias_v was not None"
-        elif self.dropout:
-            why_not_fast_path = f"dropout was {self.dropout}, required zero"
         elif self.add_zero_attn:
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
@@ -1116,24 +1109,15 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif not all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
                 why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
-                why_not_fast_path = ("grad is enabled and at least one of query or the "
-                                     "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
-                return torch._native_multi_head_attention(
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    key_padding_mask if key_padding_mask is not None else attn_mask,
-                    need_weights,
-                    average_attn_weights,
-                    1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
+                q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+                mask = key_padding_mask if key_padding_mask is not None else attn_mask
+                attn_output, attn_weights = torch._scaled_dot_product_attention(q, k, v, mask, 0.0, need_weights, False)
+                if average_attn_weights:
+                    attn_weights = attn_weights.sum(1)
+                    attn_weights = attn_weights / self.num_heads
+                proj = F.linear(attn_output, self.out_proj.weight, self.out_proj.bias);
+                return proj, attn_weights
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
