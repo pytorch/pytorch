@@ -5973,12 +5973,20 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.swapaxes_(0, 0))
 
     def test_autograd_inplace_view_of_view(self):
-        x = torch.zeros(2, requires_grad=False)
+        x = torch.zeros(2)
         with torch.no_grad():
             y = x.view(2)
-            y.requires_grad_(True)
+        y.requires_grad_(True)
         z = y.view(2)
-        with self.assertRaisesRegex(RuntimeError, "both the view and the inplace either both inside the no_grad block"):
+        with self.assertRaisesRegex(RuntimeError, "a view of a view .* is being .* inside the no_grad block"):
+            z /= 2
+
+        x = torch.zeros(2)
+        with torch.inference_mode():
+            y = x.view(2)
+        y.requires_grad_(True)
+        z = y.view(2)
+        with self.assertRaisesRegex(RuntimeError, "a view of a view .* is being .* inside the inference_mode"):
             z /= 2
 
     # TODO This is not the correct behavior -
