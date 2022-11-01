@@ -5,6 +5,7 @@
 /*
  * TILE_SIZE = (2, 2, 1)
  * WEIGHT_STORAGE = TEXTURE_3D
+ * BIAS_STORAGE = TEXTURE_3D
  */
 
 /*

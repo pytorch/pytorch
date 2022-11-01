@@ -56,9 +56,11 @@ ShaderInfo::ShaderInfo(
     const uint32_t size,
     const std::vector<VkDescriptorType>& layout,
     const std::vector<uint32_t>& tile_size,
+    const StorageType bias_storage_type,
     const StorageType weight_storage_type)
     : shader_src(name, spirv_bin, size, layout),
       tile_size(tile_size),
+      bias_storage_type(bias_storage_type),
       weight_storage_type(weight_storage_type) {
   for (uint64_t i = 0; i < tile_size.size(); ++i) {
     shader_src.out_tile_size.data[i] = tile_size[i];
