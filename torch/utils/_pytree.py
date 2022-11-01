@@ -95,13 +95,14 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
         return False
     return all(type(entry) == str for entry in fields)
 
-def _get_node_type(pytree: Any) -> Optional[Any]:
+def _get_node_type(pytree: Any) -> Any:
     if _is_namedtuple_instance(pytree):
         return namedtuple
-    if isinstance(pytree, type):
-        return None
-    supported_types = [i for i in type(pytree).mro() if i in SUPPORTED_NODES]
-    return supported_types[0] if len(supported_types) > 0 else None
+    return type(pytree)
+
+# A leaf is defined as anything that is not a Node.
+def _is_leaf(pytree: PyTree) -> bool:
+    return _get_node_type(pytree) not in SUPPORTED_NODES.keys()
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
@@ -142,10 +143,10 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
-    node_type = _get_node_type(pytree)
-    if not node_type:
+    if _is_leaf(pytree):
         return [pytree], LeafSpec()
 
+    node_type = _get_node_type(pytree)
     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
     child_pytrees, context = flatten_fn(pytree)
 
@@ -300,8 +301,7 @@ def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
 def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[Any]]:
     assert isinstance(spec, TreeSpec)
 
-    node_type = _get_node_type(pytree)
-    if not node_type:
+    if _is_leaf(pytree):
         return [pytree] * spec.num_leaves
     if isinstance(spec, LeafSpec):
         return None
