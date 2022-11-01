@@ -174,12 +174,6 @@ bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
   return check_fast_path_restrictions(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
-bool can_use_fast_route(ArrayRef<TensorList> tensorLists,
-                        const Tensor& scalarList = {},
-                        bool does_op_promote_integer_inputs_to_float = false) {
-  return check_fast_path_restrictions(tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
-}
-
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool does_op_promote_integer_inputs_to_float = false) {
   return can_use_fast_route({tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
 }

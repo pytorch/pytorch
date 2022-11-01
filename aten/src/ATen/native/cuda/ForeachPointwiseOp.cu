@@ -174,26 +174,45 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);                                                                                       \
 }
 
-#define FOREACH_POINTWISE_OP_TENSOR(NAME, OP)                                                                                                            \
-std::vector<Tensor> foreach_tensor_##NAME##_tensor_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Tensor scalars) {                \
-    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
-                                                                                                                                                         \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral_tensor(input, /* includeBool */ true)) {                               \
-        return at::native::foreach_tensor_##NAME##_tensor_slow(input, tensors1, tensors2, scalars);                                                  \
-    }                                                                                                                                                    \
-                                                                                                                                                         \
-    return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalars);                                                                                 \
-}                                                                                                                                                        \
-                                                                                                                                                         \
-void foreach_tensor_##NAME##_tensor_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Tensor scalars) {                                  \
-    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);                                                                                  \
-                                                                                                                                                         \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) || has_integral_tensor(input, /* includeBool */ true)) {                               \
-        return at::native::foreach_tensor_##NAME##_tensor_slow_(input, tensors1, tensors2, scalars);                                                 \
-    }                                                                                                                                                    \
-                                                                                                                                                         \
-    foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);                                                                                       \
-}
+#define FOREACH_POINTWISE_OP_TENSOR(NAME, OP)                                \
+  std::vector<Tensor> foreach_tensor_##NAME##_tensor_cuda(                   \
+      TensorList input,                                                      \
+      TensorList tensors1,                                                   \
+      TensorList tensors2,                                                   \
+      Tensor scalars) {                                                      \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);      \
+                                                                             \
+    auto maybe_scalarList =                                                  \
+        convert_tensor_to_scalar_list(scalarList_, tensorLists.size());      \
+    if (!maybe_scalarList ||                                                 \
+        !can_use_fast_route({input, tensors1, tensors2}) ||                  \
+        has_integral_tensor(input, /* includeBool */ true)) {                \
+      return at::native::foreach_tensor_##NAME##_tensor_slow(                \
+          input, tensors1, tensors2, scalars);                               \
+    }                                                                        \
+                                                                             \
+    return foreach_pointwise_op<OP>(                                         \
+        input, tensors1, tensors2, *maybe_scalarList);                       \
+  }                                                                          \
+                                                                             \
+  void foreach_tensor_##NAME##_tensor_cuda_(                                 \
+      TensorList input,                                                      \
+      TensorList tensors1,                                                   \
+      TensorList tensors2,                                                   \
+      Tensor scalars) {                                                      \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);      \
+                                                                             \
+    auto maybe_scalarList =                                                  \
+        convert_tensor_to_scalar_list(scalarList_, tensorLists.size());      \
+    if (!maybe_scalarList ||                                                 \
+        !can_use_fast_route({input, tensors1, tensors2}, scalars) ||         \
+        has_integral_tensor(input, /* includeBool */ true)) {                \
+      return at::native::foreach_tensor_##NAME##_tensor_slow_(               \
+          input, tensors1, tensors2, scalars);                               \
+    }                                                                        \
+                                                                             \
+    foreach_pointwise_op_<OP>(input, tensors1, tensors2, *maybe_scalarList); \
+  }
 
 FOREACH_POINTWISE_OP_SCALAR(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
