@@ -1597,58 +1597,16 @@ def _export(
                     model_file_location,
                     node_attr_to_name,
                 )
-            if verbose:
-                torch.onnx.log("Exported graph: ", graph)
-            if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
-                assert len(export_map) == 0
-                with torch.serialization._open_file_like(f, "wb") as opened_file:
-                    opened_file.write(proto)
-            elif export_type in [
-                _exporter_states.ExportTypes.ZIP_ARCHIVE,
-                _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
-            ]:
-                compression = (
-                    zipfile.ZIP_DEFLATED
-                    if export_type
-                    == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
-                    else zipfile.ZIP_STORED
-                )
-                with zipfile.ZipFile(f, "w", compression=compression) as z:
-                    z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
-                    for k, v in export_map.items():
-                        z.writestr(k, v)
-            elif export_type == _exporter_states.ExportTypes.DIRECTORY:
-                if os.path.exists(f):
-                    assert os.path.isdir(f)
-                else:
-                    os.makedirs(f)
-
-                model_proto_file = os.path.join(
-                    f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME
-                )
-                with torch.serialization._open_file_like(
-                    model_proto_file, "wb"
-                ) as opened_file:
-                    opened_file.write(proto)
-
-                for k, v in export_map.items():
-                    weight_proto_file = os.path.join(f, k)
-                    with torch.serialization._open_file_like(
-                        weight_proto_file, "wb"
-                    ) as opened_file:
-                        opened_file.write(v)
-            else:
-                raise RuntimeError("Unknown export type")
             # insert function_proto into model_proto.
-            # this has to be called after onnx file is created,
-            # as >2GB model needs to be loaded from path
             proto = _add_onnxscript_fn(
                 proto,
-                graph,
                 custom_opsets,
                 val_use_external_data_format,
                 model_file_location,
             )
+            if verbose:
+                torch.onnx.log("Exported graph: ", graph)
+            _export_file(proto, f, export_type, export_map)
             # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
             # we can skip this check.
             # If large model format export is enabled, proto will only contain data location instead of
@@ -1670,9 +1628,53 @@ def _export(
 
 
 @_beartype.beartype
+def _export_file(
+    model_bytes: bytes,
+    f: Union[str, io.BytesIO],
+    export_type: str,
+    export_map: Mapping[str, bytes],
+) -> None:
+    """export/write model bytes into directory/protobuf/zip"""
+    if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
+        assert len(export_map) == 0
+        with torch.serialization._open_file_like(f, "wb") as opened_file:
+            opened_file.write(model_bytes)
+    elif export_type in [
+        _exporter_states.ExportTypes.ZIP_ARCHIVE,
+        _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
+    ]:
+        compression = (
+            zipfile.ZIP_DEFLATED
+            if export_type == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
+            else zipfile.ZIP_STORED
+        )
+        with zipfile.ZipFile(f, "w", compression=compression) as z:
+            z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, model_bytes)
+            for k, v in export_map.items():
+                z.writestr(k, v)
+    elif export_type == _exporter_states.ExportTypes.DIRECTORY:
+        if os.path.exists(f):
+            assert os.path.isdir(f)
+        else:
+            os.makedirs(f)
+
+        model_proto_file = os.path.join(f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME)
+        with torch.serialization._open_file_like(model_proto_file, "wb") as opened_file:
+            opened_file.write(model_bytes)
+
+        for k, v in export_map.items():
+            weight_proto_file = os.path.join(f, k)
+            with torch.serialization._open_file_like(
+                weight_proto_file, "wb"
+            ) as opened_file:
+                opened_file.write(v)
+    else:
+        raise RuntimeError("Unknown export type")
+
+
+@_beartype.beartype
 def _add_onnxscript_fn(
     model_bytes: bytes,
-    graph: _C.Graph,
     custom_opsets: Mapping[str, int],
     val_use_external_data_format: bool,
     model_file_location: str,
@@ -1685,15 +1687,29 @@ def _add_onnxscript_fn(
     except ImportError:
         raise errors.OnnxExporterError("Module onnx is not installed!")
 
+    # For > 2GB model, we need to load from file
+    # TODO(titaiwang): Does > 2GB model exists in model bytes?
+    # because in _export_onnx, the tensors should be saved separately
+    # from model proto already
+    if val_use_external_data_format:
+        # save the model bytes into onnx before using onnx.load
+        with torch.serialization._open_file_like(
+            model_file_location, "wb"
+        ) as opened_file:
+            opened_file.write(model_bytes)
+        model_proto = onnx.load(model_file_location, load_external_data=False)
+    else:
+        model_proto = onnx.load_from_string(model_bytes)
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
+    # TODO(titaiwang): Currently, onnxscript doesn't support
+    # ONNXFunction calling other ONNXFunction scenario, neither does it here
     onnx_function_list = list()
     included_node_func = set()
-    for node in graph.nodes():
-        node_kind = node.kind()
-        domain, _ = jit_utils.parse_node_kind(node_kind)
-        if jit_utils.is_custom_domain(domain) and node_kind not in included_node_func:
-            specified_version = custom_opsets.get(domain, 1)
+    for node in model_proto.graph.node:
+        node_kind = node.domain + "::" + node.op_type
+        if jit_utils.is_custom_domain(node.domain) and node_kind not in included_node_func:
+            specified_version = custom_opsets.get(node.domain, 1)
             onnx_function_group = registration.registry.get_function_group(node_kind)
             if onnx_function_group is not None:
                 onnx_fn = onnx_function_group.get(specified_version)
@@ -1712,18 +1728,11 @@ def _add_onnxscript_fn(
                 else None,
             )
     if onnx_function_list:
-        # For > 2GB model, we need to load from file
-        # TODO(titaiwang): Does > 2GB model exists in model bytes?
-        # because in _export_onnx, the tensors should be saved separately
-        # from model proto already
-        if val_use_external_data_format:
-            model_proto = onnx.load(model_file_location, load_external_data=False)
-            model_proto.functions.extend(onnx_function_list)
-            onnx.save(model_proto, model_file_location)
-        else:
-            model_proto = onnx.load_model_from_string(model_bytes)
-            model_proto.functions.extend(onnx_function_list)
-            model_bytes = model_proto.SerializeToString()
+        # model proto here should be < 2GB even it was 2GB
+        # in original model, as it's loaded only with model
+        # proto in the begining of this function
+        model_proto.functions.extend(onnx_function_list)
+        model_bytes = model_proto.SerializeToString()
     return model_bytes
 
 

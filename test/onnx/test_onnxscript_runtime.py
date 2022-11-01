@@ -31,7 +31,7 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         custom_opset = onnxscript.values.Opset(domain="onnx-script", version=1)
 
         @onnxscript.script(custom_opset)
-        def Selu(X, alpha: float, gamma: float):
+        def Selu(X):
             # TODO: onnx/ort doesn't support default values for now
             # move this when they do
             alpha = 1.67326  # auto wrapped as Constants

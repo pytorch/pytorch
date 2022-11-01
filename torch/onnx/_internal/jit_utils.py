@@ -381,4 +381,4 @@ def parse_node_kind(kind: str) -> Tuple[str, str]:
 @_beartype.beartype
 def is_custom_domain(domain: str) -> bool:
     """Check if the domain is official."""
-    return domain not in {"onnx", "aten", "prim"}
+    return domain not in {"onnx", "aten", "prim", ""}
