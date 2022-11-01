@@ -273,6 +273,7 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcdiv);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 
 FOREACH_POINTWISE_OP_TENSOR(addcdiv);
+FOREACH_POINTWISE_OP_TENSOR(addcmul);
 
 // NOTE(crcrpar): It didn't seem feasible to use `self[i]` as both the first and the last
 // arguments of `maximum_out` and `minimum_out` so I tentatively embarrassingly get and copy

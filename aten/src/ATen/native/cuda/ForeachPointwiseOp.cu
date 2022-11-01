@@ -198,6 +198,7 @@ FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_TENSOR(addcdiv, std::divides);
+FOREACH_POINTWISE_OP_TENSOR(addcmul, std::multiplies);
 
 
 // Why bool tensors are pushed to slowpath?
