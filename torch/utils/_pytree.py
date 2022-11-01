@@ -1,4 +1,4 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union, Set
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
 from dataclasses import dataclass
@@ -46,12 +46,8 @@ class GradNodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
     tangenttype_fn: UnflattenFunc
 
-LEAF_NODES: Set[Type[Any]] = set()
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 GRAD_NODES: Dict[Type[Any], GradNodeDef] = {}
-
-def _register_leaf_node(typ: Any) -> None:
-    LEAF_NODES.add(typ)
 
 def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc) -> None:
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
@@ -110,13 +106,14 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
         return False
     return all(type(entry) == str for entry in fields)
 
-def _get_node_type(pytree: Any) -> Optional[Any]:
+def _get_node_type(pytree: Any) -> Any:
     if _is_namedtuple_instance(pytree):
         return namedtuple
-    if isinstance(pytree, type):
-        return None
-    supported_types = [i for i in type(pytree).mro() if i in SUPPORTED_NODES or i in LEAF_NODES]
-    return supported_types[0] if len(supported_types) > 0 else None
+    return type(pytree)
+
+# A leaf is defined as anything that is not a Node.
+def _is_leaf(pytree: PyTree) -> bool:
+    return _get_node_type(pytree) not in SUPPORTED_NODES.keys()
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
@@ -157,10 +154,10 @@ def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], Tree
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
-    node_type = _get_node_type(pytree)
-    if not node_type or node_type in LEAF_NODES:
+    if _is_leaf(pytree):
         return [pytree], LeafSpec()
 
+    node_type = _get_node_type(pytree)
     if grad_fn and node_type in GRAD_NODES:
         flatten_fn = GRAD_NODES[node_type].flatten_fn
     else:
@@ -322,8 +319,7 @@ def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
 def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[Any]]:
     assert isinstance(spec, TreeSpec)
 
-    node_type = _get_node_type(pytree)
-    if not node_type:
+    if _is_leaf(pytree):
         return [pytree] * spec.num_leaves
     if isinstance(spec, LeafSpec):
         return None
