@@ -65,7 +65,14 @@ def set_proxy_slot(obj, tracer, proxy):
     assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
     d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())  # type: ignore[call-overload]
     assert isinstance(d, weakref.WeakKeyDictionary)
-    d[tracer] = proxy
+    # NB: Never clobber pre-existing proxy.  Although the proxies
+    # are in principle equivalent, when we do graph partitioning
+    # we need there not to be spurious dependencies on tangent inputs.
+    # This works because primals get their SymInts set first, and
+    # THEN later we allocate tangent inputs.  Make sure if a SymInt
+    # is derivable from a primal that we use that.
+    if tracer not in d:
+        d[tracer] = proxy
 
 def has_proxy_slot(obj, tracer):
     assert isinstance(obj, (torch.Tensor, SymNode)), type(obj)
