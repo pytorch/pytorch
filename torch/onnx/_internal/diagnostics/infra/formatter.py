@@ -59,7 +59,7 @@ def sarif_to_json(attr_cls_obj: _SarifClass) -> str:
     return json.dumps(dict, indent=4)
 
 
-def pretty_print_title(title: str, width: int = 120, fill_char: str = "=") -> None:
+def pretty_print_title(title: str, width: int = 80, fill_char: str = "=") -> None:
     """Pretty prints title in below format:
 
     ==================== title ====================

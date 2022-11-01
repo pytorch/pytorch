@@ -348,12 +348,15 @@ class DiagnosticOptions:
     Options for diagnostic context.
     """
 
+    log_verbose: bool = dataclasses.field(default=False)
+    log_level: Level = dataclasses.field(default=Level.ERROR)
+
 
 @dataclasses.dataclass
 class DiagnosticContext:
     name: str
     version: str
-    options: Optional[DiagnosticOptions] = None
+    options: DiagnosticOptions = dataclasses.field(default_factory=DiagnosticOptions)
     diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
     diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
     _invocation: Invocation = dataclasses.field(init=False)

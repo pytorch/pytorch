@@ -85,6 +85,8 @@ class DiagnosticEngine:
         Returns:
             A new diagnostic context.
         """
+        if options is None:
+            options = infra.DiagnosticOptions()
         context = infra.DiagnosticContext(
             name, version, options, diagnostic_type=diagnostic_type
         )

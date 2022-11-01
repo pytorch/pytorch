@@ -29,7 +29,6 @@ from verify import verify
 
 
 class _BaseTestCase(pytorch_test_common.ExportTestCase):
-
     def _model_to_graph(
         self,
         model,
