@@ -185,17 +185,22 @@ static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
 }
 
 static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
-  // This code shoud work perfectly fine, as vtables are idential for Foo and Baz
-  // unless rtti and ubsan are enabled
+  // This code shoud work perfectly fine, as vtables are idential for Foo and
+  // Baz unless rtti and ubsan are enabled
   struct Foo {
     virtual int bar() = 0;
+    virtual ~Foo() = default;
   };
   struct Baz {
-    virtual int bar() { return 17; }
+    virtual int bar() {
+      return 17;
+    }
+    virtual ~Baz() = default;
   };
-  Baz x;
-  auto y = static_cast<Foo *>(static_cast<void *>(&x));
-  return THPUtils_packInt32(y->bar());
+  Baz x{};
+  auto y = static_cast<Foo*>(static_cast<void*>(&x));
+  auto rc = y->bar();
+  return THPUtils_packInt32(rc);
 }
 
 static PyObject* THPModule_crashIfATenASAN(PyObject* module, PyObject* arg) {
