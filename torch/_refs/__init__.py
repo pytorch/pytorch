@@ -3271,12 +3271,14 @@ def index_fill_(
             value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
         )
 
+    # index_copy has some innecessary preconditions when x is a scalar. We do this to work through them
+    y = x.unsqueeze(0) if x.ndim == 0 else x
     # index_copy does not broadcast on value so we have to do it manually
-    shape = list(x.shape)
-    if x.ndim > 0:
-        shape[dim] = index.numel()
+    shape = list(y.shape)
+    shape[dim] = index.numel()
     value = value.expand(shape)
-    return x.index_copy_(dim, index, value)
+    y.index_copy_(dim, index, value)
+    return x
 
 
 @register_decomposition(torch.ops.aten.index_add)
