@@ -251,8 +251,8 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
-def _transpose_nvfuser(fd, a, permutation):
-    return fd.ops.permute(a, permutation)  # type: ignore[attr-defined]
+def _transpose_nvfuser(fd, a, dims):
+    return fd.ops.permute(a, dims)  # type: ignore[attr-defined]
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
