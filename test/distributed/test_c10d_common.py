@@ -1673,8 +1673,10 @@ class ReduceOpTest(TestCase):
             c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
             c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
         ):
-            _ = copy.copy(reduce_op)
-            _ = copy.copy(c10d.ReduceOp(reduce_op))
+            copy.copy(reduce_op)
+            copy.deepcopy(reduce_op)
+            copy.copy(c10d.ReduceOp(reduce_op))
+            copy.deepcopy(c10d.ReduceOp(reduce_op))
 
 
 if __name__ == "__main__":

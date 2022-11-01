@@ -60,7 +60,7 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
     }
   }
 
-  // The heap resource supplement_, if it exists, is managed by a shared_ptr,
+  // The heap resource supplement_, if it exists, is managed by a c10::intrusive_ptr,
   // so constructors and operator= can be simple
   ReduceOp(const ReduceOp& other) :
     op_(other.op_), supplement_(other.supplement_) {}

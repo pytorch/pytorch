@@ -237,15 +237,12 @@ void _register_builtin_comm_hook(
 }
 
 static PyObject* reduceopmeta___instancecheck__(PyObject* self, PyObject* args) {
-  std::cerr << ">>> Custom isinstancecheck. self's type name is "
-    << self->ob_type->tp_name << " and args' type name is " << args->ob_type->tp_name << "\n";
-  if (Py_IS_TYPE(args, self->ob_type)) {
+  if (Py_TYPE(self) == Py_TYPE(args)) {
     Py_RETURN_TRUE;
   }
   if (c10::string_view(args->ob_type->tp_name).find("RedOpType") != c10::string_view::npos) {
     Py_RETURN_TRUE;
   }
-  std::cerr << ">>>\t Not a ReduceOp, " << args->ob_type->tp_name << ", returning False\n";
   Py_RETURN_FALSE;
 }
 static PyMethodDef reduceopmeta_methods[] = {
@@ -608,6 +605,12 @@ This class does not support ``__members__`` property.)");
           })
       .def("__hash__", [](const ::c10d::ReduceOp& self) {
         return static_cast<uint8_t>(self.op_);
+      })
+      .def("__copy__", [](const ::c10d::ReduceOp& self) {
+        return ::c10d::ReduceOp(self);
+      })
+      .def("__deepcopy__", [](const ::c10d::ReduceOp& self, const py::dict& memo) {
+        return ::c10d::ReduceOp(self);
       });
 
   // note(crcrpar): Deliberately skip
