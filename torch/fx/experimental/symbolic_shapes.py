@@ -202,7 +202,7 @@ reflectable_magic_methods = {
     'mod': lambda a, b: a % b,
     'pow': lambda a, b: a ** b,
     'truediv': lambda a, b: a / b,
-    'floordiv': lambda a, b: a // b,
+    'floordiv': lambda a, b: sympy.floor(a / b),
 }
 
 def _nyi():
