@@ -11,6 +11,8 @@ from torchgen.code_template import CodeTemplate
 from dataclasses import dataclass
 from typing import List
 
+from tools.gen_vulkan_glsl import GLSLGenerator
+
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"
 DEFAULT_ENV = {"precision": "highp", "format": "rgba32f"}
@@ -78,12 +80,40 @@ def getShaderInfo(srcFilePath):
 
     return shader_info
 
+def genGLSLFromGLSLT(src_dir_path, tmp_dir_path):
+    template_dir_path = os.path.join(src_dir_path, "templates")
+    vexs = glob.glob(os.path.join(template_dir_path, '**', '*.yaml'), recursive=True)
+    parameter_yaml_files = []
+    for f in vexs:
+        if len(f) > 1:
+            parameter_yaml_files.append(f)
+    generator = GLSLGenerator()
+    for params_yaml in parameter_yaml_files:
+        generator.add_params_yaml(params_yaml)
+
+    vexs = glob.glob(os.path.join(src_dir_path, '**', '*.glslt'), recursive=True)
+    templateSrcPaths = []
+    for f in vexs:
+        if len(f) > 1:
+            templateSrcPaths.append(f)
+            templateSrcPaths.sort()
+    for glslt in templateSrcPaths:
+        generator.generate(glslt, tmp_dir_path)
+
 def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
         hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath))
 
     vexs = glob.glob(os.path.join(srcDirPath, '**', '*.glsl'), recursive=True)
     templateSrcPaths = []
+    for f in vexs:
+        if len(f) > 1:
+            templateSrcPaths.append(f)
+            templateSrcPaths.sort()
+
+    # Now add glsl files that are generated from templates
+    genGLSLFromGLSLT(srcDirPath, tmpDirPath)
+    vexs = glob.glob(os.path.join(tmpDirPath, '**', '*.glsl'), recursive=True)
     for f in vexs:
         if len(f) > 1:
             templateSrcPaths.append(f)
