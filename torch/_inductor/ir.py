@@ -10,7 +10,6 @@ from enum import Enum
 from functools import partial
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
-from contextlib import nullcontext
 
 import numpy
 import sympy
