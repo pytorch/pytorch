@@ -1554,10 +1554,6 @@ void guardFusionGroup(
       profiled_ivalue_indices.insert(index);
     }
   }
-  // we should assert on non-tensor inputs
-  TORCH_INTERNAL_ASSERT(
-      tensor_inputs_to_check.size(),
-      "CudaFusionGuard expects at least one tensor input");
 
   // insert the if block first;
   auto versioning_if =

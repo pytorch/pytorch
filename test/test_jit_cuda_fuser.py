@@ -4971,6 +4971,27 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
         self._run_helper(t_jit, t, x0, x1, w0, w1, check_stride=True)
 
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_no_tensor_input(self):
+        device = "cuda"
+        x = torch.randn(512, device=device)
+
+        def t(x):
+            tensor0 = torch.tensor(3, dtype=torch.float32, device='cuda')
+            tensor1 = torch.tensor(3, dtype=torch.float32, device='cuda')
+            o = torch.div(x.numel(), tensor0)
+            o = torch.mul(o, tensor1)
+            return o
+
+        t_jit = torch.jit.script(t)
+        self._run_helper(t_jit, t, x, check_stride=True)
+
+        # Note that curently TS embeds constant tensor in the graph
+        # this triggers memory leak check in CI
+        torch.jit._state._python_cu.drop_all_functions()
+
 
 class TestEnableDisableCudaFuser(JitTestCase):
     def setUp(self):
