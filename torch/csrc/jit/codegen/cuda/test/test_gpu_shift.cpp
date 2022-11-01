@@ -984,6 +984,9 @@ TEST_F(NVFuserTest, FusionShiftMerge1_CUDA) {
   tv2->reorder({{1, 2}, {2, 1}});
   tv2->merge(2, 3);
 
+  TransformPropagatorWithCheck propagator(tv2);
+  MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
+
   tv0->computeAt(tv2, 2);
 
   // t1 allocation: (split_factor + 1) * (split_factor + 1)
@@ -1039,6 +1042,9 @@ TEST_F(NVFuserTest, FusionShiftMerge2_CUDA) {
   tv4->split(0, split_factor);
   tv4->reorder({{1, 2}, {2, 1}});
   tv4->merge(2, 3);
+
+  TransformPropagatorWithCheck propagator(tv4);
+  MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv0->computeAt(tv4, -2);
 
