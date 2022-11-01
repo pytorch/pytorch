@@ -668,14 +668,11 @@ class FullyShardedDataParallel(nn.Module):
 
     def _cast_buffers(
         self,
-        device: Optional[torch.device] = None,
         dtype: Optional[Dict[str, torch.dtype]] = None,
         memo: Optional[Set] = None,
         recurse: bool = True,
     ) -> None:
-        """Move all buffers to the given *device* and *dtype*.
-        If *device* is not given, then it will default to
-        ``self.compute_device``, otherwise buffer will be moved to ``device``.
+        """Move all buffers to the compute device and the given *dtype*.
         In the case of nested FSDP instances, we will respect the child instance's
         ``compute_device`` configuration.
         If *dtype* is given, it must be a mapping of buffer name to buffer dtype,
@@ -684,8 +681,6 @@ class FullyShardedDataParallel(nn.Module):
             in mixed precision training, the buffer will be cast to buffer_dtype,
             otherwise the buffer will not be cast.
         Args:
-            device (torch.device, Optional):
-                device to cast buffers to (defaults to compute_device)
             dtype: (Dict[str, torch.dtype], Optional):
                 Mapping of buffer name to their dtype to cast to.
             memo (Set, Optional):
@@ -703,15 +698,13 @@ class FullyShardedDataParallel(nn.Module):
                 and recurse
             ):
                 # Allow any child FSDP instances to handle their own buffers.
-                module._cast_buffers(
-                    device=device, dtype=dtype, memo=memo, recurse=recurse
-                )
+                module._cast_buffers(dtype=dtype, memo=memo, recurse=recurse)
             elif module not in memo:
                 memo.add(module)
                 for name, buf in module.named_buffers(recurse=False):
                     if buf is None:
                         continue
-                    buf = buf.to(device=device or self.compute_device)
+                    buf = buf.to(self.compute_device)
                     if name not in self._buffer_name_to_orig_dtype:
                         self._buffer_name_to_orig_dtype[name] = buf.dtype
                     # If given, cast buffer to the given dtype. This is used to
