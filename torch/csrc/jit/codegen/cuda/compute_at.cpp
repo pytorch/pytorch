@@ -143,15 +143,18 @@ TensorView* getCommonConsumer(TensorView* producer, TensorView* consumer) {
   return common_consumer;
 }
 
-void pullInSiblings(std::unordered_set<TensorView*>& s) {
+std::unordered_set<TensorView*> pullInSiblings(
+    const std::unordered_set<TensorView*>& s) {
+  auto with_siblings = s;
   for (auto tv : s) {
     for (auto sibling_tv : ir_utils::siblingTvsOf(tv)) {
       if (sibling_tv == tv) {
         continue;
       }
-      s.emplace(sibling_tv);
+      with_siblings.emplace(sibling_tv);
     }
   }
+  return with_siblings;
 }
 
 // I am just trying to get the same set of tensors being transformed matching
@@ -171,7 +174,7 @@ std::unordered_set<TensorView*> getPropagationSubgraph(
   TensorView* common_consumer = getCommonConsumer(producer, consumer);
   if (common_consumer != nullptr) {
     auto result = getAllTVsBetween(producer, common_consumer);
-    pullInSiblings(result);
+    result = pullInSiblings(result);
     return result;
   }
   auto result_vals = DependencyCheck::getAllDependentVals({producer});
@@ -183,7 +186,7 @@ std::unordered_set<TensorView*> getPropagationSubgraph(
       result_tvs.end(),
       std::inserter(result, result.begin()),
       [](TensorView* tv) { return !tv->uses().empty(); });
-  pullInSiblings(result);
+  result = pullInSiblings(result);
   return result;
 }
 
