@@ -372,8 +372,7 @@ class BuiltinVariable(VariableTracker):
 
                 def guard_if_dyn(arg):
                     if isinstance(arg, DynamicShapeVariable):
-                        expr = arg.dyn_shape.get_pyobj().expr
-                        return tx.output.shape_env.evaluate_expr(expr)
+                        return arg.evaluate_expr(tx.output)
                     return arg
 
                 args = [guard_if_dyn(arg) for arg in args]

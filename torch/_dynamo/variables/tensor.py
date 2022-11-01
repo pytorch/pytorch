@@ -650,6 +650,13 @@ class DynamicShapeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
+    def evaluate_expr(self, output_graph):
+        if isinstance(self.dyn_shape, (bool, int)):
+            # Bool and 0/1 case fallthorugh for now
+            return self.dyn_shape
+        return output_graph.shape_env.evaluate_expr(self.dyn_shape.get_pyobj().expr)
+
+
     def call_method(
         self,
         tx,
