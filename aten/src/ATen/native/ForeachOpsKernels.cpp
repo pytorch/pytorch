@@ -198,27 +198,27 @@ void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors
   }                                                                                                                                                     \
 }
 
-#define FOREACH_POINTWISE_OP_TENSOR(OP)                                 \
-  std::vector<Tensor> foreach_tensor_##OP##_tensor_slow(                \
-      TensorList input,                                                 \
-      TensorList tensors1,                                              \
-      TensorList tensors2,                                              \
-      Tensor scalars_) {                                                \
-    check_foreach_api_restrictions(input, tensors1, tensors2, scalars); \
-    auto scalars = convert_tensor_to_scalar_list(scalars_);             \
-    return foreach_tensor_##OP##_scalarlist_slow(                       \
-        input, tensors1, tensors2, scalars);                            \
-  }                                                                     \
-                                                                        \
-  void foreach_tensor_##OP##_tensor_slow_(                              \
-      TensorList input,                                                 \
-      TensorList tensors1,                                              \
-      TensorList tensors2,                                              \
-      Tensor scalars) {                                                 \
-    check_foreach_api_restrictions(input, tensors1, tensors2, scalars); \
-    auto scalars = convert_tensor_to_scalar_list(scalars_);             \
-    foreach_tensor_##OP##_scalarlist_slow_(                             \
-        input, tensors1, tensors2, scalars);                            \
+#define FOREACH_POINTWISE_OP_TENSOR(OP)                                   \
+  std::vector<Tensor> foreach_tensor_##OP##_tensor_slow(                  \
+      TensorList input,                                                   \
+      TensorList tensors1,                                                \
+      TensorList tensors2,                                                \
+      Tensor scalars_) {                                                  \
+    auto scalars = convert_tensor_to_scalar_list(scalars_, input.size()); \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
+    return foreach_tensor_##OP##_scalarlist_slow(                         \
+        input, tensors1, tensors2, scalars);                              \
+  }                                                                       \
+                                                                          \
+  void foreach_tensor_##OP##_tensor_slow_(                                \
+      TensorList input,                                                   \
+      TensorList tensors1,                                                \
+      TensorList tensors2,                                                \
+      Tensor scalars_) {                                                  \
+    auto scalars = convert_tensor_to_scalar_list(scalars_, input.size()); \
+    check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
+    foreach_tensor_##OP##_scalarlist_slow_(                               \
+        input, tensors1, tensors2, scalars);                              \
   }
 
 FOREACH_BINARY_OP_LIST_ALPHA(add);

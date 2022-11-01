@@ -123,27 +123,34 @@ bool check_fast_path_restrictions(
     return true;
 }
 
-c10::optional<std::vector<c10:Scalar>>
-convert_tensor_to_scalar_list(const Tensor& scalarList_, int64_t expect_length) {
+c10::optional<std::vector<c10::Scalar>> convert_tensor_to_scalar_list(
+    const Tensor& scalarList_,
+    int64_t expect_length) {
   std::vector<c10::Scalar> scalarList;
-  if (scalarList.device() != c10::kCPU) {
-    return false;
-  }
-  if (scalarList.dtype() != c10:kFloat) {
-    return false;
-  }
-  if (!scalarList.is_contiguous()) {
-    return false;
-  }
-  TORCH_CHECK(scalarList_.dim() < 2, "Expected packed scalar List to be of dimension 0 or 1. Got ", scalarList_.dim(), " instead.");
-  TORCH_CHECK(scalarList_.dim() == 1 && (expect_length == scalarList_.size(0)), "Expected size of 1 dimension scalarList Tensor to match length of other arguments.");
+  // if (scalarList_.device() != c10::kCPU) {
+  //   return c10::nullopt;
+  // }
+  // if (scalarList_.dtype() != c10:kFloat) {
+  //   return c10::nullopt;
+  // }
+  // if (!scalarList_.is_contiguous()) {
+  //   return c10::nullopt;
+  // }
+  TORCH_CHECK(
+      scalarList_.dim() < 2,
+      "Expected packed scalar List to be of dimension 0 or 1. Got ",
+      scalarList_.dim(),
+      " instead.");
+  TORCH_CHECK(
+      scalarList_.dim() == 1 && (expect_length == scalarList_.size(0)),
+      "Expected size of 1 dimension scalarList Tensor to match length of other arguments.");
   if (scalarList_.dim() == 0) {
     for (int64_t i = 0; i < expect_length; i++) {
-      scalarList.push_back(scalarList_.data_ptr<float>());
+      scalarList.push_back(c10::Scalar(scalarList_.data_ptr<float>()));
     }
   } else {
     for (int64_t i = 0; i < scalarList_.size(0); i++) {
-      scalarList.push_back(scalarList_.data_ptr<float>() + 1);
+      scalarList.push_back(c10::Scalar(scalarList_.data_ptr<float>() + 1));
     }
   }
   return scalarList;
@@ -153,7 +160,7 @@ bool check_fast_path_restrictions(
   ArrayRef<TensorList> tensorLists,
   const Tensor& scalarList_ = {},
   bool does_op_promote_integer_inputs_to_float = false) {
-  auto maybe_scalarList = convert_tensor_to_scalar_list(scalarList_);
+  auto maybe_scalarList = convert_tensor_to_scalar_list(scalarList_, tensorLists.size());
   if (!maybe_scalarList) {
     return false;
   }
