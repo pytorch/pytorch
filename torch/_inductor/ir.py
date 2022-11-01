@@ -684,6 +684,26 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+
+        if reduction_numel == 0:
+            rtypes_to_inits = {
+                'sum' : 0,
+                'prod' : 1,
+                'argmin' : 0,
+                'argmax' : 0,
+            }
+            assert reduction_type in rtypes_to_inits
+            print(f"ranges={ranges}")
+            def const_fn(index):
+                return ops.constant(rtypes_to_inits[reduction_type], src_dtype)
+
+            return Pointwise.create(
+                device=device,
+                dtype=src_dtype,
+                inner_fn=const_fn,
+                ranges=list(ranges),
+            )
+
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
