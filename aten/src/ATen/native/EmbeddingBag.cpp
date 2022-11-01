@@ -85,45 +85,54 @@ std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
                                           : offsets.toType(commonType)};
 }
 
+#if defined(USE_FBGEMM) || defined(BUILD_CAFFE2)
 // Determines if we can use a fast implementation for index_select_add, which
 // is only applicable if special conditions are met
 template<typename index_t>
 bool is_fast_path_index_select(const Tensor& src, Tensor& output, index_t padding_idx) {
-  if (src.strides()[1] == 1 && output.strides()[1] == 1 &&
-      padding_idx < static_cast<index_t>(0)) {
-#ifdef USE_FBGEMM
-    if (src.scalar_type() == kFloat || src.scalar_type() == kHalf)
-      return true;
+  auto fast_path = src.strides()[1] == 1 && output.strides()[1] == 1 &&
+      padding_idx < static_cast<index_t>(0);
+  // check dtype supported
+  auto dtype_supported =
+      src.scalar_type() == kFloat || src.scalar_type() == kHalf;
+#if defined(BUILD_CAFFE2)
+  dtype_supported = dtype_supported || src.scalar_type() == kBFloat16;
 #endif
-#ifdef BUILD_CAFFE2
-    if (src.scalar_type() == kFloat || src.scalar_type() == kHalf ||
-        src.scalar_type() == kBFloat16)
-      return true;
-#endif
-    return false;
-  }
-  return false;
+  return fast_path && dtype_supported;
 }
 
 // Determines if we can use a fast implementation for index_select_scale_add,
 // which is only applicable if special conditions are met
 template<typename index_t>
 bool is_fast_path_index_select_scale(const Tensor& src, const Tensor& scale, Tensor& output, index_t padding_idx) {
-  if (src.strides()[1] == 1 && output.strides()[1] == 1 &&
-      scale.strides()[0] == 1 && padding_idx < static_cast<index_t>(0)) {
-#ifdef USE_FBGEMM
-    if (src.scalar_type() == kFloat || src.scalar_type() == kHalf)
-      return true;
+  auto fast_path = src.strides()[1] == 1 && output.strides()[1] == 1 &&
+      scale.strides()[0] == 1 && padding_idx < static_cast<index_t>(0);
+  // check dtype supported
+  auto dtype_supported =
+      src.scalar_type() == kFloat || src.scalar_type() == kHalf;
+#if defined(BUILD_CAFFE2)
+  dtype_supported = dtype_supported || src.scalar_type() == kBFloat16;
 #endif
-#ifdef BUILD_CAFFE2
-    if (src.scalar_type() == kFloat || src.scalar_type() == kHalf ||
-        src.scalar_type() == kBFloat16)
-      return true;
-#endif
-    return false;
-  }
+  return fast_path && dtype_supported;
+}
+#else /* !USE_FBGEMM && !BUILD_CAFFE2 */
+template <typename index_t>
+bool is_fast_path_index_select(
+    const Tensor& src,
+    Tensor& output,
+    index_t padding_idx) {
   return false;
 }
+
+template <typename index_t>
+bool is_fast_path_index_select_scale(
+    const Tensor& src,
+    const Tensor& scale,
+    Tensor& output,
+    index_t padding_idx) {
+  return false;
+}
+#endif /* USE_FBGEMM || BUILD_CAFFE2 */
 
 template<typename index_t>
 bool is_fast_path(const Tensor& src, const c10::optional<Tensor>& scale, Tensor& output, index_t padding_idx) {
@@ -233,6 +242,7 @@ index_select_add(
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
+#if defined(USE_FBGEMM) || defined(BUILD_CAFFE2)
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
     auto* src_data = src_contig.data_ptr<data_t>();
@@ -254,8 +264,7 @@ index_select_add(
       offsets_include_last[offsets.numel()] = select_indices.numel();
       offsets_data = offsets_include_last.data();
     }
-
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM)
     if (std::is_same<data_t, at::Half>::value) {
       using float16 = uint16_t;
       auto kernel_fp16_index_t = fbgemm_kernel_cache
@@ -292,7 +301,7 @@ index_select_add(
           });
       return;
     }
-#endif
+#endif /* USE_FBGEMM */
 
 #if defined(BUILD_CAFFE2)
     // Initialize the intermediate output buffer to be 0.
@@ -321,60 +330,67 @@ index_select_add(
             }
           }
         });
-#endif
-  } else {
-    TORCH_CHECK(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<data_t>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    index_t* bag_size_data = nullptr;
-    if (bag_size.defined()) {
-      bag_size_data = bag_size.data_ptr<index_t>();
-    }
-    auto vocab_size = src.size(0);
-    auto src_stride0 = src.strides()[0];
-    auto src_stride1 = src.strides()[1];
-    auto output_stride0 = output.strides()[0];
-    auto output_stride1 = output.strides()[1];
-    auto numel = add_indices.numel();
+    return;
+#endif /* BUILD_CAFFE2 */
+  }
+#endif /* USE_FBGEMM || BUILD_CAFFE2 */
+  TORCH_CHECK(select_indices.numel() == add_indices.numel());
+  auto* src_data = src.data_ptr<data_t>();
+  auto* add_indices_data = add_indices.data_ptr<index_t>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  index_t* bag_size_data = nullptr;
+  if (bag_size.defined()) {
+    bag_size_data = bag_size.data_ptr<index_t>();
+  }
+  auto vocab_size = src.size(0);
+  auto src_stride0 = src.strides()[0];
+  auto src_stride1 = src.strides()[1];
+  auto output_stride0 = output.strides()[0];
+  auto output_stride1 = output.strides()[1];
+  auto numel = add_indices.numel();
 
-    Tensor src_fp32 = at::empty({ddim}, src.options().dtype(at::kFloat));
-    auto* src_data_fp32 = src_fp32.data_ptr<float>();
+  Tensor src_fp32 = at::empty({ddim}, src.options().dtype(at::kFloat));
+  auto* src_data_fp32 = src_fp32.data_ptr<float>();
 
-    // Initialize the intermediate output buffer to be 0.
-    Tensor output_fp32 = at::zeros({output.size(0), ddim}, output.options().dtype(at::kFloat));
-    auto* output_data_fp32 = output_fp32.data_ptr<float>();
+  // Initialize the intermediate output buffer to be 0.
+  Tensor output_fp32 =
+      at::zeros({output.size(0), ddim}, output.options().dtype(at::kFloat));
+  auto* output_data_fp32 = output_fp32.data_ptr<float>();
 
-    for (const auto i : c10::irange(numel)) {
-      // We can skip indices equal to padding_idx so they are not included in
-      // the reduction
-      auto idx = select_indices_data[i];
-      TORCH_CHECK(
-          idx >= 0 && idx < vocab_size,
-          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
-          idx);
-      if (idx != padding_idx) {
-        // Copy src_data + src_stride0 * idx to src_data_fp32
-        for (const auto d : c10::irange(ddim)) {
-          src_data_fp32[d] = static_cast<float>((src_data + src_stride0 * idx)[d * src_stride1]);
-        }
-        at::native::cpublas::axpy<float>(ddim, 1,
-                src_data_fp32, 1,
-                output_data_fp32 + ddim * add_indices_data[i], 1);
-
-      } else if (bag_size.defined()) {
-        // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-        bag_size_data[add_indices_data[i]]--;
-      }
-    }
-    for (const auto i : c10::irange(output.size(0))) {
-      // Convert FP32 intermediate buffer result back to FP16/BF16 for output
-      // dtype
+  for (const auto i : c10::irange(numel)) {
+    // We can skip indices equal to padding_idx so they are not included in
+    // the reduction
+    auto idx = select_indices_data[i];
+    TORCH_CHECK(
+        idx >= 0 && idx < vocab_size,
+        "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+        idx);
+    if (idx != padding_idx) {
+      // Copy src_data + src_stride0 * idx to src_data_fp32
       for (const auto d : c10::irange(ddim)) {
-        (output_data + output_stride0 * i)[d * output_stride1] =
-            static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
+        src_data_fp32[d] =
+            static_cast<float>((src_data + src_stride0 * idx)[d * src_stride1]);
       }
+      at::native::cpublas::axpy<float>(
+          ddim,
+          1,
+          src_data_fp32,
+          1,
+          output_data_fp32 + ddim * add_indices_data[i],
+          1);
+
+    } else if (bag_size.defined()) {
+      // Decrement bag_size to reflect that the index is padded
+      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
+      bag_size_data[add_indices_data[i]]--;
+    }
+  }
+  for (const auto i : c10::irange(output.size(0))) {
+    // Convert FP32 intermediate buffer result back to FP16/BF16 for output
+    // dtype
+    for (const auto d : c10::irange(ddim)) {
+      (output_data + output_stride0 * i)[d * output_stride1] =
+          static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
     }
   }
 }
@@ -586,6 +602,7 @@ index_select_scale_add(
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
+#if defined(USE_FBGEMM) || defined(BUILD_CAFFE2)
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
     auto* src_data = src_contig.data_ptr<data_t>();
@@ -650,7 +667,7 @@ index_select_scale_add(
           });
       return;
     }
-#endif
+#endif /* USE_FBGEMM */
 #ifdef BUILD_CAFFE2
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
@@ -682,57 +699,59 @@ index_select_scale_add(
             }
           }
         });
-#endif
-  } else {
-    AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<data_t>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    index_t* bag_size_data = nullptr;
-    if (bag_size.defined()) {
-      bag_size_data = bag_size.data_ptr<index_t>();
-    }
-    auto vocab_size = src.size(0);
-    auto src_stride0 = src.strides()[0];
-    auto src_stride1 = src.strides()[1];
-    auto output_stride0 = output.strides()[0];
-    auto output_stride1 = output.strides()[1];
-    auto scale_stride = scale.strides()[0];
-    auto numel = add_indices.numel();
+    return;
+#endif /* BUILD_CAFFE2 */
+  }
+#endif /* USE_FBGEMM || BUILD_CAFFE2 */
+  AT_ASSERT(select_indices.numel() == add_indices.numel());
+  auto* src_data = src.data_ptr<data_t>();
+  auto* add_indices_data = add_indices.data_ptr<index_t>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  index_t* bag_size_data = nullptr;
+  if (bag_size.defined()) {
+    bag_size_data = bag_size.data_ptr<index_t>();
+  }
+  auto vocab_size = src.size(0);
+  auto src_stride0 = src.strides()[0];
+  auto src_stride1 = src.strides()[1];
+  auto output_stride0 = output.strides()[0];
+  auto output_stride1 = output.strides()[1];
+  auto scale_stride = scale.strides()[0];
+  auto numel = add_indices.numel();
 
-    // Initialize the intermediate output buffer to be 0.
-    Tensor output_fp32 = at::zeros({output.size(0), ddim}, output.options().dtype(at::kFloat));
-    auto* output_data_fp32 = output_fp32.data_ptr<float>();
+  // Initialize the intermediate output buffer to be 0.
+  Tensor output_fp32 =
+      at::zeros({output.size(0), ddim}, output.options().dtype(at::kFloat));
+  auto* output_data_fp32 = output_fp32.data_ptr<float>();
 
-    for (const auto i : c10::irange(numel)) {
-      // We can skip indices equal to padding_idx so they are not included in
-      // the reduction
-      auto idx = select_indices_data[i];
-      TORCH_CHECK(
-          idx >= 0 && idx < vocab_size,
-          "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
-          idx);
-      if (idx != padding_idx) {
-
-        auto* src_base = src_data + src_stride0 * idx;
-        auto* output_base_fp32 = output_data_fp32 + ddim * add_indices_data[i];
-        auto scale = scale_data[i * scale_stride];
-        for (const auto j : c10::irange(ddim)) {
-          output_base_fp32[j] += static_cast<float>(src_base[j * src_stride1]) * static_cast<float>(scale);
-        }
-      } else if (bag_size.defined()) {
-        // Decrement bag_size to reflect that the index is padded
-        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
-        bag_size_data[add_indices_data[i]]--;
+  for (const auto i : c10::irange(numel)) {
+    // We can skip indices equal to padding_idx so they are not included in
+    // the reduction
+    auto idx = select_indices_data[i];
+    TORCH_CHECK(
+        idx >= 0 && idx < vocab_size,
+        "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+        idx);
+    if (idx != padding_idx) {
+      auto* src_base = src_data + src_stride0 * idx;
+      auto* output_base_fp32 = output_data_fp32 + ddim * add_indices_data[i];
+      auto scale = scale_data[i * scale_stride];
+      for (const auto j : c10::irange(ddim)) {
+        output_base_fp32[j] += static_cast<float>(src_base[j * src_stride1]) *
+            static_cast<float>(scale);
       }
+    } else if (bag_size.defined()) {
+      // Decrement bag_size to reflect that the index is padded
+      // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
+      bag_size_data[add_indices_data[i]]--;
     }
-    for (const auto i : c10::irange(output.size(0))) {
-      // Convert FP32 intermediate buffer result back to FP16/BF16 for output
-      // dtype
-      for (const auto d : c10::irange(ddim)) {
-        (output_data + output_stride0 * i)[d * output_stride1] =
-            static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
-      }
+  }
+  for (const auto i : c10::irange(output.size(0))) {
+    // Convert FP32 intermediate buffer result back to FP16/BF16 for output
+    // dtype
+    for (const auto d : c10::irange(ddim)) {
+      (output_data + output_stride0 * i)[d * output_stride1] =
+          static_cast<data_t>((output_data_fp32 + ddim * i)[d]);
     }
   }
 }
