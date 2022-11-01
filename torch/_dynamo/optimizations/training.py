@@ -384,9 +384,7 @@ def prims_executor(gm, inputs, *, executor, num_fixed=0, cudagraphs=False):
         prim_gm = make_fx(gm)(*inputs)
 
     # Then we return a callable that executes the "prim_gm" graph
-    # return partial(execute, prim_gm, executor=executor)
-    run = partial(execute, prim_gm, executor=executor)
-    run = make_boxed_func(run)
+    run = make_boxed_func(partial(execute, prim_gm, executor=executor))
 
     if _has_incompatible_cudagraph_ops(prim_gm) or not cudagraphs:
         return run
