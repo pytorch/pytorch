@@ -1127,7 +1127,7 @@
     "BFloat16Tensor",
     "ComplexDoubleStorage",
     "ComplexFloatStorage",
-    "DisableTorchFunction",
+    "DisableTorchFunctionSubclass",
     "Generator",
     "HalfStorage",
     "HalfTensor",
