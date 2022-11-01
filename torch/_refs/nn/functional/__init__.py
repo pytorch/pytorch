@@ -1,3 +1,4 @@
+import math
 from typing import Callable, Optional, Union
 
 import torch
@@ -61,9 +62,23 @@ __all__ = [
 Tensor = torch.Tensor
 
 
+# TODO: should we allow the user to set a different dtype for the mask generation?
+def _dropout_helper(
+    self: TensorLikeType,
+    val: float,
+) -> TensorLikeType:
+
+    return refs.lt(
+        refs.uniform(
+            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
+        ),
+        val,
+    )
+
+
 @register_decomposition(torch.ops.aten.alpha_dropout)
 def alpha_dropout(
-    self: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
+    self: TensorLikeType, p: float = 0.5, training: bool = False, inplace: bool = False
 ) -> TensorLikeType:
 
     if inplace:
@@ -72,29 +87,26 @@ def alpha_dropout(
     if not training:
         return self
 
-    assert p <= 1
-    assert p >= 0
+    utils.check(
+        p <= 1 and p >= 0,
+        lambda: f"dropout probability has to be between 0 and 1, but got, {p}",
+    )
 
     if p == 1:
-        return refs.zeros_like(self)
+        return torch.zeros_like(self)
 
     if p == 0:
         return self
 
-    noise = refs.lt(
-        refs.uniform(
-            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
-        ),
-        1 - p,
-    )
+    dropout_mask = _dropout_helper(self, 1 - p)
 
     alpha = 1.7580993408473766
 
-    a = 1.0 / ((alpha * alpha * p + 1) ** 2 * (1 - p) ** 2)
-    b = refs.mul(-1 + noise, alpha * a) + alpha * a * p
-    noise = refs.mul(a, noise)
+    a = 1.0 / math.sqrt((alpha * alpha * p + 1) * (1 - p))
+    b = torch.logical_not(dropout_mask) * alpha * a + alpha * a * p
+    dropout_mask = a * dropout_mask
 
-    return refs.mul(self, noise) + b
+    return self * dropout_mask + b
 
 
 # celu is implemented specially because it has an alpha argument
@@ -131,7 +143,6 @@ def celu(
     return torch.where(a > 0, a, rhs)
 
 
-# TODO: should we allow the user to set a different dtype for the mask generation?
 @register_decomposition(torch.ops.aten.dropout)
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
@@ -143,22 +154,21 @@ def dropout(
     if not training:
         return a
 
-    assert p <= 1
-    assert p >= 0
+    utils.check(
+        p <= 1 and p >= 0,
+        lambda: f"dropout probability has to be between 0 and 1, but got, {p}",
+    )
 
     if p == 1:
-        return refs.zeros_like(a)
+        return torch.zeros_like(a)
 
     if p == 0:
         return a
 
-    p1m = 1 - p
-    scale = 1 / p1m
-    mask = refs.lt(
-        refs.uniform(a.shape, low=0.0, high=1.0, dtype=torch.float32, device=a.device),
-        p1m,
-    )
-    return refs.mul(refs.mul(a, mask), scale)
+    scale = 1 / (1 - p)
+    dropout_mask = _dropout_helper(a, 1 - p)
+
+    return a * dropout_mask * scale
 
 
 # elu is implemented specially because it has an alpha argument
