@@ -120,6 +120,16 @@ def meta_max(self):
     return self.new_empty(())
 
 
+@register_meta(aten.max.dim)
+def meta_max_dim(self, dim, keepdim=False):
+    dim = utils.reduction_dims(self.shape, (dim,))
+    output_shape = _compute_reduction_shape(self, dim, keepdim)
+    return (
+        self.new_empty(output_shape),
+        self.new_empty(output_shape, dtype=torch.long),
+    )
+
+
 @register_meta([aten.min.default])
 def meta_min(self):
     return self.new_empty(())
@@ -1092,6 +1102,11 @@ def meta_repeat(self, repeats):
 @register_meta(aten.zero_.default)
 def meta_zero_(self):
     return self
+
+
+@register_meta(aten.zero.default)
+def meta_zero(self):
+    return self.new_empty(self.shape)
 
 
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
