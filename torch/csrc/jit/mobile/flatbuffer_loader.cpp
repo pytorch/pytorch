@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
+#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h>
 #include <torch/custom_class.h>
 
 #ifndef DISABLE_UPGRADER
@@ -49,12 +50,9 @@
 #include <cstdlib>
 #endif
 
-#if defined(FB_XPLAT_BUILD) || defined(FBCODE_CAFFE2)
-#include <torch/csrc/jit/serialization/mobile_bytecode_generated_fbsource.h> // NOLINT
+#if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
 namespace flatbuffers = flatbuffers_fbsource;
 #define FLATBUFFERS_MAX_ALIGNMENT FLATBUFFERS_FBSOURCE_MAX_ALIGNMENT
-#else
-#include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
 namespace torch {

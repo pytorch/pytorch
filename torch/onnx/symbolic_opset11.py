@@ -590,12 +590,18 @@ def _avg_pool(name, tuple_fn):
         count_include_pad: int,
         divisor_override=None,
     ):
+        # Although onnx::AvgPool provides count_include_pad and ceil_mode,
+        # The corner case of Average Pooling with ceil_mode on
+        # PyTorch allows sliding window go off bound, which leads to
+        # this accommodation.
+        # More detail on https://github.com/pytorch/pytorch/issues/57178
+        if not stride:
+            stride = kernel_size
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
         assert isinstance(padding, tuple)
-        if not stride:
-            stride = kernel_size
+        adjusted_padding = padding
         if count_include_pad:
             input = g.op(
                 "Pad",
@@ -603,14 +609,22 @@ def _avg_pool(name, tuple_fn):
                 g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)),
                 mode_s="constant",
             )
-            padding = (0,) * len(padding)
+            adjusted_padding = (0,) * len(padding)
+        if ceil_mode:
+            padding_ceil = opset9.get_pool_ceil_padding(
+                input, kernel_size, stride, padding
+            )
+            adjusted_padding = adjusted_padding + tuple(
+                a + b for (a, b) in zip(padding_ceil, adjusted_padding)
+            )
+        else:
+            adjusted_padding = adjusted_padding * 2
         output = g.op(
             "AveragePool",
             input,
             kernel_shape_i=tuple_fn(kernel_size),
             strides_i=tuple_fn(stride),
-            pads_i=padding * 2,
-            ceil_mode_i=ceil_mode,
+            pads_i=adjusted_padding,
         )
         return output
 
@@ -821,7 +835,13 @@ def replication_pad(g: jit_utils.GraphContext, input, padding):
 
 @_onnx_symbolic("aten::pad")
 @_beartype.beartype
-def pad(g: jit_utils.GraphContext, input, pad, mode, value):
+def pad(
+    g: jit_utils.GraphContext,
+    input: _C.Value,
+    pad: _C.Value,
+    mode: _C.Value,
+    value: _C.Value,
+):
     mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)
