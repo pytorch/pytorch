@@ -2755,7 +2755,6 @@ def instance_norm(
     eps: float,
     cudnn_enabled: bool,
 ) -> Tensor:
-    print("here")
     batch_size = input.shape[0]
     num_channels = input.shape[1]
     instance_norm_channels = batch_size * num_channels
