@@ -258,6 +258,7 @@ def _make_prim(
     meta: Callable,
     impl_aten: Callable,
     doc: str,
+    tags: Sequence[torch.Tag] = (),
 ):
     """
     Creates a primitive operation.
@@ -293,6 +294,7 @@ def _make_prim(
 
     _prim_packet = getattr(torch.ops.prims, name)
     _prim = _prim_packet.default
+    _prim._tags = tags
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 

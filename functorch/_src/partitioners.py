@@ -9,7 +9,7 @@ import os
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
 from typing import Tuple
-from .compile_utils import fx_graph_cse, get_aten_target
+from .compile_utils import fx_graph_cse, get_aten_target, is_random_op
 from . import config
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -331,11 +331,13 @@ def min_cut_rematerialization_partition(
 
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
-    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward]  # noqa: E501
 
-    unrecomputable_ops = random_ops + compute_intensive_ops
+    def is_unrecomputable(node):
+        return get_aten_target(node) in compute_intensive_ops or is_random_op(node)
 
+    # TODO migrate over random fusible ops to tags
+    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
         joint_module_ops = set(
@@ -351,7 +353,7 @@ def min_cut_rematerialization_partition(
 
     def ban_recomputation(node):
         if AGGRESSIVE_RECOMPUTATION:
-            return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
+            return (node.op == 'call_function' and is_unrecomputable(node))
         else:
             if node.op != 'call_function':
                 return False

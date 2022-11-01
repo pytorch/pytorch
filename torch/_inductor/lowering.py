@@ -1024,8 +1024,8 @@ def make_rand(fn_name):
 
         def inner_fn(index):
             seed = seed_buffer([])
-            # change seed so that we don't collide with philox_rand_like()
-            # TODO(jansel): migrate everything to philox_rand_like()
+            # change seed so that we don't collide with philox_rand()
+            # TODO(jansel): migrate everything to philox_rand()
             seed = ops.bitwise_xor(seed, ops.constant(0xFFFF, torch.int32))
             return getattr(ops, fn_name)(
                 seed,
@@ -1065,17 +1065,40 @@ def randn(*args, **kwargs):
         return fast_randn(*args, **kwargs)
 
 
-@register_lowering(overrides.philox_seed_like._overloadpacket)
-def philox_seed_like(x):
+@register_lowering(overrides.philox_seed._overloadpacket)
+def philox_seed(device):
     warn_triton_random()
-    return V.graph.random_seed_buffer(x.get_device())
+    return V.graph.random_seed_buffer(device)
 
 
-@register_lowering(overrides.philox_rand_like._overloadpacket, type_promotion_kind=None)
-def philox_rand_like(x, seed, offset):
-    device = x.get_device()
-    dtype = x.get_dtype()
-    size = x.get_size()
+@register_lowering(overrides.philox_rand._overloadpacket, type_promotion_kind=None)
+def philox_rand(size, dtype, device, seed, offset):
+    random_pos = ir.FixedLayout(
+        device,
+        dtype,
+        size,
+        ir.FlexibleLayout.contiguous_strides(size),
+        offset=sympy.expand(offset),
+    ).make_indexer()
+    seed_loader = seed.make_loader()
+
+    def inner_fn(index):
+        return ops.rand(
+            seed_loader([]),
+            ops.index_expr(random_pos(index), torch.int32),
+            dtype,
+        )
+
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(size),
+    )
+
+
+@register_lowering(overrides.philox_rand._overloadpacket, type_promotion_kind=None)
+def philox_rand(size, dtype, device, seed, offset):
     random_pos = ir.FixedLayout(
         device,
         dtype,

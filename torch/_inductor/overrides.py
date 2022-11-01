@@ -7,6 +7,7 @@ import weakref
 import torch
 import torch.nn as nn
 from torch import _prims
+from torch._prims_common import make_contiguous_strides_for
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -167,40 +168,48 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     return gm
 
 
-def _philox_rand_like_meta(input, seed, offset):
-    return _prims.TensorMeta(input)
+def _philox_rand_meta(size, dtype, device, seed, offset):
+    return _prims.TensorMeta(
+        shape=size,
+        dtype=dtype,
+        strides=make_contiguous_strides_for(size),
+        device=device,
+    )
 
 
-def _philox_rand_like(input, seed, offset):
+def _philox_rand(size, dtype, device, seed, offset):
     # placeholder only used in tracing
-    return torch.rand_like(input)
+    return torch.empty()
+    return torch.rand(size, dtype=dtype, device=device)
 
 
-philox_rand_like = _prims._make_prim(
-    schema="philox_rand_like(Tensor input, Tensor seed, int offset) -> Tensor",
+philox_rand = _prims._make_prim(
+    schema="philox_rand(SymInt[] size, ScalarType dtype, Device device, Tensor seed, int offset) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
-    meta=_philox_rand_like_meta,
-    impl_aten=_philox_rand_like,
+    meta=_philox_rand_meta,
+    impl_aten=_philox_rand,
     doc="",
+    tags=(torch.Tag.nondeterministic_seeded,),
 )
 
 
-def _philox_seed_like_meta(x):
-    return _prims.TensorMeta(_philox_seed_like(x))
+def _philox_seed_meta(device):
+    return _prims.TensorMeta(shape=[], strides=[], device=device, dtype=torch.int32)
 
 
-def _philox_seed_like(x):
+def _philox_seed(device):
     # we need a tensor input here so AOT autograd properly captures this
     # with just a device input, this becomes a constant
-    return torch.tensor(random.randrange(2**31), device=x.device, dtype=torch.int32)
+    return torch.tensor(random.randrange(2**31), device=device, dtype=torch.int32)
 
 
-philox_seed_like = _prims._make_prim(
-    schema="philox_seed_like(Tensor other) -> Tensor",
+philox_seed = _prims._make_prim(
+    schema="philox_seed(Device device) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
-    meta=_philox_seed_like_meta,
-    impl_aten=_philox_seed_like,
+    meta=_philox_seed_meta,
+    impl_aten=_philox_seed,
     doc="",
+    tags=(torch.Tag.nondeterministic_seeded,),
 )
 
 
@@ -236,7 +245,7 @@ class PhiloxRandomState:
         if device not in cls.seed:
             # Compute the seed just once per trace so that we pass fewer
             # things from forward to backward
-            cls.seed[device] = philox_seed_like(x)
+            cls.seed[device] = philox_seed(x.device)
 
         seed = cls.seed[device]
         offset = cls.next_offset
@@ -252,7 +261,7 @@ class LowmemDropout(torch.autograd.Function):
         seed, offset = PhiloxRandomState.get_seed_offset(x)
         ctx.save_for_backward(seed)
         ctx.offset = offset
-        bool_mask = philox_rand_like(x, seed, offset) > p
+        bool_mask = philox_rand(x.shape, x.dtype, x.device, seed, offset) > p
         return bool_mask.to(x.dtype) * x * scale
 
     @staticmethod
@@ -260,7 +269,16 @@ class LowmemDropout(torch.autograd.Function):
         p = ctx.p
         scale = float(1.0 / (1.0 - p))
         (seed,) = ctx.saved_tensors
-        bool_mask = philox_rand_like(grad_output, seed, ctx.offset) > p
+        bool_mask = (
+            philox_rand(
+                grad_output.shape,
+                grad_output.dtype,
+                grad_output.device,
+                seed,
+                ctx.offset,
+            )
+            > p
+        )
         return bool_mask.to(grad_output.dtype) * grad_output * scale, None
 
 
@@ -289,7 +307,9 @@ def rand_like(x, **kwargs):
         return x.tracer.create_proxy("call_function", rand_like, (x), kwargs)
     assert kwargs.get("device", x.device) == x.device
     seed, offset = PhiloxRandomState.get_seed_offset(x)
-    return philox_rand_like(x, seed, offset).to(kwargs.get("dtype", torch.float32))
+    return philox_rand(x.shape, x.dtype, x.device, seed, offset).to(
+        kwargs.get("dtype", torch.float32)
+    )
 
 
 replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
