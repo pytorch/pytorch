@@ -8,7 +8,7 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map, LeafSpec
+from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
 from .modules_as_pytree import are_modules_pytrees
 import torch.autograd.forward_ad as fwAD
@@ -38,11 +38,11 @@ from torch._C._functorch import (
 argnums_t = Union[int, Tuple[int, ...]]
 
 # Hacks to override the pytree behavior so we thread through the flag of whether or not to use modules as pytrees
-def tree_flatten_maybe_with_modules(pytree, grad_fn = False):
+def tree_flatten_maybe_with_modules(pytree, grad_fn=False):
     support_nn_modules = are_modules_pytrees()
     return tree_flatten(pytree, grad_fn=grad_fn, support_nn_modules=support_nn_modules)
 
-def tree_map_maybe_with_modules(fn, pytree, grad_fn = False):
+def tree_map_maybe_with_modules(fn, pytree, grad_fn=False):
     support_nn_modules = are_modules_pytrees()
     return tree_map(fn, pytree, grad_fn=grad_fn, support_nn_modules=support_nn_modules)
 

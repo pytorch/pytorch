@@ -106,7 +106,7 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
         return False
     return all(type(entry) == str for entry in fields)
 
-def _get_node_type(pytree: Any, support_nn_modules) -> Any:
+def _get_node_type(pytree: Any, support_nn_modules: bool) -> Any:
     from torch import nn
     if _is_namedtuple_instance(pytree):
         return namedtuple
@@ -115,7 +115,7 @@ def _get_node_type(pytree: Any, support_nn_modules) -> Any:
     return type(pytree)
 
 # A leaf is defined as anything that is not a Node.
-def _is_leaf(pytree: PyTree, support_nn_modules) -> bool:
+def _is_leaf(pytree: PyTree, support_nn_modules: bool) -> bool:
     return _get_node_type(pytree, support_nn_modules) not in SUPPORTED_NODES.keys()
 
 

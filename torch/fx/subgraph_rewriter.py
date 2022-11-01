@@ -8,7 +8,7 @@ import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
 
-__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters']
+__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filter']
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
@@ -185,11 +185,11 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
 
 # Experimental API, not backward compatible
 @compatibility(is_backward_compatible=False)
-def replace_pattern_with_filters(
+def replace_pattern_with_filter(
     gm: GraphModule,
     pattern: Callable,
     replacement: Callable,
-    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]],  # type: ignore[name-defined]
+    match_filter: Callable[["InternalMatch", Graph, Graph], bool],  # type: ignore[name-defined]
 ) -> List[Match]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
@@ -200,20 +200,17 @@ def replace_pattern_with_filters(
             definition of InternalMatch.
     """
 
-    return _replace_pattern(gm, pattern, replacement, match_filters)
+    return _replace_pattern(gm, pattern, replacement, match_filter)
 
 
 def _replace_pattern(
     gm: GraphModule,
     pattern: Callable,
     replacement: Callable,
-    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None  # type: ignore[name-defined]
+    match_filter: Optional[Callable[["InternalMatch", Graph, Graph], bool]] = None  # type: ignore[name-defined]
 ) -> List[Match]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
-
-    if match_filters is None:
-        match_filters = []
 
     # Get the graphs for `gm`, `pattern`, `replacement`
     original_graph: Graph = gm.graph
@@ -225,11 +222,8 @@ def _replace_pattern(
     _matches: List[InternalMatch] = matcher.match(original_graph)
 
     # Filter out matches that don't match the filter
-    _matches = [
-        m for m in _matches
-        if all(match_filter(m, original_graph, pattern_graph)
-               for match_filter in match_filters)
-    ]
+    if match_filter:
+        _matches = [m for m in _matches if match_filter(m, original_graph, pattern_graph)]
 
     replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
 
