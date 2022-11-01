@@ -3777,7 +3777,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
   // in the forward, then autograd will generate one for the backward.
   // If the input to the select_scatter is grad_output, then this could be an expanded tensor
   // with internal overlap.
-  if (at::has_internal_overlap(self) == at::MemoryOverlap::Yes) {
+  if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
     return self.clone();
   }
   auto dtype_size = self.dtype().itemsize();
