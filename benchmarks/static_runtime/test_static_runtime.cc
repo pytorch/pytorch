@@ -3194,9 +3194,14 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
   smodule.runtime().check_for_memory_leak();
 
   EXPECT_TRUE(expected.equal(actual));
-  EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
+
+  // Make a fresh graph to ensure the pass works in isolation
+  auto new_graph = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(to, new_graph.get());
+  ReplaceWithMaybeCopy(new_graph);
+  EXPECT_FALSE(hasNodeWithKind(new_graph, "aten::to"));
   EXPECT_TRUE(
-      hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
+      hasNodeWithKind(new_graph, "static_runtime::to_maybe_copy_out"));
 }
 
 TEST(StaticRuntime, Int) {
