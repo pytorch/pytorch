@@ -91,7 +91,7 @@ from ._state_dict_utils import (
     _post_state_dict_hook,
     _pre_load_state_dict_hook,
 )
-from ._utils import _free_storage, p_assert
+from ._utils import p_assert
 from .flat_param import FlatParameter, FlatParamHandle, HandleShardingStrategy
 from .wrap import ParamExecOrderWrapPolicy
 
@@ -673,12 +673,6 @@ class FullyShardedDataParallel(nn.Module):
         Reset instance so :func:`_lazy_init` will run on the next forward.
         """
         self._is_root: Optional[bool] = None
-        for p in self.params:
-            if hasattr(p, "_local_shard"):
-                # We only need to `del` `_local_shard` because
-                # `_init_param_attributes()` gates the logic based on its
-                # existence (and not any of the other attributes).
-                del p._local_shard  # type: ignore[attr-defined]
 
     def _lazy_init(self) -> None:
         """
@@ -704,7 +698,7 @@ class FullyShardedDataParallel(nn.Module):
         buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(self, self)
         _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, self.compute_device)
         for handle in self._handles:
-            self._init_param_attributes(handle)
+            handle.init_flat_param_attributes()
         self._exec_order_data.init(self, self.process_group)
         # Initialize non-root FSDP instances and share attributes from the root
         # to non-root instances
@@ -731,119 +725,13 @@ class FullyShardedDataParallel(nn.Module):
                     self._needs_pre_backward_unshard
                 )
                 for handle in fsdp_module._handles:
-                    fsdp_module._init_param_attributes(handle)
+                    handle.init_flat_param_attributes()
         if inconsistent_limit_all_gathers:
             warnings.warn(
                 "Found inconsistent `limit_all_gathers` values across FSDP "
                 f"instances on rank {self.rank}. Using the root FSDP's value "
                 f"of {self.limit_all_gathers} for all instances."
             )
-
-    # TODO (awgu): Move this to the `FlatParamHandle` class later
-    @torch.no_grad()
-    def _init_param_attributes(self, handle: FlatParamHandle) -> None:
-        """
-        We manage several attributes on each Parameter instance.
-        A few attributes are set here:
-            ``_local_shard``: a single shard of the parameter. This is needed to
-                recover the shard after rebuilding full parameter in forward
-                and backward.
-            ``_full_param_padded``: the full weight (padded to be evenly
-                divisible by ``world_size``), used for computation in the
-                forward and backward pass. It is initialized with the
-                appropriate size and then has its storage freed. This will be
-                resized in place and only materialized (via all-gather) as needed.
-        Another attribute is set by :func:`_register_post_backward_hooks`:
-            ``_post_backward_hook_state``: it holds the parameter's AccumulateGrad object
-                and the registered post hook handle.
-        """
-        p = handle.flat_param
-        # If _local_shard has been set in the first lazy init and
-        # current parameter is pointed to _local_shard, no need to
-        # set the _local_shard again.
-        if hasattr(p, "_local_shard"):
-            # If CPU offloading, p._local_shard should have been placed on CPU
-            # during its first lazy construction.
-            if self.cpu_offload.offload_params:
-                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
-                    "cpu"
-                ), (
-                    "Expected p._local_shard to be on CPU, "  # type: ignore[attr-defined]
-                    f"but it's on {p._local_shard.device}"  # type: ignore[attr-defined]
-                )
-            return
-
-        # A single shard of the parameters. Also makes p._local_shard to be on
-        # CPU if we are CPU offloading, since p.data would be on CPU during
-        # init.
-        if self.cpu_offload.offload_params:
-            assert p.device == torch.device("cpu"), (
-                "Expected param to be on CPU when cpu_offloading is enabled. "
-                "If CPU offloading is enabled correctly, you may be "
-                "accidentally moving the model to CUDA after FSDP initialization."
-            )
-        p._local_shard = p.data  # type: ignore[attr-defined]
-        # If CPU offloading, pin the memory to enable faster CPU -> GPU device
-        # transfer.
-        if self.cpu_offload.offload_params:
-            assert p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-            p._local_shard = p._local_shard.pin_memory()  # type: ignore[attr-defined]
-            # When offloading parameters, also move the grad shard to CPU during
-            # backward pass. In this case, it's important to pre-allocate the
-            # CPU grad shard in pinned memory so that we can do a non-blocking
-            # transfer.
-            p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
-                p, device=torch.device("cpu")
-            ).pin_memory()
-
-        # If mixed_precision, maintain reduced precision param shard on
-        # compute_device for computation in fwd/bwd. We resize storage to 0 here
-        # and rematerialize before building the full param when needed. After
-        # fwd/bwd, it is freed and we only hold on to the full precision shard.
-        # As a result, this reduced precision shard is not allocated if we are
-        # not in the forward/backward pass.
-        if self._mixed_precision_enabled_for_params():
-            p._mp_shard = torch.zeros_like(
-                p._local_shard,
-                device=self.compute_device,
-                dtype=self.mixed_precision.param_dtype,
-            )
-            _free_storage(p._mp_shard)
-
-        # We also maintain a full-sized parameter of type self.compute_dtype.
-        # We resize the storage to size 0 at init (here) and only materialize
-        # as needed. The storage may contain padding elements so that it is
-        # evenly divisible by world_size, although these padding elements will
-        # be removed before the relevant computation.
-        if handle.uses_sharded_strategy:  # type: ignore[attr-defined]
-            # We set p._full_param_padded's dtype to the desired parameter dtype
-            # in the case of mixed precision. This is so that when we all_gather
-            # into full_param_padded it can occur without issues and result in
-            # full_param_padded having the expected param_dtype.
-            full_param_dtype = (
-                p.dtype
-                if not self._mixed_precision_enabled_for_params()
-                else self.mixed_precision.param_dtype
-            )
-            p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
-                p.numel() * self.world_size,
-                device=self.compute_device,
-                dtype=full_param_dtype,
-            )
-            p._padded_unsharded_size = p._full_param_padded.size()  # type: ignore[attr-defined]
-            _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
-
-            if self._mixed_precision_enabled_for_params():
-                p._full_prec_full_param_padded = torch.zeros(  # type: ignore[attr-defined]
-                    p.numel() * self.world_size,
-                    device=self.compute_device,
-                    dtype=p.dtype,  # full precision
-                )
-                _free_storage(p._full_prec_full_param_padded)
-
-        # Track whether the `FlatParameter`'s post-backward hook has been
-        # called for validation in the post-backward callback
-        p._post_backward_called = False
 
     @staticmethod
     def set_state_dict_type(
