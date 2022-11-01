@@ -298,7 +298,6 @@ CHECK_STRIDES_SKIPS = {
     aten._linalg_svd.default,
     aten._scaled_dot_product_attention_forward.default,
     aten.add.Tensor,
-    aten.addmm.default,
     aten.atan2.default,
     aten.binary_cross_entropy.default,
     aten.bitwise_and.Tensor,
