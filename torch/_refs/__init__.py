@@ -413,9 +413,11 @@ def _make_elementwise_unary_reference(
     return inner
 
 
-def _make_alias(fn, name=None):
-    if name is None:
-        name = fn.__name__.split(".")[-1]
+def _make_alias(fn, name):
+    """
+    This function defines an alias of another function and sets its __name__argument
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    """
 
     def _fn(*args, **kwargs):
         return fn(*args, **kwargs)
