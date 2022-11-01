@@ -2190,8 +2190,9 @@ class TestSparse(TestSparseBase):
 
             # test autograd
             x = sparse_tensor.clone()
-            #y = sparse_tensor.log1p()
-            self.assertTrue(gradcheck(lambda inp: inp.log1p().to_dense(), x, check_sparse_nnz=True))
+            y = sparse_tensor.log1p()
+            with self.assertRaisesRegex(RuntimeError, "log1p of a sparse tensor is made to be non-differentiable"):
+                y.backward(x)
         else:
             with self.assertRaisesRegex(RuntimeError, "only Tensors of floating point dtype can require gradients"):
                 sparse_tensor.requires_grad_()
