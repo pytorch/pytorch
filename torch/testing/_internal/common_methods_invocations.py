@@ -10420,7 +10420,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
                # https://github.com/pytorch/pytorch/issues/88105
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
+               DecorateInfo(unittest.skip("This fails intermittently"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),)),
