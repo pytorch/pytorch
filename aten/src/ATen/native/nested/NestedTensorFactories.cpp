@@ -120,17 +120,5 @@ Tensor& copy_nested_(Tensor& self, const Tensor& src, bool non_blocking) {
   return self;
 }
 
-Tensor& fill_nested_(Tensor& self, const Scalar& value) {
-  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.fill_(value);
-  return self;
-}
-
-Tensor& fill_nested_(Tensor& self, const Tensor& value) {
-  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
-  self_buf.fill_(value);
-  return self;
-}
-
 } // namespace native
 } // namespace at
