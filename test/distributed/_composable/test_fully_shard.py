@@ -89,7 +89,7 @@ class TestFSDPInitialization(FSDPTest):
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
-        fsdp_state = fully_shard(
+        fully_shard(
             composable_module,
             auto_wrap_policy=Model.auto_wrap_policy(),
         )
@@ -110,7 +110,7 @@ class TestFSDPInitialization(FSDPTest):
 
         # Check that the composable module has the same  `FlatParameter`
         # construction as the FSDP-wrapped model
-        composable_handles = fsdp_state._handles
+        composable_handles = fully_shard.state(composable_module)._handles
         fsdp_wrapped_handles = FSDP._fsdp_handles(fsdp_wrapped_model)
         self.assertEqual(len(composable_handles), len(fsdp_wrapped_handles))
         for (composable_handle, fsdp_wrapped_handle) in zip(
@@ -231,7 +231,7 @@ class TestFSDPRuntime(FSDPTest):
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
-        fsdp_state = fully_shard(
+        fully_shard(
             composable_module,
             auto_wrap_policy=Model.auto_wrap_policy(),
         )
@@ -251,7 +251,7 @@ class TestFSDPRuntime(FSDPTest):
                 # hook registration, currently blocked by kwarg support
                 if model is composable_module:
                     args, kwargs = _root_pre_forward(
-                        fsdp_state, composable_module, *inp
+                        fully_shard.state(composable_module), composable_module, *inp
                     )
                 else:
                     args = inp
