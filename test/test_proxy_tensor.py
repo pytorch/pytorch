@@ -1418,6 +1418,7 @@ inplace_symbolic_tensor_failures = {
     xfail('igamma', ''),  # aten.igamma_.default - couldn't find symbolic meta function/decomposition
     xfail('igammac', ''),  # aten.igammac_.default - couldn't find symbolic meta function/decomposition
     xfail('le', ''),  # aten.le_.Tensor - couldn't find symbolic meta function/decomposition
+    xfail('lerp', ''),  # aten.lerp_.default - couldn't find symbolic meta function/decomposition
     xfail('lgamma', ''),  # aten.lgamma_.default - couldn't find symbolic meta function/decomposition
     xfail('log10', ''),  # aten.log10_.default - couldn't find symbolic meta function/decomposition
     xfail('log1p', ''),  # aten.log1p_.default - couldn't find symbolic meta function/decomposition
