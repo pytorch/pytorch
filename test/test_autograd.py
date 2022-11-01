@@ -5972,6 +5972,15 @@ for shape in [(1,), ()]:
         run_tests(lambda v: v.swapdims_(0, 0))
         run_tests(lambda v: v.swapaxes_(0, 0))
 
+    def test_autograd_inplace_view_of_view(self):
+        x = torch.zeros(2, requires_grad=False)
+        with torch.no_grad():
+            y = x.view(2)
+            y.requires_grad_(True)
+        z = y.view(2)
+        with self.assertRaisesRegex(RuntimeError, "both the view and the inplace either both inside the no_grad block"):
+            z /= 2
+
     # TODO This is not the correct behavior -
     # See https://github.com/pytorch/pytorch/issues/49825#issuecomment-794466627
     def test_autograd_inplace_views_cross_dtype(self):
