@@ -333,6 +333,27 @@ def _init_param_handle_from_params(
         handle.flat_param_to(cpu_device)
 
 
+@no_type_check
+def _init_streams(
+    state: _State,
+) -> _State:
+    """
+    Initializes CUDA streams for overlapping communication, computation, and
+    data transfers. The streams should be shared across FSDP instances.
+    """
+    assert state._is_root
+    assert torch.cuda.is_available()
+    # Stream for unshard logic, including allocating the all-gather destination
+    # tensors and the all-gathers themselves.
+    state._streams["unshard"] = torch.cuda.Stream()
+    # Stream for overlapping gradient reduction with the backward pass gradient
+    # computation.
+    state._streams["post_backward"] = torch.cuda.Stream()
+    # Stream for pre-unshard logic, namely allocations and writes for CPU
+    # offloading (H2D copy) and mixed precision (low precision cast).
+    state._streams["pre_unshard"] = torch.cuda.Stream()
+
+
 def _get_ignored_modules(
     root_module: nn.Module,
     _ignored_modules: Optional[Iterable[torch.nn.Module]],
