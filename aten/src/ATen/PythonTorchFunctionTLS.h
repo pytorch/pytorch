@@ -8,7 +8,7 @@ namespace impl {
 
 struct TORCH_API PythonTorchFunctionTLS {
   static void set_disable_subclass(bool);
-    static void set_disable_all(bool);
+  static void set_disable_all(bool);
   static bool is_disable_subclass();
   static bool is_disable_all();
 

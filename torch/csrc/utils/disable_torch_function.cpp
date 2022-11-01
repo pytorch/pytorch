@@ -11,7 +11,8 @@ PyObject* disabled_torch_function = nullptr;
 PyObject* disabled_torch_dispatch = nullptr;
 
 bool torch_function_enabled() {
-  return !at::impl::PythonTorchFunctionTLS::is_disable_subclass() && !at::impl::PythonTorchFunctionTLS::is_disable_all();
+  return !at::impl::PythonTorchFunctionTLS::is_disable_subclass() &&
+      !at::impl::PythonTorchFunctionTLS::is_disable_all();
 }
 
 PyObject* disabled_torch_function_impl() {
@@ -37,7 +38,9 @@ typedef struct {
       bool old_state;
 } DisableTorchFunctionSubclass;
 
-PyObject* DisableTorchFunctionSubclass__enter(PyObject* self, PyObject* unused) {
+PyObject* DisableTorchFunctionSubclass__enter(
+    PyObject* self,
+    PyObject* unused) {
   ((DisableTorchFunctionSubclass*)self)->old_state =
       at::impl::PythonTorchFunctionTLS::is_disable_subclass();
   at::impl::PythonTorchFunctionTLS::set_disable_subclass(true);
