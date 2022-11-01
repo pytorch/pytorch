@@ -236,31 +236,32 @@ void _register_builtin_comm_hook(
   reducer.register_builtin_comm_hook(comm_hook_type);
 }
 
-static PyObject* reduceopmeta___instancecheck__(PyObject* self, PyObject* args) {
+static PyObject* reduceopmeta___instancecheck__(
+    PyObject* self,
+    PyObject* args) {
   if (Py_TYPE(self) == Py_TYPE(args)) {
     Py_RETURN_TRUE;
   }
-  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") != c10::string_view::npos) {
+  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") !=
+      c10::string_view::npos) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
 }
 static PyMethodDef reduceopmeta_methods[] = {
-  {
-    "__instancecheck__",
-    (PyCFunction)reduceopmeta___instancecheck__,
-    METH_O,
-    "Custom `__instancecheck__` for ReduceOp"
-  },
-  {NULL, NULL}
-};
+    {"__instancecheck__",
+     (PyCFunction)reduceopmeta___instancecheck__,
+     METH_O,
+     "Custom `__instancecheck__` for ReduceOp"},
+    {NULL, NULL}};
 PyTypeObject* GetReduceOpMetaclass() {
   static auto* metaclass = [] {
-    PyTypeObject* base_metaclass = pybind11::detail::get_internals().default_metaclass;
+    PyTypeObject* base_metaclass =
+        pybind11::detail::get_internals().default_metaclass;
     PyType_Slot slots[] = {
-      {Py_tp_base, base_metaclass},
-      {Py_tp_methods, reduceopmeta_methods},
-      {0},
+        {Py_tp_base, base_metaclass},
+        {Py_tp_methods, reduceopmeta_methods},
+        {0},
     };
     PyType_Spec spec = {};
     spec.name = "torch._C._distributed_c10d._ReduceOpMeta";
@@ -268,7 +269,8 @@ PyTypeObject* GetReduceOpMetaclass() {
     spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
     spec.slots = slots;
     PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
-    if (!metaclass) throw py::error_already_set();
+    if (!metaclass)
+      throw py::error_already_set();
     return metaclass;
   }();
   return metaclass;
@@ -560,8 +562,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(
-      module, "ReduceOp",
-      py::metaclass((PyObject *)GetReduceOpMetaclass()), R"(
+      module, "ReduceOp", py::metaclass((PyObject*)GetReduceOpMetaclass()), R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
@@ -603,15 +604,19 @@ This class does not support ``__members__`` property.)");
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
             return self == other.op_;
           })
-      .def("__hash__", [](const ::c10d::ReduceOp& self) {
-        return static_cast<uint8_t>(self.op_);
-      })
-      .def("__copy__", [](const ::c10d::ReduceOp& self) {
-        return ::c10d::ReduceOp(self);
-      })
-      .def("__deepcopy__", [](const ::c10d::ReduceOp& self, const py::dict& memo) {
-        return ::c10d::ReduceOp(self);
-      });
+      .def(
+          "__hash__",
+          [](const ::c10d::ReduceOp& self) {
+            return static_cast<uint8_t>(self.op_);
+          })
+      .def(
+          "__copy__",
+          [](const ::c10d::ReduceOp& self) { return ::c10d::ReduceOp(self); })
+      .def(
+          "__deepcopy__",
+          [](const ::c10d::ReduceOp& self, const py::dict& memo) {
+            return ::c10d::ReduceOp(self);
+          });
 
   // note(crcrpar): Deliberately skip
   // [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
