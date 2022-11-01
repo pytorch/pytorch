@@ -136,8 +136,8 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
   TORCH_CHECK(
       scalarList_.is_contiguous(), "Expected scalars to be contiguous.");
   TORCH_CHECK(
-      scalarList_.dim() < 2,
-      "Expected packed scalar List to be of dimension 0 or 1. Got ",
+      scalarList_.dim() == 1,
+      "Expected packed scalar Tensor to be of dimension 1. Got ",
       scalarList_.dim(),
       " instead.");
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
@@ -149,21 +149,15 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
       "convert_tensor_to_scalar_list",
       [&]() {
         const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
-        if (scalarList_.dim() == 0) {
-          for (int64_t i = 0; i < expect_length; i++) {
-            scalarList.push_back(c10::Scalar(scalar_data[0]));
-          }
-        } else {
-          TORCH_CHECK(
-              (expect_length == scalarList_.size(0)),
-              "Expected length of scalars to match input of length ",
-              expect_length,
-              " but got ",
-              scalarList_.size(0),
-              " instead.");
-          for (int64_t i = 0; i < scalarList_.size(0); i++) {
-            scalarList.push_back(c10::Scalar(scalar_data[i]));
-          }
+        TORCH_CHECK(
+            (expect_length == scalarList_.size(0)),
+            "Expected length of scalars to match input of length ",
+            expect_length,
+            " but got ",
+            scalarList_.size(0),
+            " instead.");
+        for (int64_t i = 0; i < scalarList_.size(0); i++) {
+          scalarList.push_back(c10::Scalar(scalar_data[i]));
         }
       });
   return scalarList;
