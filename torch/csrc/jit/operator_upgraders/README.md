@@ -177,7 +177,7 @@ When making changes to the operators, the first thing to identify is if it's BC/
             except Exception as e:
                 self.skipTest("Failed to load fixture!")
 
-            # Step4. Load the new model and it won't apply the ugprader
+            # Step4. Load the new model and it won't apply the upgrader
             current_mobile_module_float = self._save_load_mobile_module(MyModuleFloat)
             current_server_module_float = self._save_load_module(MyModuleFloat)
 

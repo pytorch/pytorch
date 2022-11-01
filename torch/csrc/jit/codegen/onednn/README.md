@@ -104,7 +104,7 @@ with torch.no_grad():
 
 # run the model
 with torch.no_grad():
-    # oneDNN graph fusion will be trigerred during runtime
+    # oneDNN graph fusion will be triggered during runtime
     output = model(images)
 ```
 
