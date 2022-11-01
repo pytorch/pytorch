@@ -547,127 +547,29 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       "expected `qkv_bias` first dim and first dim of query to be equal");
   TORCH_CHECK(D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
 
-#ifndef NDEBUG
-  const auto B = query.is_nested()
-      ? get_nested_tensor_impl(query)->get_nested_size_tensor().size(0)
-      : query.sizes()[0];
-  auto T = query.is_nested() ? 0 : query.sizes()[1];
-
-#endif
+  auto x_size_0 = query.size(0);
   const auto dim_per_head = D / num_head;
-  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 ) {
-
-    // We have not done linear projection yet but the input for SDP
-    // Is expected to be 4 dimensional. We "cheaply" create view tensors
-    // That will then be used for checking hot path conditions with select_sd_backend
-    auto q = query.view({query.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
-    auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
-    auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
-
-    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, need_weights, false};
-    auto backend = select_sdp_backend(kernel_params);
-    if (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention) {
-      auto x = at::linear(query, qkv_weight, qkv_bias);
-      auto chunks = x.chunk(3, -1);
-      auto x_size_0 = x.size(0);
-
-      chunks[0] = (chunks[0].view({x_size_0, -1, num_head, dim_per_head}))
-                      .transpose(1, 2);
-      chunks[1] = (chunks[1].view({x_size_0, -1, num_head, dim_per_head}))
-                      .transpose(1, 2);
-      chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
-                      .transpose(1, 2);
-
-      auto y = at::_scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, need_weights, false);
-      auto past_sdp =
-          std::get<0>(y).transpose(1, 2).reshape({x_size_0, -1, embed_dim});
-      return std::make_tuple(
-          at::linear(past_sdp, proj_weight, proj_bias), Tensor());
-    }
-    // Returned math or error lets not use it
+  std::vector<Tensor> chunks;
+  if ((query.is_same(key) && key.is_same(value))) {
+    chunks = at::linear(query, qkv_weight, qkv_bias).chunk(3, -1);
+  } else {
+    auto qkv_weight_s = at::native::chunk(qkv_weight, 3, 0);
+    auto qkv_bias_s = at::native::chunk(qkv_bias, 3, 0);
+    chunks.push_back(at::linear(query, qkv_weight_s[0], qkv_bias_s[0]));
+    chunks.push_back(at::linear(key, qkv_weight_s[1], qkv_bias_s[1]));
+    chunks.push_back(at::linear(value, qkv_weight_s[2], qkv_bias_s[2]));
+  }
+  for (int64_t i = 0; i < 3; i++) {
+    chunks[i] = chunks[i].view({x_size_0, -1, num_head, dim_per_head})
+                    .transpose(1, 2);
   }
 
-  // shape: [B, T, 3 x D]
-  auto qkv = qkv_projection(query, key, value, embed_dim, qkv_weight);
-
-  if (!qkv.is_nested() && qkv.numel() == 0) {
-    if (query.is_nested()) {
-      return std::make_tuple(Tensor(), Tensor());
-    }
-    return std::make_tuple(at::empty_like(query), Tensor());
-  }
-
-#ifndef NDEBUG
-  if (!query.is_nested() || !qkv.is_nested()) {
-    if (query.is_nested()) {
-      T = qkv.size(1);
-    }
-    debug_assert_shape(__LINE__, qkv, {B, T, 3 * D});
-  }
-#endif
-
-#ifdef DEBUG_PRINT_EACH_STEP
-  if (!qkv.is_nested()) {
-    std::cerr << "qkv: " << qkv << std::endl;
-  }
-#endif
-  // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
-  qkv = Tensor(); // Not used any more, allow free
-  auto& q = std::get<0>(q_k_v);
-  const auto& k = std::get<1>(q_k_v);
-  const auto& v = std::get<2>(q_k_v);
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
-  debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
-  debug_assert_shape(__LINE__, v, {B, num_head, T, dim_per_head});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "q: " << q << std::endl;
-  std::cerr << "k: " << k << std::endl;
-  std::cerr << "v: " << v << std::endl;
-#endif
-
-  // shape: [B, num_head, T, T]
-  auto qkt = bmm_nt(q, k);
-  // q & k are dead but cannot be freed because they were packed with v
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, qkt, {B, num_head, T, T});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt: " << qkt << std::endl;
-#endif
-
-  // shape: [B, num_head, T, T]
-  // TODO: long-term, have a kernel that works with
-  // NestedTensor directly if there is no mask passed
-  qkt = masked_softmax(qkt, mask, query, mask_type);
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "qkt after softmax: " << qkt << std::endl;
-#endif
-
-  // shape: [B, num_head, T, dim_per_head]
-  // reuse storage for q; we're done with it
-  auto attn_ctx = bmm_nn(q, qkt, v);
-  // qkv is not dead; we just reused storage for q!
-  if (!need_weights) {
-    qkt = Tensor();
-  }
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, attn_ctx, {B, num_head, T, dim_per_head});
-#endif
-#ifdef DEBUG_PRINT_EACH_STEP
-  std::cerr << "attn_ctx: " << attn_ctx << std::endl;
-#endif
-
-  // shape: [B, T, D]
-  // Fuse transform_0213 inside
-  auto proj = transform0213_gemm_nt_bias(
-      attn_ctx, proj_weight, proj_bias, query);
-#ifndef NDEBUG
-  debug_assert_shape(__LINE__, proj, {B, T, D});
-#endif
+  auto y = at::_scaled_dot_product_attention(
+      chunks[0], chunks[1], chunks[2], mask, 0.0, need_weights, false);
+  auto past_sdp =
+      std::get<0>(y).transpose(1, 2).reshape({x_size_0, -1, embed_dim});
+  auto qkt = std::get<1>(y);
+  auto proj = at::linear(past_sdp, proj_weight, proj_bias);
   if (need_weights && average_attn_weights) {
     // weights are not needed for full transformer, so don't worry too
     // much about performance -- we implement this just to make use
