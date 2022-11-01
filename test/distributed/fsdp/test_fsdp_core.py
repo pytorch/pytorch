@@ -366,12 +366,14 @@ class TestHooks(FSDPTest):
         )
         input = fsdp_model.module.get_input(torch.device("cuda"))
         fsdp_model._register_pre_backward_hooks = mock.MagicMock(return_value=None)
-        fsdp_model._register_post_backward_hooks = mock.MagicMock(return_value=None)
-        self.assertFalse(fsdp_model._register_post_backward_hooks.called)
-        self.assertFalse(fsdp_model._register_pre_backward_hooks.called)
-        fsdp_model(*input)
-        self.assertTrue(fsdp_model._register_post_backward_hooks.called)
-        self.assertTrue(fsdp_model._register_pre_backward_hooks.called)
+        with mock.patch(
+            "torch.distributed.fsdp._runtime_utils._register_post_backward_hooks"
+        ) as register_post_bwd_mock:
+            self.assertFalse(fsdp_model._register_pre_backward_hooks.called)
+            self.assertFalse(register_post_bwd_mock.called)
+            fsdp_model(*input)
+            self.assertTrue(fsdp_model._register_pre_backward_hooks.called)
+            self.assertTrue(register_post_bwd_mock.called)
 
 
 class TestNoGrad(FSDPTest):
