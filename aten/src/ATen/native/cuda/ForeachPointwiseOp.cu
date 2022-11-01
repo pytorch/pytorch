@@ -183,7 +183,7 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);      \
                                                                              \
     auto maybe_scalarList =                                                  \
-        convert_tensor_to_scalar_list(scalarList_, tensorLists.size());      \
+        convert_tensor_to_scalar_list(scalars, tensorLists.size());      \
     if (!maybe_scalarList ||                                                 \
         !can_use_fast_route({input, tensors1, tensors2}) ||                  \
         has_integral_tensor(input, /* includeBool */ true)) {                \
@@ -203,7 +203,7 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);      \
                                                                              \
     auto maybe_scalarList =                                                  \
-        convert_tensor_to_scalar_list(scalarList_, tensorLists.size());      \
+        convert_tensor_to_scalar_list(scalars, tensorLists.size());      \
     if (!maybe_scalarList ||                                                 \
         !can_use_fast_route({input, tensors1, tensors2}, scalars) ||         \
         has_integral_tensor(input, /* includeBool */ true)) {                \
@@ -218,7 +218,7 @@ FOREACH_POINTWISE_OP_SCALAR(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);
-FOREACH_POINTWISE_OP_TENSORLIST(addcdiv, std::divides);
+FOREACH_POINTWISE_OP_TENSOR(addcdiv, std::divides);
 
 
 // Why bool tensors are pushed to slowpath?
