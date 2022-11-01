@@ -56,15 +56,12 @@ except (ImportError, AssertionError) as e:
 
 HAS_CPU = False
 try:
-    if IS_FBCODE:
-        raise torch._inductor.exc.CppCompileError
-
     from subprocess import CalledProcessError
 
     from torch._inductor.codecache import CppCodeCache
 
     CppCodeCache.load("")
-    HAS_CPU = True
+    HAS_CPU = not IS_FBCODE
 except (
     CalledProcessError,
     OSError,
@@ -2197,6 +2194,17 @@ class CommonTemplate:
             atol=1e-5,
             rtol=3e-05,
         )
+
+    def test_pow3(self):
+        # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
+        def fn(x):
+            z = torch.tensor(0.123, device=self.device)
+            w = z + x
+            return torch.pow(w, 0.5)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        input = torch.rand(())
+        self.assertTrue(same(opt(input), fn(input)))
 
     def test_glu(self):
         def fn(x):

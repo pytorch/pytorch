@@ -975,6 +975,11 @@ def forward(self, a_1):
             return x.shape
         self._test_dynamic(f, [(5, 3)], [[(4, 6)]])
 
+    def test_rmethod(self):
+        def f(x):
+            return x.size(0) + x
+        self._test_dynamic(f, [(5,)], [[(4,)], [(12,)]])
+
     def test_mega_guard(self):
         def f(a, b):
             assert a.shape[0] == b.shape[0] * 2
@@ -1150,7 +1155,6 @@ symbolic_tensor_failures = {
     xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
-    xfail('diagonal_scatter', ''),  # aten.diagonal_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
