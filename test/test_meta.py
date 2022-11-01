@@ -298,7 +298,6 @@ CHECK_STRIDES_SKIPS = {
     aten._linalg_svd.default,
     aten._scaled_dot_product_attention_forward.default,
     aten.add.Tensor,
-    aten.addmm.default,
     aten.atan2.default,
     aten.binary_cross_entropy.default,
     aten.bitwise_and.Tensor,
@@ -348,14 +347,7 @@ CHECK_STRIDES_SKIPS = {
     aten.xlogy.Tensor,
 
     # channel_last and channel_last_3d related failures
-    aten.constant_pad_nd.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.constant_pad_nd.default,
     aten.convolution.default,
-    aten.convolution.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.upsample_bilinear2d.vec,
-    aten.constant_pad_nd.default,
     aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
@@ -1269,7 +1261,7 @@ class TestMeta(TestCase):
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, inps[0].shape)
 
-    def test_fill_alias_relationship(self):
+    def test_fill__alias_relationship(self):
         inps = torch.rand(2**52, device='meta')
         r = torch.ops.aten.fill_(inps, 1.0)
         # aten.fill_ returns an aliase
@@ -1328,6 +1320,19 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
             self.assertEqual(ref_out[1].size(), meta_out[1].size())
             self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
+
+    # opinfo test is using aten.fill_, it's not testing aten.fill
+    @onlyCUDA
+    def test_fill_stride(self):
+        to_meta = MetaConverter()
+        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
+
+        for args in get_strided_args(sample_args):
+            meta_args = to_meta(args)
+            ref_out = torch.ops.aten.fill(*args)
+            meta_out = torch.ops.aten.fill(*meta_args)
+            self.assertEqual(ref_out.size(), meta_out.size())
+            self.assertEqual(ref_out.stride(), meta_out.stride())
 
 
     def test_map_location_deserialize(self):
