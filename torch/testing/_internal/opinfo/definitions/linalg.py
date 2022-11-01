@@ -1609,7 +1609,7 @@ op_db: List[OpInfo] = [
             # norm's vjp/jvp are not well-conditioned near zero
             DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"),
             DecorateInfo(
-                unittest.expectedFailure, "TestFWdGradients", "test_fn_fwgrad_bwgrad"
+                unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"
             ),
             DecorateInfo(
                 unittest.expectedFailure, "TestFwdGradients", "test_forward_mode_AD"
