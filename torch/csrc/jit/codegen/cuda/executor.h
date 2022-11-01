@@ -291,8 +291,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   ExecutorCompileTimeInfoCache compile_time_info_cache_;
 
   // Cached expr eval
-  std::unique_ptr<KernelPrecomputedValues> evaluator_precomputed_values_ =
-      nullptr;
+  std::unique_ptr<PrecomputedValues> evaluator_precomputed_values_ = nullptr;
 
   // Profiling support: knob to control wheter we actually execute the
   // kernel on the GPU or not

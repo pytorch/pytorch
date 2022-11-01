@@ -192,7 +192,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   } runtime_workspace_;
 
   //! Utility to speed up value evaluation at runtime
-  std::unique_ptr<FusionPrecomputedValues> precomputed_values_;
+  std::unique_ptr<PrecomputedValues> precomputed_values_;
 
   // States for profiling support
   bool profiling_ = false;

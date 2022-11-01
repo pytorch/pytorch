@@ -237,23 +237,15 @@ double Val::evaluateDouble() {
 }
 
 c10::optional<int64_t> Val::getInt() const {
-  if (isConstScalar() && isAnInt()) {
-    if (this->getValType() == ValType::Scalar) {
-      if (this->isA<Int>()) {
-        return this->as<Int>()->value();
-      }
-    }
+  if (isConstScalar() && isAnInt() && isA<Int>()) {
+    return this->as<Int>()->value();
   }
   return c10::nullopt;
 }
 
 c10::optional<double> Val::getDouble() const {
-  if (isConstScalar() && isAnInt()) {
-    if (this->getValType() == ValType::Scalar) {
-      if (this->isA<Double>()) {
-        return this->as<Double>()->value();
-      }
-    }
+  if (isConstScalar() && isADouble() && isA<Double>()) {
+    return this->as<Double>()->value();
   }
   return c10::nullopt;
 }

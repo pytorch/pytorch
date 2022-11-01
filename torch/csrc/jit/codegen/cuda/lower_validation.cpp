@@ -379,8 +379,6 @@ class VectorizeValidator : public OptInDispatch {
       return;
     }
 
-    auto fusion = FusionGuard::getCurFusion();
-
     TORCH_CHECK(
         v_id->extent()->isConstScalar(),
         "Vectorizing a domain requires a constant size.");

@@ -15,7 +15,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class FusionPrecomputedValues;
+class PrecomputedValues;
 
 //! Calculate Fusion IR expressions
 class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
@@ -32,7 +32,7 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
   //! Debugging helper, prints all the currently known values
   void print() const;
 
-  void bindPrecomputedValues(FusionPrecomputedValues* precomputed_values) {
+  void bindPrecomputedValues(PrecomputedValues* precomputed_values) {
     precomputed_values_ = precomputed_values;
   }
 
@@ -47,7 +47,7 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
   void handle(const BinaryOp* binary_op) final;
 
  private:
-  FusionPrecomputedValues* precomputed_values_ = nullptr;
+  PrecomputedValues* precomputed_values_ = nullptr;
   std::unordered_map<const Val*, IntOrDouble> known_values_;
   std::unordered_map<std::string, IntOrDouble> known_named_scalars_;
 };

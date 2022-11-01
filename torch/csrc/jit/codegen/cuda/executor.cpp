@@ -891,11 +891,11 @@ KernelArgumentHolder FusionExecutor::inferOutputSizes(
 
   if (!evaluator_precomputed_values_) {
     evaluator_precomputed_values_ =
-        std::make_unique<KernelPrecomputedValues>(lowered_->kernel());
+        std::make_unique<PrecomputedValues>(lowered_->kernel());
   }
 
   kir::ExpressionEvaluator expr_eval;
-  evaluator_precomputed_values_->bindKernelInputs(args);
+  evaluator_precomputed_values_->bindInputs(args);
   expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 
   // I think this binds something to expr_eval, so even though we are not using
@@ -1061,11 +1061,11 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     if (!evaluator_precomputed_values_) {
       evaluator_precomputed_values_ =
-          std::make_unique<KernelPrecomputedValues>(lowered_->kernel());
+          std::make_unique<PrecomputedValues>(lowered_->kernel());
     }
 
     kir::ExpressionEvaluator expr_eval;
-    evaluator_precomputed_values_->bindKernelInputs(args);
+    evaluator_precomputed_values_->bindInputs(args);
     expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 
     launch_params_ =

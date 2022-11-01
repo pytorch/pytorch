@@ -62,7 +62,7 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
   void handle(const BinaryOp* binary_op) final;
 
  private:
-  KernelPrecomputedValues* precomputed_values_ = nullptr;
+  PrecomputedValues* precomputed_values_ = nullptr;
   std::unordered_map<const Val*, IntOrDouble> known_values_;
   std::unordered_map<std::string, IntOrDouble> known_named_scalars_;
 };

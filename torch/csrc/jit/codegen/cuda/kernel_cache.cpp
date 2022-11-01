@@ -285,8 +285,7 @@ FusionKernelRuntime::FusionKernelRuntime(
   SchedulerRuntimeInfo runtime_info(fusion_copy.get(), args, true);
 
   // Initialize the evaluator simplifer
-  precomputed_values_ =
-      std::make_unique<FusionPrecomputedValues>(fusion_copy.get());
+  precomputed_values_ = std::make_unique<PrecomputedValues>(fusion_copy.get());
 
   //! Try to schedule the complete fusion
   scheduler_debug_utils::canScheduleMessage(
@@ -757,7 +756,7 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
   FUSER_PERF_SCOPE("FusionKernelRuntime::getMaybeHeuristicsFor");
   auto complete_fusion = segmented_fusion_->completeFusion();
   SchedulerRuntimeInfo runtime_info(complete_fusion, args);
-  precomputed_values_->bindFusionInputs(args);
+  precomputed_values_->bindInputs(args);
   precomputed_values_->evaluate();
   runtime_info.expressionEvaluator().bindPrecomputedValues(
       precomputed_values_.get());
