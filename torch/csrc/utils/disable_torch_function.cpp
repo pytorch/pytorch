@@ -37,7 +37,9 @@ typedef struct {
       bool old_state;
 } DisableTorchFunctionSubclass;
 
-PyObject* DisableTorchFunctionSubclass__enter(PyObject* self, PyObject* unused) {
+PyObject* DisableTorchFunctionSubclass__enter(
+    PyObject* self,
+    PyObject* unused) {
   ((DisableTorchFunctionSubclass*)self)->old_state =
       at::impl::PythonTorchFunctionTLS::is_disabled();
   at::impl::PythonTorchFunctionTLS::set_disabled(true);
