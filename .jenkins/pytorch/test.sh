@@ -180,9 +180,10 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
-    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
