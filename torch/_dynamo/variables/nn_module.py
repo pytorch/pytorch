@@ -548,12 +548,19 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if method is torch.nn.Module.parameters:
-                assert not args or kwargs
                 options["guards"].add(
                     self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
                 )
                 items = []
-                for name, value in self.value.named_parameters():
+                named_parameters_kwargs = {}
+                if len(args) > 0:
+                    assert len(args) == 1, f"Expected one positional arg for parameters(recurse), got {args}"
+                    assert not kwargs, f"Expected at most one arg for parameters, got {args} and {kwargs}"
+                    named_parameters_kwargs = {"recurse": args[0]}
+                elif len(kwargs):
+                    assert len(kwargs)  == 1 and "recurse" in kwargs, f"Expected only 'recurse' kwarg, got {kwargs}"
+                    named_parameters_kwargs.update(kwargs)
+                for name, value in self.value.named_parameters(**named_parameters_kwargs):
                     items.append(
                         VariableBuilder(tx, AttrSource(self.source, name))(
                             value
