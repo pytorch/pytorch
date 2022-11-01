@@ -167,7 +167,7 @@ void pushPyOutToStack(
   if (num_returns == 0) {
     // Check that we got a None return from Python. Anything else is an error.
     TORCH_CHECK(
-        out.is(py::none()),
+        out.is_none(),
         "Expected ",
         msg,
         " for ",
@@ -686,7 +686,9 @@ static PyObject* THPVariable_make_subclass(
     throw torch::TypeError(
         "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  torch_dispatch_mode::StashTorchDispatchModeGuard td_g;
+  // guard completely turns off torch dispatch modes, doesn't just pop off the
+  // stack
+  torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
   c10::impl::DisablePythonDispatcher dpd_g;
   auto data =
       r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
@@ -2351,7 +2353,7 @@ bool ConcretePyInterpreterVTable::is_contiguous(
         {py::cast(memory_format)});
   }
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     return self->is_contiguous_default(memory_format);
   }
 
@@ -2384,7 +2386,7 @@ bool ConcretePyInterpreterVTable::is_strides_like(
       "torch.ops.aten",
       {py::cast(memory_format)});
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     return self->is_strides_like_default(memory_format);
   }
 
@@ -2413,7 +2415,7 @@ bool ConcretePyInterpreterVTable::is_non_overlapping_and_dense(
           .ptr(),
       "torch.ops.aten");
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     return self->is_non_overlapping_and_dense_default();
   }
 
@@ -2485,7 +2487,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call strides on a tensor with symbolic shapes/strides");
@@ -2544,7 +2546,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call sizes on a tensor with symbolic shapes/strides");
@@ -2575,7 +2577,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     return self->sym_sizes_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`
@@ -2638,15 +2640,14 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
           .ptr(),
       "torch.ops.aten");
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return torch::is_symint(out) ? out.cast<c10::SymInt>()
+                               : c10::SymInt{py::cast<int64_t>(out)};
 }
 
 c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
@@ -2664,12 +2665,11 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
           .ptr(),
       "torch.ops.aten");
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     return self->sym_storage_offset_default();
   }
-  return torch::is_symint_node(out)
-      ? out.cast<c10::SymIntNodeImpl*>()->toSymInt()
-      : c10::SymInt{py::cast<int64_t>(out)};
+  return torch::is_symint(out) ? out.cast<c10::SymInt>()
+                               : c10::SymInt{py::cast<int64_t>(out)};
 }
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
@@ -2688,7 +2688,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out.is(py::none())) {
+  if (out.is_none()) {
     return self->sym_strides_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`
@@ -2699,9 +2699,8 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
-    auto si = torch::is_symint_node(elm)
-        ? elm.cast<c10::SymIntNodeImpl*>()->toSymInt()
-        : c10::SymInt{py::cast<int64_t>(elm)};
+    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
+                                    : c10::SymInt{py::cast<int64_t>(elm)};
     symints.append(si.as_int_unchecked());
   }
 

@@ -3740,7 +3740,7 @@ Examples::
 add_docstr(
     torch.as_strided_scatter,
     r"""
-as_strided_scatter(input, src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(input, src, size, stride, storage_offset=None) -> Tensor
 
 Embeds the values of the :attr:`src` tensor into :attr:`input` along
 the elements corresponding to the result of calling
@@ -11179,7 +11179,7 @@ add_docstr(
     r"""
 flip(input, dims) -> Tensor
 
-Reverse the order of a n-D tensor along given axis in dims.
+Reverse the order of an n-D tensor along given axis in dims.
 
 .. note::
     `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
@@ -11336,7 +11336,7 @@ add_docstr(
     r"""
 rot90(input, k=1, dims=[0,1]) -> Tensor
 
-Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
+Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
 
 Args:
@@ -12444,7 +12444,7 @@ Alias for :func:`torch.linalg.det`
 add_docstr(
     torch.where,
     r"""
-where(condition, x, y) -> Tensor
+where(condition, x, y, *, out=None) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -12455,7 +12455,8 @@ The operation is defined as:
         \text{x}_i & \text{if } \text{condition}_i \\
         \text{y}_i & \text{otherwise} \\
     \end{cases}
-
+"""
+    + r"""
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -12465,6 +12466,9 @@ Arguments:
                           where :attr:`condition` is ``True``
     y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
+
+Keyword args:
+    {out}
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -12497,7 +12501,9 @@ Example::
 
 .. note::
     See also :func:`torch.nonzero`.
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(
