@@ -259,7 +259,7 @@ if(TBB_BUILD_STATIC)
   endif()
 
   if(UNIX AND NOT APPLE)
-    target_link_libraries(tbb_static PUBLIC -ltbb pthread dl)
+    target_link_libraries(tbb_static PUBLIC pthread dl)
   endif()
 endif()
 
