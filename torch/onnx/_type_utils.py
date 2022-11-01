@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import enum
+import typing
 from typing import Dict, Optional, Union
 
 from typing_extensions import Literal
@@ -10,6 +11,11 @@ import torch
 from torch._C import _onnx as _C_onnx
 from torch.onnx import errors
 from torch.onnx._internal import _beartype
+
+
+if typing.TYPE_CHECKING:
+    # Hack to help mypy to recognize torch._C.Value
+    from torch import _C  # noqa: F401
 
 ScalarName = Literal[
     "Byte",
@@ -140,16 +146,15 @@ class JitScalarType(enum.IntEnum):
             raise errors.OnnxExporterError(f"Unknown dtype: {dtype}")
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
-    # TODO: `value: torch._C.Value` type annotation raises (CI machines only):
-    #       NameError: name '_C' is not defined
-    # In both cases, using typing.TypeVar or string literals didn't work
     @classmethod
     @_beartype.beartype
-    def from_value(cls, value, default=None) -> JitScalarType:
+    def from_value(
+        cls, value: Union[None, torch._C.Value, torch.Tensor], default=None
+    ) -> JitScalarType:
         """Create a JitScalarType from an value's scalar type.
 
         Args:
-            value: A `Union[torch._C.Value, torch.Tensor]` object to fetch scalar type from.
+            value: An object to fetch scalar type from.
             default: The JitScalarType to return if a valid scalar cannot be fetched from value
 
         Returns:
