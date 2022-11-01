@@ -2184,15 +2184,7 @@ class TestSparse(TestSparseBase):
             with self.assertRaisesRegex(RuntimeError, "log1p_ requires coalesced input"):
                 sparse_tensor.log1p_()
 
-        if not is_integral_dtype:
-            sparse_tensor.requires_grad_()
-            self.assertTrue(sparse_tensor.requires_grad)
-
-            # test autograd
-            x = sparse_tensor.clone()
-            #y = sparse_tensor.log1p()
-            self.assertTrue(gradcheck(lambda inp: inp.log1p().to_dense(), x, check_sparse_nnz=True))
-        else:
+        if is_integral_dtype:
             with self.assertRaisesRegex(RuntimeError, "only Tensors of floating point dtype can require gradients"):
                 sparse_tensor.requires_grad_()
 
