@@ -322,7 +322,7 @@ aot_prims_nvfuser = AotPrimsNvfuser.compile_fn
 
 
 def _has_incompatible_cudagraph_ops(gm):
-    from torchinductor.utils import (
+    from torch._inductor.utils import (
         has_incompatible_cudagraph_ops as has_incompatible_cudagraph_ops_inductor,
     )
 
@@ -426,7 +426,7 @@ def create_nvprims_backend(*, executor, cudagraphs):
                 )(model, example_inputs)
 
             def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-                from torchinductor.compile_fx import count_tangents
+                from torch._inductor.compile_fx import count_tangents
 
                 num_fixed = count_tangents(model)
                 return partial(
