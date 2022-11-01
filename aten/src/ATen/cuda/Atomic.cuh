@@ -225,7 +225,7 @@ static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BF
                                       return bsum + val;
                                     });
 #else
-  return atomicAdd(reinterpret_cast<__nv_bfloat16*>(address), val);
+  return atomicAdd(reinterpret_cast<at::BFloat16*>(address), val);
 #endif
 }
 
