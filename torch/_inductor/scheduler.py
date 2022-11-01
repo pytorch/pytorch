@@ -922,9 +922,22 @@ class Scheduler:
         be scheduled before the fusion of node1 and node2.
         """
         node1_names = node1.get_names()
-        remaining_deps = {
-            dep.name for dep in node2.unmet_dependencies - node1.read_writes.writes
-        }
+        computed_deps = set()
+        for rd in node2.unmet_dependencies:
+            for cd in node1.read_writes.writes:
+                # StarDep doesn't match MemoryDep, different indices don't match
+                # However, broadcasting sometimes strips dimensions, and if that's the case
+                # we still can match unmet dep
+                if (
+                    rd.name == cd.name
+                    and type(rd) == type(cd)
+                    and rd.index == cd.index
+                    and len(rd.size) >= len(cd.size)
+                    and rd.size[: len(cd.size)] == cd.size
+                ):
+                    computed_deps.add(rd)
+
+        remaining_deps = {dep.name for dep in node2.unmet_dependencies - computed_deps}
         if remaining_deps & node1_names:
             # MemoryDeps didn't match and read different locations of the same buffer.
             # Examples here include:
