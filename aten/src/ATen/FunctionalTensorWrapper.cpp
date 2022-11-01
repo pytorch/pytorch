@@ -139,13 +139,13 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
     ),
     value_(view_value)
 {
-  set_constructor_metadata();
   // Copy the original tensor's ViewMeta vector and push the current one.
   if (base->view_metas_.size() > 0) {
       view_metas_ = base->view_metas_;  // copy
   }
   view_metas_.push_back(meta);
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
+  set_constructor_metadata();
 }
 
 functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_storage_impl() const {
@@ -155,10 +155,14 @@ functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_st
 void FunctionalTensorWrapper::commit_update() {
   auto storage_impl = functional_storage_impl();
   storage_impl->add_update(value_, view_metas_);
-  // Invariant: commit_update() is called during an inplace operation.
-  // Tensor inputs to the operation are synced before runnig the op,
-  // so the current tensor must be up-to-date with its alias at this point.
-  generation_ = storage_impl->generation();
+  // As an optimization, we used to mark the tensor here as "up-to-date",
+  // That way, code like:
+  //   x = torch.ones(1'000'000)
+  //   x[0].add_(1)
+  // doesn't result in an unnecessary materialization of the base.
+  // This optimization results in the slice temporarily haven't incorrect
+  // stride/storage_offset though, and DCE should handle that optimization anyway.
+  // generation_ = storage_impl->generation();
 }
 
 bool FunctionalTensorWrapper::is_up_to_date() const {
@@ -349,30 +353,38 @@ c10::Device FunctionalTensorWrapper::device_custom() const {
   return value_.unsafeGetTensorImpl()->device();
 }
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sizes();
 }
 at::IntArrayRef FunctionalTensorWrapper::strides_custom() const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->strides();
 }
 int64_t FunctionalTensorWrapper::dim_custom() const {
   return value_.unsafeGetTensorImpl()->dim();
 }
 int64_t FunctionalTensorWrapper::numel_custom() const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->numel();
 }
 bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->is_contiguous();
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_sizes();
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_strides();
 }
 c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_size(d);
 }
 c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
+  const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_storage_offset();
 }
 
