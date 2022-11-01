@@ -774,7 +774,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
                                (torch.half, torch.bfloat16, torch.float, torch.double)))
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
-                               (torch.float, torch.double, torch.half)))
+                                     (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_empty_per_sample_weights_and_offsets(self, device, dtypes):
         # Test empty input and per sample weight, and backward pass. There was a CUDA
         # invalid configuration bug (more context in #46572)
@@ -816,7 +816,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
                                (torch.float, torch.double, torch.half, torch.bfloat16)))
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
-                               (torch.float, torch.double, torch.half)))
+                                     (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_offsets(self, device, dtypes):
         def test_per_sample_weights(mode, trainable_scale):
             es = nn.EmbeddingBag(5, 2, mode=mode).to(dtype=dtypes[2], device=device)
@@ -853,7 +853,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
                                (torch.float, torch.double, torch.half, torch.bfloat16)))
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
-                               (torch.float, torch.double, torch.half)))
+                                     (torch.float, torch.double, torch.half)))
     def test_EmbeddingBag_per_sample_weights_and_new_offsets(self, device, dtypes):
         def test_per_sample_weights_new_offsets(mode, trainable_scale, include_last_offset, has_weight=True):
             es = nn.EmbeddingBag(5, 2, mode=mode, include_last_offset=include_last_offset).to(dtype=dtypes[2], device=device)
@@ -1121,7 +1121,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
                                (torch.float, torch.double, torch.half, torch.bfloat16)))
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
-                               (torch.float, torch.double, torch.half)))
+                                     (torch.float, torch.double, torch.half)))
     def test_embedding_bag_device(self, device, dtypes):
         with set_default_dtype(torch.double):
             self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
@@ -1160,7 +1160,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
                                (torch.float, torch.double, torch.half, torch.bfloat16)))
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
-                               (torch.float, torch.double, torch.half)))
+                                     (torch.float, torch.double, torch.half)))
     def test_embedding_bag_non_contiguous_weight(self, device, dtypes):
         weight_tensor = torch.randn(3, 4, dtype=dtypes[2], device=device)
 
