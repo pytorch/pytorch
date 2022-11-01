@@ -277,6 +277,47 @@ def prims_executor(gm, inputs, *, executor):
     return partial(execute, prim_gm, executor=executor)
 
 
+def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
+    # This function is called once per forward+backward pass of a graph in AOT
+    # Autograd. We use it to set up the nvFuser-specific FX graph that is later
+    # passed to the executor.
+    from functorch.compile import min_cut_rematerialization_partition
+
+    from torch._prims.context import TorchRefsNvfuserCapabilityMode
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    # AOT Autograd expects arguments of the traced function to be named exactly
+    # "primals, tangents"
+    def func(primals, tangents):
+        return joint_module(primals, tangents)
+
+    # First we trace the graph conditionally decomposing nodes
+    # that can be sent to the nvfuser executor
+    with TorchRefsNvfuserCapabilityMode():
+        prim_gm = make_fx(func)(*joint_inputs)
+
+    # all nvprims for now
+    recomputable_ops = {
+        getattr(torch.ops.nvprims, prim)
+        for prim in dir(torch.ops.nvprims)
+        if isinstance(getattr(torch.ops.nvprims, prim), torch._ops.OpOverloadPacket)
+    } - {
+        # Remove random ops from recomputable ops
+        torch.ops.nvprims.rand_like,
+        # Remove reduction/normalization ops from recomputable ops
+        torch.ops.nvprims.sum,
+        torch.ops.nvprims.var,
+        torch.ops.nvprims.var_mean,
+        torch.ops.nvprims.native_batch_norm,
+        torch.ops.nvprims.amax,
+        torch.ops.nvprims.amin,
+    }
+
+    return min_cut_rematerialization_partition(
+        prim_gm, joint_inputs, recomputable_ops=recomputable_ops
+    )
+
+
 def create_nvprims_backend(*, executor):
     class NvPrims(AotAutogradStrategy):
         def __init__(self, gm: torch.fx.GraphModule, example_inputs):
@@ -284,11 +325,14 @@ def create_nvprims_backend(*, executor):
             self.executor = executor
 
         def candidate(self):
+            from torch._dynamo import disable
+
             return BACKENDS["aot_autograd"](
                 self.gm,
                 self.example_inputs,
                 fw_compiler=partial(prims_executor, executor=self.executor),
                 bw_compiler=partial(prims_executor, executor=self.executor),
+                partition_fn=disable(nvprims_fw_bw_partition_fn),
             )
 
     return NvPrims
