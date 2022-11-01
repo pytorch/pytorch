@@ -872,6 +872,7 @@ def _get_buffers_and_dtypes_for_computation(
     is either ``None`` if buffer mixed precision is not enabled or the buffer
     low precision dtype otherwise.
     """
+    p_assert(state._is_root, "Expects the root to cast buffers")
     buffers: List[torch.Tensor] = []
     buffer_dtypes: List[Optional[torch.dtype]] = []
     if _is_composable(state):
@@ -882,14 +883,42 @@ def _get_buffers_and_dtypes_for_computation(
             state.mixed_precision.buffer_dtype for _ in range(len(buffers))
         ]
     else:
-        for fsdp_module in state.fsdp_modules(root_module):
-            fsdp_module_buffers = list(fsdp_module.module.buffers(recurse=False))
-            buffers.extend(fsdp_module_buffers)
-            buffer_dtypes.extend(
-                fsdp_module.mixed_precision.buffer_dtype
-                for _ in range(len(fsdp_module_buffers))
-            )
+        visited_buffers = set()
+        # Traverse the FSDP instances bottom-up so that we prefer the owning
+        # FSDP instance's mixed precision setting for each buffer
+        for fsdp_module in reversed(state.fsdp_modules(root_module)):
+            for buffer in fsdp_module.buffers():
+                if buffer in visited_buffers:
+                    continue
+                visited_buffers.add(buffer)
+                buffers.append(buffer)
+                buffer_dtypes.append(fsdp_module.mixed_precision.buffer_dtype)
     assert len(buffers) == len(buffer_dtypes), f"{len(buffers)} {len(buffer_dtypes)}"
+    return buffers, buffer_dtypes
+
+
+@no_type_check
+def _get_buffers_and_dtypes_for_checkpoint(
+    state: _State,
+    root_module: nn.Module,
+) -> Tuple[List[torch.Tensor], List[torch.dtype]]:
+    """
+    Returns all buffers in the module tree rooted at ``root_module`` and a
+    corresponding list of the buffer dtypes for checkpointing. Each buffer
+    dtype is the original buffer dtype ignoring any buffer mixed precision.
+    """
+    p_assert(state._is_root, "Expects the root to cast buffers")
+    buffers: List[torch.Tensor] = []
+    buffer_dtypes: List[Optional[torch.dtype]] = []
+    for buffer_name, buffer in root_module.named_buffers():
+        p_assert(
+            buffer_name in state._buffer_name_to_orig_dtype,
+            f"{buffer_name} is missing from pre-computed dict on rank "
+            f"{state.rank}, which only has keys "
+            f"{state._buffer_name_to_orig_dtype.keys()}",
+        )
+        buffers.append(buffer)
+        buffer_dtypes.append(state._buffer_name_to_orig_dtype[buffer_name])
     return buffers, buffer_dtypes
 
 
