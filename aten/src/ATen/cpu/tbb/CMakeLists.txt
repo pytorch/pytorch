@@ -43,7 +43,6 @@ endif()
 set(TBB_INCLUDES
   "${TBB_ROOT_DIR}/include"
   "${TBB_ROOT_DIR}/src"
-  "${TBB_ROOT_DIR}/src/rml/include"
   ${CMAKE_CURRENT_BINARY_DIR})
 
 option(TBB_BUILD_SHARED          "Build TBB shared library" ON)
@@ -58,7 +57,7 @@ if(APPLE)
 endif()
 
 file(GLOB tbb_src "${TBB_ROOT_DIR}/src/tbb/*.cpp" "${TBB_ROOT_DIR}/src/old/*.cpp")
-list(APPEND tbb_src ${TBB_ROOT_DIR}/src/rml/client/rml_tbb.cpp)
+list(APPEND tbb_src ${TBB_ROOT_DIR}/src/tbb/rml_tbb.cpp)
 file(GLOB to_remove "${TBB_ROOT_DIR}/src/old/test*.cpp")
 if(NOT "${to_remove}" STREQUAL "")
   list(REMOVE_ITEM tbb_src ${to_remove})
@@ -214,32 +213,32 @@ endif()
 
 if(MINGW)
   set(ARCH_PREFIX "${ARCH_PREFIX}-gcc")
-  # there's no win32-gcc-tbb-export.def, use lin32-tbb-export.def
-  execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${TBB_ROOT_DIR}/src/tbb/lin32-tbb-export.def ${TBB_ROOT_DIR}/src/tbb/win32-gcc-tbb-export.def)
+  # there's no win32-gcc-tbb.def, use lin32-tbb.def
+  execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${TBB_ROOT_DIR}/src/tbb/def/lin32-tbb.def ${TBB_ROOT_DIR}/src/tbb/def/win32-gcc-tbb.def)
 endif()
 
 if(MSVC)
   add_custom_command(OUTPUT tbb.def
-    COMMAND ${CMAKE_CXX_COMPILER} /TC /EP ${TBB_ROOT_DIR}/src/tbb/${ARCH_PREFIX}-tbb-export.def  -I ${TBB_ROOT_DIR}/include > tbb.def
-    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbb/${ARCH_PREFIX}-tbb-export.def
+    COMMAND ${CMAKE_CXX_COMPILER} /TC /EP ${TBB_ROOT_DIR}/src/tbb/def/${ARCH_PREFIX}-tbb.def  -I ${TBB_ROOT_DIR}/include > tbb.def
+    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbb/def/${ARCH_PREFIX}-tbb.def
     COMMENT "Preprocessing tbb.def"
   )
 
   add_custom_command(OUTPUT tbbmalloc.def
-    COMMAND ${CMAKE_CXX_COMPILER} /TC /EP ${TBB_ROOT_DIR}/src/tbbmalloc/${ARCH_PREFIX}-tbbmalloc-export.def  -I ${TBB_ROOT_DIR}/include >   tbbmalloc.def
-    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbbmalloc/${ARCH_PREFIX}-tbbmalloc-export.def
+    COMMAND ${CMAKE_CXX_COMPILER} /TC /EP ${TBB_ROOT_DIR}/src/tbbmalloc/def/${ARCH_PREFIX}-tbbmalloc.def  -I ${TBB_ROOT_DIR}/include >   tbbmalloc.def
+    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbbmalloc/def/${ARCH_PREFIX}-tbbmalloc.def
     COMMENT "Preprocessing tbbmalloc.def"
   )
 else()
   add_custom_command(OUTPUT tbb.def
-    COMMAND ${CMAKE_CXX_COMPILER} -xc++ -E ${TBB_ROOT_DIR}/src/tbb/${ARCH_PREFIX}-tbb-export.def  -I ${TBB_ROOT_DIR}/include -o tbb.def
-    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbb/${ARCH_PREFIX}-tbb-export.def
+    COMMAND ${CMAKE_CXX_COMPILER} -xc++ -E ${TBB_ROOT_DIR}/src/tbb/def/${ARCH_PREFIX}-tbb.def  -I ${TBB_ROOT_DIR}/include -o tbb.def
+    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbb/def/${ARCH_PREFIX}-tbb.def
     COMMENT "Preprocessing tbb.def"
   )
 
   add_custom_command(OUTPUT tbbmalloc.def
-    COMMAND ${CMAKE_CXX_COMPILER} -xc++ -E ${TBB_ROOT_DIR}/src/tbbmalloc/${ARCH_PREFIX}-tbbmalloc-export.def  -I ${TBB_ROOT_DIR}/include -o   tbbmalloc.def
-    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbbmalloc/${ARCH_PREFIX}-tbbmalloc-export.def
+    COMMAND ${CMAKE_CXX_COMPILER} -xc++ -E ${TBB_ROOT_DIR}/src/tbbmalloc/def/${ARCH_PREFIX}-tbbmalloc.def  -I ${TBB_ROOT_DIR}/include -o   tbbmalloc.def
+    MAIN_DEPENDENCY ${TBB_ROOT_DIR}/src/tbbmalloc/def/${ARCH_PREFIX}-tbbmalloc.def
     COMMENT "Preprocessing tbbmalloc.def"
   )
 endif()
@@ -285,7 +284,7 @@ if(TBB_BUILD_SHARED)
           ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR}
           RUNTIME DESTINATION ${TBB_INSTALL_RUNTIME_DIR})
   if(UNIX AND NOT APPLE)
-    target_link_libraries(tbb PUBLIC pthread dl)
+    target_link_libraries(tbb PUBLIC -ltbb pthread dl)
   endif()
   if(MSVC)
     target_compile_definitions(tbb PUBLIC __TBB_NO_IMPLICIT_LINKAGE=1)
