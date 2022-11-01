@@ -607,9 +607,13 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
     AT_ERROR(
         "Expected both to be nested, but got a non-nested self and nested other");
   }
+  // TODO currently we only support contiguous NestedTensors
+  auto self_contiguous = self.contiguous();
+  auto mat2_contiguous = mat2.contiguous();
+
   // dispatcher should have guaranteed that at least one is nested
-  auto self_ptr = get_nested_tensor_impl(self);
-  auto mat2_ptr = get_nested_tensor_impl(mat2);
+  auto self_ptr = get_nested_tensor_impl(self_contiguous);
+  auto mat2_ptr = get_nested_tensor_impl(mat2_contiguous);
   TORCH_CHECK(self_ptr->dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(mat2_ptr->dim() == 3, "batch2 must be a 3D tensor");
   int64_t ntensors = self_ptr->size(0), ntensors2 = mat2_ptr->size(0);
