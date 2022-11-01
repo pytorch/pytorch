@@ -322,6 +322,8 @@ aot_prims_nvfuser = AotPrimsNvfuser.compile_fn
 
 
 def prims_executor(gm, inputs, *, executor):
+    from functorch.compile import make_boxed_func
+
     # This function is called once per forward/backward pass of a graph in AOT
     # Autograd. We use it to set up the nvFuser-specific FX graph and return
     # execute function.
@@ -335,7 +337,7 @@ def prims_executor(gm, inputs, *, executor):
         prim_gm = make_fx(gm)(*inputs)
 
     # Then we return a callable that executes the "prim_gm" graph
-    return partial(execute, prim_gm, executor=executor)
+    return make_boxed_func(partial(execute, prim_gm, executor=executor))
 
 
 def create_nvprims_backend(*, executor):
