@@ -415,7 +415,10 @@ class FlatParamHandle:
                         else param_name
                     )
                     prefixed_param_names.append(prefixed_param_name)
-        assert requires_grad is not None
+        assert requires_grad is not None, (
+            "Passed-in `params` were not found in the module tree\n"
+            f"params: {params}\nmodule: {module}"
+        )
         self.flat_param = FlatParamHandle.flatten_params(
             params_to_flatten, requires_grad
         )
@@ -1803,3 +1806,9 @@ class FlatParamHandle:
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
         )
+
+
+# A handles key represents the group of `FlatParamHandle`s involved in a given
+# module's forward. These will be all-gathered together in the pre-forward and
+# pre-backward.
+_HandlesKey = Tuple[FlatParamHandle, ...]
