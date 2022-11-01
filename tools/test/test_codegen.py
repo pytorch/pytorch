@@ -234,7 +234,7 @@ class TestGenSchemaRegistration(unittest.TestCase):
         self.assertEqual(
             registrations,
             """
-TORCH_LIBRARY(custom, m) {
+TORCH_LIBRARY_FRAGMENT(custom, m) {
   m.def("func() -> bool", {});
 
 };""",
@@ -252,7 +252,7 @@ TORCH_LIBRARY(custom, m) {
         self.assertEqual(
             custom_registrations,
             """
-TORCH_LIBRARY(custom, m) {
+TORCH_LIBRARY_FRAGMENT(custom, m) {
   m.def("func() -> bool", {});
 
 };""",
@@ -279,11 +279,11 @@ TORCH_LIBRARY(custom, m) {
         self.assertEqual(
             custom_registrations,
             """
-TORCH_LIBRARY(custom, m) {
+TORCH_LIBRARY_FRAGMENT(custom, m) {
   m.def("func() -> bool", {});
 
 };
-TORCH_LIBRARY(custom2, m) {
+TORCH_LIBRARY_FRAGMENT(custom2, m) {
   m.def("func() -> bool", {});
 
 };""",
