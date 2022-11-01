@@ -44,7 +44,6 @@ unset = object()
 compile_lock = threading.RLock()
 most_recent_backend = None
 
-
 def remove_from_cache(f):
     """
     Make sure f.__code__ is not cached to force a recompile
@@ -120,27 +119,9 @@ class _TorchDynamoContext:
         if isinstance(fn, torch.nn.Module):
             mod = fn
             optimized_forward = self(mod.forward)
-
-            class TorchDynamoNNModuleWrapper:
-                """
-                A wrapper that redirects the forward call to the optimized
-                forward, while for rest it redirects the calls to the original
-                module.
-                """
-
-                def __getattr__(self, name):
-                    return getattr(mod, name)
-
-                def forward(self, *args, **kwargs):
-                    return optimized_forward(*args, **kwargs)
-
-                def __call__(self, *args, **kwargs):
-                    return self.forward(*args, **kwargs)
-
-            new_mod = TorchDynamoNNModuleWrapper()
-            # Save the function pointer to find the original callable while nesting
-            # of decorators.
-            new_mod._torchdynamo_orig_callable = mod
+            new_mod = copy.copy(fn)
+            new_mod.forward = optimized_forward
+            
             return new_mod
 
         assert callable(fn)
@@ -180,8 +161,8 @@ class _TorchDynamoContext:
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
-        if callback not in (None, False):
-            always_optimize_code_objects[fn.__code__] = True
+        # if callback not in (None, False):
+        #     always_optimize_code_objects[fn.__code__] = True
 
         return _fn
 
