@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
+    _all_handles,
     _assert_in_training_states,
     _is_composable,
     _State,
@@ -181,6 +182,44 @@ def _post_forward(
 
 
 @no_type_check
+def _fsdp_root_pre_forward(
+    state: _State,
+    *args,
+    **kwargs,
+):
+    """
+    Runs pre-forward logic specific to the root FSDP instance, which should run
+    before any individual module's pre-forward. If this is called on a non-root
+    FSDP instance, then the forward inputs are returned directly.
+    """
+    p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
+    if not state._is_root:
+        return args, kwargs
+    if state.forward_prefetch:
+        handles_keys = []
+        if _is_composable(state):
+            # TODO: This assumes singleton handles keys.
+            handles_keys = [tuple(handle) for handle in state._handles]
+        else:
+            for fsdp_module in state.fsdp_modules(state):
+                handles_key = tuple(fsdp_module._handles)
+                handles_keys.append(handles_key)
+        for handles_key in handles_keys:
+            state._needs_pre_forward_unshard[handles_key] = True
+    _wait_for_computation_stream(
+        torch.cuda.current_stream(),
+        state._streams["unshard"],
+        state._streams["pre_unshard"],
+    )
+    _clear_grads_if_needed(_all_handles(state))
+    input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
+    args, kwargs = _prepare_forward_inputs(
+        state.compute_device, input_dtype, *args, **kwargs
+    )
+    return args, kwargs
+
+
+@no_type_check
 def _pre_backward_hook(
     state: _State,
     _handles: List[FlatParamHandle],
@@ -201,10 +240,7 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             state._queue_wait_for_post_backward()
-            all_handles = (
-                state._fsdp_handles(state) if _is_composable(state) else state._handles
-            )
-            _clear_grads_if_needed(all_handles)
+            _clear_grads_if_needed(_all_handles(state))
         elif _handles_key:
             _assert_in_training_states(state, [TrainingState.IDLE])
         state.training_state = TrainingState.FORWARD_BACKWARD
@@ -343,8 +379,11 @@ def _post_backward_hook(
             if handle._config.offload_params:
                 # Offload the gradient to CPU to ensure parameters and
                 # gradients are on the same device as required by the optimizer
+                # TODO: Investigate why `NO_SHARD` breaks correctness when
+                # using `non_blocking=True` here.
+                non_blocking = handle.uses_sharded_strategy
                 param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    sharded_grad.detach(), non_blocking=True
+                    sharded_grad.detach(), non_blocking=non_blocking
                 )  # synchronized in the post-backward callback
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform

@@ -54,10 +54,10 @@ from torch.distributed.fsdp._init_utils import (
 )
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
+    _fsdp_root_pre_forward,
     _post_forward,
     _pre_forward,
     _prefetch_handles,
-    _prepare_forward_inputs,
     _reshard,
     _reshard_grads,
     _should_free_in_backward,
@@ -1169,7 +1169,7 @@ class FullyShardedDataParallel(nn.Module):
             "FullyShardedDataParallel.forward"
         ):
             self._lazy_init()
-            args, kwargs = self._fsdp_root_pre_forward(*args, **kwargs)
+            args, kwargs = _fsdp_root_pre_forward(self, *args, **kwargs)
             unused = None
             unshard_fn = functools.partial(
                 self._pre_forward_unshard, handles=self._handles
@@ -1216,38 +1216,6 @@ class FullyShardedDataParallel(nn.Module):
             self._needs_pre_forward_unshard[handles_key] = False
             torch.cuda.current_stream().wait_stream(self._streams["unshard"])
             _prefetch_handles(self, handles_key)
-
-    def _fsdp_root_pre_forward(self, *args, **kwargs):
-        """
-        Runs pre-forward logic specific to the root FSDP instance, which should
-        run before any individual module's pre-forward. This includes
-        synchronizing with the previous iteration and casting the forward
-        inputs appropriately. If this is called on a non-root FSDP instance,
-        then the forward inputs are returned directly.
-        """
-        p_assert(self._is_root is not None, "Expects a root FSDP to have been set")
-        if not self._is_root:
-            return args, kwargs
-        if self.forward_prefetch:
-            for fsdp_module in self.fsdp_modules(self):
-                handles_key = tuple(fsdp_module._handles)
-                if handles_key:
-                    self._needs_pre_forward_unshard[handles_key] = True
-        _wait_for_computation_stream(
-            torch.cuda.current_stream(),
-            self._streams["unshard"],
-            self._streams["pre_unshard"],
-        )
-        _clear_grads_if_needed(self._fsdp_handles(self))
-        input_dtype = (
-            self.mixed_precision.param_dtype
-            if self._mixed_precision_enabled_for_params()
-            else None
-        )
-        args, kwargs = _prepare_forward_inputs(
-            self.compute_device, input_dtype, *args, **kwargs
-        )
-        return args, kwargs
 
     @staticmethod
     @contextlib.contextmanager
