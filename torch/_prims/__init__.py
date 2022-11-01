@@ -190,6 +190,7 @@ __all__ = [
     "empty_strided",
     "scalar_tensor",
     "arange",
+    "int_tensor",
     #
     # Linear algebra (linalg) Prims
     #
@@ -2541,6 +2542,18 @@ scalar_tensor = _make_prim(
     doc=_scalar_tensor_doc,
 )
 
+_int_tensor_doc = """
+    Wraps a SymInt or a list of SymInts into a Tensor with the specified dtype and device.
+"""
+
+int_tensor = _make_prim(
+    # TODO: handle scalar values
+    schema="int_tensor(SymInt[] data, *, ScalarType? dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False) -> Tensor",
+    meta=torch.tensor,
+    impl_aten=torch.tensor,
+    return_type=RETURN_TYPE.NEW,
+    doc=_int_tensor_doc,
+)
 
 #
 # Linear algebra (linalg) prims
