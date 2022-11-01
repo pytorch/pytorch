@@ -271,6 +271,20 @@ class WrapperCodeGen(CodeGen):
                     f"from {config.inductor_import}.triton_ops.batched_matmul import bmm_out as triton_bmm_out"
                 )
 
+        self.write_prefix()
+
+        for name, value in V.graph.constants.items():
+            # include a hash so our code cache gives different constants different files
+            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
+            self.header.writeline(f"{name} = None  # {hashed}")
+
+        self.allocated = set()
+        self.freed = set()
+        self.write_get_cuda_stream = functools.lru_cache(None)(
+            self.write_get_cuda_stream
+        )
+
+    def write_prefix(self):
         self.prefix.splice(
             """
 
@@ -291,17 +305,6 @@ class WrapperCodeGen(CodeGen):
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
                 )
             V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
-
-        for name, value in V.graph.constants.items():
-            # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
-            self.header.writeline(f"{name} = None  # {hashed}")
-
-        self.allocated = set()
-        self.freed = set()
-        self.write_get_cuda_stream = functools.lru_cache(None)(
-            self.write_get_cuda_stream
-        )
 
     def write_get_cuda_stream(self, index):
         name = f"stream{index}"
@@ -391,6 +394,15 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.write_reuse_line(input_buffer, output_buffer)
 
+    def generate_return(self, result, output_refs):
+        if output_refs:
+            result.writeline("return (" + ", ".join(output_refs) + ", )")
+        else:
+            result.writeline("return ()")
+
+    def generate_end(self, result):
+        return
+
     @dynamo_utils.dynamo_timed
     def generate(self):
         result = IndentedBuffer()
@@ -420,10 +432,9 @@ class WrapperCodeGen(CodeGen):
                     result.writeline(line)
 
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
-            if output_refs:
-                result.writeline("return (" + ", ".join(output_refs) + ", )")
-            else:
-                result.writeline("return ()")
+            self.generate_return(result, output_refs)
+
+        self.generate_end(result)
 
         self.add_benchmark_harness(result)
 
@@ -493,25 +504,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
     call_func_id = count()
 
     def __init__(self):
-        super().__init__()
-        self._names_iter = count()
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
-        self.header = IndentedBuffer()
-        self.prefix = IndentedBuffer()
-        self.kernels = {}
-        self.lines = []
-        self.header.splice(
-            f"""
-                from ctypes import c_void_p, c_long
-                import torch
-                import random
-                from torch import empty_strided, as_strided, device
-                from {codecache.__name__} import AsyncCompile
-                aten = torch.ops.aten
-                async_compile = AsyncCompile()
-            """
-        )
+        super().__init__()
 
+    def write_prefix(self):
         self.prefix.splice(
             """
             async_compile.wait(globals())
@@ -559,17 +555,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
             V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
 
-        for name, value in V.graph.constants.items():
-            # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
-            self.header.writeline(f"{name} = None  # {hashed}")
-
-        self.allocated = set()
-        self.freed = set()
-        self.write_get_cuda_stream = functools.lru_cache(None)(
-            self.write_get_cuda_stream
-        )
-
     def write_allocate_line(self, buffer):
         self.writeline(CppAllocateLine(buffer))
 
@@ -587,43 +572,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
             name, f"auto {name} = {layout.view.codegen_reference()};  // alias"
         )
 
-    @dynamo_utils.dynamo_timed
-    def generate(self):
-        result = IndentedBuffer()
-        result.splice(self.header)
-        result.splice(self.prefix)
-
-        out_names = V.graph.get_output_names()
-        with result.indent():
-            while (
-                self.lines
-                and isinstance(self.lines[-1], MemoryPlanningLine)
-                and self.lines[-1].node.name not in out_names
-            ):
-                # these lines will be pointless
-                self.lines.pop()
-
-            # codegen allocations in two passes
-            planning_state = MemoryPlanningState()
-            for i in range(len(self.lines)):
-                if isinstance(self.lines[i], MemoryPlanningLine):
-                    self.lines[i] = self.lines[i].plan(planning_state)
-
-            for line in self.lines:
-                if isinstance(line, MemoryPlanningLine):
-                    line.codegen(result)
-                else:
-                    result.writeline(line)
-            output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
-            if output_refs:
-                if len(output_refs) == 1:
-                    result.writeline("return " + output_refs[0] + "; }''' )")
-                else:
-                    result.writeline(
-                        "return std::make_tuple(" + ", ".join(output_refs) + "); }''' )"
-                    )
+    def generate_return(self, result, output_refs):
+        if output_refs:
+            if len(output_refs) == 1:
+                result.writeline("return " + output_refs[0] + "; }''' )")
             else:
-                result.writeline("return; }''' )")
+                result.writeline(
+                    "return std::make_tuple(" + ", ".join(output_refs) + "); }''' )"
+                )
+        else:
+            result.writeline("return; }''' )")
+
+    def generate_end(self, result):
         result.splice(
             f"""
             module = load_inline(
@@ -643,7 +603,3 @@ class CppWrapperCodeGen(WrapperCodeGen):
             call = _wrap_func(module.call_{self._call_func_id})
             """
         )
-
-        self.add_benchmark_harness(result)
-
-        return result.getvalue()
