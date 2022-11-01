@@ -1184,7 +1184,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
         self.assertEqual(output_non_contig, output_contig)
 
-    @onlyNativeDeviceTypes # currently fails on XLA
+    @onlyNativeDeviceTypes  # currently fails on XLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         with set_default_dtype(torch.double):
