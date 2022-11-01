@@ -219,6 +219,7 @@ def _fsdp_root_pre_forward(
         else:
             for fsdp_module in state.fsdp_modules(state):
                 handles_key = tuple(fsdp_module._handles)
+                handles_keys.append(handles_key)
         for handles_key in handles_keys:
             state._needs_pre_forward_unshard[handles_key] = True
     _wait_for_computation_stream(
