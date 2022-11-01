@@ -172,6 +172,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-test:
@@ -183,12 +184,12 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.test-matrix }}
 
-  linux-xenial-py3-clang5-mobile-build:
-    name: linux-xenial-py3-clang5-mobile-build
+  linux-focal-py3-clang7-mobile-build:
+    name: linux-focal-py3-clang7-mobile-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3-clang5-mobile-build
-      docker-image-name: pytorch-linux-xenial-py3-clang5-asan
+      build-environment: linux-focal-py3-clang7-mobile-build
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
       build-generates-artifacts: false
 
   linux-jammy-cuda-11_6-cudnn8-py3_8-clang12-build:
@@ -198,12 +199,12 @@ jobs:
       build-environment: linux-jammy-cuda11.6-cudnn8-py3.8-clang12
       docker-image-name: pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12
 
-  linux-xenial-py3-clang5-mobile-custom-build-static:
-    name: linux-xenial-py3-clang5-mobile-custom-build-static
+  linux-focal-py3-clang7-mobile-custom-build-static:
+    name: linux-focal-py3-clang7-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3-clang5-mobile-custom-build-static
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: linux-focal-py3-clang7-mobile-custom-build-static
+      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
       build-generates-artifacts: false
 
   linux-bionic-py3_7-clang8-xla-build:
@@ -274,19 +275,19 @@ jobs:
       build-environment: linux-bionic-cuda11.6-py3.10-gcc7-bazel-test
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
-  linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
-    name: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+  linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single:
+    name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
+      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
 
-  linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit:
-    name: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
+  linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit:
+    name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
-      docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+      build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
+      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
 
   linux-focal-py3_7-gcc7-mobile-lightweight-dispatch-build:
     name: linux-focal-py3.7-gcc7-mobile-lightweight-dispatch-build
@@ -296,12 +297,12 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
       build-generates-artifacts: false
 
-  linux-focal-rocm5_2-py3_7-build:
+  linux-focal-rocm5_2-py3_8-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm5.2-py3.7
+    name: linux-focal-rocm5.2-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.2-py3.7
-      docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
       sync-tag: rocm-build
