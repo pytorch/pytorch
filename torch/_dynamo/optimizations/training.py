@@ -367,14 +367,15 @@ def _replace_cpu_with_cuda(gm):
 
 
 def prims_executor(gm, inputs, *, executor, num_fixed=0, cudagraphs):
-    # This function is called once per forward/backward pass of a graph in AOT
-    # Autograd. We use it to set up the nvFuser-specific FX graph and return
-    # execute function.
+    """This function is called once per forward/backward pass of a graph in AOT
+    Autograd. We use it to set up the nvFuser-specific FX graph and return
+    execute function."""
+    from functorch.compile import make_boxed_func
+
     from torch._inductor.compile_fx import align_inputs, cudagraphify
     from torch._prims.context import TorchRefsNvfuserCapabilityMode
     from torch._prims.executor import execute
     from torch.fx.experimental.proxy_tensor import make_fx
-    from functorch.compile import make_boxed_func
 
     # cudagraphify fails if intermediate tensors are CPU and there's an attempt
     # to send them to CUDA
@@ -446,11 +447,15 @@ def create_nvprims_backend(*, executor, cudagraphs):
     return NvPrims
 
 
+class nvfuser_config:
+    cudagraphs = True
+
+
 aot_nvprims_nvfuser = create_nvprims_backend(
-    executor="nvfuser", cudagraphs=True
+    executor="nvfuser", cudagraphs=nvfuser_config.cudagraphs
 ).compile_fn
 aot_nvprims_aten = create_nvprims_backend(
-    executor="aten", cudagraphs=True
+    executor="aten", cudagraphs=nvfuser_config.cudagraphs
 ).compile_fn
 
 
