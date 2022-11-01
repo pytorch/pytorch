@@ -741,6 +741,7 @@ class TestNN(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
     def test_conv2d_channels_last_empty_input(self):
+        # channels_last2d
         input = torch.randn((0, 4, 20, 20))
         conv = torch.nn.Conv2d(4, 4, 3, 1)
         out = conv(input)
@@ -748,6 +749,19 @@ class TestNN(NNTestCase):
         out_cl = conv_cl(input)
         self.assertEqual(out, out_cl)
         input_cl = input.to(memory_format=torch.channels_last)
+        out_cl2 = conv(input_cl)
+        self.assertEqual(out_cl, out_cl2)
+        out_cl3 = conv_cl(input_cl)
+        self.assertEqual(out_cl, out_cl3)
+
+        # channels_last3d
+        input = torch.randn((0, 4, 20, 20, 20))
+        conv = torch.nn.Conv3d(4, 4, 3, 1)
+        out = conv(input)
+        conv_cl = torch.nn.Conv3d(4, 4, 3, 1).to(memory_format=torch.channels_last_3d)
+        out_cl = conv_cl(input)
+        self.assertEqual(out, out_cl)
+        input_cl = input.to(memory_format=torch.channels_last_3d)
         out_cl2 = conv(input_cl)
         self.assertEqual(out_cl, out_cl2)
         out_cl3 = conv_cl(input_cl)

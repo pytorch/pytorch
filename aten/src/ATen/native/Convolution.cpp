@@ -11,9 +11,8 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-
 #include <c10/macros/Macros.h>
-
+#include <ATen/ops/permute.h>
 #include <limits>
 
 #if AT_NNPACK_ENABLED()
@@ -1508,8 +1507,16 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Empty:
     {
-      auto weight_view = weight.is_contiguous() ? at::_unsafe_view(weight, -1) :
-        at::_unsafe_view(weight.clone(at::MemoryFormat::Contiguous), -1);
+      Tensor weight_view; 
+      if(weight.is_contiguous()) {
+        weight_view = at::_unsafe_view(weight, -1);
+      } else if (weight.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+        weight_view = at::_unsafe_view(at::permute(weight, {0, 2, 3, 1}), -1);
+      } else if (weight.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+        weight_view = at::_unsafe_view(at::permute(weight, {0, 2, 3, 4, 1}), -1);
+      } else {
+        weight_view = at::_unsafe_view(weight.clone(at::MemoryFormat::Contiguous), -1);
+      }
       output = (input.size(1) == 0) ? (input.view(-1) * weight_view) : (input * weight_view[0]);
       if (bias.defined()) {
         output.add_(bias[0]);
