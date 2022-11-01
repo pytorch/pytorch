@@ -8,14 +8,7 @@ import unittest
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (
-    parametrize,
-    run_tests,
-    TestCase,
-    TEST_SCIPY,
-    skipCUDAMemoryLeakCheckIf,
-    skipIfTorchDynamo,
-)
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_SCIPY, skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -394,7 +387,6 @@ class TestPrims(TestCase):
         actual = execute(gm, a.mT, executor="nvfuser")
         self.assertEqual(expected, actual)
 
-    @skipIfTorchDynamo
     def test_nvfuser_capability_context(self, device):
         # This test is to ensure that the torch calls are replaced with refs
         # based on the nvfuser+prims capability
@@ -882,6 +874,32 @@ class TestPrims(TestCase):
             # Try executing the graph
             out = execute(gm, a, executor="strictly_nvfuser")
             self.assertEqual(out, func(a))
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_nvprims_view_partitioner(self, device, dtype):
+        # This test verifies that views that are not fused with other ops are
+        # correctly overriden to call aten implementation.
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.nvfuser_executor import maybe_partition_graph
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((4, 5))
+        b = make_arg((5, 4))
+
+        def func(a, b):
+            aa = a.view(b.shape)
+            aa = aa.view(a.shape)
+            return aa.digamma()
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a, b)
+        gm, _ = maybe_partition_graph(gm, False, False)
+
+        out = gm(a, b)
+        self.assertEqual(out, func(a, b))
 
     @onlyCUDA
     @skipCUDAIfRocm

@@ -30,7 +30,7 @@ else:
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
         "use_python_fusion_cache": True,
-        "allow_single_op_fusion": True,
+        "allow_single_op_fusion": False,
     }
 )
 
@@ -268,6 +268,23 @@ class NvfuserGraphModule(torch.nn.Module):
         )
 
 
+# A set of operators that are supported by nvFuser
+# but should not form a fusion group solely on their own
+_non_compute_ops = [
+    "torch.ops." + str(getattr(torch.ops.nvprims, prim).default)
+    for prim in dir(torch.ops.nvprims)
+    if isinstance(getattr(torch.ops.nvprims, prim), torch._ops.OpOverloadPacket)
+    and getattr(torch.ops.nvprims, prim).return_type
+    == torch._prims_common.RETURN_TYPE.VIEW
+]
+
+_allowed_single_node_partition_ops = [
+    "torch.ops.nvprims.native_batch_norm.default",
+    "torch.ops.nvprims.var_mean.default",
+    "torch.ops.nvprims.var_mean.main",
+]
+
+
 def _remove_empty_like_fill(gm: GraphModule):
     # Remove empty_like + fill nodes that prevent lowering to nvprims
     # This is a workaround for nonoptimal traces of C++ code `(1 - tensor)`
@@ -325,7 +342,11 @@ def maybe_partition_graph(
         # CapabilityBasedPartitioner modifies the graph in-place so we need to make a copy of the graph
         gm = deepcopy(gm)
         partitioner = CapabilityBasedPartitioner(
-            gm, supported_ops, allows_single_node_partition=allow_single_op_fusion
+            gm,
+            supported_ops,
+            allows_single_node_partition=allow_single_op_fusion,
+            non_compute_ops=_non_compute_ops,
+            allowed_single_node_partition_ops=_allowed_single_node_partition_ops,
         )
         partitions = partitioner.propose_partitions()
         if len(partitions) == 0:
@@ -350,6 +371,16 @@ def maybe_partition_graph(
                     NvfuserGraphModule(nvfuser_submodule, use_python_fusion_cache),
                 )
 
+        # Go through the graph and replace all the nodes that were converted to
+        # nvprims but won't be sent to nvFuser with a call to PyTorch's eager
+        # mode. This is necessary because torch.ops.* have higher overhead than
+        # calling the eager mode directly.
+        for node in partitioned_graph.graph.nodes:
+            if node.op == "call_function" and str(node.target).startswith("nvprims."):
+                if getattr(node.target, "impl_aten", None) is not None:
+                    node.target = node.target.impl_aten
+        partitioned_graph.graph.eliminate_dead_code()
+        partitioned_graph.recompile()
         return partitioned_graph, any_unsupported
     else:
         return gm, any_unsupported

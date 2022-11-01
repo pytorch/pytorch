@@ -44,16 +44,16 @@ Tensor nested_from_padded_cuda(
     const Tensor& sizes,
     bool do_transform_0213) {
   if (padded.dim() > 1 && padded.dim() < 5) {
+    // Instead of erroring call the generic version
+    if(!(padded.dim() == 4 && do_transform_0213) && !(padded.dim() == 3 && !do_transform_0213)){
+      return at::native::nested_from_padded_generic(padded, sizes, do_transform_0213);
+    }
     if (padded.dtype() != kFloat && padded.dtype() != kHalf) {
       TORCH_WARN_ONCE(
           "nested_from_padded CUDA kernels only support fp32/fp16; falling "
           "back to slower generic kernel");
       return at::native::nested_from_padded_generic(padded, sizes, do_transform_0213);
     }
-    TORCH_CHECK(
-        (padded.dim() == 4 && do_transform_0213) ||
-            (padded.dim() == 3 && !do_transform_0213),
-        "padded tensor size error");
     Tensor target_offsets =
         NestedTensor_batch_offsets_from_size_tensor(sizes, 0);
     Tensor padded_sizes_tensor = at::tensor(padded.sizes());
@@ -322,14 +322,15 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
   const int64_t* tensor_size_ptr = tensor_sizes.data_ptr<int64_t>();
   const int64_t* tensor_stride_ptr = tensor_strides.data_ptr<int64_t>();
 
-  int64_t offset_constant = (tensor_offsets[1] - tensor_offsets[0]) /
-      tensor_size_ptr[0] * tensor_stride_ptr[0];
+  int64_t numel_0 = (tensor_size_ptr[0] * tensor_stride_ptr[0]);
+  TORCH_INTERNAL_ASSERT(numel_0 > 0, "numels must be positive!");
 
+  int64_t offset_constant = (tensor_offsets[1] - tensor_offsets[0]) / numel_0;
   for (int64_t i = 2; i < n_tensors; i++) {
-    int64_t current_offset_constant =
-        (tensor_offsets[i] - tensor_offsets[i - 1]) /
-        tensor_size_ptr[(i - 1) * tensor_stride_0] *
-        tensor_stride_ptr[(i - 1) * tensor_stride_0];
+    // TODO: When 0 seq_len nested tensors are allowed we need to guard against this
+    int64_t previous_numel = tensor_size_ptr[(i - 1) * tensor_stride_0] * tensor_stride_ptr[(i - 1) * tensor_stride_0];
+    TORCH_INTERNAL_ASSERT(previous_numel > 0, "numels must be positive!");
+    int64_t current_offset_constant = (tensor_offsets[i] - tensor_offsets[i - 1]) / previous_numel;
     if (current_offset_constant != offset_constant) {
       return false;
     }
@@ -431,7 +432,6 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
       {Nnz_kv, num_heads, head_dim},
       {nnz_v_stride, head_v_stride, head_dim_stride},
       value_impl->get_storage_offsets()[0]);
-
   std::tuple<Tensor, Tensor> attention_and_weights =
       at::_efficient_attention_forward(
           query_buffer_reshaped.unsqueeze(0),

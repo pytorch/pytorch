@@ -1016,6 +1016,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 8)
 
+    # TODO: make set_rng_state work with FakeTensor/aot_autograd
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_rng_state(self):
         def fn():
             state = torch.get_rng_state()
@@ -1755,6 +1757,26 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_modules(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(4, 3)
+
+            def forward(self, inp):
+                res = torch.zeros(3, 3)
+                for mod in self.modules():
+                    res += self.fc(inp)
+                return res
+
+        mod = Foo()
+        args = (torch.ones(3, 4),)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt, nopython=True)(mod)
+        self.assertTrue(same(mod(*args), opt_mod(*args)))
+        self.assertEqual(cnt.op_count, 5)
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
