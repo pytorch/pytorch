@@ -6,6 +6,9 @@
 
 #include <ATen/NumericUtils.h>
 
+#if !(defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))))
+#include <cuda_bf16.h>
+
 template <typename T>
 struct AtomicFPOp;
 
