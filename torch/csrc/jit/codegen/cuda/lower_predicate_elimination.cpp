@@ -141,7 +141,7 @@ class PredicateAnalyzer : public OptOutDispatch {
       return;
     }
 
-    ExpressionEvaluator ee(split->fusion());
+    ExpressionEvaluator ee;
     const auto in_extent = ee.evaluate(split->in()->extent());
 
     if (!in_extent.has_value() || ((in_extent.value() % factor.value()) != 0)) {

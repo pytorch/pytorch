@@ -37,30 +37,13 @@ class ExpressionEvaluator;
 //! Context for using generic logic on FusionIR
 class FusionIRContext {
  public:
-  using TV_TYPE = TensorView;
   using EVALUATOR_TYPE = ExpressionEvaluator;
-
-  static BinaryOpType getOpType(BinaryOp* bop) {
-    return bop->getBinaryOpType();
-  }
-
-  static UnaryOpType getOpType(UnaryOp* uop) {
-    return uop->getUnaryOpType();
-  }
 };
 
 //! Context for using generic logic on KernelIR
 class KernelIRContext {
  public:
   using EVALUATOR_TYPE = kir::ExpressionEvaluator;
-
-  static BinaryOpType getOpType(BinaryOp* bop) {
-    return bop->getBinaryOpType();
-  }
-
-  static UnaryOpType getOpType(UnaryOp* uop) {
-    return uop->getUnaryOpType();
-  }
 };
 
 template <typename IRContext>
@@ -281,10 +264,23 @@ class FusionPrecomputedValues : public PrecomputedValuesBase<FusionIRContext> {
   using precomputedValuesBaseType = PrecomputedValuesBase<FusionIRContext>;
 
  public:
+  using ParallelExtentMap =
+      std::unordered_map<ParallelType, std::vector<const Val*>, TypeHash>;
+
   FusionPrecomputedValues(Fusion* fusion);
 
   //! Bind concrete values from fusion runtime inputs
   void bindFusionInputs(const KernelArgumentHolder& args);
+
+  //! Bind concrete values from launch constraints
+  void bindParallelExtents(
+      const ParallelExtentMap& parallel_extents,
+      const LaunchParams& launch_constraint);
+
+  //! Bind the NamedScalars corresponding to the
+  //!  concrete parallel dimension sizes after the
+  //!  actual value has been resolved.
+  void bindConcreteParallelTypeValue(ParallelType pt, int64_t value);
 
  private:
   void bindTensorMetaData(
@@ -293,7 +289,13 @@ class FusionPrecomputedValues : public PrecomputedValuesBase<FusionIRContext> {
 
  private:
   Fusion* fusion_ = nullptr;
+
+  //! Contains all the named scalars correspond
+  //!  to thread size of each parallel type.
+  std::unordered_map<ParallelType, std::unique_ptr<std::vector<int>>, TypeHash>
+      thread_dim_value_indices_;
 };
+
 //! PrecomputedValues workspace in Fusion IR context,
 //!  defines the set of values to be collected in each
 //!  kernel IR sequence and the input value binding given each
@@ -308,7 +310,7 @@ class KernelPrecomputedValues : public PrecomputedValuesBase<KernelIRContext> {
   KernelPrecomputedValues(kir::Kernel* kernel);
 
   //! Bind concrete values from fusion runtime inputs
-  void bindKernelInputs(kir::Kernel* kernel, const KernelArgumentHolder& args);
+  void bindKernelInputs(const KernelArgumentHolder& args);
 
   //! Bind concrete values from launch constraints
   void bindParallelExtents(
@@ -331,6 +333,8 @@ class KernelPrecomputedValues : public PrecomputedValuesBase<KernelIRContext> {
   void initializeNamedScalars();
 
  private:
+  kir::Kernel* kernel_ = nullptr;
+
   //! Contains all the named scalars correspond
   //!  to thread size of each parallel type.
   std::unordered_map<ParallelType, std::unique_ptr<std::vector<int>>, TypeHash>

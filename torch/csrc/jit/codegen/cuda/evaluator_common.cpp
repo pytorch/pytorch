@@ -253,7 +253,7 @@ void NaiveValueMachine<IRContext>::makeUnaryOp(UnaryOp* uop) {
 
   int index = makeInstructionEntry();
   inst_type_[index] = InstructionType::UNARY_OP;
-  uop_type_[index] = IRContext::getOpType(uop);
+  uop_type_[index] = uop->getUnaryOpType();
   if (uop_type_[index] == UnaryOpType::Cast) {
     data_type_[index] = uop->out()->getDataType().value();
   }
@@ -273,7 +273,7 @@ void NaiveValueMachine<IRContext>::makeBinaryOp(BinaryOp* bop) {
 
   int index = makeInstructionEntry();
   inst_type_[index] = InstructionType::BINARY_OP;
-  bop_type_[index] = IRContext::getOpType(bop);
+  bop_type_[index] = bop->getBinaryOpType();
   src0_[index] = in0;
   src1_[index] = in1;
   dest_[index] = out;
@@ -404,8 +404,9 @@ void NaiveValueMachine<IRContext>::runBinaryOp(int index) {
   precomputed_values_.defined_[dest_index] = true;
 }
 
-KernelPrecomputedValues::KernelPrecomputedValues(kir::Kernel* kernel) {
-  loadSymbols(collectRuntimeUsedValues(kernel));
+KernelPrecomputedValues::KernelPrecomputedValues(kir::Kernel* kernel)
+    : kernel_(kernel) {
+  loadSymbols(collectRuntimeUsedValues(kernel_));
   kir::ExpressionEvaluator evaluator;
   initializeValueList(evaluator, symbols());
   initializeNamedScalars();
@@ -472,13 +473,12 @@ void KernelPrecomputedValues::initializeNamedScalars() {
 
 // TODO: merge this one with above.
 void KernelPrecomputedValues::bindKernelInputs(
-    kir::Kernel* kernel,
     const KernelArgumentHolder& args) {
   if (hasValidValues()) {
     invalidate();
   }
 
-  const auto& inputs = kernel->inputs();
+  const auto& inputs = kernel_->inputs();
   TORCH_INTERNAL_ASSERT(
       args.size() == inputs.size(), "kernel inputs size does not match args");
 
@@ -543,7 +543,7 @@ void KernelPrecomputedValues::bindConcreteParallelTypeValue(
 FusionPrecomputedValues::FusionPrecomputedValues(Fusion* fusion)
     : fusion_(fusion) {
   loadSymbols(collectRuntimeUsedValues(fusion));
-  ExpressionEvaluator evaluator(fusion);
+  ExpressionEvaluator evaluator;
   initializeValueList(evaluator, symbols());
   initializeIntegerMachine();
 }
@@ -601,6 +601,33 @@ void FusionPrecomputedValues::bindFusionInputs(
         precomputedValuesBaseType::bindValue(
             input->evaluatorIndex(), *static_cast<const double*>(arg->arg()));
       }
+    }
+  }
+}
+
+void FusionPrecomputedValues::bindParallelExtents(
+    const ParallelExtentMap& parallel_extents,
+    const LaunchParams& launch_constraint) {
+  // Bind values of extents of parallelized
+  //  iterdomains from launch_constraint when applicable.
+  // Consistency will be checked at validate().
+  for (const auto& it : parallel_extents) {
+    auto raw_val = launch_constraint.getRawVal(it.first);
+    if (raw_val > 0) {
+      for (auto extent : it.second) {
+        bindValue(extent->evaluatorIndex(), raw_val);
+      }
+    }
+  }
+}
+
+void FusionPrecomputedValues::bindConcreteParallelTypeValue(
+    ParallelType pt,
+    int64_t value) {
+  auto index_list_it = thread_dim_value_indices_.find(pt);
+  if (index_list_it != thread_dim_value_indices_.end()) {
+    for (auto index : *(index_list_it->second)) {
+      bindValue(index, value);
     }
   }
 }

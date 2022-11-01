@@ -392,7 +392,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     }
 
     if (id->extent()->isConstScalar()) {
-      ExpressionEvaluator evaluator(FusionGuard::getCurFusion());
+      ExpressionEvaluator evaluator;
       return evaluator.evaluate(id->extent()).value() == warp_size;
     }
 

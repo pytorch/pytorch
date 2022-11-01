@@ -617,7 +617,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           continue;
         }
 
-        ExpressionEvaluator expr_eval(id->fusion());
+        ExpressionEvaluator expr_eval;
         auto vector_size_optional = expr_eval.evaluate(id->extent());
 
         TORCH_INTERNAL_ASSERT(
@@ -1294,7 +1294,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         continue;
       }
 
-      ExpressionEvaluator expr_eval(id->fusion());
+      ExpressionEvaluator expr_eval;
       auto vector_size_optional = expr_eval.evaluate(id->extent());
 
       TORCH_INTERNAL_ASSERT(

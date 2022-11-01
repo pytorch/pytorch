@@ -620,7 +620,7 @@ TensorView* TensorView::swizzle(
 
   // Check swizzle specific constraints on the input axes:
   if (swizzle_type != Swizzle2DType::ZShape) {
-    ExpressionEvaluator const_eval(fusion());
+    ExpressionEvaluator const_eval;
 
     auto x_id = axis(x);
     auto y_id = axis(y);

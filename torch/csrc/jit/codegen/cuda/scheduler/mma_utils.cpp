@@ -29,7 +29,7 @@ bool canValidateIsInnerDim(
     return true;
   }
   auto expr = leaf->definition();
-  ExpressionEvaluator const_eval(leaf->fusion());
+  ExpressionEvaluator const_eval;
   auto maybe_leaf_size = const_eval.evaluate(leaf->extent());
   if (!maybe_leaf_size.has_value()) {
     return false;
@@ -91,7 +91,7 @@ void checkDimSize(
   TORCH_INTERNAL_ASSERT(
       axis.size() == expect.size(),
       "CheckDimSize: Mismatched axis and expect size");
-  ExpressionEvaluator const_eval(tv->fusion());
+  ExpressionEvaluator const_eval;
   for (auto axis_index : c10::irange(axis.size())) {
     TORCH_INTERNAL_ASSERT(
         ((axis[axis_index] + static_cast<int>(tv->nDims())) >= 0) &&

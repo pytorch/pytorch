@@ -135,7 +135,7 @@ TEST_F(NVFuserTest, FusionExprEvalConstants_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  ExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator;
 
   auto* a = IrBuilder::create<Int>(7);
   auto* b = IrBuilder::create<Int>(3);
@@ -164,7 +164,7 @@ TEST_F(NVFuserTest, FusionExprEvalBindings_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  ExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator;
 
   auto* a = IrBuilder::create<Int>();
   auto* b = IrBuilder::create<Int>();
@@ -194,7 +194,7 @@ TEST_F(NVFuserTest, FusionExprEvalBindings_CUDA) {
   checkIntValue(evaluator, d, -4);
 
   // Reset evaluation context
-  evaluator = ExpressionEvaluator(&fusion);
+  evaluator = ExpressionEvaluator();
 
   evaluator.bind(a, 2);
   evaluator.bind(b, 5);
@@ -235,7 +235,7 @@ TEST_F(NVFuserTest, FusionExprEvalBasic_CUDA) {
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
   // 1. Create an evaluator
-  ExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator;
 
   // 2. Bind values
   //
@@ -286,7 +286,7 @@ TEST_F(NVFuserTest, FusionExprEvalComplex_CUDA) {
   tv5->merge(0);
 
   // 1. Create an evaluator
-  ExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator;
 
   // 2. Bind values
   evaluator.bind(tv0->getRootDomain()[0]->extent(), 129);
@@ -349,7 +349,7 @@ TEST_F(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   GpuLower gpulw(&fusion);
 
   // 1. Create an evaluation context
-  ExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator;
 
   // 2. Bind values
   evaluator.bind(tv0->getRootDomain()[0]->extent(), 6);

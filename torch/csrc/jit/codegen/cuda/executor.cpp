@@ -895,7 +895,7 @@ KernelArgumentHolder FusionExecutor::inferOutputSizes(
   }
 
   kir::ExpressionEvaluator expr_eval;
-  evaluator_precomputed_values_->bindKernelInputs(lowered_->kernel(), args);
+  evaluator_precomputed_values_->bindKernelInputs(args);
   expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 
   // I think this binds something to expr_eval, so even though we are not using
@@ -1065,7 +1065,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
 
     kir::ExpressionEvaluator expr_eval;
-    evaluator_precomputed_values_->bindKernelInputs(lowered_->kernel(), args);
+    evaluator_precomputed_values_->bindKernelInputs(args);
     expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 
     launch_params_ =

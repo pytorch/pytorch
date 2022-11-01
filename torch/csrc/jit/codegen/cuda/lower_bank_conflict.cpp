@@ -27,7 +27,7 @@ int64_t getVectorizeSize(kir::TensorIndex* ti) {
       continue;
     }
 
-    ExpressionEvaluator expr_eval(id->fusion());
+    ExpressionEvaluator expr_eval;
     auto vector_size_optional = expr_eval.evaluate(id->extent());
 
     TORCH_INTERNAL_ASSERT(
@@ -159,8 +159,7 @@ class InferLaunchParams : public kir::IrVisitor {
  private:
   InferLaunchParams(
       const std::vector<Expr*>& exprs,
-      const std::unordered_map<std::string, IntOrDouble>& known_values)
-      : expr_eval_(exprs[0]->fusion()) {
+      const std::unordered_map<std::string, IntOrDouble>& known_values) {
     for (auto pair : known_values) {
       expr_eval_.bind(pair.first, pair.second);
     }
@@ -221,7 +220,7 @@ class BankConflictInfo : public kir::IrVisitor {
       const std::vector<Expr*>& exprs,
       c10::optional<LaunchParams> launch_params,
       const std::unordered_map<std::string, IntOrDouble>& known_values)
-      : launch_params_(launch_params), expr_eval_common_(exprs[0]->fusion()) {
+      : launch_params_(launch_params) {
     expr_eval_common_.bind("blockIdx.x", 0);
     expr_eval_common_.bind("blockIdx.y", 0);
     expr_eval_common_.bind("blockIdx.z", 0);

@@ -72,7 +72,7 @@ class KernelIrScanner : private IrVisitor {
         summary_.dynamic_smem_allocations.push_back(allocate);
         break;
       case MemoryType::Local:
-        if (!ExpressionEvaluator::isConst(allocate->size())) {
+        if (!allocate->size()->isConstInt()) {
           summary_.has_dynamic_local_memory_allocations = true;
           summary_.dynamic_lmem_allocations.emplace_back(allocate);
         }

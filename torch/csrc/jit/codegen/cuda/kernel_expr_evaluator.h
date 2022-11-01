@@ -48,9 +48,6 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
   //! Try to evaluate a Kernel IR value
   c10::optional<IntOrDouble> evaluate(const Val* value);
 
-  //! Returns true if `value` is known before binding kernel inputs
-  static bool isConst(const Val* value);
-
   //! Debugging helper, prints all the currently known values
   void print() const;
 
@@ -59,17 +56,15 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
   }
 
  private:
-  void handle(const Int* value) final;
-  void handle(const Double* value) final;
-  void handle(const NamedScalar* named_scalar) final;
+  c10::optional<IntOrDouble> getValue(const Val* value);
+
   void handle(const UnaryOp* unary_op) final;
   void handle(const BinaryOp* binary_op) final;
 
  private:
-  std::unordered_map<const Val*, IntOrDouble> known_values_;
   KernelPrecomputedValues* precomputed_values_ = nullptr;
-  std::unordered_map<ParallelType, Int::ScalarType, TypeHash>
-      known_parallel_dimensions_;
+  std::unordered_map<const Val*, IntOrDouble> known_values_;
+  std::unordered_map<std::string, IntOrDouble> known_named_scalars_;
 };
 
 } // namespace kir

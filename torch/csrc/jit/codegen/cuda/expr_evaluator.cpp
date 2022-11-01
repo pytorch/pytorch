@@ -1,7 +1,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -15,7 +14,7 @@ namespace cuda {
 
 namespace {
 
-bool equals(Val* value, const IntOrDouble& concrete_value) {
+bool equals(const Val* value, const IntOrDouble& concrete_value) {
   switch (value->getDataType().value()) {
     case DataType::Int: {
       if (!concrete_value.is_int()) {
@@ -46,14 +45,22 @@ c10::optional<IntOrDouble> toOptionalIntOrDouble(c10::optional<T> i) {
 
 } // namespace
 
-void ExpressionEvaluator::bind(Val* value, const IntOrDouble& concrete_value) {
+void ExpressionEvaluator::bind(
+    const Val* value,
+    const IntOrDouble& concrete_value) {
   if (equals(value, concrete_value)) {
     return;
   }
+  TORCH_CHECK(value->isScalar());
+  TORCH_CHECK(
+      value->dtype() == DataType::Int || value->dtype() == DataType::Double);
   TORCH_CHECK(!value->isConstScalar(), "Tried to bind to a constant value");
   TORCH_CHECK(
       value->definition() == nullptr,
-      "Tried to bind to a value that is computed in the fusion IR");
+      "Tried to bind to a value that is computed in the Fusion IR: ",
+      value->toInlineString(),
+      " with ",
+      concrete_value);
   if (value->isA<NamedScalar>()) {
     known_named_scalars_[value->as<NamedScalar>()->name()] = concrete_value;
   } else {
@@ -67,21 +74,48 @@ void ExpressionEvaluator::bind(
   known_named_scalars_[name] = concrete_value;
 }
 
-c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(Val* value) {
-  if (evaluator_precomputed_values_ != nullptr) {
-    return toOptionalIntOrDouble(
-        evaluator_precomputed_values_->getMaybeValueFor(value));
-  } else {
-    auto maybe_concrete_value = getValue(value);
-    if (!maybe_concrete_value.has_value()) {
-      if (value->definition() != nullptr) {
-        OptOutDispatch::handle(value->definition());
-        maybe_concrete_value = getValue(value);
-      }
+c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(const Val* value) {
+  if (precomputed_values_ && precomputed_values_->ready()) {
+    if (precomputed_values_->getMaybeValueFor(value).has_value()) {
+      return toOptionalIntOrDouble(
+          precomputed_values_->getMaybeValueFor(value));
     }
-    return maybe_concrete_value;
   }
-  return c10::nullopt;
+
+  auto maybe_concrete_value = getValue(value);
+  if (!maybe_concrete_value.has_value()) {
+    if (value->definition() != nullptr) {
+      FUSER_PERF_SCOPE("ExpressionEvaluator::evaluate");
+      OptInConstDispatch::handle(value->definition());
+      maybe_concrete_value = getValue(value);
+    }
+  }
+  return maybe_concrete_value;
+}
+
+c10::optional<IntOrDouble> ExpressionEvaluator::getValue(const Val* value) {
+  TORCH_INTERNAL_ASSERT(
+      value->isAnInt() || value->isADouble(),
+      value->toString(),
+      " is not a supported type in expression evaluation.");
+
+  if (value->isScalar() && value->isConst()) {
+    if (value->isADouble()) {
+      return toOptionalIntOrDouble(value->as<Double>()->value());
+    }
+    return toOptionalIntOrDouble(value->as<Int>()->value());
+  }
+
+  if (value->isA<NamedScalar>()) {
+    const auto it = known_named_scalars_.find(value->as<NamedScalar>()->name());
+    if (it != known_named_scalars_.end()) {
+      return c10::optional<IntOrDouble>(it->second);
+    }
+  }
+
+  const auto it = known_values_.find(value);
+  return it != known_values_.end() ? c10::optional<IntOrDouble>(it->second)
+                                   : c10::nullopt;
 }
 
 void ExpressionEvaluator::print() const {
@@ -92,36 +126,19 @@ void ExpressionEvaluator::print() const {
     std::cout << kv.first << " = " << kv.second << " ; "
               << *kv.first->getValType() << "\n";
   }
+
+  for (const auto& kv : known_named_scalars_) {
+    std::cout << kv.first << " = " << kv.second << " ;\n";
+  }
+
+  std::cout << "\nPre-computed Values\n";
+  if (precomputed_values_ != nullptr) {
+    precomputed_values_->print();
+  }
   std::cout << "--------------------\n\n";
 }
 
-c10::optional<IntOrDouble> ExpressionEvaluator::getValue(Val* value) {
-  TORCH_INTERNAL_ASSERT(
-      value->isAnInt() || value->isADouble(),
-      "Expression Evaluation does not support values other than integers/doubles at this time.");
-
-  if (value->getValType().value() == ValType::Scalar) {
-    if (value->isAnInt() && value->as<Int>()->value().has_value()) {
-      return toOptionalIntOrDouble(value->as<Int>()->value());
-    }
-    if (value->isADouble() && value->as<Double>()->value().has_value()) {
-      return toOptionalIntOrDouble(value->as<Double>()->value());
-    }
-  }
-
-  if (value->isA<NamedScalar>()) {
-    const auto it = known_named_scalars_.find(value->as<NamedScalar>()->name());
-    return it != known_named_scalars_.end()
-        ? c10::optional<IntOrDouble>(it->second)
-        : c10::nullopt;
-  } else {
-    const auto it = known_values_.find(value);
-    return it != known_values_.end() ? c10::optional<IntOrDouble>(it->second)
-                                     : c10::nullopt;
-  }
-}
-
-void ExpressionEvaluator::handle(UnaryOp* uop) {
+void ExpressionEvaluator::handle(const UnaryOp* uop) {
   using namespace IntOrDouble_functions;
   const auto in = evaluate(uop->in());
   if (in.has_value()) {
@@ -155,7 +172,7 @@ void ExpressionEvaluator::handle(UnaryOp* uop) {
   }
 }
 
-void ExpressionEvaluator::handle(BinaryOp* bop) {
+void ExpressionEvaluator::handle(const BinaryOp* bop) {
   using namespace IntOrDouble_functions;
   const auto lhs = evaluate(bop->lhs());
   const auto rhs = evaluate(bop->rhs());

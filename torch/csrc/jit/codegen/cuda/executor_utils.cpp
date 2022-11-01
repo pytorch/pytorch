@@ -912,7 +912,7 @@ ExpressionEvaluator bindFusionInputs(
       " args size: ",
       args.size());
 
-  ExpressionEvaluator expr_eval(fusion);
+  ExpressionEvaluator expr_eval;
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.

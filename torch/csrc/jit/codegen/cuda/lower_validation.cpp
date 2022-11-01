@@ -385,7 +385,7 @@ class VectorizeValidator : public OptInDispatch {
         v_id->extent()->isConstScalar(),
         "Vectorizing a domain requires a constant size.");
 
-    ExpressionEvaluator const_expr_eval(fusion);
+    ExpressionEvaluator const_expr_eval;
 
     auto vector_size_optional = const_expr_eval.evaluate(v_id->extent());
 
@@ -717,7 +717,7 @@ std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets
 
   std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> map;
 
-  ExpressionEvaluator ee(fusion);
+  ExpressionEvaluator ee;
 
   for (auto it = exprs.rbegin(); it != exprs.rend(); ++it) {
     auto expr = *it;
@@ -807,7 +807,7 @@ void validateSplit(
     Val* split_offset,
     int64_t domain_offset,
     const std::string& err_msg_prefix) {
-  ExpressionEvaluator ee(split_offset->fusion());
+  ExpressionEvaluator ee;
 
   TORCH_INTERNAL_ASSERT(split_offset->isA<Int>());
   auto split_offset_value = ee.evaluate(split_offset);

@@ -48,7 +48,7 @@ void ParallelDimensionMap::registerConstantExtent(IterDomain* id) {
     return;
   }
 
-  ExpressionEvaluator ee(id->fusion());
+  ExpressionEvaluator ee;
   auto extent_int = ee.evaluate(id->extent());
   TORCH_INTERNAL_ASSERT(
       extent_int.has_value(),

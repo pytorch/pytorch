@@ -211,7 +211,7 @@ int64_t Val::evaluateInt() {
     return this->as<Int>()->value().value();
   }
 
-  ExpressionEvaluator ee(fusion());
+  ExpressionEvaluator ee;
   auto evaluated_val = ee.evaluate(this);
   TORCH_INTERNAL_ASSERT(
       evaluated_val.has_value(),
@@ -228,7 +228,7 @@ double Val::evaluateDouble() {
     return this->as<Double>()->value().value();
   }
 
-  ExpressionEvaluator ee(fusion());
+  ExpressionEvaluator ee;
   auto evaluated_val = ee.evaluate(this);
   TORCH_INTERNAL_ASSERT(
       evaluated_val.has_value(),

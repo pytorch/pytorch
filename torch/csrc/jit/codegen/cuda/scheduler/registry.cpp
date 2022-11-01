@@ -741,8 +741,7 @@ void SchedulerRuntimeInfo::initialize(
     }
   }
 
-  expression_evaluator_ =
-      std::make_unique<ExpressionEvaluator>(complete_fusion_);
+  expression_evaluator_ = std::make_unique<ExpressionEvaluator>();
   if (create_expr_evaluator) {
     initializeExpressionEvaluator(args);
   }

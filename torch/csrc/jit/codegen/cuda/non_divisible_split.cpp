@@ -99,7 +99,7 @@ void NonDivisibleSplitInfo::propagateReachability(
 }
 
 Val* NonDivisibleSplitInfo::getMaybeNonDivisibleExtent(Split* split) const {
-  ExpressionEvaluator ee(split->fusion());
+  ExpressionEvaluator ee;
   auto in_extent = ee.evaluate(split->in()->extent());
   auto factor = ee.evaluate(split->factor());
 

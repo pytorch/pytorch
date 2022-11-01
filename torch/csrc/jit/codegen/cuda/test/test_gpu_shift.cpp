@@ -4156,7 +4156,7 @@ TEST_F(NVFuserTest, FusionPartialSplit1_CUDA) {
   // so it's going to be just 2 rather than 3.
   const int numel_x = 18;
 
-  ExpressionEvaluator evaluator(&fusion);
+  ExpressionEvaluator evaluator;
   auto root_extent = tv4->getRootDomain()[0]->extent();
   evaluator.bind(root_extent, numel_x);
   auto extent_eval = evaluator.evaluate(tv4->axis(0)->extent());
