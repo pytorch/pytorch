@@ -305,11 +305,8 @@ class TestForeach(TestCase):
             for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, True, disable_fastpath, values=scalarlist)
-                if case == "mixed":
-                    pass
-                else:
-                    self._test_pointwise_op(
-                        device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist))
+                self._test_pointwise_op(
+                    device, dtype, op, N, True, disable_fastpath, values=torch.tensor(scalarlist))
 
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_slowpath(self, device, dtype, op):
@@ -321,11 +318,8 @@ class TestForeach(TestCase):
             for case, scalarlist in getScalarLists(N):
                 self._test_pointwise_op(
                     device, dtype, op, N, False, False, values=scalarlist)
-                if case == "mixed":
-                    pass
-                else:
-                    self._test_pointwise_op(
-                        device, dtype, op, N, False, False, values=torch.tensor(scalarlist))
+                self._test_pointwise_op(
+                    device, dtype, op, N, False, False, values=torch.tensor(scalarlist))
 
     # note(mkozuki): fastpath test uses dtypes which fastpath implementation supports.
     # To confirm the dtypes of `OpInfo` cover the dtypes that the function support,
