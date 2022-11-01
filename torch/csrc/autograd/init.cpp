@@ -343,7 +343,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_RestorePythonTLSSnapshot")
       .def(py::init<>());
 
-  // TODO: line up this binding with DisableTorchFunction
   py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
   py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")

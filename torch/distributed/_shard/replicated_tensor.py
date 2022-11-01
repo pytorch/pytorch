@@ -109,7 +109,7 @@ class ReplicatedTensor(torch.Tensor):
         # We cann't do super().__torch_function__() as it implicitly convert the result
         # back to tensor subclasses, where in our case, we need to control the output type
         # base on the inter-op rules we defined.
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             rs = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return rs
@@ -157,7 +157,7 @@ class ReplicatedTensor(torch.Tensor):
         return True
 
     def __setstate__(self, state):
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             self.data = state
             self.requires_grad = state.requires_grad
             from torch.distributed._shard.api import _get_current_process_group
