@@ -1,17 +1,36 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <ATen/SmallVector.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <c10/macros/Macros.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/irange.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
-#include <array>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_trilinear.h>
+#include <ATen/ops/_trilinear_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/bilinear_native.h>
+#include <ATen/ops/bmm.h>
+#include <ATen/ops/einsum_native.h>
+#include <ATen/ops/linear_native.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/mkldnn_linear.h>
+#include <ATen/ops/mm.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/tensordot_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <cctype>
-#include <cstddef>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -90,16 +109,16 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // dims in lro appear in left, right and output, similarly, lo: left and output, ro: right and output
   // also the sizes are kept track of for reshaping
   std::vector<int64_t> lro, lo, ro;
-  int64_t lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
+  SymInt lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
   Tensor left = left_;
   Tensor right = right_;
   for (const auto i : c10::irange(dim)) {
-    auto sl = left.size(i)!=1;
-    auto sr = right.size(i)!=1;
+    auto sl = left.sym_size(i)!=1;
+    auto sr = right.sym_size(i)!=1;
     if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
       if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
-        TORCH_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
-        sum_size *= left.size(i);
+        TORCH_CHECK(left.sym_size(i)==right.sym_size(i), "non-broadcast dimensions must match");
+        sum_size *= left.sym_size(i);
       } else if (sl) { // if it is only in one of left and right, we can sum right away
         left = left.sum(i, true);
       } else if (sr) {
@@ -107,15 +126,15 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
       }
     } else if (sl && sr) { // now deal with dimensions that will be in the output
       // dimensions nontrivially in both left and right must be of the same size
-      TORCH_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+      TORCH_CHECK(left.sym_size(i)==right.sym_size(i), "non-broadcast dimensions must match");
       lro.push_back(i);
-      lro_size *= left.size(i);
+      lro_size *= left.sym_size(i);
     } else if (sl) { // keep track of dimensions appearing only once
       lo.push_back(i);
-      lo_size *= left.size(i);
+      lo_size *= left.sym_size(i);
     } else {
       ro.push_back(i);
-      ro_size *= right.size(i);
+      ro_size *= right.sym_size(i);
     }
   }
   // we now work with the following permutations / shapes.
@@ -126,12 +145,12 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // then the permuted output is a view of bmm(left, right)
   // finally, opermutation reverts the permutation to the original order of dimensions
   auto out_num_dim = lro.size() + lo.size() + sum_dims_.size() + ro.size();
-  std::vector<int64_t> out_size;
+  std::vector<SymInt> out_size;
   out_size.reserve(out_num_dim);
-  for (auto& d : lro) out_size.push_back(left.size(d));
-  for (auto& d : lo) out_size.push_back(left.size(d));
+  for (auto& d : lro) out_size.push_back(left.sym_size(d));
+  for (auto& d : lo) out_size.push_back(left.sym_size(d));
   for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warning about not using d
-  for (auto& d : ro) out_size.push_back(right.size(d));
+  for (auto& d : ro) out_size.push_back(right.sym_size(d));
 
   std::vector<int64_t> lpermutation(lro);
   lpermutation.insert(lpermutation.end(), lo.begin(), lo.end());
@@ -162,10 +181,10 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   }
 
   // now we can execute the operations above
-  left = left.permute(lpermutation).reshape({lro_size, lo_size, sum_size});
-  right = right.permute(rpermutation).reshape({lro_size, sum_size, ro_size});
+  left = left.permute(lpermutation).reshape_symint({lro_size, lo_size, sum_size});
+  right = right.permute(rpermutation).reshape_symint({lro_size, sum_size, ro_size});
   Tensor result = at::bmm(left, right);
-  result = result.view(out_size).permute(opermutation);
+  result = result.view_symint(out_size).permute(opermutation);
 
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
@@ -402,10 +421,10 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   // the operands to align the dimensions following the indices computed above.
   // We also count how many operands have dimension with size != 1 for each
   // label used to identify which dimensions can be contracted.
-  std::vector<int64_t> label_size(TOTAL_LABELS, 1);
-  std::vector<int64_t> ell_sizes(ell_num_dim, 1);
+  std::vector<SymInt> label_size(TOTAL_LABELS, 1);
+  std::vector<SymInt> ell_sizes(ell_num_dim, 1);
   std::vector<uint64_t> dim_counts(perm_index, 0);
-  std::vector<Tensor> ops;
+  std::deque<Tensor> ops;
   for (const auto i : irange(num_ops)) {
     auto op = operands[i];
     std::vector<int64_t> permutation(perm_index, -1);
@@ -415,10 +434,10 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
         // Iterate over each dimension covered by ellipsis
         const auto ndim = operands[i].ndimension() - (static_cast<int64_t>(op_labels[i].size()) - 1);
         for (auto j = ell_num_dim - ndim; j < ell_num_dim; ++j) {
-          if (op.size(dim) != 1) {
+          if (op.sym_size(dim) != 1) {
             // Update ellipsis size
             TORCH_CHECK(
-                ell_sizes[j] == 1 || ell_sizes[j] == op.size(dim),
+                ell_sizes[j] == 1 || ell_sizes[j] == op.sym_size(dim),
                 "einsum(): dimension ",
                 dim,
                 " covered by ellipsis in operand ",
@@ -428,25 +447,25 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
                 " which does not broadcast with previously seen ellipsis with size ",
                 ell_sizes[j],
                 " for the respective dimension");
-            ell_sizes[j] = op.size(dim);
+            ell_sizes[j] = op.sym_size(dim);
             ++dim_counts[ell_index + j];
           }
           permutation[ell_index + j] = dim++;
         }
       } else if (permutation[label_perm_index[s]] == -1) {
-        if (op.size(dim) != 1) {
+        if (op.sym_size(dim) != 1) {
           // Update subscript
           TORCH_CHECK(
-              label_size[s] == 1 || label_size[s] == op.size(dim),
+              label_size[s] == 1 || label_size[s] == op.sym_size(dim),
               "einsum(): subscript ",
               subscript_to_label(s),
               " has size ",
-              op.size(dim),
+              op.sym_size(dim),
               " for operand ",
               i,
               " which does not broadcast with previously seen size ",
               label_size[s]);
-          label_size[s] = op.size(dim);
+          label_size[s] = op.sym_size(dim);
           ++dim_counts[label_perm_index[s]];
         }
         permutation[label_perm_index[s]] = dim++;
@@ -454,15 +473,15 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
         // Repeated label, take diagonal
         const auto prev_dim = permutation[label_perm_index[s]];
         TORCH_CHECK(
-          op.size(dim) == op.size(prev_dim),
+          op.sym_size(dim) == op.sym_size(prev_dim),
             "einsum(): subscript ",
             subscript_to_label(s),
             " is repeated for operand ",
             i,
             " but the sizes don't match, ",
-            op.size(dim),
+            op.sym_size(dim),
             " != ",
-            op.size(prev_dim));
+            op.sym_size(prev_dim));
         op = op.diagonal(0, prev_dim, dim).movedim(-1, prev_dim);
       }
     }
@@ -512,16 +531,16 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
     SmallVector<int64_t, 5> a_dims_to_sum;
     SmallVector<int64_t, 5> b_dims_to_sum;
     for (auto dim = out_num_dim; dim < perm_index; ++dim) {
-      if (a.size(dim) != 1 && b.size(dim) != 1) {
+      if (a.sym_size(dim) != 1 && b.sym_size(dim) != 1) {
         if (--dim_counts[dim] == 1) {
           sum_dims.push_back(dim);
           dim_counts[dim] = 0;
         }
       } else if (dim_counts[dim] == 1) {
-        if (a.size(dim) != 1) {
+        if (a.sym_size(dim) != 1) {
           a_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
-        } else if (b.size(dim) != 1) {
+        } else if (b.sym_size(dim) != 1) {
           b_dims_to_sum.push_back(dim);
           dim_counts[dim] = 0;
         }
@@ -536,14 +555,29 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
       b = b.sum(b_dims_to_sum, true);
     }
 
-    ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    if (path.has_value()) {
+      ops.emplace_back(sumproduct_pair(a, b, sum_dims, true));
+    } else {
+      ops.emplace_front(sumproduct_pair(a, b, sum_dims, true));
+    }
   }
 
   // Sum out contraction dims
   if (perm_index - out_num_dim > 0) {
-    std::vector<int64_t> sum_dims(perm_index - out_num_dim);
-    std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
-    ops[0] = ops[0].sum(sum_dims);
+    // if there were ops to contract, we would have already done so
+    // in the previous loop and all the dims to sum are now 1
+    // NB: use view instead of squeeze (or sum) for faster (mps) performance
+    if (num_ops > 1) {
+      auto sizes = ops[0].sym_sizes().vec();
+      for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {
+        sizes.erase(sizes.begin() + dim);
+      }
+      return ops[0].view_symint(sizes);
+    } else {
+      std::vector<int64_t> sum_dims(perm_index - out_num_dim);
+      std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
+      return ops[0].sum(sum_dims);
+    }
   }
 
   return ops[0];

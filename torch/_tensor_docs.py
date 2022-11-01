@@ -1584,7 +1584,7 @@ See :func:`torch.diagonal_scatter`
 add_docstr_all(
     "as_strided_scatter",
     r"""
-as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(src, size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided_scatter`
 """,
@@ -2229,14 +2229,15 @@ add_docstr_all(
 get_device() -> Device ordinal (Integer)
 
 For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
-For CPU tensors, an error is thrown.
+For CPU tensors, this function returns `-1`.
 
 Example::
 
     >>> x = torch.randn(3, 4, 5, device='cuda:0')
     >>> x.get_device()
     0
-    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+    >>> x.cpu().get_device()
+    -1
 """,
 )
 
@@ -6542,6 +6543,6 @@ add_docstr_all(
     "to_padded_tensor",
     r"""
 to_padded_tensor(padding, output_size=None) -> Tensor
-See :func:`torch.nested.to_padded_tensor`
+See :func:`to_padded_tensor`
 """,
 )

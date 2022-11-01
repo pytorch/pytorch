@@ -11,7 +11,6 @@
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #ifdef USE_NCCL
@@ -355,6 +354,12 @@ PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(c10::cuda::CUDACachingAllocator::name());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::cuda::device_synchronize();
@@ -387,7 +392,7 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
 static PyGILState_STATE cudaMutexGILState;
 
 PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
+  auto mutex = c10::cuda::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
   // run while we have the cudaMutex, but not the GIL, they might try to e.g.
@@ -407,7 +412,7 @@ PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaUnlockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
+  auto mutex = c10::cuda::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
@@ -914,6 +919,15 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_clearBlasWorkspaces_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::cuda::clearCublasWorkspaces();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_rocm_is_backward_pass(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1003,6 +1017,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_getCurrentBlasHandle_wrap,
      METH_NOARGS,
      nullptr},
+    {"_cuda_clearCublasWorkspaces",
+     THCPModule_clearBlasWorkspaces_wrap,
+     METH_NOARGS,
+     nullptr},
     {"_cuda_isCurrentStreamCapturing",
      THCPModule_isCurrentStreamCapturing_wrap,
      METH_NOARGS,
@@ -1047,6 +1065,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_cudaCachingAllocator_set_allocator_settings",
      THCPModule_cudaCachingAllocator_set_allocator_settings,
      METH_O,
+     nullptr},
+    {"_cuda_getAllocatorBackend",
+     THCPModule_getAllocatorBackend,
+     METH_NOARGS,
      nullptr},
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
     {"_cuda_ipc_collect", THCPModule_cudaIPCCollect, METH_NOARGS, nullptr},

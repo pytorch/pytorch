@@ -14,16 +14,17 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
           token: ${{ secrets.MERGEBOT_TOKEN }}
 
       - name: Setup Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.8
+          python-version: '3.8'
           architecture: x64
+          check-latest: false
           cache: pip
           cache-dependency-path: |
             **/.circleci/docker/requirements-ci.txt
@@ -40,7 +41,7 @@ jobs:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           output=$(python3 .github/scripts/fetch_latest_green_commit.py)
-          echo "::set-output name=latest_viable_sha::$output"
+          echo "latest_viable_sha=$output" >> "${GITHUB_OUTPUT}"
         id: get-latest-commit
 
       - name: Push SHA to viable/strict branch
