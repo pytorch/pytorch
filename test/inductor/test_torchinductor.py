@@ -3,9 +3,11 @@ import contextlib
 import dataclasses
 import functools
 import importlib
+import itertools
 import os
 import random
 import sys
+import typing
 import unittest
 import weakref
 from unittest.mock import patch
@@ -18,6 +20,7 @@ from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -58,7 +61,7 @@ try:
     from torch._inductor.codecache import CppCodeCache
 
     CppCodeCache.load("")
-    HAS_CPU = True
+    HAS_CPU = not IS_FBCODE
 except (
     CalledProcessError,
     OSError,
@@ -409,13 +412,6 @@ class SweepInputs2:
                 cls.gen_template(name1, name2)
 
 
-class SweepInputsCpuTest(SweepInputs2, TestCase):
-    gen = InputGen(10, "cpu")
-
-
-SweepInputsCpuTest.populate()
-
-
 class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
@@ -719,6 +715,17 @@ class CommonTemplate:
             return (a.sum(), a.max(), a.min(), a.argmax())
 
         self.common(fn, (torch.full((4,), float("-inf")),))
+
+    def test_reduction4(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("Non-deterministic CPU results")
+
+        def fn(a):
+            return (a.argmax(-1), a.argmin(-1))
+
+        inputs = (torch.ones(128), torch.ones(4, 4, 1))
+        for i in inputs:
+            self.common(fn, (i,))
 
     @patch.object(config, "dynamic_shapes", False)
     def test_unroll_small_reduction(self):
@@ -1283,6 +1290,65 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    # For gpu path, there has a accurcy issue,
+    # see https://github.com/pytorch/pytorch/issues/87745.
+    @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
+    def test_conv2d_unary(self):
+        def _unary_list():
+            unary_list = [
+                torch.nn.ReLU(),
+                torch.nn.Sigmoid(),
+                torch.nn.Tanh(),
+                torch.nn.Hardswish(),
+                torch.nn.LeakyReLU(0.1, inplace=False),
+                torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
+                torch.nn.GELU(approximate="none"),
+                torch.nn.GELU(approximate="tanh"),
+            ]
+            return unary_list
+
+        test_memory_format = [torch.contiguous_format, torch.channels_last]
+        options = itertools.product(
+            _unary_list(),
+            [True, False],
+            [1, 3],
+            [1, 2],
+            [1, 4],
+            test_memory_format,
+        )
+
+        for (
+            unary_fn,
+            bias,
+            kernel_size,
+            dilation,
+            groups,
+            memory_format,
+        ) in options:
+            oC = 32 * groups
+            iC = 3 * groups
+            x_shape = (1, iC, 112, 112)
+            mod = torch.nn.Sequential(
+                torch.nn.Conv2d(
+                    iC,
+                    oC,
+                    kernel_size=kernel_size,
+                    dilation=dilation,
+                    groups=groups,
+                    bias=bias,
+                ),
+                unary_fn,
+            ).eval()
+
+            # TODO: add bf16 test for cpu path?
+            v = torch.randn(x_shape, dtype=torch.float32).to(
+                memory_format=memory_format
+            )
+            self.common(
+                mod,
+                (v,),
+            )
+
     def test_gather1(self):
         def fn(a, b):
             return (
@@ -1474,6 +1540,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @unittest.skipIf(HAS_CUDA, "only support cpu channels_last")
     def test_conv2d_channels_last(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(3, 3, 1, 1),
@@ -1930,6 +1997,92 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    def test_transpose_add(self):
+        def fn(a, b):
+            return a.t() + b
+
+        self.common(
+            fn, (torch.randn([16, 32]), torch.randn([32, 16])), check_lowp=False
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_softmax_one_kernel(self):
+        def fn(x):
+            dim = 1
+            x_max = torch.amax(x, dim, keepdim=True)
+            unnormalized = torch.exp(x * x_max)
+            result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+            return result
+
+        self.common(fn, (torch.randn([16, 32]),), check_lowp=False)
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_cauchy(self):
+        def fn(x, y):
+            return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
+
+        self.common(
+            fn,
+            (
+                torch.randn(32),
+                torch.randn(32),
+            ),
+            # Absolute difference: 0.0003662109375 (up to 0.0001 allowed)
+            # Relative difference: 1.8804297408767818e-05 (up to 1e-05 allowed)
+            atol=5 * 1e-4,
+            rtol=5 * 1e-5,
+            check_lowp=False,
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_gather_scatter(self):
+        def fn(node_feat, edge_index):
+            src_node_feat = node_feat[edge_index[0]]
+            dst_node_feat = node_feat[edge_index[1]]
+            edge_feat = src_node_feat - dst_node_feat + 1
+            new_node_feat = torch.zeros_like(node_feat)
+            new_node_feat.scatter_add_(
+                0, edge_index[1].unsqueeze(-1).expand_as(edge_feat), edge_feat
+            )
+            return new_node_feat
+
+        num_nodes = 16
+        num_features = 32
+        node_feat = torch.randn(num_nodes, num_features)
+        edge_index = torch.randint(0, num_nodes, size=(2, num_nodes * 5))
+        self.common(
+            fn,
+            (
+                node_feat,
+                edge_index,
+            ),
+            check_lowp=False,
+        )
+        if self.device != "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @patch.object(torch._inductor.config, "max_fusion_size", 1)
+    def test_no_mega_fusion_during_lowering(self):
+        n = 50
+
+        def fn(*args):
+            x = args[0]
+            for i in range(n):
+                x = torch.add(x, args[i])
+            return x
+
+        self.common(
+            fn,
+            [torch.randn(64) for _ in range(n)],
+            check_lowp=False,
+        )
+        print("-->", torch._inductor.metrics.generated_kernel_count)
+        if self.device != "cpu":
+            self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
+
     def test_move_arange(self):
         def fn(x):
             return torch.arange(len(x), device="cpu").to(x.device) + x
@@ -2041,6 +2194,17 @@ class CommonTemplate:
             atol=1e-5,
             rtol=3e-05,
         )
+
+    def test_pow3(self):
+        # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
+        def fn(x):
+            z = torch.tensor(0.123, device=self.device)
+            w = z + x
+            return torch.pow(w, 0.5)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        input = torch.rand(())
+        self.assertTrue(same(opt(input), fn(input)))
 
     def test_glu(self):
         def fn(x):
@@ -3437,6 +3601,31 @@ class CommonTemplate:
             ],
         )
 
+    # From https://github.com/pytorch/torchdynamo/issues/1352
+    def test_max_pool2d_with_indices_backward4(self):
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [5, 5], [1, 1], [2, 2], [1, 1], False, c
+            )
+
+        x = torch.randn([2, 64, 3, 4])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [5, 5],
+            [1, 1],
+            2,
+            1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -3819,29 +4008,23 @@ class CommonTemplate:
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
+        dtypes = [
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64,
+        ]
 
-        inputs = (
-            rand_strided((2, 3), (3, 1), device="cuda"),
-            rand_strided((), (), device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-
-    @requires_cuda()
-    def test_unspec_inputs_fp16(self):
-        def fn(x, y):
-            return x + y, x * y, x / y
-
-        opt = torch._dynamo.optimize("inductor")(fn)
-
-        inputs = (
-            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
-            rand_strided((), (), dtype=torch.float16, device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        for d in dtypes:
+            inputs = (
+                rand_strided((2, 3), (3, 1), dtype=torch.float32, device="cuda"),
+                rand_strided((), (), dtype=d, device="cpu"),
+            )
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
+            inputs = (inputs[1], inputs[0])
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
@@ -3902,6 +4085,11 @@ class CommonTemplate:
 
 
 if HAS_CPU:
+
+    class SweepInputsCpuTest(SweepInputs2, TestCase):
+        gen = InputGen(10, "cpu")
+
+    SweepInputsCpuTest.populate()
 
     class CpuTests(TestCase):
         common = check_model
@@ -4290,6 +4478,87 @@ if HAS_CUDA:
             ]
             result = forward(*args)
             assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
+
+    class TritonCodeGenTests(TestCase):
+        from torch._inductor.triton_ops.autotune import CachingAutotuner
+
+        class NoOpCompilerBackend:
+            def __init__(self):
+                self.example_args = None
+                self.model = None
+
+            def noop_backend(
+                self,
+                model_: torch.fx.GraphModule,
+                example_inputs_: typing.List[torch.Tensor],
+            ):
+                """
+                The Noop backend does not compile the fx graph it is given.
+                Instead, it transforms the fx graph so that its functions are
+                aten operations. It then saves this graph.
+                """
+                from functorch._src.aot_autograd import Interpreter
+                from torch._inductor.decomposition import select_decomp_table
+                from torch._subclasses import FakeTensorMode
+
+                fake_mode = FakeTensorMode()
+
+                def interpret(*args, **kwargs):
+                    return Interpreter(model_).run(*args[0:], **kwargs)
+
+                fake_flat_tensor_args = [
+                    fake_mode.from_tensor(x) for x in example_inputs_
+                ]
+                fw_module = make_fx(interpret, select_decomp_table())(
+                    *fake_flat_tensor_args
+                )
+                self.model = fw_module
+                self.example_args = fake_flat_tensor_args
+                return lambda x: example_inputs_
+
+        def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
+            from torch._inductor.debug import DebugContext
+            from torch._inductor.graph import GraphLowering
+            from torch._inductor.virtualized import V
+
+            cxt = TritonCodeGenTests.NoOpCompilerBackend()
+            torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
+            graph = GraphLowering(cxt.model)
+            graph.num_static_inputs = 0
+            kernels = []
+            with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
+                graph.run(*(cxt.example_args))
+                mod = graph.compile_to_module()
+                i = 0
+                while True:
+                    attribute = f"kernel{i}"
+                    if not hasattr(mod, attribute):
+                        break
+                    else:
+                        kernels.append(getattr(mod, attribute))
+                        i = i + 1
+            return kernels
+
+        def test_divisibile_by_16_covers_numel_args(self):
+            def fn(a: torch.Tensor) -> torch.Tensor:
+                return torch.sum(a)
+
+            kernels = self.get_kernels(fn, [torch.randn([256, 256], device="cuda")])
+            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+
+            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+            # at slot 3 should be in the divisible by 16 descriptor
+            arguments_that_are_divisible_by_16_in_kernel0 = (
+                kernels[0].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+
+            # kernel1 reduces from 8 elements to a single scalar.
+            arguments_that_are_divisible_by_16_in_kernel1 = (
+                kernels[1].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
 
 
 if __name__ == "__main__":
