@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -135,7 +134,6 @@ class KIRCleaner : public OptOutDispatch {
 } // namespace
 
 void GpuLower::collectPaddedParallelDims() {
-  ExpressionEvaluator ee;
   bool can_be_single_warp = true;
 
   auto warp_size = at::cuda::warp_size();
@@ -165,12 +163,12 @@ void GpuLower::collectPaddedParallelDims() {
       // Check all possible bindings of TIDx to see
       //  if TIDx will eventually be bound to a single warp.
       if (id->getParallelType() == ParallelType::TIDx) {
-        auto eval_dim = ee.evaluate(id->extent());
         auto size_after_padding = id->getMaybeSizeAfterPadding();
         bool padding_to_single_warp = size_after_padding.has_value() &&
             size_after_padding.value() == warp_size;
 
-        if ((!eval_dim.has_value() || eval_dim.value() > warp_size) &&
+        if (id->extent()->isConstInt() &&
+            id->extent()->evaluateInt() > warp_size &&
             !padding_to_single_warp) {
           // If we see any other TIDx binding that's larger than
           //  a warp or unknown, we shouldn't lower warp reduce
@@ -179,7 +177,8 @@ void GpuLower::collectPaddedParallelDims() {
           warp_pad_info_.is_tidx_single_warp = false;
         } else if (can_be_single_warp) {
           if (padding_to_single_warp ||
-              (eval_dim.has_value() && eval_dim.value() == warp_size)) {
+              (id->extent()->isConstInt() &&
+               id->extent()->evaluateInt() == warp_size)) {
             warp_pad_info_.is_tidx_single_warp = true;
           }
         }

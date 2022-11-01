@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
@@ -616,14 +616,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           continue;
         }
 
-        ExpressionEvaluator expr_eval;
-        auto vector_size_optional = expr_eval.evaluate(id->extent());
-
         TORCH_INTERNAL_ASSERT(
-            vector_size_optional.has_value(),
+            id->extent()->isConstInt(),
             "Could not evaluate constant value bound to vectorized dim.");
 
-        vector_word_size = vector_size_optional->as<int64_t>();
+        vector_word_size = id->extent()->evaluateInt();
 
         vectorize_op = id->getParallelType() == ParallelType::Vectorize;
         misaligned_op =
@@ -1293,17 +1290,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         continue;
       }
 
-      ExpressionEvaluator expr_eval;
-      auto vector_size_optional = expr_eval.evaluate(id->extent());
-
       TORCH_INTERNAL_ASSERT(
-          vector_size_optional.has_value(),
+          id->extent()->isConstInt(),
           "Could not evaluate constant value bound to vectorized dim.");
 
       TORCH_INTERNAL_ASSERT(
           id->getParallelType() != ParallelType::MisalignedVectorize,
           "LoadStoreOp: no support yet for mis-aligned vectorization");
-      vector_word_size = vector_size_optional->as<int64_t>();
+      vector_word_size = id->extent()->evaluateInt();
       vectorize_op = true;
       break;
     }

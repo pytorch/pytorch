@@ -4,7 +4,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/contiguity.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -298,18 +297,17 @@ Val* getProducerIndexWithPartialSplit(
   // accounted.
 
   auto diff = SimplifyingIrBuilder::subExpr(consumer_offset, producer_offset);
-  ExpressionEvaluator ee;
-  auto diff_eval = ee.evaluate(diff);
   // We currently only allow constant offsetting
-  TORCH_INTERNAL_ASSERT(diff_eval.has_value(), "Invalid partial split");
+  TORCH_INTERNAL_ASSERT(
+      diff->isConstScalar(),
+      "Invalid partial split, must be a constant value.");
 
-  if (diff_eval.value() == 0) {
+  if (diff->evaluateInt() == 0) {
     return producer_index;
   }
 
   return SimplifyingIrBuilder::addExpr(
-      producer_index,
-      SimplifyingIrBuilder::create<Int>(diff_eval->as<int64_t>()));
+      producer_index, SimplifyingIrBuilder::create<Int>(diff->evaluateInt()));
 }
 
 } // namespace

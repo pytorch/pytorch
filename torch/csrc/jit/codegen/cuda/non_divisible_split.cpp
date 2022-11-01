@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -99,9 +98,15 @@ void NonDivisibleSplitInfo::propagateReachability(
 }
 
 Val* NonDivisibleSplitInfo::getMaybeNonDivisibleExtent(Split* split) const {
-  ExpressionEvaluator ee;
-  auto in_extent = ee.evaluate(split->in()->extent());
-  auto factor = ee.evaluate(split->factor());
+  c10::optional<int64_t> in_extent;
+  if (split->in()->extent()->isConstInt()) {
+    in_extent = split->in()->extent()->evaluateInt();
+  }
+
+  c10::optional<int64_t> factor;
+  if (split->factor()->isConstInt()) {
+    factor = split->factor()->evaluateInt();
+  }
 
   if (in_extent.has_value() && factor.has_value() &&
       in_extent.value() % factor.value() == 0) {

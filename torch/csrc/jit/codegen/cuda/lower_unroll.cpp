@@ -233,7 +233,6 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 }
 
 bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
-  ExpressionEvaluator eval;
   std::vector<kir::ForLoop*> loops({fl});
 
   const auto& pred_map = GpuLower::current()->threadPredMap();
@@ -264,8 +263,7 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
       visit_once = true;
     }
     if (!visit_once) {
-      const auto result = eval.evaluate(loop->stop());
-      if (result.has_value() && result.value() == 1) {
+      if (loop->stop()->isConstInt() && loop->stop()->evaluateInt() == 1) {
         visit_once = true;
       }
     }

@@ -1,7 +1,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/compute_at.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -620,8 +619,6 @@ TensorView* TensorView::swizzle(
 
   // Check swizzle specific constraints on the input axes:
   if (swizzle_type != Swizzle2DType::ZShape) {
-    ExpressionEvaluator const_eval;
-
     auto x_id = axis(x);
     auto y_id = axis(y);
 

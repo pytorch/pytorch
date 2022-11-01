@@ -29,12 +29,10 @@ bool canValidateIsInnerDim(
     return true;
   }
   auto expr = leaf->definition();
-  ExpressionEvaluator const_eval;
-  auto maybe_leaf_size = const_eval.evaluate(leaf->extent());
-  if (!maybe_leaf_size.has_value()) {
+  if (!leaf->extent()->isConstInt()) {
     return false;
   }
-  if (maybe_leaf_size.value() != inner_dim_size) {
+  if (leaf->extent()->evaluateInt() != inner_dim_size) {
     return false;
   }
 
@@ -45,12 +43,10 @@ bool canValidateIsInnerDim(
         return false;
       }
       // Const split only
-      auto maybe_factor = const_eval.evaluate(split->factor());
-      if (!maybe_factor.has_value()) {
+      if (!split->factor()->isConstInt()) {
         return false;
       }
-      int factor = maybe_factor->as<int64_t>();
-      if (factor < inner_dim_size) {
+      if (split->factor()->evaluateInt() < inner_dim_size) {
         // This might be too restrictive. Would need more
         //   bookkeeping to relax.
         return false;
@@ -64,11 +60,10 @@ bool canValidateIsInnerDim(
       }
 
       // Only support merging with constant sized dims
-      maybe_leaf_size = const_eval.evaluate(leaf->extent());
-      if (!maybe_leaf_size.has_value()) {
+      if (!leaf->extent()->isConstInt()) {
         return false;
       }
-      if (maybe_leaf_size->as<int64_t>() != inner_dim_size) {
+      if (leaf->extent()->evaluateInt() != inner_dim_size) {
         return false;
       }
       leaf = merge->inner();
@@ -91,7 +86,6 @@ void checkDimSize(
   TORCH_INTERNAL_ASSERT(
       axis.size() == expect.size(),
       "CheckDimSize: Mismatched axis and expect size");
-  ExpressionEvaluator const_eval;
   for (auto axis_index : c10::irange(axis.size())) {
     TORCH_INTERNAL_ASSERT(
         ((axis[axis_index] + static_cast<int>(tv->nDims())) >= 0) &&
@@ -101,16 +95,15 @@ void checkDimSize(
         " ",
         tv->nDims());
     auto id = tv->axis(axis[axis_index]);
-    auto maybe_extent = const_eval.evaluate(id->extent());
     TORCH_CHECK(
-        maybe_extent.has_value(),
+        id->extent()->isConstInt(),
         "Mma warp mapping: instruction tile has to be constant");
     TORCH_CHECK(
-        maybe_extent.value() == expect[axis_index],
+        id->extent()->evaluateInt() == expect[axis_index],
         "Mma warp mapping: unexpected tile size at",
         axis_index,
         ":",
-        maybe_extent.value(),
+        id->extent()->evaluateInt(),
         "vs",
         expect[axis_index]);
   }

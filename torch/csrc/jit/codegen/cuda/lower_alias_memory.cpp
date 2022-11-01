@@ -567,13 +567,12 @@ class BufferUseDefInfo {
     // Skip smaller register sizes
     bool should_try_alias = true;
     if (mem_type == MemoryType::Local) {
-      const auto register_size = expr_evaluator_.evaluate(alloc->size());
-      if (!register_size.has_value()) {
+      if (!alloc->size()->isConstInt()) {
         TORCH_WARN_ONCE(
             "Lower_alias_memory : dynamic sized register allocation");
         return;
       }
-      if (register_size->as<int64_t>() <= kRegisterSizeThreshold) {
+      if (alloc->size()->evaluateInt() <= kRegisterSizeThreshold) {
         should_try_alias = false;
       }
     }
@@ -811,9 +810,6 @@ class BufferUseDefInfo {
 
   //! Owning list of collected allocation info
   ScopeInfoOwningPtrList all_loop_infos_;
-
-  //! Expression Evaluator to infer size of register allocation
-  ExpressionEvaluator expr_evaluator_;
 
   //! Position counter when iterating through the exprs list
   int current_pos_ = -1;

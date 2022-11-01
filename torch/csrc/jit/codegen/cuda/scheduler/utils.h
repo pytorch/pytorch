@@ -13,7 +13,6 @@ namespace fuser {
 namespace cuda {
 
 class SchedulerRuntimeInfo;
-class ExpressionEvaluator;
 class HeuristicSummary;
 
 namespace scheduler_utils {

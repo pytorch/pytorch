@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_predicate_elimination.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -140,10 +139,10 @@ class PredicateAnalyzer : public OptOutDispatch {
       return;
     }
 
-    ExpressionEvaluator ee;
-    const auto in_extent = ee.evaluate(split->in()->extent());
+    auto in_extent = split->in()->extent();
 
-    if (!in_extent.has_value() || ((in_extent.value() % factor.value()) != 0)) {
+    if (!in_extent->isConstInt() ||
+        ((in_extent->evaluateInt() % factor.value()) != 0)) {
       needs_predicate_ = true;
       return;
     }

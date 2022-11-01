@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -47,15 +46,13 @@ void ParallelDimensionMap::registerConstantExtent(IterDomain* id) {
     return;
   }
 
-  ExpressionEvaluator ee;
-  auto extent_int = ee.evaluate(id->extent());
   TORCH_INTERNAL_ASSERT(
-      extent_int.has_value(),
+      id->extent()->isConstInt(),
       "Extent of ",
       id->toString(),
       " should have been constant, but could not be evaluated at compile time.");
 
-  auto const_extent = extent_int->as<int64_t>();
+  auto const_extent = id->extent()->evaluateInt();
 
   // Uses index map
   auto concrete_id = getCAMappedConcreteDomain(id);

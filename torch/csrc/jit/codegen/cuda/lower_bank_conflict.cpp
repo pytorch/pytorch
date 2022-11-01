@@ -27,14 +27,11 @@ int64_t getVectorizeSize(kir::TensorIndex* ti) {
       continue;
     }
 
-    ExpressionEvaluator expr_eval;
-    auto vector_size_optional = expr_eval.evaluate(id->extent());
-
     TORCH_INTERNAL_ASSERT(
-        vector_size_optional.has_value(),
+        id->extent()->isConstInt(),
         "Could not evaluate constant value bound to vectorized dim.");
 
-    return vector_size_optional->as<int64_t>();
+    return id->extent()->evaluateInt();
   }
   return 1;
 }
