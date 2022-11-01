@@ -124,7 +124,7 @@ bool check_fast_path_restrictions(
     return true;
 }
 
-c10::optional<std::vector<c10::Scalar>> convert_tensor_to_scalar_list(
+std::vector<c10::Scalar> convert_tensor_to_scalar_list(
     const Tensor& scalarList_,
     int64_t expect_length) {
   std::vector<c10::Scalar> scalarList;
