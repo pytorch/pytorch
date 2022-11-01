@@ -2685,7 +2685,7 @@
 - name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   self: grad.reshape_symint(self.sym_sizes())
 
-# Nested Tensor
+# NestedTensor
 - name: _nested_tensor_from_tensor_list(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
@@ -2705,6 +2705,12 @@
   self: grad.values()
   nested_size: non_differentiable
   nested_strides: non_differentiable
+
+# Transformers
+- name: _scaled_dot_product_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
+  query, key, value: _scaled_dot_product_attention_backward(grad, attn_mask, dropout, need_attn_weights, is_causal)
+  attn_mask: non_differentiable
+
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor

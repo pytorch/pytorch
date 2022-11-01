@@ -20,7 +20,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     IS_WINDOWS,
-    slowTest
+    slowTest,
+    gradcheck
 )
 from torch.testing._internal.common_cuda import TEST_CUDA, SM80OrLater
 
@@ -851,6 +852,14 @@ class TestTransformers(NNTestCase):
                 expected = sdp_ref(q, k, v, attn_mask=a, dropout_p=dropout_p)
                 if input_dim > 3:
                     expected = (expected[0].view(-1, N_prime, L, E), expected[1].view(-1, N_prime, L, S))
+                q = q.double()
+                k = k.double()
+                v = v.double()
+                q.requires_grad_()
+                k.requires_grad_()
+                v.requires_grad_()
+                gradcheck(sdp_ref, (q, k, v))
+                gradcheck(torch.ops.aten._scaled_dot_product_attention, (q, k, v))
 
             need_attn_weights: bool = True
             with freeze_rng_state():
