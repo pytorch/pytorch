@@ -3030,18 +3030,22 @@ torch.cuda.synchronize()
             def backward(ctx, grad):
                 self.assertTrue(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
-                return grad.mm(b.t()), a.t().mm(grad)
+                a_grad, b_grad = grad.mm(b.t()), a.t().mm(grad)
+                self.assertTrue(a_grad.dtype is dtype and b_grad.dtype is dtype)
+                return a_grad, b_grad
 
         mymm = MyMM.apply
 
         x = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
         y = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
 
-        with torch.cuda.amp.autocast():
-            output = mymm(x, y)
-            self.assertTrue(output.dtype is torch.float16)
-            loss = output.sum()
-        loss.backward()
+        dtypes = (torch.float16, torch.bfloat16) if TEST_BF16 else (torch.float16,)
+        for dtype in dtypes:
+            with torch.cuda.amp.autocast(dtype=dtype):
+                output = mymm(x, y)
+                self.assertTrue(output.dtype is dtype)
+                loss = output.sum()
+            loss.backward()
 
     def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):
