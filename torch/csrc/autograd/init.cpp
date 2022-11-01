@@ -60,13 +60,17 @@ struct DisableAutocast {
 
 struct EnableTorchFunction {
   EnableTorchFunction()
-      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
-    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+      : old_subclass_(at::impl::PythonTorchFunctionTLS::is_disable_subclass()),
+        old_all_(at::impl::PythonTorchFunctionTLS::is_disable_all()){
+    at::impl::PythonTorchFunctionTLS::set_disable_subclass(false);
+    at::impl::PythonTorchFunctionTLS::set_disable_all(false);
   }
   ~EnableTorchFunction() {
-    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+    at::impl::PythonTorchFunctionTLS::set_disable_subclass(old_subclass_);
+    at::impl::PythonTorchFunctionTLS::set_disable_all(old_all_);
   }
-  bool old_;
+  bool old_subclass_;
+  bool old_all_;
 };
 
 struct EnablePythonDispatcher {
