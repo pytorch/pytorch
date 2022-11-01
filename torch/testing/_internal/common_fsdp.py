@@ -615,19 +615,22 @@ class MixtureOfExperts(NestedWrappedModule):
         if self.delay_before_free_ms > 0:
             expert = self.module[2]
             if isinstance(expert, FSDP):
-                orig_reshard = self.module[2]._reshard
+                orig_reshard = torch.distributed.fsdp._runtime_utils._reshard
 
-                def _free_full_params_with_delay(*args):
+                def _delayed_reshard(*args, **kwargs):
                     torch.cuda._sleep(
                         int(self.delay_before_free_ms * get_cycles_per_ms())
                     )
-                    return orig_reshard(*args)
+                    return orig_reshard(*args, **kwargs)
 
-                assert hasattr(
-                    expert, "_reshard"
-                ), "expert FSDP module should have a `_reshard()` method"
-                with mock.patch.object(
-                    expert, "_reshard", _free_full_params_with_delay
+                # The first patch covers any `from torch... import _reshard`
+                # uses in `fully_sharded_data_parallel.py`, and the second
+                # patch covers any `import torch..._reshard` uses in general.
+                with mock.patch(
+                    "torch.distributed.fsdp.fully_sharded_data_parallel._reshard",
+                    _delayed_reshard,
+                ), mock.patch(
+                    "torch.distributed.fsdp._runtime_utils._reshard", _delayed_reshard
                 ):
                     return self.module(x)
 
