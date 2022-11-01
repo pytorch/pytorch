@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
+    IS_WINDOWS,
 )
 from torch.testing._internal.jit_utils import RUN_CUDA
 
@@ -25,6 +26,7 @@ def is_pre_volta():
 
 
 @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+@unittest.skipIf(IS_WINDOWS, "TorchDynamo is not supported on Windows")
 @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
 @unittest.skipIf(is_pre_volta(), "Only supported on Volta and newer devices.")
 class TestNvFuserDynamo(TestCase):
