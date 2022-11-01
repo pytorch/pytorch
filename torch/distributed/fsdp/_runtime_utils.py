@@ -532,8 +532,11 @@ def _post_backward_hook(
             if handle._config.offload_params:
                 # Offload the gradient to CPU to ensure parameters and
                 # gradients are on the same device as required by the optimizer
+                # TODO: Investigate why `NO_SHARD` breaks correctness when
+                # using `non_blocking=True` here.
+                non_blocking = handle.uses_sharded_strategy
                 param._cpu_grad.copy_(  # type: ignore[attr-defined]
-                    sharded_grad.detach(), non_blocking=True
+                    sharded_grad.detach(), non_blocking=non_blocking
                 )  # synchronized in the post-backward callback
                 # Since the sharded gradient is produced in the post-backward
                 # stream and consumed later in the computation stream, inform
