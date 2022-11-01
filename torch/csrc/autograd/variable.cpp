@@ -789,7 +789,6 @@ void handle_view_on_rebase(
           " allow the output views to be modified inplace. You should replace the inplace operation by an"
           " out-of-place one.");
     } else if (creation_meta == CreationMeta::NO_GRAD_MODE) {
-      TORCH_INTERNAL_ASSERT(!grad_fn);
       msg = c10::str(
           msg,
           " Given that this use case is ambiguous and error-prone, it is forbidden."
