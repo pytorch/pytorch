@@ -133,7 +133,7 @@ def meta_angle(self):
         _, result_dtype = elementwise_dtypes(
             self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
         )
-    return self.new_empty(self.size(), dtype=result_dtype)
+    return torch.empty_like(self, dtype=result_dtype)
 
 
 @register_meta(aten.angle.out)
@@ -252,15 +252,15 @@ def meta__fused_moving_avg_obs_fq_helper(
     quant_min,
     quant_max,
     ch_axis,
-    per_row_fake_quant,
-    symmetric_quant,
+    per_row_fake_quant=False,
+    symmetric_quant=False,
 ):
     check(
         ch_axis < self.dim(),
         lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
     )
-    mask = self.empty_like(dtype=torch.bool)
-    return (self.empty_like(), mask)
+    mask = torch.empty_like(self, dtype=torch.bool)
+    return (torch.empty_like(self), mask)
 
 
 def dot_check(self, other):
