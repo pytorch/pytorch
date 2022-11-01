@@ -67,8 +67,8 @@ on:
 
 jobs:
   build:
-    runs-on: linux.4xlarge
-    timeout-minutes: 270
+    runs-on: linux.12xlarge
+    timeout-minutes: 150
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -167,11 +167,6 @@ jobs:
           git clean -fxd
         working-directory: builder
 
-      - name: Set BUILD_SPLIT_CUDA
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && startsWith(inputs.GPU_ARCH_VERSION, '11') }}
-        shell: bash
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -184,7 +179,6 @@ jobs:
             -e BINARY_ENV_FILE \
             -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
             -e DESIRED_PYTHON \
