@@ -25,6 +25,7 @@
 #include <ATen/ops/_foreach_expm1_native.h>
 #include <ATen/ops/_foreach_floor_native.h>
 #include <ATen/ops/_foreach_frac_native.h>
+#include <ATen/ops/_foreach_lerp_native.h>
 #include <ATen/ops/_foreach_lgamma_native.h>
 #include <ATen/ops/_foreach_log10_native.h>
 #include <ATen/ops/_foreach_log1p_native.h>
@@ -223,23 +224,6 @@ void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors
         input, tensors1, tensors2, scalars);                               \
   }
 
-#define FOREACH_TERNARY_OP(OP)                                                                                           \
-std::vector<Tensor> foreach_tensor_##OP##_ternary_slow(TensorList tensors1, TensorList tensors2, TensorList tensors3) {  \
-  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
-  std::vector<Tensor> result;                                                                                            \
-  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
-    result.emplace_back(tensors1[i].OP(tensors2[i], tensors3[i]));                                                       \
-  }                                                                                                                      \
-  return result;                                                                                                         \
-}                                                                                                                        \
-                                                                                                                         \
-void foreach_tensor_##OP##_ternary_slow_(TensorList tensors1, TensorList tensors2, TensorList tensors3) {                \
-  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
-  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
-    tensors1[i].OP##_(tensors2[i], tensors3[i]);                                                                         \
-  }                                                                                                                      \
-}                                                                                                                        \
-
 FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
 FOREACH_BINARY_OP_LIST_ALPHA(lerp);
@@ -300,6 +284,23 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcmul);
 
 FOREACH_POINTWISE_OP_TENSOR(addcdiv);
 FOREACH_POINTWISE_OP_TENSOR(addcmul);
+
+#define FOREACH_TERNARY_OP(OP)                                                                                           \
+std::vector<Tensor> foreach_tensor_ternary_##OP##_slow(TensorList tensors1, TensorList tensors2, TensorList tensors3) {  \
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
+  std::vector<Tensor> result;                                                                                            \
+  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
+    result.emplace_back(tensors1[i].OP(tensors2[i], tensors3[i]));                                                       \
+  }                                                                                                                      \
+  return result;                                                                                                         \
+}                                                                                                                        \
+                                                                                                                         \
+void foreach_tensor_ternary_##OP##_slow_(TensorList tensors1, TensorList tensors2, TensorList tensors3) {                \
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);                                                          \
+  for (const auto i : c10::irange(tensors1.size())) {                                                                    \
+    tensors1[i].OP##_(tensors2[i], tensors3[i]);                                                                         \
+  }                                                                                                                      \
+}                                                                                                                        \
 
 FOREACH_TERNARY_OP(lerp);
 

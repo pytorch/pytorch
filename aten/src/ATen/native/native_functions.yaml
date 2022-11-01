@@ -10542,7 +10542,7 @@
   device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
   variants: function
   dispatch:
-    CPU: foreach_tensor_lerp_ternary_slow
+    CPU: foreach_tensor_ternary_lerp_slow
     CUDA: foreach_tensor_lerp_ternary_cuda
   autogen: _foreach_lerp.List_out
 
@@ -10550,7 +10550,7 @@
   device_check: NoCheck   # foreach kernels fall back to slow path when tensors are on different devices
   variants: function
   dispatch:
-    CPU: foreach_tensor_lerp_ternary_slow_
+    CPU: foreach_tensor_ternary_lerp_slow_
     CUDA: foreach_tensor_lerp_ternary_cuda_
   autogen: _foreach_lerp.List_out
 
