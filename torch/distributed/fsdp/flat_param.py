@@ -23,16 +23,13 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributed.fsdp._common_utils import HandleTrainingState
+from torch.distributed.fsdp._common_utils import (
+    _set_fsdp_flattened,
+    HandleTrainingState,
+)
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import (
-    _alloc_storage,
-    _free_storage,
-    _same_storage,
-    _set_fsdp_flattened,
-    p_assert,
-)
+from ._utils import _alloc_storage, _free_storage, _same_storage, p_assert
 
 __all__ = [
     "FlatParameter",
