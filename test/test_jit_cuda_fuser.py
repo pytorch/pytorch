@@ -4971,10 +4971,6 @@ class TestCudaFuser(JitTestCase):
         t_jit = torch.jit.script(t)
         self._run_helper(t_jit, t, x0, x1, w0, w1, check_stride=True)
 
-    # Note that curently TS embeds constant tensor in the graph
-    # I believe this is giving me memory leak in CI
-    @unittest.skipIf(os.environ.get('PYTORCH_NO_CUDA_MEMORY_CACHING') is None,
-                     "skipping graph_rng when caching allocator is enabled")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
@@ -4991,6 +4987,10 @@ class TestCudaFuser(JitTestCase):
 
         t_jit = torch.jit.script(t)
         self._run_helper(t_jit, t, x, check_stride=True)
+
+        # Note that curently TS embeds constant tensor in the graph
+        # this triggers memory leak check in CI
+        torch.jit._state._python_cu.drop_all_functions()
 
 
 class TestEnableDisableCudaFuser(JitTestCase):
