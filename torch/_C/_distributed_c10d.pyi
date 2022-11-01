@@ -1,6 +1,6 @@
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union, overload
+from typing import Any, Dict, List, Optional, overload, Tuple, Union
 
 from torch import Tensor
 from torch.futures import Future
@@ -35,11 +35,11 @@ class Reducer:
         bucket_indices: List[List[int]],
         per_bucket_size_limits: List[int],
         process_group: ProcessGroup,
-        expect_sparse_gradients: List[bool] = [],
+        expect_sparse_gradients: List[bool] = ...,
         bucket_bytes_cap: int = ...,  # kDefaultBucketBytesCap in reducer.hpp
-        find_unused_parameters: bool = False,
-        gradient_as_bucket_view: bool = False,
-        param_to_name_mapping: Dict[int, str] = {},
+        find_unused_parameters: bool = ...,
+        gradient_as_bucket_view: bool = ...,
+        param_to_name_mapping: Dict[int, str] = ...,
         first_bucket_types_cap: int = ...,  # kDefaultFirstBucketBytes in reducer.hpp
     ): ...
     def prepare_for_forward(self) -> None: ...
@@ -53,9 +53,7 @@ class Reducer:
         self, work: Work, use_static_world_size: bool
     ): ...
     def _get_local_used_map(self) -> Tensor: ...
-    def _set_ddp_runtime_logging_sample_rate(
-        self, sample_rate: int
-    ) -> None: ...
+    def _set_ddp_runtime_logging_sample_rate(self, sample_rate: int) -> None: ...
     def _set_static_graph(self) -> None: ...
     def _run_comm_hook(self, bucket: GradBucket) -> Future: ...
     def set_logger(self, logger: Logger) -> None: ...
@@ -433,8 +431,8 @@ class ProcessGroupMPI(ProcessGroup):
 def _compute_bucket_assignment_by_size(
     tensors: List[Tensor],
     bucket_size_limits: List[int],
-    expect_sparse_gradient: List[bool] = [],
-    tensor_indices: List[int] = [],
+    expect_sparse_gradient: List[bool] = ...,
+    tensor_indices: List[int] = ...,
 ) -> Tuple[List[List[int]], List[int]]: ...
 def _broadcast_coalesced(
     process_group: ProcessGroup,
