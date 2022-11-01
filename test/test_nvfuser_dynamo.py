@@ -6,7 +6,12 @@ import warnings
 import torch
 import torch._dynamo as torchdynamo
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.jit_utils import RUN_CUDA
 
 RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
@@ -19,6 +24,7 @@ def is_pre_volta():
     return prop.major < 7
 
 
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
 @unittest.skipIf(is_pre_volta(), "Only supported on Volta and newer devices.")
 class TestNvFuserDynamo(TestCase):
