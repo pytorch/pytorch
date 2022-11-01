@@ -1318,7 +1318,7 @@ class Module:
                               "behavior.")
 
     def register_forward_pre_hook(
-        self, hook: Callable[..., None], prepend: bool = False, with_kwargs: bool = False
+        self, hook: Callable[..., None], *, prepend: bool = False, with_kwargs: bool = False
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
@@ -1365,7 +1365,7 @@ class Module:
         return handle
 
     def register_forward_hook(
-        self, hook: Callable[..., None], prepend: bool = False, with_kwargs: bool = False
+        self, hook: Callable[..., None], *, prepend: bool = False, with_kwargs: bool = False
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
