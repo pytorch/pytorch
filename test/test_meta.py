@@ -309,7 +309,6 @@ CHECK_STRIDES_SKIPS = {
     aten.pow.Scalar,
     aten.prelu.default,
     aten.special_xlog1py.default,
-    aten.where.self,
     aten.xlogy.Tensor,
 
     # channel_last and channel_last_3d related failures
