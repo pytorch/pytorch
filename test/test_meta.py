@@ -325,6 +325,8 @@ CHECK_STRIDES_SKIPS = {
     aten.igammac.default,
     aten.lcm.default,
     aten.le.Tensor,
+    aten.lerp.Scalar,
+    aten.lerp.Tensor,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
