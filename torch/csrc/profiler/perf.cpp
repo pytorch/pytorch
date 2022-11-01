@@ -7,17 +7,6 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-// HACK: make sure we have new children pids to attach to
-void ResetPThreadPool() {
-#ifdef C10_MOBILE
-  caffe2::PThreadPool* const tp = caffe2::pthreadpool();
-  // check if the threadpool does exist yet and has additional threads
-  if (tp && tp->get_thread_count() > 1) {
-    tp->set_thread_count(tp->get_thread_count());
-  }
-#endif /* C10_MOBILE */
-}
-
 namespace linux_perf {
 
 #if defined(__ANDROID__) || defined(__linux__)
@@ -163,7 +152,10 @@ void PerfProfiler::Configure(std::vector<std::string>& event_names) {
     events_.back().Init();
   }
   start_values_.resize(events_.size(), 0);
-  ResetPThreadPool();
+
+  // TODO
+  // Reset pthreadpool here to make sure we can attach to new children
+  // threads
 }
 
 void PerfProfiler::Enable() {
