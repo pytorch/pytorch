@@ -17,6 +17,10 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
+from torch.distributed.fsdp._runtime_utils import (
+    _cast_buffers_to_dtype_and_device,
+    _get_buffers_and_dtypes_for_computation,
+)
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
@@ -382,7 +386,12 @@ def _post_state_dict_hook(
     # during lazy_init() and stay at their mixed precision type before/after
     # forward/backward. As a result state_dict() should maintain this.
     if fsdp_module._is_root and fsdp_module._mixed_precision_enabled_for_buffers():
-        fsdp_module._cast_buffers(recurse=True)
+        buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(
+            fsdp_module, fsdp_module
+        )
+        _cast_buffers_to_dtype_and_device(
+            buffers, buffer_dtypes, fsdp_module.compute_device
+        )
     return processed_state_dict
 
 
