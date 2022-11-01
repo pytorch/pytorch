@@ -362,7 +362,7 @@ def _replace_cpu_with_cuda(gm):
     return gm
 
 
-def prims_executor(gm, inputs, *, executor, num_fixed=0, cudagraphs):
+def prims_executor(gm, inputs, *, executor, num_fixed=0, cudagraphs=False):
     """This function is called once per forward/backward pass of a graph in AOT
     Autograd. We use it to set up the nvFuser-specific FX graph and return
     execute function."""
