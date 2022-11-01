@@ -131,16 +131,17 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
+    def disable_cpp_wrapper(self, cond):
+        self._can_use_cpp_wrapper = False
+        if config.debug:
+            print("Set _can_use_cpp_wrapper to False due to", cond)
+
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            self._can_use_cpp_wrapper = False
-            if config.debug:
-                print("set _can_use_cpp_wrapper to False due to ExternKernel")
+            self.disable_cpp_wrapper("ExternKernel")
         if isinstance(buffer, ir.ComputedBuffer):
             if buffer.data.get_reduction_type():
-                self._can_use_cpp_wrapper = False
-                if config.debug:
-                    print("set _can_use_cpp_wrapper to False due to Reduction")
+                self.disable_cpp_wrapper("Reduction")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
         if config.cpp_wrapper:
@@ -339,33 +340,21 @@ class GraphLowering(torch.fx.Interpreter):
             device = self.device_types.pop()
             if device == "cpu":
                 return
-        self._can_use_cpp_wrapper = False
-        if config.debug:
-            print("set _can_use_cpp_wrapper to False since device is not cpu")
+        self.disable_cpp_wrapper("device not CPU")
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
             if value.get_dtype() != torch.float32:
-                self._can_use_cpp_wrapper = False
-                if config.debug:
-                    print(
-                        "set _can_use_cpp_wrapper to False since non-fp32 input exists"
-                    )
+                self.disable_cpp_wrapper("inputs not FP32")
 
     def check_output_for_cpp_buffer(self):
         for item in self.graph_outputs:
             if isinstance(item, ir.NoneAsConstantBuffer):
-                self._can_use_cpp_wrapper = False
-                if config.debug:
-                    print(
-                        "set _can_use_cpp_wrapper to False due to NoneAsConstantBuffer"
-                    )
+                self.disable_cpp_wrapper("NoneAsConstantBuffer")
 
     def check_constant_for_cpp_buffer(self):
         if self.constants:
-            self._can_use_cpp_wrapper = False
-            if config.debug:
-                print("set _can_use_cpp_wrapper to False due to constants")
+            self.disable_cpp_wrapper("Constants")
 
     def check_cpp_wrapper(self):
         self.check_device_for_cpp_buffer()
