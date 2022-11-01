@@ -377,13 +377,13 @@ struct PermuteOpRecord : RecordFunctor {
   PermuteOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
-      std::vector<int64_t>& permutation)
+      std::vector<int64_t>& dims)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "permute",
+            "ops.permute",
             RecordType::PermuteOp),
-        permutation_(std::move(permutation)) {}
+        dims_(std::move(dims)) {}
   virtual ~PermuteOpRecord() = default;
   virtual RecordFunctor* clone() final {
     return new PermuteOpRecord(*this);
@@ -391,11 +391,11 @@ struct PermuteOpRecord : RecordFunctor {
 
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    size_t permutation_hash = 0;
-    for (auto p : permutation_) {
-      permutation_hash ^= static_cast<size_t>(p);
+    size_t dims_hash = 0;
+    for (auto dim : dims_) {
+      dims_hash ^= static_cast<size_t>(dim);
     }
-    return result | (permutation_hash & 0xffff);
+    return result | (dims_hash & 0xffff);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -403,10 +403,10 @@ struct PermuteOpRecord : RecordFunctor {
     if (auto child_ptr = dynamic_cast<const PermuteOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       if (result) {
-        result = (permutation_.size() == child_ptr->permutation_.size());
+        result = (dims_.size() == child_ptr->dims_.size());
         if (result) {
-          for (size_t i = 0; i < permutation_.size(); ++i) {
-            if (permutation_[i] != child_ptr->permutation_[i]) {
+          for (size_t i = 0; i < dims_.size(); ++i) {
+            if (dims_[i] != child_ptr->dims_[i]) {
               result = false;
               break;
             }
@@ -420,13 +420,31 @@ struct PermuteOpRecord : RecordFunctor {
   void operator()(FusionDefinition& fd) final {
     auto arg =
         fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output = torch::jit::fuser::cuda::permute(arg, permutation_);
+    auto output = Nvf::permute(arg, dims_);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
+    RecordFunctor::print(os, false);
+    os << ", dims=[";
+    bool first_arg = true;
+    for (auto dim : dims_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << dim;
+    }
+    os << "]";
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
   //! Represents the mapping from the original shape to the new shape
-  std::vector<int64_t> permutation_;
+  std::vector<int64_t> dims_;
 };
 
 struct SqueezeOpRecord : RecordFunctor {
@@ -438,7 +456,7 @@ struct SqueezeOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "squeeze",
+            "ops.squeeze",
             RecordType::SqueezeOp),
         original_shape_(std::move(original_shape)),
         dim_(dim) {}
