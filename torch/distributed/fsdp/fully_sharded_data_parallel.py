@@ -24,7 +24,6 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.autograd import Variable
 from torch.distributed import ProcessGroup
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
@@ -57,7 +56,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _fsdp_root_pre_forward,
     _post_forward,
     _pre_forward,
-    _prefetch_handles,
+    _pre_forward_unshard,
     _reshard,
     _reshard_grads,
     _should_free_in_backward,
@@ -907,7 +906,7 @@ class FullyShardedDataParallel(nn.Module):
                 _free_storage(p._full_prec_full_param_padded)
 
         # Track whether the `FlatParameter`'s post-backward hook has been
-        # called for validation in `_wait_for_post_backward()`
+        # called for validation in the post-backward callback
         p._post_backward_called = False
 
     @staticmethod
@@ -1171,9 +1170,7 @@ class FullyShardedDataParallel(nn.Module):
             self._lazy_init()
             args, kwargs = _fsdp_root_pre_forward(self, *args, **kwargs)
             unused = None
-            unshard_fn = functools.partial(
-                self._pre_forward_unshard, handles=self._handles
-            )
+            unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
             # Do not free the root's parameters in the post-forward for
             # `FULL_SHARD` with the intention that they are immediately used
             # for backward computation (though this may not be true)
@@ -1202,20 +1199,6 @@ class FullyShardedDataParallel(nn.Module):
             return _post_forward(
                 self, self._handles, reshard_fn, unused, unused, output
             )
-
-    def _pre_forward_unshard(
-        self,
-        handles: List[FlatParamHandle],
-    ) -> None:
-        """Unshards parameters in the pre-forward."""
-        if handles:
-            _unshard(
-                self, handles, self._streams["unshard"], self._streams["pre_unshard"]
-            )
-            handles_key = tuple(handles)
-            self._needs_pre_forward_unshard[handles_key] = False
-            torch.cuda.current_stream().wait_stream(self._streams["unshard"])
-            _prefetch_handles(self, handles_key)
 
     @staticmethod
     @contextlib.contextmanager
@@ -1618,21 +1601,6 @@ class FullyShardedDataParallel(nn.Module):
                 # be multiple in the case of nested FSDP modules
                 param_name = param_name.replace(FSDP_PREFIX, "")
             yield (param_name, param)
-
-    def _queue_wait_for_post_backward(self) -> None:
-        """
-        Queues a post-backward callback from the root FSDP instance, which
-        should happen at the beginning of its pre-backward.
-        """
-        p_assert(
-            self._is_root,
-            "`_queue_wait_for_post_backward()` should be called on the root FSDP instance",
-        )
-        if self._post_backward_callback_queued:
-            return
-        self._assert_state([TrainingState.IDLE])
-        self._post_backward_callback_queued = True
-        Variable._execution_engine.queue_callback(self._wait_for_post_backward)
 
     @torch.no_grad()
     def _wait_for_post_backward(self) -> None:

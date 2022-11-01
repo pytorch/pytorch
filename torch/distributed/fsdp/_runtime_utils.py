@@ -4,6 +4,7 @@ from typing import Any, Callable, List, no_type_check, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
@@ -142,6 +143,21 @@ def _pre_forward(
 
 
 @no_type_check
+def _pre_forward_unshard(
+    state: _State,
+    handles: List[FlatParamHandle],
+) -> None:
+    """Unshards parameters in the pre-forward."""
+    if not handles:
+        return
+    _unshard(state, handles, state._streams["unshard"], state._streams["pre_unshard"])
+    handles_key = tuple(handles)
+    state._needs_pre_forward_unshard[handles_key] = False
+    torch.cuda.current_stream().wait_stream(state._streams["unshard"])
+    _prefetch_handles(state, handles_key)
+
+
+@no_type_check
 def _post_forward(
     state: _State,
     handles: List[FlatParamHandle],
@@ -239,7 +255,7 @@ def _pre_backward_hook(
         # attach it to the outermost backward graph task so that it is called
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
-            state._queue_wait_for_post_backward()
+            _register_post_backward_final_callback(state)
             _clear_grads_if_needed(_all_handles(state))
         elif _handles_key:
             _assert_in_training_states(state, [TrainingState.IDLE])
@@ -483,6 +499,109 @@ def _low_precision_hook_enabled(state: _State) -> bool:
 
 
 @no_type_check
+@torch.no_grad()
+def _post_backward_final_callback(
+    state: _State,
+):
+    """
+    This waits for the post-backward to finish and performs some final cleanup.
+    This runs at the end of the entire backward pass and should only be called
+    on the root FSDP instance.
+    """
+    p_assert(
+        state._is_root,
+        "The post-backward callback should only be called on the root FSDP instance",
+    )
+
+    if state._sync_gradients:
+        torch.cuda.current_stream().wait_stream(state._streams["post_backward"])
+        if state.cpu_offload.offload_params:
+            # Wait for non-blocking GPU -> CPU sharded gradient copies from the
+            # post-backward hooks to finish explicitly since CPU gradients do
+            # not automatically synchronize with the GPU
+            torch.cuda.current_stream().synchronize()
+    state._exec_order_data.next_iter()
+
+    states = [state] if _is_composable(state) else state.fsdp_modules(state)
+    for state in states:
+        _catch_all_reshard(state)
+        _finalize_params(state)
+        state._ran_pre_backward_hook.clear()
+        state.training_state = TrainingState.IDLE
+        for handle in state._handles:
+            handle._training_state = HandleTrainingState.IDLE
+        state._handles_prefetched.clear()
+    # Reset for cases like one forward and multiple backwards
+    state._post_backward_callback_queued = False
+
+
+@no_type_check
+def _catch_all_reshard(
+    state: _State,
+) -> None:
+    """
+    Reshards the parameters that may not have been resharded in the
+    post-backward hook. This can happen when a module's output is used in the
+    forward pass, meaning that its pre-backward hook runs (unsharding the
+    parameter), but the post-backward hook does not run because the output was
+    not jused in the loss computation corresponding to this backward pass.
+    """
+    # Wrap with a try-except to provide a more informative traceback if an
+    # error is raised
+    try:
+        free_unsharded_flat_params: List[bool] = []
+        handles_to_reshard: List[FlatParamHandle] = []
+        for handle in state._handles:
+            # TODO: This already-resharded check is brittle:
+            # https://github.com/pytorch/pytorch/issues/83956
+            already_resharded = (
+                handle.flat_param.data_ptr()
+                == handle.flat_param._local_shard.data_ptr()
+            )
+            if already_resharded:
+                continue
+            free_unsharded_flat_params.append(_should_free_in_backward(state, handle))
+            handles_to_reshard.append(handle)
+        _reshard(state, handles_to_reshard, free_unsharded_flat_params)
+    except Exception as e:
+        p_assert(
+            False,
+            f"Got exception in the catch-all reshard for {state}: {str(e)}",
+            raise_assertion_error=False,
+        )
+        raise e
+
+
+@no_type_check
+def _finalize_params(
+    state: _State,
+) -> None:
+    """Finalizes the parameters before the next iteration."""
+    for handle in state._handles:
+        flat_param = handle.flat_param
+        if flat_param.requires_grad:
+            if hasattr(flat_param, "_post_backward_hook_state"):
+                p_assert(
+                    len(flat_param._post_backward_hook_state) == 2,
+                    f"Invalid: ``_post_backward_hook_state``: {flat_param._post_backward_hook_state}",
+                )
+                flat_param._post_backward_hook_state[1].remove()
+                delattr(flat_param, "_post_backward_hook_state")
+            if not state._sync_gradients:
+                # Preserve the gradient accumulation state if not synchronizing
+                # gradients: `.grad` remains the unsharded gradient  from prior
+                # `no_sync()` iterations, and `_saved_grad_shard` remains the
+                # sharded gradient from the last synchronized iteration
+                continue
+            handle.prepare_gradient_for_optim()
+            p_assert(
+                hasattr(flat_param, "_post_backward_called"),
+                "Expects `_post_backward_called` to be set on the `FlatParameter`",
+            )
+            flat_param._post_backward_called = False
+
+
+@no_type_check
 def _prefetch_handles(
     state: _State,
     current_handles_key: _HandlesKey,
@@ -644,6 +763,26 @@ def _register_post_backward_hooks(
             functools.partial(_post_backward_hook, state, handle)
         )
         flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+
+
+@no_type_check
+def _register_post_backward_final_callback(state: _State) -> None:
+    """
+    Registers the post-backward final callback that runs at the end of the
+    backward pass. This should be called from the root FSDP instance at the
+    beginning of the pre-backward.
+    """
+    p_assert(
+        state._is_root,
+        "Only the root FSDP instance should register the post-backward callback",
+    )
+    if state._post_backward_callback_queued:
+        return
+    _assert_in_training_states(state, [TrainingState.IDLE])
+    state._post_backward_callback_queued = True
+    Variable._execution_engine.queue_callback(
+        functools.partial(_post_backward_final_callback, state)
+    )
 
 
 def _wait_for_computation_stream(
