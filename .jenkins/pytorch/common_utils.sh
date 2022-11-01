@@ -104,9 +104,7 @@ function get_pinned_commit() {
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  # pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
-  # Install a certain commit somehow doesn't work on CI. Pin to a nightly instead.
-  pip install --pre torchaudio==0.14.0.dev20221030 --extra-index-url https://download.pytorch.org/whl/nightly/cu116
+  pip_install --user "git+https://github.com/pytorch/audio.git@${commit}"
 }
 
 function install_torchvision() {
