@@ -16484,6 +16484,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.lerp",
+        torch_opinfo_name="lerp",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.ones",
         torch_opinfo_name="ones",
         skips=(
