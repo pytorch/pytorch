@@ -2195,6 +2195,17 @@ class CommonTemplate:
             rtol=3e-05,
         )
 
+    def test_pow3(self):
+        # power of 0.5 is special-cased, arbitrary power would still produce triton codegen error
+        def fn(x):
+            z = torch.tensor(0.123, device=self.device)
+            w = z + x
+            return torch.pow(w, 0.5)
+
+        opt = torch._dynamo.optimize("inductor")(fn)
+        input = torch.rand(())
+        self.assertTrue(same(opt(input), fn(input)))
+
     def test_glu(self):
         def fn(x):
             return aten.glu(x, -1), aten.glu(x, 1), aten.glu(x, 2)
@@ -3997,29 +4008,23 @@ class CommonTemplate:
             return x + y, x * y, x / y
 
         opt = torch._dynamo.optimize("inductor")(fn)
+        dtypes = [
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64,
+        ]
 
-        inputs = (
-            rand_strided((2, 3), (3, 1), device="cuda"),
-            rand_strided((), (), device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-
-    @requires_cuda()
-    def test_unspec_inputs_fp16(self):
-        def fn(x, y):
-            return x + y, x * y, x / y
-
-        opt = torch._dynamo.optimize("inductor")(fn)
-
-        inputs = (
-            rand_strided((2, 3), (3, 1), dtype=torch.float16, device="cuda"),
-            rand_strided((), (), dtype=torch.float16, device="cpu"),
-        )
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
-        inputs = (inputs[1], inputs[0])
-        self.assertTrue(same(opt(*inputs), fn(*inputs)))
+        for d in dtypes:
+            inputs = (
+                rand_strided((2, 3), (3, 1), dtype=torch.float32, device="cuda"),
+                rand_strided((), (), dtype=d, device="cpu"),
+            )
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
+            inputs = (inputs[1], inputs[0])
+            self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     @patch.object(config.triton, "mm", "aten")
     def test_list_clearing(self):
