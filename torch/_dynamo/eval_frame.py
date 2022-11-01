@@ -121,7 +121,7 @@ class _TorchDynamoContext:
             optimized_forward = self(mod.forward)
             new_mod = copy.copy(fn)
             new_mod.forward = optimized_forward
-            
+
             return new_mod
 
         assert callable(fn)
@@ -161,8 +161,8 @@ class _TorchDynamoContext:
 
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
-        # if callback not in (None, False):
-        #     always_optimize_code_objects[fn.__code__] = True
+        if callback not in (None, False):
+            always_optimize_code_objects[fn.__code__] = True
 
         return _fn
 
