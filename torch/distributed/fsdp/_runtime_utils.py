@@ -1102,7 +1102,7 @@ def _get_buffers_and_dtypes_for_computation(
 
 @no_type_check
 def _get_buffers_and_dtypes_for_checkpoint(
-    state: _State,
+    state: _FSDPState,
     root_module: nn.Module,
 ) -> Tuple[List[torch.Tensor], List[torch.dtype]]:
     """
