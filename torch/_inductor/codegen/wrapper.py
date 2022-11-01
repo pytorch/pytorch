@@ -28,29 +28,19 @@ def buffer_reuse_key(node: ir.Buffer):
     )
 
 
-def make_buffer_reuse(old, new):
+def make_buffer_reuse(old, new, del_needed, declare, endding, as_strided):
     assert old.get_dtype() == new.get_dtype()
     del_line = ""
-    if old.get_name() not in V.graph.get_output_names():
-        del_line = f"; del {old.get_name()}"
+    if del_needed:
+        if old.get_name() not in V.graph.get_output_names():
+            del_line = f"; del {old.get_name()}"
     if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
-        return f"{new.get_name()} = {old.get_name()}{del_line}"
+        return f"{declare}{new.get_name()} = {old.get_name()}{del_line}{endding}"
 
     return (
-        f"{new.get_name()} = as_strided({old.get_name()}, "
+        f"{declare}{new.get_name()} = {as_strided}({old.get_name()}, "
         f"{V.graph.sizevars.codegen_shape_tuple(new.get_size())}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}){del_line}"
-    )
-
-
-def make_cpp_buffer_reuse(old, new):
-    assert old.get_dtype() == new.get_dtype()
-    if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
-        return f"auto {new.get_name()} = {old.get_name()};"
-    return (
-        f"auto {new.get_name()} = at::as_strided({old.get_name()}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_size())}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())});"
+        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}){del_line}{endding}"
     )
 
 
@@ -170,7 +160,17 @@ class ReuseLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         assert self.reused_as.get_name() not in V.graph.removed_buffers
-        code.writeline(make_buffer_reuse(self.node, self.reused_as) + "  # reuse")
+        code.writeline(
+            make_buffer_reuse(
+                self.node,
+                self.reused_as,
+                del_needed=True,
+                declare="",
+                endding="",
+                as_strided="as_strided",
+            )
+            + "  # reuse"
+        )
 
 
 @dataclasses.dataclass
@@ -181,7 +181,17 @@ class CppReuseLine(ReuseLine):
     def codegen(self, code: IndentedBuffer):
         assert self.node.get_name() not in V.graph.removed_buffers
         assert self.reused_as.get_name() not in V.graph.removed_buffers
-        code.writeline(make_cpp_buffer_reuse(self.node, self.reused_as) + "  // reuse")
+        code.writeline(
+            make_buffer_reuse(
+                self.node,
+                self.reused_as,
+                del_needed=False,
+                declare="auto ",
+                endding=";",
+                as_strided="at::as_strided",
+            )
+            + "  // reuse"
+        )
 
 
 @dataclasses.dataclass
@@ -301,6 +311,14 @@ class WrapperCodeGen(CodeGen):
     def next_kernel_name(self):
         return f"kernel{next(self._names_iter)}"
 
+    def write_allocate_line(self, buffer):
+        self.writeline(AllocateLine(buffer))
+
+    def get_deferred_line(self, name, layout):
+        return DeferredLine(
+            name, f"{name} = {layout.view.codegen_reference()}  # alias"
+        )
+
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
         if name in V.graph.removed_buffers or name in self.allocated:
@@ -321,20 +339,24 @@ class WrapperCodeGen(CodeGen):
             if not layout.maybe_guard_aligned():
                 V.graph.unaligned_buffers.add(name)
             self.codegen_allocation(layout.view.data)
-            allocation = DeferredLine(
-                name, f"{name} = {layout.view.codegen_reference()}  # alias"
-            )
+            allocation = self.get_deferred_line(name, layout)
             self.writeline(allocation)
             return
 
-        self.writeline(AllocateLine(buffer))
+        self.write_allocate_line(buffer)
+
+    def write_del_line(self, name):
+        self.writeline(f"del {name}")
+
+    def write_free_if_not_reused_line(self, buffer):
+        self.writeline(FreeIfNotReusedLine(buffer))
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
-            self.writeline(f"del {name}")
+            self.write_del_line(name)
             return
 
         if not self.can_reuse(buffer):
@@ -343,10 +365,10 @@ class WrapperCodeGen(CodeGen):
 
         layout = buffer.get_layout()
         if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
-            self.writeline(f"del {name}")
+            self.write_del_line(name)
             return
 
-        self.writeline(FreeIfNotReusedLine(buffer))
+        self.write_free_if_not_reused_line(buffer)
 
     def can_reuse(self, buffer):
         name = buffer.get_name()
@@ -359,12 +381,15 @@ class WrapperCodeGen(CodeGen):
             return False
         return True
 
+    def write_reuse_line(self, input_buffer, output_buffer):
+        self.writeline(ReuseLine(input_buffer, output_buffer))
+
     def codegen_inplace_reuse(self, input_buffer, output_buffer):
         assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
-        self.writeline(ReuseLine(input_buffer, output_buffer))
+        self.write_reuse_line(input_buffer, output_buffer)
 
     @dynamo_utils.dynamo_timed
     def generate(self):
@@ -545,55 +570,22 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.write_get_cuda_stream
         )
 
-    def codegen_allocation(self, buffer):
-        name = buffer.get_name()
-        if name in V.graph.removed_buffers or name in self.allocated:
-            return
-        self.allocated.add(name)
-
-        if isinstance(
-            buffer,
-            (ir.ExternKernelAlloc, ir.MultiOutput),
-        ):
-            return
-
-        layout = buffer.get_layout()
-        if isinstance(layout, ir.MutationLayout):
-            return
-        if isinstance(layout, ir.AliasedLayout):
-            assert isinstance(layout.view, ir.ReinterpretView)
-            if not layout.maybe_guard_aligned():
-                V.graph.unaligned_buffers.add(name)
-            self.codegen_allocation(layout.view.data)
-            allocation = DeferredLine(
-                name, f"auto {name} = {layout.view.codegen_reference()};  // alias"
-            )
-            self.writeline(allocation)
-            return
-
+    def write_allocate_line(self, buffer):
         self.writeline(CppAllocateLine(buffer))
 
-    def codegen_free(self, buffer):
-        name = buffer.get_name()
+    def write_del_line(self, name):
+        return
 
-        # can be freed but not reused
-        if isinstance(buffer, ir.InputBuffer):
-            return
+    def write_free_if_not_reused_line(self, buffer):
+        return
 
-        if not self.can_reuse(buffer):
-            return
-        self.freed.add(name)
-
-        layout = buffer.get_layout()
-        if isinstance(layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
-            return
-
-    def codegen_inplace_reuse(self, input_buffer, output_buffer):
-        assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
-        self.codegen_allocation(input_buffer)
-        self.freed.add(input_buffer.get_name())
-        self.allocated.add(output_buffer.get_name())
+    def write_reuse_line(self, input_buffer, output_buffer):
         self.writeline(CppReuseLine(input_buffer, output_buffer))
+
+    def get_deferred_line(self, name, layout):
+        return DeferredLine(
+            name, f"auto {name} = {layout.view.codegen_reference()};  // alias"
+        )
 
     @dynamo_utils.dynamo_timed
     def generate(self):

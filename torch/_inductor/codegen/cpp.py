@@ -16,6 +16,7 @@ from ..utils import sympy_product, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
+    CppWrapperKernelArgs,
     DeferredIndentedBuffer,
     ExprPrinter,
     IndentedBuffer,
@@ -528,10 +529,18 @@ class CppKernel(Kernel):
 class CppScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
-        self.kernel_group = KernelGroup()
+        self.get_kernel_group()
 
     def group_fn(self, sizes):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
+
+    def get_kernel_group(self):
+        from .wrapper import CppWrapperCodeGen
+
+        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
+            self.kernel_group = CppWrapperKernelGroup()
+        else:
+            self.kernel_group = KernelGroup()
 
     @staticmethod
     def can_fuse_horizontal(node1, node2):
@@ -582,14 +591,8 @@ class CppScheduling:
         kernel_group.finalize_kernel(kernel, scheduler)
 
     def flush(self):
-        from .wrapper import CppWrapperCodeGen
-
-        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
-            codegen_func = self.kernel_group.cpp_codegen_define_and_call
-        else:
-            codegen_func = self.kernel_group.codegen_define_and_call
-        codegen_func(V.graph.wrapper_code)
-        self.kernel_group = KernelGroup()
+        self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
+        self.get_kernel_group()
 
 
 class KernelGroup:
@@ -611,54 +614,19 @@ class KernelGroup:
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
 
+    def generate_kernel_calling_code(
+        self, wrapper, kernel_name, call_args, code=None, arg_types=None
+    ):
+        wrapper.writeline(
+            "{}({})".format(kernel_name, ", ".join(call_args)),
+        )
+
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
         if self.count == 0:
             return
 
-        arg_defs, call_args = self.args.cpp_argdefs()
-        arg_defs = ",\n".ljust(25).join(arg_defs)
-        code = BracesBuffer()
-        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
-        with code.indent():
-            for old, new in self.args.aliases():
-                code.writeline(f"auto {old} = {new};")
-            code.splice(self.loops_code)
-
-        codecache_def = IndentedBuffer()
-        codecache_def.writeline("async_compile.cpp('''")
-        codecache_def.splice(code)
-        codecache_def.writeline("''')")
-
-        kernel_name = wrapper.next_kernel_name()
-        codecache_str = codecache_def.getvalue()
-        # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
-        # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
-        codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str)
-
-        # generate the code to call this
-        wrapper.writeline(
-            "{}({})".format(kernel_name, ", ".join(call_args)),
-        )
-
-    def get_kernel_path(self, code):
-        # TODO: this duplicates with CodeCache logic
-        ext = "so"
-        extra = cpp_compile_command("i", "o")
-        # \n is required to match with the CodeCache behavior
-        source_code = "\n" + code.getvalue()
-        basename = code_hash(source_code + extra)
-        subdir = os.path.join(cache_dir(), basename[1:3])
-        kernel_path = os.path.join(subdir, f"{basename}.{ext}")
-        return kernel_path
-
-    def cpp_codegen_define_and_call(self, wrapper):
-        self.stack.close()
-        if self.count == 0:
-            return
-
-        arg_defs, arg_types, call_args = self.args.cpp_argdefs_for_cpp_wrapper()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         arg_types = ",".join(arg_types)
         code = BracesBuffer()
@@ -680,6 +648,31 @@ class KernelGroup:
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
 
+        # generate the code to call this
+        self.generate_kernel_calling_code(
+            wrapper, kernel_name, call_args, code, arg_types
+        )
+
+
+class CppWrapperKernelGroup(KernelGroup):
+    def __init__(self):
+        super().__init__()
+        self.args = CppWrapperKernelArgs()
+
+    def get_kernel_path(self, code):
+        # TODO: this duplicates with CodeCache logic
+        ext = "so"
+        extra = cpp_compile_command("i", "o")
+        # \n is required to match with the CodeCache behavior
+        source_code = "\n" + code.getvalue()
+        basename = code_hash(source_code + extra)
+        subdir = os.path.join(cache_dir(), basename[1:3])
+        kernel_path = os.path.join(subdir, f"{basename}.{ext}")
+        return kernel_path
+
+    def generate_kernel_calling_code(
+        self, wrapper, kernel_name, call_args, code, arg_types
+    ):
         kernel_path = self.get_kernel_path(code)
 
         wrapper.writeline(

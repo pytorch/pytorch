@@ -50,6 +50,8 @@ class SizeVarAllocator(object):
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
+        self.declare = ""
+        self.ending = ""
 
     def seed(self):
         """
@@ -446,12 +448,14 @@ class SizeVarAllocator(object):
 
         @functools.lru_cache(None)
         def sizeof(name):
-            code.writeline(f"{name}_size = {name}.size()")
+            code.writeline(f"{self.declare}{name}_size = {name}.size(){self.ending}")
             return f"{name}_size"
 
         @functools.lru_cache(None)
         def strideof(name):
-            code.writeline(f"{name}_stride = {name}.stride()")
+            code.writeline(
+                f"{self.declare}{name}_stride = {name}.stride(){self.ending}"
+            )
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
@@ -465,7 +469,9 @@ class SizeVarAllocator(object):
                 if shape in needed:
                     needed.remove(shape)
                     added.add(shape)
-                    code.writeline(f"{shape} = {sizeof(name)}[{dim}]")
+                    code.writeline(
+                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
+                    )
                 elif isinstance(shape, sympy.Symbol):
                     assert shape in added, f"{shape} is needed but not added"
 
@@ -475,7 +481,9 @@ class SizeVarAllocator(object):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    code.writeline(f"{shape} = {strideof(name)}[{dim}]")
+                    code.writeline(
+                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
+                    )
                 elif isinstance(shape, sympy.Symbol):
                     assert shape in added, f"{shape} is needed but not added"
         assert not needed
@@ -563,48 +571,10 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 
 
 class CppSizeVarAllocator(SizeVarAllocator):
-    def codegen(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
-        """Assign all symbolic shapes to locals"""
-        if self.need_seed:
-            code.writeline(
-                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
-            )
-
-        @functools.lru_cache(None)
-        def sizeof(name):
-            code.writeline(f"auto {name}_size = {name}.sizes();")
-            return f"{name}_size"
-
-        @functools.lru_cache(None)
-        def strideof(name):
-            code.writeline(f"auto {name}_stride = {name}.strides();")
-            return f"{name}_stride"
-
-        # Assign all symbolic shapes needed to local variables
-        needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
-        added = set()
-
-        for name, value in graph_inputs.items():
-            shapes = value.get_size()
-            for dim, shape in enumerate(shapes):
-                shape = self.simplify(shape)
-                if shape in needed:
-                    needed.remove(shape)
-                    added.add(shape)
-                    code.writeline(f"auto {shape} = {sizeof(name)}[{dim}];")
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
-
-        for name, value in graph_inputs.items():
-            shapes = value.get_stride()
-            for dim, shape in enumerate(shapes):
-                shape = self.simplify(shape)
-                if shape in needed:
-                    needed.remove(shape)
-                    code.writeline(f"auto {shape} = {strideof(name)}[{dim}];")
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
-        assert not needed
+    def __init__(self, shape_env=None):
+        super().__init__(shape_env)
+        self.declare = "auto "
+        self.ending = ";"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
@@ -613,9 +583,6 @@ class CppSizeVarAllocator(SizeVarAllocator):
         if len(parts) == 1:
             return f"{{{parts[0]}, }}"
         return f"{{{', '.join(parts)}}}"
-
-    def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
-        return super().codegen_shape_tuple(shape)
 
 
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
