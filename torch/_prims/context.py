@@ -280,10 +280,6 @@ def _is_func_unsupported_nvfuser(
 class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
     def __init__(self, *, skip_ops=()):
         aten_ops_to_skip = (
-            "aten.transpose.int",
-            "aten.t.default",
-            "aten.unsqueeze.default",
-            "aten.permute.default",
             "aten._log_softmax.default",
             "aten._log_softmax_backward_data.default",
             "aten.expand.default",

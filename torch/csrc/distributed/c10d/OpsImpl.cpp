@@ -185,6 +185,40 @@ allgather_cuda_(
           output_tensors, work);
 }
 
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
+reduce_scatter_cpu_(
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto work = process_group->reduce_scatter(
+      const_cast<std::vector<at::Tensor>&>(output_tensors),
+      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      output_tensors, work);
+}
+
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
+reduce_scatter_cuda_(
+    const std::vector<at::Tensor>& output_tensors,
+    const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t timeout) {
+  auto work = process_group->reduce_scatter(
+      const_cast<std::vector<at::Tensor>&>(output_tensors),
+      const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
+      ReduceScatterOptions{
+          *reduce_op.get(), std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      output_tensors, work);
+}
+
 // register functions to dispatcher
 namespace {
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -243,6 +277,14 @@ TORCH_LIBRARY_IMPL(c10d, CPU, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("allgather_", allgather_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("reduce_scatter_", reduce_scatter_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("reduce_scatter_", reduce_scatter_cuda_);
 }
 } // namespace
 

@@ -431,7 +431,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   }
 
   // Computes a common dtype, if needed
-  if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
+  if ((has_different_input_dtypes || all_ops_are_scalars_) && config.promote_inputs_to_common_dtype_) {
     common_dtype_ = compute_common_dtype();
   }
 
@@ -1237,6 +1237,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
       shape_ = infer_size_dimvector(shape_, shape);
     }
   }
+  all_ops_are_scalars_ = !has_tensors;
 }
 
 void TensorIteratorBase::compute_strides(const TensorIteratorConfig& config) {

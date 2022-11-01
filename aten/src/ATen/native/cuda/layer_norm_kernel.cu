@@ -33,7 +33,7 @@ namespace {
 
 constexpr int kCUDANumThreads = 256;
 constexpr int kColwiseReduceTileSize = 32;
-constexpr int kWarpSize = 32;
+constexpr unsigned int kWarpSize = 32;
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
 // aligned vector generates vectorized load/store on CUDA (copy-pasted from MemoryAccess.cuh)

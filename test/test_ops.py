@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
+    skipIfTorchInductor,
     slowTest,
 )
 from torch.testing._internal.common_methods_invocations import (
@@ -69,6 +70,7 @@ import torch._prims as prims
 from torch._prims.context import (TorchRefsMode, MOCK_REF_RESULT)
 
 from torch.testing._internal import opinfo
+from torch.testing._internal.opinfo.refs import _REFS_PREFIX
 from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
@@ -184,7 +186,7 @@ class TestCommon(TestCase):
                 return arg.to(device='cpu')
             return arg
 
-        samples = op.sample_inputs(device, dtype)
+        samples = op.reference_inputs(device, dtype)
 
         for sample in samples:
             cpu_sample = sample.transform(to_cpu)
@@ -209,6 +211,7 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
+    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_meta(self, device, dtype, op):
         with FakeTensorMode() as mode:
             pass
@@ -408,6 +411,7 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
+    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref(self, device, dtype, op):
         # In this test, primTorch refs call into the refs namespace. For
         # example, a ref with torch.foo in it will call refs.foo instead.
@@ -482,6 +486,7 @@ class TestCommon(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
+    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_torch_fallback(self, device, dtype, op):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
@@ -493,6 +498,7 @@ class TestCommon(TestCase):
     @skipCUDAIfRocm
     @ops(python_ref_db)
     @parametrize('executor', ['aten', 'nvfuser'])
+    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
         # TODO: Not all dtypes are supported with nvfuser
         from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
@@ -548,11 +554,13 @@ class TestCommon(TestCase):
         for ei in error_inputs:
             si = ei.sample_input
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
-                op(si.input, *si.args, **si.kwargs)
+                out = op(si.input, *si.args, **si.kwargs)
+                self.assertFalse(isinstance(out, type(NotImplemented)))
 
     @skipMeta
     @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_errors(self, device, op):
         mode = FakeTensorMode()
         with mode:
@@ -567,8 +575,7 @@ class TestCommon(TestCase):
         for ei in error_inputs:
             si = ei.sample_input
             meta_sample = si.transform(_to_tensormeta)
-            # TODO: match strings
-            with self.assertRaisesRegex(ei.error_type, ""):
+            with self.assertRaisesRegex(ei.error_type, ei.error_regex):
                 op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
 
     # Tests that the function produces the same result when called with
@@ -1766,8 +1773,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.logsumexp',
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.norm',
-        '_refs.var',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
@@ -1890,9 +1895,8 @@ class TestRefsOpsInfo(TestCase):
     def test_ref_db_has_no_aliases(self):
         def _strip_ref_prefix(ref):
             # TODO: maybe support other prefixes (like ops.nvprims for nvfuser)
-            prefix = "_refs."
-            if ref.startswith(prefix):
-                return ref[len(prefix):]
+            if ref.startswith(_REFS_PREFIX):
+                return ref[len(_REFS_PREFIX):]
             else:
                 return ref
 

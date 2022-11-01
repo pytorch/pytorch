@@ -23,6 +23,7 @@ from torch.testing._internal.opinfo.core import (
 from torch.testing._internal.opinfo.refs import (
     _find_referenced_opinfo,
     _inherit_constructor_args,
+    _torch_to_refs_alias_names,
     PythonRefInfo,
 )
 
@@ -58,6 +59,8 @@ class SpectralFuncPythonRefInfo(SpectralFuncInfo):
         )
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, SpectralFuncInfo)
+        if kwargs.get("aliases") is None:
+            kwargs["aliases"] = _torch_to_refs_alias_names(self.torch_opinfo.aliases)
 
         inherited = self.torch_opinfo._original_spectral_func_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)

@@ -249,15 +249,16 @@ test_dynamo_shard() {
   assert_git_not_dirty
 }
 
+test_inductor_distributed() {
+  PYTORCH_TEST_WITH_INDUCTOR=0 PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed
+  assert_git_not_dirty
+}
 
 test_inductor() {
-  echo "TODO: enable inductor unit tests"
-  # time python test/run_test.py --core --exclude test_autograd --continue-through-error --verbose
-
-  # PYTORCH_TEST_WITH_DYNAMO and PYTORCH_TEST_WITH_INDUCTOR are only needed for PyTorch tests not written with
-  # using dynamo/inductor. For dynamo/inductor unit tests, specifiying them will trigger an error like
-  # "Detected two calls to `torchdynamo.optimize(...)` with a different backend compiler arguments."
-  # PYTORCH_TEST_WITH_DYNAMO=0 PYTORCH_TEST_WITH_INDUCTOR=0 pytest test/inductor
+  python test/test_modules.py --verbose
+  # TODO: investigate "RuntimeError: CUDA driver API confirmed a leak"
+  # seen intest_ops_gradients.py
+  # pytest test/test_ops_gradients.py --verbose -k "not _complex and not test_inplace_grad_acos_cuda_float64"
 }
 
 test_inductor_huggingface_shard() {
@@ -743,6 +744,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SH
   install_filelock
   install_triton
   test_inductor
+  test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_filelock

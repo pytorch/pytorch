@@ -1,4 +1,7 @@
+from typing import Tuple
+
 from torch.testing._internal.opinfo.core import (
+    AliasInfo,
     BinaryUfuncInfo,
     OpInfo,
     ReductionOpInfo,
@@ -48,7 +51,6 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     common_kwargs = {
         "name": name,
         "op": op,
-        "aliases": None,  # TODO add a check for alias coverage
         "method_variant": None,
         "inplace_variant": None,  # TODO: add a check for inplace coverage
         "supports_scripting": False,
@@ -86,6 +88,17 @@ def _inherit_constructor_args(name, op, inherited, overrides):
     return kwargs
 
 
+_REFS_PREFIX = "_refs."
+
+
+# In OpInfo, users declare aliases as strings, but internally those are stored
+# as AliasInfo objects. This extracts the alias name of each torch alias, then
+# adds _REFS_PREFIX to it, so that the return value can be passed to the OpInfo
+# constructor as aliases.
+def _torch_to_refs_alias_names(aliases: Tuple[AliasInfo]) -> Tuple[str]:
+    return tuple(_REFS_PREFIX + x.name for x in aliases)
+
+
 class PythonRefInfo(OpInfo):
     """
     An OpInfo for a Python reference of an OpInfo base class operation.
@@ -112,6 +125,8 @@ class PythonRefInfo(OpInfo):
         self.validate_view_consistency = validate_view_consistency
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, OpInfo)
+        if kwargs.get("aliases") is None:
+            kwargs["aliases"] = _torch_to_refs_alias_names(self.torch_opinfo.aliases)
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -142,6 +157,8 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         )
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, ReductionOpInfo)
+        if kwargs.get("aliases") is None:
+            kwargs["aliases"] = _torch_to_refs_alias_names(self.torch_opinfo.aliases)
 
         inherited = self.torch_opinfo._original_reduction_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -178,6 +195,8 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         self.validate_view_consistency = validate_view_consistency
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
+        if kwargs.get("aliases") is None:
+            kwargs["aliases"] = _torch_to_refs_alias_names(self.torch_opinfo.aliases)
 
         inherited = self.torch_opinfo._original_unary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
@@ -209,6 +228,8 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         )
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
+        if kwargs.get("aliases") is None:
+            kwargs["aliases"] = _torch_to_refs_alias_names(self.torch_opinfo.aliases)
 
         inherited = self.torch_opinfo._original_binary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)

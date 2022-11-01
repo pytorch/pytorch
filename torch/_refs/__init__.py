@@ -253,6 +253,7 @@ __all__ = [
     "diag",
     "diagonal",
     "diagonal_copy",
+    "diagonal_scatter",
     "dsplit",
     "dstack",
     "expand",
@@ -929,6 +930,7 @@ def _make_elementwise_binary_reference(
     has_out=True,
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
+    supports_two_python_scalars=False,
 ) -> Callable:
     @elementwise_type_promotion_wrapper(
         type_promoting_args=("a", "b"),
@@ -948,8 +950,11 @@ def _make_elementwise_binary_reference(
                 "Received a rhs Python scalar to an elementwise binary operation that does not accept rhs scalars!"
             )
 
-        # TODO: enable this for operations that support it, like add
-        if isinstance(a, Number) and isinstance(b, Number):
+        if (
+            not supports_two_python_scalars
+            and isinstance(a, Number)
+            and isinstance(b, Number)
+        ):
             raise ValueError(
                 f"Receive two Number inputs to an elementwise binary operation {prim}!"
             )
@@ -984,11 +989,6 @@ def add(
     """
     Reference implementation of torch.add
     """
-
-    if isinstance(a, Number) and isinstance(b, Number):
-        raise ValueError(
-            "Receive two Number inputs to an elementwise binary operation!"
-        )
 
     a, b = _maybe_broadcast(a, b)
 
@@ -1235,7 +1235,7 @@ def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
 
     # Convert truncation to flooring:
     offset = (torch.signbit(a) != torch.signbit(b)).logical_and(torch.fmod(a, b) != 0)
-    return prims.div(a, b) - prims.convert_element_type(offset, a.dtype)
+    return prims.div(a, b) - _maybe_convert_to_dtype(offset, a.dtype)
 
 
 def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
@@ -1268,6 +1268,7 @@ floor_divide = _make_elementwise_binary_reference(
     _floor_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.floor_divide,
+    supports_two_python_scalars=True,
 )
 
 
@@ -1441,6 +1442,8 @@ def isclose(
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
     dtype = a.dtype
+    # promoting to int32 to maintain 100% consistency with C++ and to
+    # prevent overflow in case of int8 and int16
     promote_to_int = dtype in (torch.int8, torch.int16)
     if promote_to_int:
         a = prims.convert_element_type(a, torch.int32)
@@ -1556,6 +1559,7 @@ minimum = _make_elementwise_binary_reference(
 mul = _make_elementwise_binary_reference(
     prims.mul,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_two_python_scalars=True,
 )
 
 
@@ -1620,11 +1624,6 @@ def sub(
     Reference implementation of torch.sub
     """
 
-    if isinstance(a, Number) and isinstance(b, Number):
-        raise ValueError(
-            "Receive two Number inputs to an elementwise binary operation!"
-        )
-
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
@@ -1650,6 +1649,7 @@ true_divide = _make_elementwise_binary_reference(
     prims.div,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
+    supports_two_python_scalars=True,
 )
 
 
@@ -1693,6 +1693,7 @@ trunc_divide = _make_elementwise_binary_reference(
     _trunc_divide,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # CompositeImplicitAutograd
+    supports_two_python_scalars=True,
 )
 
 #
@@ -2315,6 +2316,7 @@ def _dim_var_dispatch(dim=None, unbiased=None):
     return dim, unbiased
 
 
+@register_decomposition(torch.ops.aten.var)
 @out_wrapper()
 def var(
     a: TensorLikeType,
@@ -2956,10 +2958,10 @@ def native_layer_norm(
     elif weight is not None and bias is not None:
         out = out * weight + bias
 
-    out = prims.convert_element_type(out, input.dtype)
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     if input.device.type == "cpu":
-        mean = prims.convert_element_type(mean, input.dtype)
-        rstd = prims.convert_element_type(rstd, input.dtype)
+        mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
+        rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
 
 
@@ -3257,7 +3259,7 @@ def rot90(
     elif k == 3:
         return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
-        return clone(a)
+        return clone(a, memory_format=torch.contiguous_format)
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
@@ -3347,7 +3349,9 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
 @register_decomposition(torch.ops.aten.index_copy)
 @out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
-    return x.clone().index_copy_(dim, index, tensor)
+    return x.clone(memory_format=torch.contiguous_format).index_copy_(
+        dim, index, tensor
+    )
 
 
 @register_decomposition(torch.ops.aten.index_copy_)
@@ -3404,7 +3408,10 @@ def index_add(
     *,
     alpha: NumberType = 1,
 ):
-    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
+    # index_add always returns a new contiguous tensor
+    return x.clone(memory_format=torch.contiguous_format).index_add_(
+        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+    )
 
 
 @register_decomposition(torch.ops.aten.index_select)
@@ -3620,6 +3627,26 @@ def diag(
         return torch.diag_embed(self, offset)
     else:
         return torch.diagonal_copy(self, offset)
+
+
+@register_decomposition(torch.ops.aten.diagonal_scatter)
+@out_wrapper()
+def diagonal_scatter(
+    input: TensorLikeType,
+    src: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    out = input.clone()
+    diag = out.diagonal(offset, dim1, dim2)
+    check(
+        diag.shape == src.shape,
+        lambda: "expected src to have a size equal to the diagonal of the input."
+        f"Got {src.shape} for a diagonal of shape {diag.shape}",
+    )
+    copy_to(diag, src)
+    return out
 
 
 @register_decomposition(torch.ops.aten.diagonal)

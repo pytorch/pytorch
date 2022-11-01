@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version)
+    _get_torch_cuda_version, _get_torch_rocm_version)
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
@@ -3079,8 +3079,12 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
 
     assert fn is not None
 
-    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input}
-    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3}
+    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input,
+                   torch.nn.functional.conv_transpose2d: torch.nn.grad.conv2d_input,
+                   torch.nn.functional.conv_transpose3d: torch.nn.grad.conv3d_input}
+    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3,
+                       torch.nn.functional.conv_transpose2d: 4,
+                       torch.nn.functional.conv_transpose3d: 5}
 
     # Input for `ref` is ndarray.
     input, weight = torch.from_numpy(input), torch.from_numpy(weight)
@@ -3090,7 +3094,10 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
         input = input.unsqueeze(0)
 
     if bias is not None:
-        bias = torch.from_numpy(bias).unsqueeze(1)
+        bias = torch.from_numpy(bias)
+        unsqueeze_dims = input.ndim - 2
+        for _ in range(unsqueeze_dims):
+            bias = bias.unsqueeze(1)
 
     grad_output = input
     # Get the input shape for grad_fn.
@@ -3156,9 +3163,8 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
-        ((2, 8, 4, 4), (8, 1, 3, 3), None, {'groups': 4}),
-        ((1, 4, 5, 5), (4, 8, 3, 3), None,
-         {})
+        ((2, 4, 4, 4), (4, 1, 3, 3), None, {'groups': 4}),
+        ((1, 2, 5, 5), (2, 4, 3, 3), None, {})
     )
 
     for input_shape, weight, bias, kwargs in cases:
@@ -7010,9 +7016,10 @@ def error_inputs_poisson_nll_loss(op_info, device, **kwargs):
                      error_regex='abc is not valid')
     # invalid input shapes
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
-                     error_regex=(r'The size of tensor a \(5\) must match the '
+                     error_regex=(r'(Attempting to broadcast a dimension of length|'
+                                  r'The size of tensor a \(5\) must match the '
                                   r'size of tensor b \(4\) at non-singleton '
-                                  r'dimension 1'))
+                                  r'dimension 1)'))
 
 def error_inputs_soft_margin_loss(op_info, device, **kwargs):
     make = partial(make_tensor, device=device, dtype=torch.float32)
@@ -7024,9 +7031,10 @@ def error_inputs_soft_margin_loss(op_info, device, **kwargs):
                      error_regex='abc is not a valid value for reduction')
     # invalid input shapes
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
-                     error_regex=(r'The size of tensor a \(4\) must match the '
+                     error_regex=(r'(Attempting to broadcast a dimension of length|'
+                                  r'The size of tensor a \(4\) must match the '
                                   r'size of tensor b \(5\) at non-singleton '
-                                  r'dimension 1'))
+                                  r'dimension 1)'))
 
 def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, with_distance=False, **kwargs):
     make = partial(make_tensor, (S, M), device=device, dtype=dtype, requires_grad=requires_grad)
@@ -7058,18 +7066,21 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
         (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
          dict(),
          RuntimeError,
-         (r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
-          r"at non-singleton dimension 1")),
+         (r'(Attempting to broadcast a dimension of length|'
+          r"The size of tensor a \(5\) must match the size of tensor b \(4\) "
+          r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 5), make_input(3, 4)),
          dict(),
          RuntimeError,
-         (r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
-          r"at non-singleton dimension 1")),
+         (r'(Attempting to broadcast a dimension of length|'
+          r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
+          r"at non-singleton dimension 1)")),
         (make_input(3, 4), (make_input(3, 4), make_input(3, 5)),
          dict(),
          RuntimeError,
-         (r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
-          r"at non-singleton dimension 1")),
+         (r'(Attempting to broadcast a dimension of length|'
+          r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
+          r"at non-singleton dimension 1)")),
 
         # different dimensions
         (make_input(3,), (make_input(3, 4), make_input(3, 4)),
@@ -7228,9 +7239,11 @@ def error_inputs_l1_loss(op_info, device, **kwargs):
                      error_regex='abc is not a valid value for reduction')
     # invalid input shapes
     yield ErrorInput(SampleInput(make(5, 4), args=(make(5,),)),
-                     error_regex=(r'The size of tensor a \(4\) must match the '
+                     error_regex=(r'(Attempting to broadcast a dimension of length|'
+                                  r'The size of tensor a \(4\) must match the '
                                   r'size of tensor b \(5\) at non-singleton '
-                                  r'dimension 1'))
+                                  r'dimension 1)')
+                     )
 
 def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
@@ -8592,6 +8605,8 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # https://github.com/pytorch/pytorch/issues/70904
+                        DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
@@ -8604,6 +8619,8 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # https://github.com/pytorch/pytorch/issues/70904
+                        DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                     )),
     OpInfo('combinations',
            op=torch.combinations,
@@ -9395,7 +9412,9 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               skipCUDAIf(_get_torch_cuda_version() < (11, 3), "cusparseSDDMM was added in 11.2.1"),
+               skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
+                               or (_get_torch_rocm_version() >= (5, 2))),
+                          "cusparseSDDMM was added in 11.2.1"),
                skipCPUIfNoMklSparse, ],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
@@ -10667,10 +10686,15 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv_transpose2d',
            aten_name='conv_transpose2d',
            aliases=('conv_transpose2d',),
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16,
-                                           *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           # `ref` for this function is backward of
+           # corresponding `conv*d`
+           ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
+           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
+                                                       *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose2d,
+           # Runs very slowly on slow-gradcheck for complex.
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -10678,7 +10702,16 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
-                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda')],
+                   'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=2e-05, rtol=5e-05), }),
+                   'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.complex32: tol(atol=5e-2, rtol=5e-2)}),
+                   "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
+                   'TestCommon', 'test_complex_half_reference_testing')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -12806,7 +12839,7 @@ op_db: List[OpInfo] = [
                     supports_out=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_two_python_scalars=True,
+                    supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
@@ -12841,7 +12874,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_out=False,
-                    supports_two_python_scalars=True,
+                    supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
@@ -13839,6 +13872,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'char',
@@ -13852,6 +13886,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'double',
@@ -13904,6 +13939,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'long',
@@ -13916,6 +13952,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'short',
@@ -13928,6 +13965,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'cdouble',
@@ -16391,7 +16429,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
-        aliases=('_refs.absolute',),
         skips=(
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
@@ -16404,23 +16441,19 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
         torch_opinfo_name="acos",
-        aliases=('_refs.arccos',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acosh",
         torch_opinfo_name="acosh",
-        aliases=('_refs.arccosh',),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.asin",
         torch_opinfo_name="asin",
-        aliases=('_refs.arcsin',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.asinh",
         torch_opinfo_name="asinh",
-        aliases=('_refs.arcsinh',),
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -16572,8 +16605,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.movedim",
         torch_opinfo_name="movedim",
-        aliases=('_refs.moveaxis',),
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.bucketize",
@@ -16588,12 +16623,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
-        aliases=('_refs.arctan',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atanh",
         torch_opinfo_name="atanh",
-        aliases=('_refs.arctanh',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
@@ -16622,24 +16655,20 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.digamma",
         torch_opinfo_name="digamma",
-        aliases=('_refs.special.psi', '_refs.special.digamma'),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erf",
         torch_opinfo_name="erf",
-        aliases=('_refs.special.erf',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erfinv",
         torch_opinfo_name="erfinv",
-        aliases=('_refs.special.erfinv',),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erfc",
         torch_opinfo_name="erfc",
-        aliases=('_refs.special.erfc',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp",
@@ -16648,12 +16677,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.expm1",
         torch_opinfo_name="expm1",
-        aliases=('_refs.special.expm1',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.exp2",
         torch_opinfo_name="exp2",
-        aliases=('_refs.special.exp2',),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -16721,33 +16748,28 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.i0",
         torch_opinfo_name="i0",
-        aliases=('_refs.special.i0',),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
-        aliases=('_refs.special.gammaln',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.mvlgamma",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_1",
-        aliases=("_refs.special.multigammaln",),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.mvlgamma",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_3",
-        aliases=("_refs.special.multigammaln",),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.mvlgamma",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_5",
-        aliases=("_refs.special.multigammaln",),
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -16757,7 +16779,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.log1p",
         torch_opinfo_name="log1p",
-        aliases=('_refs.special.log1p',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log10",
@@ -16770,13 +16791,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.logit",
         torch_opinfo_name="special.logit",
-        aliases=('_refs.logit',),
         supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        aliases=('_refs.special.logsumexp',),
         # When keepdim=False logsumexp function uses squeeze operation
         # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
@@ -16785,7 +16804,6 @@ python_ref_db = [
         "_refs.log_softmax",
         torch_opinfo_name="log_softmax",
         torch_opinfo_variant_name="with_dtype",
-        aliases=('_refs.special.log_softmax', '_refs.nn.functional.log_softmax'),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
@@ -16795,7 +16813,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
         torch_opinfo_name="neg",
-        aliases=('_refs.negative',),
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.positive",
@@ -16814,7 +16834,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.round",
         torch_opinfo_name="round",
-        aliases=('_refs.special.round',),
         # Fails on int32
         # https://github.com/pytorch/pytorch/issues/85258
         supports_nvfuser=False,
@@ -16826,7 +16845,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
-        aliases=('_refs.special.expit', '_refs.nn.functional.sigmoid'),
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
@@ -16854,7 +16872,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.sinc",
         torch_opinfo_name="special.sinc",
-        aliases=('_refs.sinc',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
@@ -16864,7 +16881,6 @@ python_ref_db = [
         "_refs.softmax",
         torch_opinfo_name="softmax",
         torch_opinfo_variant_name="with_dtype",
-        aliases=('_refs.special.softmax', '_refs.nn.functional.softmax'),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",
@@ -16885,12 +16901,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tanh",
         torch_opinfo_name="tanh",
-        aliases=('_refs.nn.functional.tanh',),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.trunc",
         torch_opinfo_name="trunc",
-        aliases=('_refs.fix',),
         # Fails on int32
         # https://github.com/pytorch/pytorch/issues/85258
         supports_nvfuser=False,
@@ -16956,7 +16970,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.layer_norm",
         torch_opinfo_name="nn.functional.layer_norm",
-        aliases=('_refs.layer_norm',),
         skips=(
             # Reference result was farther (3.5762786809723224e-07) from the precise computation
             # than the torch result was (2.5068410824946596e-07)!
@@ -16991,10 +17004,16 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.poisson_nll_loss",
         torch_opinfo_name="nn.functional.poisson_nll_loss",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
@@ -17098,13 +17117,12 @@ python_ref_db = [
         "_refs.add",
         torch_opinfo_name="add",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
         torch_opinfo_name="atan2",
-        aliases=('_refs.arctan2',),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_and",
@@ -17114,6 +17132,19 @@ python_ref_db = [
         "_refs.bitwise_left_shift",
         torch_opinfo_name="bitwise_left_shift",
         supports_nvfuser=False,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/70904
+            DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.bitwise_right_shift",
+        torch_opinfo_name="bitwise_right_shift",
+        supports_nvfuser=False,
+        skips=(
+            # # https://github.com/pytorch/pytorch/issues/70904
+            DecorateInfo(unittest.skip("Skipped some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_or",
@@ -17136,9 +17167,8 @@ python_ref_db = [
         "_refs.div",
         torch_opinfo_name="div",
         torch_opinfo_variant_name="no_rounding_mode",
-        aliases=('_refs.divide',),
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
@@ -17163,9 +17193,8 @@ python_ref_db = [
         "_refs.div",
         torch_opinfo_name="div",
         torch_opinfo_variant_name="trunc_rounding",
-        aliases=('_refs.divide',),
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
     ),
@@ -17173,9 +17202,8 @@ python_ref_db = [
         "_refs.div",
         torch_opinfo_name="div",
         torch_opinfo_variant_name="floor_rounding",
-        aliases=('_refs.divide',),
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
     ),
@@ -17197,7 +17225,7 @@ python_ref_db = [
         torch_opinfo_name="floor_divide",
         rhs_make_tensor_kwargs=dict(exclude_zero=True),
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         # bfloat16 floor_divide compared with a float32 reference works inconsistently
@@ -17242,12 +17270,10 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
-        aliases=('_refs.greater_equal',),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.gt",
         torch_opinfo_name="gt",
-        aliases=('_refs.greater',),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.heaviside",
@@ -17264,13 +17290,11 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.igamma",
         torch_opinfo_name="igamma",
-        aliases=('_refs.special.gammainc',),
         supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.igammac",
         torch_opinfo_name="igammac",
-        aliases=('_refs.special.gammaincc',),
         supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -17290,7 +17314,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
         torch_opinfo_name="le",
-        aliases=('_refs.less_equal',),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_and",
@@ -17311,7 +17334,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
         torch_opinfo_name="lt",
-        aliases=('_refs.less',),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
@@ -17332,9 +17354,8 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.mul",
         torch_opinfo_name="mul",
-        aliases=('_refs.multiply',),
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         skips=(
             # Reference result was farther (0.0) from the precise computation
@@ -17356,7 +17377,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ne",
         torch_opinfo_name="ne",
-        aliases=('_refs.not_equal',),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.nextafter",
@@ -17410,16 +17430,15 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.sub",
         torch_opinfo_name="sub",
-        aliases=('_refs.subtract',),
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.true_divide",
         torch_opinfo_name="true_divide",
         # https://github.com/pytorch/pytorch/issues/76944
-        supports_two_python_scalars=False,
+        supports_two_python_scalars=True,
         supports_one_python_scalar=True,
         skips=(
             # Reference result was farther (0.7433461727239705) from the precise
@@ -17470,7 +17489,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
-        aliases=('_refs.clip',),
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -17490,7 +17508,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.xlogy",
         torch_opinfo_name="xlogy",
-        aliases=('_refs.special.xlogy',),
         supports_one_python_scalar=True,
         supports_nvfuser=False,
     ),
@@ -17532,6 +17549,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.char",
@@ -17541,6 +17561,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.double",
@@ -17577,6 +17600,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.long",
@@ -17586,6 +17612,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.short",
@@ -17595,6 +17624,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.chalf",
@@ -17684,7 +17716,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.cat",
         torch_opinfo_name="cat",
-        aliases=('_refs.concat', '_refs.concatenate'),
         supports_nvfuser=False,
         skips=(
             # FIXME: AssertionError: RuntimeError not raised
@@ -17720,6 +17751,9 @@ python_ref_db = [
         "_refs.dsplit",
         torch_opinfo_name="dsplit",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.diag",
@@ -17729,12 +17763,17 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.diagonal",
         torch_opinfo_name="diagonal",
-        aliases=('_refs.linalg.diagonal',),
         supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.diagonal_copy",
         torch_opinfo_name="diagonal_copy",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.diagonal_scatter",
+        torch_opinfo_name="diagonal_scatter",
+        supports_out=True,
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -17746,6 +17785,9 @@ python_ref_db = [
         "_refs.dstack",
         torch_opinfo_name="dstack",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.expand",
@@ -17830,6 +17872,9 @@ python_ref_db = [
         "_refs.reshape",
         torch_opinfo_name="reshape",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.reshape_as",
@@ -17878,11 +17923,13 @@ python_ref_db = [
         "_refs.vsplit",
         torch_opinfo_name="vsplit",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
-        aliases=('_refs.swapdims', '_refs.swapaxes'),
     ),
     PythonRefInfo(
         "_refs.t",
@@ -17912,6 +17959,9 @@ python_ref_db = [
         "_refs.view",
         torch_opinfo_name="view",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.view_as",
@@ -17921,7 +17971,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.vstack",
         torch_opinfo_name="vstack",
-        aliases=('_refs.row_stack',),
         supports_nvfuser=False,
         skips=(
             # https://github.com/pytorch/pytorch/issues/78613
@@ -17937,6 +17986,9 @@ python_ref_db = [
         "_refs.unbind",
         torch_opinfo_name="unbind",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     #
     # Reduction Reference OpInfos
@@ -17948,10 +18000,16 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.any",
@@ -17961,6 +18019,9 @@ python_ref_db = [
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.std",
@@ -18241,12 +18302,18 @@ python_ref_db = [
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
+        ),
     ),
     PythonRefInfo(
         "_refs.index_select",
