@@ -19,7 +19,6 @@ if fake_tensors_available:
     )
     from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
-import torch.utils._python_dispatch as py_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._pytree import tree_map
@@ -652,10 +651,9 @@ class DynamicShapeVariable(VariableTracker):
 
     def evaluate_expr(self, output_graph):
         if isinstance(self.dyn_shape, (bool, int)):
-            # Bool and 0/1 case fallthorugh for now
+            # Bool and 0/1 case fallthrough
             return self.dyn_shape
         return output_graph.shape_env.evaluate_expr(self.dyn_shape.get_pyobj().expr)
-
 
     def call_method(
         self,

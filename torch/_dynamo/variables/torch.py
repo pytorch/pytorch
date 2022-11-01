@@ -179,6 +179,7 @@ class TorchVariable(VariableTracker):
             GradModeVariable,
             TensorVariable,
         )
+
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
