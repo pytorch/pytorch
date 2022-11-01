@@ -303,6 +303,7 @@ CORE_TEST_LIST = [
     "test_nn",
     "test_ops",
     "test_ops_gradients",
+    "test_ops_fwd_gradients",
     "test_ops_jit",
     "test_torch"
 ]
@@ -779,6 +780,7 @@ CUSTOM_HANDLERS = {
     "doctests": run_doctests,
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
+    "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
 }
@@ -1120,6 +1122,11 @@ def get_selected_tests(options):
         else:
             print("Found test time stats from artifacts")
             test_file_times_config = test_file_times[test_config]
+            if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
+                # HACK: hardcode approx test times, so these two don't get put in the same shard
+                #       we can remove this when their actual runtimes are recorded
+                test_file_times_config["test_ops_fwd_gradients"] = 3600 * 2 + 600 # 2:10
+                test_file_times_config["test_ops_gradients"] = 3600 * 2 + 600 # 2:10
             shards = calculate_shards(num_shards, selected_tests, test_file_times_config,
                                       must_serial=must_serial)
             _, tests_from_shard = shards[which_shard - 1]
