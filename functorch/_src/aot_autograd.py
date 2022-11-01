@@ -25,7 +25,7 @@ from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
 
 try:
-    from torchdynamo import disable as disable_torchdynamo
+    from torch._dynamo import disable as disable_torchdynamo
 except ImportError:
 
     def disable_torchdynamo(x):
@@ -33,7 +33,7 @@ except ImportError:
 
 
 try:
-    from torchdynamo.utils import dynamo_timed
+    from torch._dynamo.utils import dynamo_timed
 except ImportError:
 
     def dynamo_timed(x):
