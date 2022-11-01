@@ -10,6 +10,7 @@ from enum import Enum
 from functools import partial
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
+from contextlib import nullcontext
 
 import numpy
 import sympy
@@ -2890,12 +2891,13 @@ class FallbackKernel(ExternKernelAlloc):
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        (
-            example_output,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-        ) = cls.process_kernel(kernel, *args, **kwargs)
+        with FakeTensorMode():
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            ) = cls.process_kernel(kernel, *args, **kwargs)
 
         if isinstance(example_output, (list, tuple)):
             packed = FallbackKernel(
