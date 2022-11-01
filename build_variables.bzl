@@ -691,7 +691,6 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",
     "torch/csrc/jit/codegen/cuda/kernel.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_cache.cpp",
-    "torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/lower_alias_memory.cpp",

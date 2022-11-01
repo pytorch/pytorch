@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -233,7 +233,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 }
 
 bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
-  kir::ExpressionEvaluator eval;
+  ExpressionEvaluator eval;
   std::vector<kir::ForLoop*> loops({fl});
 
   const auto& pred_map = GpuLower::current()->threadPredMap();

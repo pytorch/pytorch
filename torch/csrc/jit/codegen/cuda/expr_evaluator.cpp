@@ -74,6 +74,19 @@ void ExpressionEvaluator::bind(
   known_named_scalars_[name] = concrete_value;
 }
 
+void ExpressionEvaluator::bind(
+    ParallelType pt,
+    Int::ScalarType concrete_value) {
+  TORCH_INTERNAL_ASSERT(isParallelTypeThread(pt));
+  if (precomputed_values_) {
+    // Need to bind the thread value to integer machine
+    //  in pre-computed mode.
+    precomputed_values_->bindConcreteParallelTypeValue(pt, concrete_value);
+  } else {
+    bind(stringifyThreadSize(pt), concrete_value);
+  }
+}
+
 c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(const Val* value) {
   if (precomputed_values_ && precomputed_values_->ready()) {
     if (precomputed_values_->getMaybeValueFor(value).has_value()) {

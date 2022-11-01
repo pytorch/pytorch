@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -816,7 +816,7 @@ class BufferUseDefInfo {
   ScopeInfoOwningPtrList all_loop_infos_;
 
   //! Expression Evaluator to infer size of register allocation
-  kir::ExpressionEvaluator expr_evaluator_;
+  ExpressionEvaluator expr_evaluator_;
 
   //! Position counter when iterating through the exprs list
   int current_pos_ = -1;

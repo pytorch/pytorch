@@ -2,6 +2,7 @@
 
 #include <c10/macros/Export.h>
 #include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
@@ -25,6 +26,9 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
 
   //! Bind a concrete value to a named scalar
   void bind(const std::string& name, const IntOrDouble& concrete_value);
+
+  //! Set a concrete value for a parallel dimension
+  void bind(ParallelType pt, Int::ScalarType concrete_value);
 
   //! Try to evaluate a Fusion IR value
   c10::optional<IntOrDouble> evaluate(const Val* value);

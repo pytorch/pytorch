@@ -1,6 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -347,7 +346,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
         return;
       }
 
-      kir::ExpressionEvaluator ee;
+      ExpressionEvaluator ee;
 
       // Cannot replace if either the reduction buffer or broadcast buffer does
       // not have

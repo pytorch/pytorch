@@ -1,11 +1,11 @@
 #pragma once
 #include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -203,25 +203,25 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   LaunchParams computeLaunchParams(
       const LaunchParams& launch_constraints,
-      kir::ExpressionEvaluator& expr_eval,
+      ExpressionEvaluator& expr_eval,
       const int warp_size);
 
   uint64_t computeSharedMemory(
-      kir::ExpressionEvaluator& expr_eval,
+      ExpressionEvaluator& expr_eval,
       const std::vector<const kir::Allocate*>& buffers,
       bool align_padding = false,
       uint64_t total = 0);
 
   // return a pair of vector of tensors, where tensors in the first vector are
   // not initialized, while the second vector contains zero-initiliazed tensors
-  GlobalBuffers allocGlobalVals(kir::ExpressionEvaluator& expr_eval);
+  GlobalBuffers allocGlobalVals(ExpressionEvaluator& expr_eval);
 
   // alias_index: index of outputs that are aliases to inputs, hence we should
   // skip allocating real storage for those, but still maintain its spot to
   // maintain the indexing from output aliases to inputs
   std::vector<at::Tensor> allocOutputs(
       const KernelArgumentHolder& args,
-      kir::ExpressionEvaluator& expr_eval,
+      ExpressionEvaluator& expr_eval,
       const std::unordered_set<int>& alias_indices = {});
 
   void setUsedTVs();
@@ -240,7 +240,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   //! allocate output in memory, but rather is used just to infer output sizes.
   KernelArgumentHolder evaluateOutputSizes(
       const KernelArgumentHolder& args,
-      kir::ExpressionEvaluator& expr_eval,
+      ExpressionEvaluator& expr_eval,
       const std::unordered_set<int>& alias_indices = {});
 
  private:

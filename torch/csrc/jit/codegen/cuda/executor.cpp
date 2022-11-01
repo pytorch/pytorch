@@ -161,7 +161,7 @@ void FusionExecutor::debugCompileFusionFromStr(
   const auto& kernel_summary = kernel->summary();
 
   if (!kernel_summary.static_smem_allocations.empty()) {
-    kir::ExpressionEvaluator static_evaluator;
+    ExpressionEvaluator static_evaluator;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const auto static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
@@ -287,7 +287,7 @@ void FusionExecutor::compileFusion(
   //  tensors statically but could keep this path if
   //  needed in later development.
   if (!kernel_summary.static_smem_allocations.empty()) {
-    kir::ExpressionEvaluator static_evaluator;
+    ExpressionEvaluator static_evaluator;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     const auto static_smem_size = computeSharedMemory(
         static_evaluator, kernel_summary.static_smem_allocations);
@@ -386,7 +386,7 @@ void fillTensorWithNan(at::Tensor& t) {
 at::Tensor inferAndAlloc(
     const TensorView* tv,
     const std::vector<Val*>& sizes,
-    kir::ExpressionEvaluator& expr_eval,
+    ExpressionEvaluator& expr_eval,
     // Map from dim -> expanded size of TV if any expanded broadcast dimensions
     // exist
     std::unordered_map<int, Val*> expanded_map,
@@ -464,7 +464,7 @@ at::Tensor inferAndAlloc(
 
 at::Tensor inferAndAllocOutput(
     const TensorView* tv,
-    kir::ExpressionEvaluator& expr_eval,
+    ExpressionEvaluator& expr_eval,
     const CompileOptions& options,
     bool zero_init = false) {
   const auto domain = tv->domain();
@@ -490,7 +490,7 @@ at::Tensor inferAndAllocOutput(
 } // namespace
 
 uint64_t FusionExecutor::computeSharedMemory(
-    kir::ExpressionEvaluator& expr_eval,
+    ExpressionEvaluator& expr_eval,
     const std::vector<const kir::Allocate*>& buffers,
     bool align_padding,
     uint64_t total) {
@@ -527,7 +527,7 @@ uint64_t FusionExecutor::computeSharedMemory(
 
 LaunchParams FusionExecutor::computeLaunchParams(
     const LaunchParams& launch_constraints,
-    kir::ExpressionEvaluator& expr_eval,
+    ExpressionEvaluator& expr_eval,
     const int warp_size) {
   FUSER_PERF_SCOPE("FusionExecutor::ComputeLaunchParams");
   TORCH_INTERNAL_ASSERT(warp_size > 0, "WARP_SIZE should be larger than 0");
@@ -739,7 +739,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
 }
 
 FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
-    kir::ExpressionEvaluator& expr_eval) {
+    ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocGlobalVals");
   GlobalBuffers global_buffers;
   const auto kernel = lowered_->kernel();
@@ -773,7 +773,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
     const KernelArgumentHolder& args,
-    kir::ExpressionEvaluator& expr_eval,
+    ExpressionEvaluator& expr_eval,
     const std::unordered_set<int>& alias_indices) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocOutputs");
   const auto kernel = lowered_->kernel();
@@ -817,7 +817,7 @@ void FusionExecutor::setUsedTVs() {
 
 KernelArgumentHolder FusionExecutor::evaluateOutputSizes(
     const KernelArgumentHolder& args,
-    kir::ExpressionEvaluator& expr_eval,
+    ExpressionEvaluator& expr_eval,
     const std::unordered_set<int>& alias_indices) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocOutputs");
   const auto kernel = lowered_->kernel();
@@ -894,7 +894,7 @@ KernelArgumentHolder FusionExecutor::inferOutputSizes(
         std::make_unique<PrecomputedValues>(lowered_->kernel());
   }
 
-  kir::ExpressionEvaluator expr_eval;
+  ExpressionEvaluator expr_eval;
   evaluator_precomputed_values_->bindInputs(args);
   expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 
@@ -1064,7 +1064,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
           std::make_unique<PrecomputedValues>(lowered_->kernel());
     }
 
-    kir::ExpressionEvaluator expr_eval;
+    ExpressionEvaluator expr_eval;
     evaluator_precomputed_values_->bindInputs(args);
     expr_eval.precomputedValues() = evaluator_precomputed_values_.get();
 

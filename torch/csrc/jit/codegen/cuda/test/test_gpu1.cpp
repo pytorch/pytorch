@@ -20,7 +20,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
@@ -384,7 +383,7 @@ TEST_F(NVFuserTest, FusionKernelExprEvalConstants_CUDA) {
   auto d = IrBuilder::divExpr(a, b);
   auto e = IrBuilder::mulExpr(c, d);
 
-  kir::ExpressionEvaluator evaluator;
+  ExpressionEvaluator evaluator;
 
   checkIntValue(evaluator, IrBuilder::negExpr(a), -7);
   checkIntValue(evaluator, IrBuilder::addExpr(a, b), 10);
@@ -399,7 +398,7 @@ TEST_F(NVFuserTest, FusionKernelExprEvalBindings_CUDA) {
   kir::Kernel kernel(&fusion);
   FusionGuard fg((&kernel)->as<Fusion>());
 
-  kir::ExpressionEvaluator evaluator;
+  ExpressionEvaluator evaluator;
 
   auto a = IrBuilder::create<Int>(c10::nullopt);
   auto b = IrBuilder::create<Int>(c10::nullopt);
@@ -429,7 +428,7 @@ TEST_F(NVFuserTest, FusionKernelExprEvalBindings_CUDA) {
   checkIntValue(evaluator, d, -4);
 
   // Reset the evaluation context
-  evaluator = kir::ExpressionEvaluator();
+  evaluator = ExpressionEvaluator();
 
   evaluator.bind(a, 2);
   evaluator.bind(b, 5);

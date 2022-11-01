@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index_compute.h>
@@ -299,7 +298,7 @@ Val* getProducerIndexWithPartialSplit(
   // accounted.
 
   auto diff = SimplifyingIrBuilder::subExpr(consumer_offset, producer_offset);
-  kir::ExpressionEvaluator ee;
+  ExpressionEvaluator ee;
   auto diff_eval = ee.evaluate(diff);
   // We currently only allow constant offsetting
   TORCH_INTERNAL_ASSERT(diff_eval.has_value(), "Invalid partial split");

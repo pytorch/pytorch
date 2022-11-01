@@ -68,15 +68,6 @@ void checkIntValue(
   TORCH_CHECK(actual_value.value() == expected_value);
 }
 
-void checkIntValue(
-    kir::ExpressionEvaluator& evaluator,
-    const Val* val,
-    Int::ScalarType expected_value) {
-  const auto actual_value = evaluator.evaluate(val);
-  TORCH_CHECK(actual_value.has_value());
-  TORCH_CHECK(actual_value.value() == expected_value);
-}
-
 // prime numbers
 int64_t prime_numbers[] = {
     2,    3,    5,    7,    11,   13,   17,   19,   23,   29,   31,   37,

@@ -539,7 +539,7 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
 // word size.
 void validateAlignedVectorizeExtents(
     const VectorizedSetInfo& info,
-    kir::ExpressionEvaluator& expr_eval) {
+    ExpressionEvaluator& expr_eval) {
   TORCH_INTERNAL_ASSERT(
       !info.contig_root_ids.empty(),
       "No root ID found for vectorization with ",
@@ -640,7 +640,7 @@ void validateAlignedVectorizedTensors(
     const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
-    kir::ExpressionEvaluator& expr_eval) {
+    ExpressionEvaluator& expr_eval) {
   auto tensor_vectorization_validation_entry =
       executor_utils::caching::ExecutorCompileTimeEntry<
           executor_utils::caching::VectorizedTensorValidation>(
@@ -686,7 +686,7 @@ void validateMisalignedVectorizedTensors(
     const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
-    kir::ExpressionEvaluator& expr_eval) {
+    ExpressionEvaluator& expr_eval) {
   auto tensor_vectorization_validation_entry =
       executor_utils::caching::ExecutorCompileTimeEntry<
           executor_utils::caching::VectorizedTensorValidation>(
@@ -736,7 +736,7 @@ void validateMisalignedVectorizedTensors(
 // found, Vectorize is illegal.
 void validateVectorizedSplits(
     kir::Kernel* kernel,
-    kir::ExpressionEvaluator& expr_eval) {
+    ExpressionEvaluator& expr_eval) {
   for (const auto& extent_factor : kernel->summary().splits_to_validate) {
     auto input_extent = expr_eval.evaluate(extent_factor.first);
     auto split_factor = expr_eval.evaluate(extent_factor.second);
@@ -767,7 +767,7 @@ void validateVectorizedTensors(
     const KernelArgumentHolder& args,
     const std::vector<at::Tensor>& outputs,
     caching::ExecutorCompileTimeInfoCache* data_cache,
-    kir::ExpressionEvaluator& expr_eval) {
+    ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("FusionExecutor::validateVectorizedTensors");
 
   validateAlignedVectorizedTensors(
@@ -878,7 +878,7 @@ void bindInputForExprEvaluation(
 
 } // namespace
 
-kir::ExpressionEvaluator bindKernelInputs(
+ExpressionEvaluator bindKernelInputs(
     const KernelArgumentHolder& args,
     kir::Kernel* kernel,
     bool check_consistency) {
@@ -888,7 +888,7 @@ kir::ExpressionEvaluator bindKernelInputs(
       kernel->inputs().size() == args.size(),
       "Something went wrong configuring launch. Inputs no longer match.");
 
-  kir::ExpressionEvaluator expr_eval;
+  ExpressionEvaluator expr_eval;
   const auto& inputs = kernel->inputs();
 
   for (const auto i : c10::irange(inputs.size())) {
