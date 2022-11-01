@@ -354,6 +354,52 @@ class KernelArgs:
             call_args.append(f"c_long({outer})")
         return arg_defs, call_args
 
+    def cpp_argdefs_for_cpp_wrapper(self):
+        from .cpp import DTYPE_TO_CPP, INDEX_TYPE
+
+        # TODO(jansel): replace this with data from scheduler
+        buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
+        buffer_types.update(
+            {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
+        )
+        buffer_types.update(
+            {name: val.dtype for name, val in V.graph.constants.items()}
+        )
+
+        call_args = []
+        arg_defs = []
+        arg_types = []
+        for inplaced in unique(self.inplace_buffers.values()):
+            outer = inplaced.other_names[0]
+            inner = inplaced.inner_name
+            dtype = buffer_types[outer]
+            arg_types.append(f"{DTYPE_TO_CPP[dtype]}*")
+            arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            name = inplaced.other_names[-1]
+            ptr_type = f"({DTYPE_TO_CPP[dtype]}*)"
+            call_args.append(f"{ptr_type}({name}.data_ptr())")
+        for outer, inner in self.input_buffers.items():
+            if outer in self.inplace_buffers:
+                continue
+            dtype = buffer_types[outer]
+            arg_types.append(f"const {DTYPE_TO_CPP[dtype]}*")
+            arg_defs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            ptr_type = f"({DTYPE_TO_CPP[dtype]}*)"
+            call_args.append(f"{ptr_type}({outer}.data_ptr())")
+        for outer, inner in self.output_buffers.items():
+            if outer in self.inplace_buffers or inner == "REMOVED":
+                continue
+            dtype = buffer_types[outer]
+            arg_types.append(f"{DTYPE_TO_CPP[dtype]}*")
+            arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
+            ptr_type = f"({DTYPE_TO_CPP[dtype]}*)"
+            call_args.append(f"{ptr_type}({outer}.data_ptr())")
+        for outer, inner in self.sizevars.items():
+            arg_types.append(f"const {INDEX_TYPE}")
+            arg_defs.append(f"const {INDEX_TYPE} {inner}")
+            call_args.append(f"{outer}")
+        return arg_defs, arg_types, call_args
+
     def python_argdefs(self):
         arg_defs = []
         call_args = []

@@ -4,6 +4,9 @@ import sys
 # add some debug printouts
 debug = False
 
+# use cpp wrapper instead of python wrapper
+cpp_wrapper = False
+
 # dead code elimination
 dce = False
 
