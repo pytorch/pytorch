@@ -106,7 +106,7 @@ class HandleConfig:
     offload_params: bool
     low_prec_param_dtype: Optional[torch.dtype]
     low_prec_reduce_dtype: Optional[torch.dtype]
-    keep_low_precision_grads: Optional[bool] = False
+    keep_low_precision_grads: bool = False
 
 
 class FlatParameter(nn.Parameter):
@@ -1799,6 +1799,14 @@ class FlatParamHandle:
     @property
     def _uses_param_mixed_precision(self) -> bool:
         return self._config.low_prec_param_dtype is not None
+
+    @property
+    def _uses_reduce_mixed_precision(self) -> bool:
+        return self._config.low_prec_reduce_dtype is not None
+
+    @property
+    def _keep_low_precision_grads(self) -> bool:
+        return self._config.keep_low_precision_grads
 
     @property
     def _force_full_precision(self) -> bool:
