@@ -59,13 +59,13 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     if (type->kind() == TypeKind::OptionalType) {
       type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
       // recursive optional type is not supported
-      AT_ASSERT(type->kind() != TypeKind::OptionalType);
+      TORCH_INTERNAL_ASSERT(type->kind() != TypeKind::OptionalType);
     }
     if (type->kind() == TypeKind::ListType) {
       const auto& elem_type =
           reinterpret_cast<ListType*>(type.get())->getElementType();
       if (elem_type->isSubtypeOf(*TensorType::get())) {
-        AT_ASSERTM(
+        TORCH_INTERNAL_ASSERT(
             !has_tensor_list,
             "ONNX export supports at most one TensorList as input.");
         has_tensor_list = true;
@@ -92,7 +92,7 @@ void preprocessCaffe2Ops(Block* block) {
       size_t origin_inputs_index = 0;
       for (const auto& arg : args) {
         auto type = arg.type();
-        AT_ASSERT(origin_inputs_index < origin_inputs.size());
+        TORCH_INTERNAL_ASSERT(origin_inputs_index < origin_inputs.size());
         const auto& origin_input = origin_inputs[origin_inputs_index++];
         if (type->kind() == TypeKind::OptionalType &&
             origin_input->mustBeNone()) {
@@ -104,24 +104,24 @@ void preprocessCaffe2Ops(Block* block) {
             type->kind() == TypeKind::BoolType ||
             type->kind() == TypeKind::IntType) {
           const auto* constant_node = origin_input->node();
-          AT_ASSERT(constant_node->kind() == prim::Constant);
+          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
           it->i_(Symbol::attr(arg.name()), constant_node->i(attr::value));
         } else if (type->kind() == TypeKind::FloatType) {
           const auto* constant_node = origin_input->node();
-          AT_ASSERT(constant_node->kind() == prim::Constant);
+          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
           it->f_(Symbol::attr(arg.name()), constant_node->f(attr::value));
         } else if (type->kind() == TypeKind::StringType) {
           const auto* constant_node = origin_input->node();
-          AT_ASSERT(constant_node->kind() == prim::Constant);
+          TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
           it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
           const auto& elem_type = type->castRaw<ListType>()->getElementType();
-          AT_ASSERT(
+          TORCH_INTERNAL_ASSERT(
               list_node->kind() == prim::ListConstruct ||
               list_node->kind() == prim::Constant);
           if (elem_type->isSubtypeOf(*TensorType::get())) {
-            AT_ASSERT(list_node->kind(), prim::ListConstruct);
+            TORCH_INTERNAL_ASSERT(list_node->kind(), prim::ListConstruct);
             const auto& tensor_list = origin_input->node()->inputs();
             for (const auto& t : tensor_list) {
               it->addInput(t);
@@ -131,7 +131,7 @@ void preprocessCaffe2Ops(Block* block) {
             if (list_node->kind() == prim::ListConstruct) {
               for (const auto* elem_input : list_node->inputs()) {
                 const auto* constant_node = elem_input->node();
-                AT_ASSERT(constant_node->kind() == prim::Constant);
+                TORCH_INTERNAL_ASSERT(constant_node->kind() == prim::Constant);
                 values.push_back(constant_node->f(attr::value));
               }
             } else { // is a constant list
@@ -426,8 +426,16 @@ void NodeToONNX(
 
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*g, n->scope());
+
+    // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+    // Python. Check #87343 for details.
     py::object raw_output = onnx.attr("_run_symbolic_function")(
-        g, new_block, n, py_inputs, env, operator_export_type);
+        g->shared_from_this(),
+        new_block,
+        n,
+        py_inputs,
+        env,
+        operator_export_type);
 
     // Find new nodes that have been created by _run_symbolic_function and
     // propagate metadata
@@ -530,8 +538,11 @@ void NodeToONNX(
               opset_version,
               pyobj.attr("symbolic"),
               /* custom */ true);
+
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_method")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           op->name(),
           pyobj.attr("symbolic"),
           py_symbolic_args);
@@ -542,8 +553,10 @@ void NodeToONNX(
       Node* n = static_cast<Node*>(op);
       n->s_(attr::name, op->name());
       // Call symbolic function
+      // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
+      // Python. Check #87343 for details.
       py::object raw_output = onnx.attr("_run_symbolic_function")(
-          new_block->owningGraph(),
+          new_block->owningGraph()->shared_from_this(),
           new_block,
           n,
           py_symbolic_args,
