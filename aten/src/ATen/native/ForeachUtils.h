@@ -127,29 +127,36 @@ c10::optional<std::vector<c10::Scalar>> convert_tensor_to_scalar_list(
     const Tensor& scalarList_,
     int64_t expect_length) {
   std::vector<c10::Scalar> scalarList;
-  // if (scalarList_.device() != c10::kCPU) {
-  //   return c10::nullopt;
-  // }
-  // if (scalarList_.dtype() != c10:kFloat) {
-  //   return c10::nullopt;
-  // }
-  // if (!scalarList_.is_contiguous()) {
-  //   return c10::nullopt;
-  // }
+  TORCH_CHECK(
+      scalarList_.device() == c10::kCPU,
+      "Expected scalars to be on CPU, got ",
+      scalarList_.device(),
+      " instead.");
+  TORCH_CHECK(
+      scalarList_.device() == c10::kCPU,
+      "Expected scalars to be of dtype float32, got ",
+      scalarList_.dtype(),
+      " instead.");
+  TORCH_CHECK(
+      scalarList_.is_contiguous(), "Expected scalars to be contiguous.");
   TORCH_CHECK(
       scalarList_.dim() < 2,
       "Expected packed scalar List to be of dimension 0 or 1. Got ",
       scalarList_.dim(),
       " instead.");
-  TORCH_CHECK(
-      scalarList_.dim() == 1 && (expect_length == scalarList_.size(0)),
-      "Expected size of 1 dimension scalarList Tensor to match length of other arguments.");
   const float* scalar_data = scalarList_.data_ptr<float>();
   if (scalarList_.dim() == 0) {
     for (int64_t i = 0; i < expect_length; i++) {
       scalarList.push_back(c10::Scalar(scalar_data[0]));
     }
   } else {
+    TORCH_CHECK(
+        (expect_length == scalarList_.size(0)),
+        "Expected length of scalars to match input of length ",
+        expect_length,
+        " but got ",
+        scalarList_.size(0),
+        " instead.");
     for (int64_t i = 0; i < scalarList_.size(0); i++) {
       scalarList.push_back(c10::Scalar(scalar_data[i]));
     }
