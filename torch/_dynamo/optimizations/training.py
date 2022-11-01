@@ -445,7 +445,7 @@ def create_nvprims_backend(*, executor, cudagraphs):
 
 
 class nvfuser_config:
-    cudagraphs = True
+    cudagraphs = True and not torch._dynamo.config.dynamic_shapes
 
 
 aot_nvprims_nvfuser = create_nvprims_backend(
