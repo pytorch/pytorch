@@ -416,7 +416,6 @@ def run_meta_crossref(
 
     try:
         rs = func(*args, **kwargs)
-        print(rs)
     except Exception as e:
         # A lot of OpInfo for inplace are actually broken because
         # they're not tested outside of gradcheck which only checks
