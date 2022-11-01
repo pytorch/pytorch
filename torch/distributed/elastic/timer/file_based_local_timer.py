@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import select
-import signal
+import signal as _signal
 import threading
 import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
@@ -78,10 +78,10 @@ class FileTimerClient(TimerClient):
         signal: singal, the signal to use to kill the process. Using a
                         negative or zero signal will not kill the process.
     """
-    def __init__(self, file_path: str, signal=signal.SIGKILL) -> None:
+    def __init__(self, file_path: str, signal: Optional[_signal.Signals] = None) -> None:
         super().__init__()
         self._file_path = file_path
-        self.signal = signal
+        self.signal = _signal.SIGKILL if signal is None else signal
 
     def _open_non_blocking(self) -> Optional[io.TextIOWrapper]:
         try:
