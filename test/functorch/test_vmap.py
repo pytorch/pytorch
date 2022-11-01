@@ -3331,7 +3331,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
-        xfail('narrow_copy'),  # hit the vmap fallback which is currently disabled
         xfail('ormqr'),
         xfail('put'),
         xfail('quantile'),
