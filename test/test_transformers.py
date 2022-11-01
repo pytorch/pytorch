@@ -215,7 +215,7 @@ class TestTransformers(NNTestCase):
         ]
         input_mask_pairs = [
             (
-                torch.tensor(pair[0], device=device, dtype=torch.float32),  # float input
+                torch.tensor(pair[0], device=device, dtype=torch.get_default_dtype()),  # float input
                 torch.tensor(pair[1], device=device, dtype=torch.bool)  # bool mask
             ) for pair in input_mask_pairs
         ]
@@ -267,7 +267,7 @@ class TestTransformers(NNTestCase):
             model = model.train()
         else:
             model = model.eval()
-        x = torch.arange(0, 16).reshape(2, 2, 4).to(torch.float).to(device)
+        x = torch.arange(0, 16).reshape(2, 2, 4).to(torch.get_default_dtype()).to(device)
         src_mask = torch.Tensor([[0, 1], [0, 0]]).to(torch.bool).to(device)
 
         if with_no_grad:
