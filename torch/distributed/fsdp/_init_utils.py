@@ -21,7 +21,6 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
-    _apply_to_modules,
     _get_param_to_unflat_param_names,
     _is_fsdp_flattened,
     _State,
