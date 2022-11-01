@@ -1217,6 +1217,7 @@ symbolic_aot_autograd_failures = {
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/deco...
     xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('view_copy', ''),  # aten.view_copy.default - couldn't find symbolic meta function/decomposition
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
