@@ -1,7 +1,5 @@
 #include <unordered_set>
 
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
-
 #include <torch/csrc/profiler/perf-inl.h>
 #include <torch/csrc/profiler/perf.h>
 
@@ -11,13 +9,13 @@ namespace impl {
 
 // HACK: make sure we have new children pids to attach to
 void ResetPThreadPool() {
-#ifdef USE_PTHREADPOOL
+#ifdef C10_MOBILE
   caffe2::PThreadPool* const tp = caffe2::pthreadpool();
   // check if the threadpool does exist yet and has additional threads
   if (tp && tp->get_thread_count() > 1) {
     tp->set_thread_count(tp->get_thread_count());
   }
-#endif /* USE_PTHREADPOOL */
+#endif /* C10_MOBILE */
 }
 
 namespace linux_perf {
