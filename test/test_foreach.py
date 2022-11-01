@@ -272,7 +272,6 @@ class TestForeach(TestCase):
                     with self.assertRaisesRegex(type(e), re.escape(str(e))):
                         ref(ref_inputs, values=values)
                 else:
-                    # print("00: ", str(e))
                     self.assertEqual(re.escape(str(e)), re.escape(custom_values_err))
             else:
                 expected = ref(ref_inputs, values=values)
