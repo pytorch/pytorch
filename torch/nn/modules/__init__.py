@@ -35,7 +35,6 @@ from .transformer import TransformerEncoder, TransformerDecoder, \
     TransformerEncoderLayer, TransformerDecoderLayer, Transformer
 from .flatten import Flatten, Unflatten
 from .channelshuffle import ChannelShuffle
-from .module_pytree import _module_flatten, _module_unflatten, _module_unflatten_tangent_type
 
 
 __all__ = [

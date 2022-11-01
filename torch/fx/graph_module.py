@@ -744,7 +744,6 @@ class {module_name}(torch.nn.Module):
         new_gm._is_replica = True
         return new_gm
 
-
 # workarounds for issues in __torch_function__
 
 # WAR for __torch_function__ not handling tensor lists,
