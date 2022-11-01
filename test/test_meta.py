@@ -291,6 +291,7 @@ CHECK_STRIDES = {
 }
 
 CHECK_STRIDES_SKIPS = {
+    aten._conj_physical.default,
     aten._fft_c2c.default,
     aten._fft_c2r.default,
     aten._fft_r2c.default,
