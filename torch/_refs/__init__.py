@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
+from typing import Callable, List, Optional, overload, Sequence, Tuple, Union, Any
 
 import torch
 
@@ -282,6 +282,7 @@ __all__ = [
     "scalar_tensor",
     "zeros",
     "zeros_like",
+    "torch_tensor_r",
     #
     # Randomness References
     #
@@ -4482,6 +4483,32 @@ def scalar_tensor(
     device = device if device is not None else torch.device("cpu")
     return prims.scalar_tensor(a, dtype=dtype, device=device)
 
+def check_for_1d_list_with_symints(a):
+    assert isinstance(a, Iterable)
+    len_ = None
+    for item in a:
+        if isinstance(item, Iterable):
+            return False
+        if isinstance(item, torch.SymInt):
+            return True
+    return False
+
+
+def torch_tensor_r(
+    a: Any,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    utils.check_pin_memory(pin_memory)
+    # dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
+    device = device if device is not None else torch.device("cpu")
+    if isinstance(a, torch.SymInt) or check_for_1d_list_with_symints(a):
+        return prims.int_tensor(a, dtype=dtype, device=device, pin_memory=pin_memory, requires_grad=requires_grad)
+    else:
+        return torch.tensor(a, dtype=dtype, device=device, pin_memory=pin_memory, requires_grad=requires_grad)
 
 #
 # Randomness References
