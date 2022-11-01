@@ -269,8 +269,12 @@ class MetaConverter:
                     # assert to pass, we have to setup the autograd view
                     # metadata anyway.  Do this by reenabling the
                     # ADInplaceOrView key.  This is kind of a hack.
-                    old_exclude = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
-                    torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, False)
+                    old_exclude = torch._C._dispatch_tls_is_dispatch_key_excluded(
+                        torch._C.DispatchKey.ADInplaceOrView
+                    )
+                    torch._C._dispatch_tls_set_dispatch_key_excluded(
+                        torch._C.DispatchKey.ADInplaceOrView, False
+                    )
                     try:
 
                         if base.dtype == t.dtype:
@@ -309,7 +313,9 @@ class MetaConverter:
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
                             with torch.no_grad():
-                                r = base.as_strided(sizes, strides, sym(t.storage_offset()))
+                                r = base.as_strided(
+                                    sizes, strides, sym(t.storage_offset())
+                                )
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
                         else:
@@ -332,7 +338,9 @@ class MetaConverter:
                                         sizes, strides, sym(t.storage_offset())
                                     )
                     finally:
-                        torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old_exclude)
+                        torch._C._dispatch_tls_set_dispatch_key_excluded(
+                            torch._C.DispatchKey.ADInplaceOrView, old_exclude
+                        )
 
                 else:
                     is_leaf = safe_is_leaf(t)

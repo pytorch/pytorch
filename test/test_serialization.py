@@ -567,6 +567,25 @@ class SerializationMixin(object):
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
+    def test_serialization_filelike_exceptions(self):
+        # Try to serialize to buffers that does not have write method
+        # Or have a malfrormed one, and make sure it does not cause an abort
+        # See https://github.com/pytorch/pytorch/issues/87997
+        x = torch.rand(10)
+        with self.assertRaises(AttributeError):
+            # Tries to serialize str into tensor
+            torch.save('foo', x)
+        x.write = "bar"
+        x.flush = "baz"
+        with self.assertRaises(TypeError):
+            # Tries to serialize str into tensor with write property
+            torch.save('foo', x)
+        x.write = str.__add__
+        x.flush = str.__mul__
+        with self.assertRaises(TypeError):
+            # Tries to serialize str into tensor with wrong callable write property
+            torch.save('foo', x)
+
 
     def test_serialization_storage_slice(self):
         # Generated using:
