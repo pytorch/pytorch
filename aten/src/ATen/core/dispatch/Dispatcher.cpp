@@ -9,6 +9,12 @@ bool show_dispatch_trace() {
     return temp != nullptr;
 }
 
+static thread_local int64_t dispatch_trace_nesting_value_;
+
+void dispatch_trace_nesting_incr() { ++dispatch_trace_nesting_value_; }
+void dispatch_trace_nesting_decr() { --dispatch_trace_nesting_value_; }
+int64_t dispatch_trace_nesting_value() { return dispatch_trace_nesting_value_; }
+
 namespace detail {
 
 class RegistrationListenerList final {

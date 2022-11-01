@@ -4,7 +4,6 @@ from enum import Enum
 
 import torch
 
-
 def is_available() -> bool:
     """
     Returns ``True`` if the distributed package is available. Otherwise,
@@ -65,6 +64,7 @@ if is_available():
         _reduce_scatter_base,
         _create_process_group_wrapper,
         _rank_not_in_group,
+        _c10d_error_logger,
     )
 
     from .rendezvous import (
