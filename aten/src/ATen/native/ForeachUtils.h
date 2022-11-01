@@ -144,13 +144,14 @@ c10::optional<std::vector<c10::Scalar>> convert_tensor_to_scalar_list(
   TORCH_CHECK(
       scalarList_.dim() == 1 && (expect_length == scalarList_.size(0)),
       "Expected size of 1 dimension scalarList Tensor to match length of other arguments.");
+  const float* scalar_data = scalarList_.data_ptr<float>();
   if (scalarList_.dim() == 0) {
     for (int64_t i = 0; i < expect_length; i++) {
-      scalarList.push_back(c10::Scalar(scalarList_.data_ptr<float>()));
+      scalarList.push_back(c10::Scalar(scalar_data[0]));
     }
   } else {
     for (int64_t i = 0; i < scalarList_.size(0); i++) {
-      scalarList.push_back(c10::Scalar(scalarList_.data_ptr<float>() + 1));
+      scalarList.push_back(c10::Scalar(scalar_data[i]));
     }
   }
   return scalarList;
