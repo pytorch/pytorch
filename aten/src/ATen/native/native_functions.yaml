@@ -4247,6 +4247,7 @@
   dispatch:
     SparseCPU, SparseCUDA: neg_sparse
     SparseCsrCPU, SparseCsrCUDA: neg_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_neg
   tags: canonical
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
@@ -4256,6 +4257,7 @@
   dispatch:
     SparseCPU, SparseCUDA: neg_sparse_
     SparseCsrCPU, SparseCsrCUDA: neg_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_neg_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
