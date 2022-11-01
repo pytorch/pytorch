@@ -90,3 +90,16 @@ class DiagnosticEngine:
         )
         self.contexts.append(context)
         return context
+
+    def pretty_print(
+        self, verbose: bool = False, level: infra.Level = infra.Level.ERROR
+    ) -> None:
+        """Pretty prints all diagnostics in the diagnostic contexts.
+
+        Args:
+            verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
+            level: The minimum level of diagnostics to print.
+        """
+        formatter.pretty_print_title(f"{len(self.contexts)} Diagnostic Run")
+        for context in self.contexts:
+            context.pretty_print(verbose, level)
