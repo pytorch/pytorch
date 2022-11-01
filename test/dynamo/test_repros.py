@@ -1759,10 +1759,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(mod(*args), opt_mod(*args)))
 
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
-    def test_rewrite_assert(self):
+    def test_rewrite_assert_with_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 3
+            assert x[0] == 3, "First dim need to be 3"
             return x.cos() + b
 
         args = (torch.Tensor([3, 4, 5]),)
@@ -1778,6 +1778,54 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+
+    # TODO (tmanlaibaatar) handle data-dependent fstring in assert statement.
+    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert_with_fstring_msg(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 3, f"First dim need to be {x[0]}"
+            return x.cos() + b
+
+        args = (torch.Tensor([3, 4, 5]),)
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
+            exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+
+    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert_without_msg(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 3
+            return x.cos() + b
+
+        args = (torch.Tensor([3, 4, 5]),)
+        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+        self.assertTrue(same(exported(*args), f(*args)))
+
+        with self.assertRaisesRegex(AssertionError, ""):
+            exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+
+    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert_noop(self):
+        def f(x):
+            b = x.sin()
+            assert True
+            assert x.dtype == torch.float32
+            return x.cos() + b
+
+        args = (torch.Tensor([3, 4, 5]),)
+        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+        self.assertTrue(same(exported(*args), f(*args)))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(*args), opt_f(*args)))
+        # torch._assert shouldn't be in the graph
+        self.assertEqual(cnt.op_count, 3)
+        self.assertEqual(cnt.frame_count, 1)
+
+        exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+        self.assertTrue(same(exported(*args), f(*args)))
 
     @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", False)
     def test_not_rewrite_assert(self):

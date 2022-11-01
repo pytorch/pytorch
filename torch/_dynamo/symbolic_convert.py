@@ -121,45 +121,92 @@ def stack_op(fn: typing.Callable):
 
     return impl
 
+def _is_assert_statement(self: "InstructionTranslatorBase", truth_fn: typing.Callable, push: bool):
+    # Detect if this jump instruction is assert.
+    #
+    #
+    # Python 3.9 assertion is in following format:
+    # 18 POP_JUMP_IF_TRUE       28
+    # 20 LOAD_ASSERTION_ERROR
+    # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
+    # 24 CALL_FUNCTION            1                    -> optional instruction
+    # 26 RAISE_VARARGS
+    #
+    # Python 3.8 assertion is in following format:
+    # 18 POP_JUMP_IF_TRUE       28
+    # 20 LOAD_GLOBAL              0
+    # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
+    # 24 CALL_FUNCTION            1                    -> optional instruction
+    # 26 RAISE_VARARGS            1
+
+    if not truth_fn is operator.truth or push:
+        return False
+
+    current_instruction_pointer = self.instruction_pointer
+    inst = self.instructions[current_instruction_pointer]
+    # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
+    if sys.version_info < (3, 9):
+        if inst.opname != "LOAD_GLOBAL" and inst.arg != 0:
+            return False
+    else:
+        if inst.opname != "LOAD_ASSERTION_ERROR":
+            return False
+
+    current_instruction_pointer += 1
+
+    if current_instruction_pointer >= len(self.instructions):
+        return False
+
+    inst = self.instructions[current_instruction_pointer]
+    has_error_msg = False
+    # DETECT RAISE_VARARGS or LOAD CONST
+    if inst.opname == "LOAD_CONST":
+        assert isinstance(inst.argval, str), f"Assert rhs must be str to be rewritten, but found {type(inst.argval)}"
+        self.LOAD_CONST(inst)
+        has_error_msg = True
+        # if it is load constant, it should be followed by CALL_FUNCTION
+        current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
+        inst = self.instructions[current_instruction_pointer]
+        if inst.opname != "CALL_FUNCTION":
+            return False
+        # CALL_FUNCTION should be followed by RAISE_VARARGS
+        current_instruction_pointer += 1
+        if current_instruction_pointer >= len(self.instructions):
+            return False
+        inst = self.instructions[current_instruction_pointer]
+
+    if inst.opname != "RAISE_VARARGS":
+        return False
+
+    if not has_error_msg:
+        # Push dummy value instead of error message
+        self.push(None)
+
+    return True
 
 def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
-        if config.rewrite_assert_with_torch_assert:
-            # detect if this jump instruction is assert
-            # Python assertion is in following format:
-            # 18 POP_JUMP_IF_TRUE       24
-            # 20 LOAD_ASSERTION_ERROR
-            # 22 RAISE_VARARGS           1
-            #
-            # We find this sequence and rewrite them as torch._assert
+        if config.rewrite_assert_with_torch_assert and _is_assert_statement(self, truth_fn, push):
+            error_msg: Optional[VariableTracker] = self.pop()
+            if error_msg is None:
+                error_msg = ConstantVariable(value="Assertion error")
+            self.output.guards.update(error_msg.guards)
+            # Skip over things like `assert True`
+            if value.is_python_constant() and bool(value.as_python_constant()):
+                self.jump(inst)
+                return
 
-            # DETECT POP_JUMP_IF_TRUE
-            if truth_fn is operator.truth and not push:
-                current_instruction_pointer = self.instruction_pointer
-                inst = self.instructions[current_instruction_pointer]
-                # Detect LOAD_ASSERTION_ERROR
-                if inst.opname == "LOAD_ASSERTION_ERROR":
-                    current_instruction_pointer += 1
-                    if current_instruction_pointer < len(self.instructions):
-                        inst_for_raise = self.instructions[current_instruction_pointer]
-                        # DETECT RAISE_VARARGS
-                        if inst_for_raise.opname == "RAISE_VARARGS":
-                            assert_error_msg = ConstantVariable(value="assertion failure")
-                            self.output.guards.update(assert_error_msg.guards)
-                            # Manually insert torch._assert instead of python assert and jump over
-                            # next two instructions as we don't need them anymore.
-                            self.output.create_proxy(
-                                "call_function", torch._assert, *proxy_args_kwargs((value, assert_error_msg), {}), current_tx=self
-                            )
-                            if current_instruction_pointer + 1 < len(self.instructions):
-                                self.instruction_pointer = current_instruction_pointer + 1
-                                self.next_instruction = self.instructions[self.instruction_pointer]
-                            else:
-                                self.instruction_pointer = None
-                                self.next_instruction = None
-                            return
+            # Manually insert torch._assert instead of python assert and jump over
+            # assert related instructions as we don't need them anymore.
+            self.output.create_proxy(
+                "call_function", torch._assert, *proxy_args_kwargs((value, error_msg), {}), current_tx=self
+            )
+            self.jump(inst)
+            return
 
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
@@ -1372,6 +1419,8 @@ class InstructionTranslatorBase(object):
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
+
+        dis.dis(self.f_code)
 
         # Execution record for replaying errors
         self.exec_recorder = ExecutionRecorder(code=f_code, code_options=code_options)
