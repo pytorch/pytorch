@@ -1333,7 +1333,6 @@ class TestCommon(TestCase):
         self.fail(msg)
 
 
-@skipIfSlowGradcheckEnv
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
     # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"

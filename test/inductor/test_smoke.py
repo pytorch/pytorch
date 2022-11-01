@@ -5,7 +5,6 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 import torch._inductor.config as torchinductor_config
-from torch.testing._internal.common_utils import skipIfSlowGradcheckEnv
 
 torchdynamo.config.log_level = logging.INFO
 torchdynamo.config.verbose = True
@@ -24,7 +23,6 @@ class MLP(torch.nn.Module):
         return x
 
 
-@skipIfSlowGradcheckEnv
 class SmokeTest(unittest.TestCase):
     def test_mlp(self):
         mlp = torchdynamo.optimize("inductor")(MLP().cuda())
