@@ -201,26 +201,25 @@ def _single_tensor_asgd(params: List[Tensor],
 
         # update step
         step_t += 1
-        step = step_t.item()
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
         # decay term
-        param.mul_(1 - lambd * eta.item())
+        param.mul_(1 - lambd * eta)
 
         # update parameter
-        param.add_(grad, alpha=-eta.item())
+        param.add_(grad, alpha=-eta)
 
         # averaging
-        if mu.item() != 1:
+        if mu != 1:
             ax.add_(param.sub(ax).mul(mu))
         else:
             ax.copy_(param)
 
-        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * step), alpha))
+        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * step_t), alpha))
         eta.copy_(new_eta)
-        new_mu = torch.tensor(1 / max(1, step - t0))
+        new_mu = 1 / max(1, step_t - t0)
         mu.copy_(new_mu)
 
 
@@ -261,7 +260,7 @@ def _multi_tensor_asgd(params: List[Tensor],
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # decay term
-    eta = etas[0].item()
+    eta = etas[0]
     torch._foreach_mul_(params, 1 - lambd * eta)
 
     # update parameter
@@ -269,14 +268,14 @@ def _multi_tensor_asgd(params: List[Tensor],
 
     # averaging
     for i in range(len(axs)):
-        if mus[i].item() != 1:
+        if mus[i] != 1:
             axs[i].add_(params[i].sub(axs[i]).mul(mus[i]))
         else:
             axs[i].copy_(params[i])
 
     # update eta and mu
     for i in range(len(mus)):
-        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * state_steps[i].item()), alpha))
+        new_eta = torch.tensor(lr / math.pow((1 + lambd * lr * state_steps[i]), alpha))
         etas[i].copy_(new_eta)
-        new_mu = torch.tensor(1 / max(1, state_steps[i].item() - t0))
+        new_mu = 1 / max(1, state_steps[i] - t0)
         mus[i].copy_(new_mu)

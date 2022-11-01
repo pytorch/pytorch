@@ -251,7 +251,6 @@ def _single_tensor_adagrad(
     for (param, grad, state_sum, step_t) in zip(params, grads, state_sums, state_steps):
         # update step
         step_t += 1
-        step = step_t.item()
         grad = grad if not maximize else -grad
 
         if weight_decay != 0:
@@ -261,7 +260,7 @@ def _single_tensor_adagrad(
                 )
             grad = grad.add(param, alpha=weight_decay)
 
-        clr = lr / (1 + (step - 1) * lr_decay)
+        clr = lr / (1 + (step_t - 1) * lr_decay)
 
         if grad.is_sparse:
             grad = grad.coalesce()  # the update is non-linear so indices must be unique

@@ -392,7 +392,7 @@ def _single_tensor_adam(params: List[Tensor],
 
             param.addcdiv_(exp_avg, denom)
         else:
-            step = step_t.item()
+            step = step_t
 
             bias_correction1 = 1 - beta1 ** step
             bias_correction2 = 1 - beta2 ** step
@@ -500,12 +500,12 @@ def _multi_tensor_adam(params: List[Tensor],
 
         torch._foreach_addcdiv_(params_, exp_avgs, denom)
     else:
-        bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-        bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
+        bias_correction1 = [1 - beta1 ** step for step in state_steps]
+        bias_correction2 = [1 - beta2 ** step for step in state_steps]
 
-        step_size = [(lr / bc) * -1 for bc in bias_correction1]
+        step_size = torch.tensor([(lr / bc) * -1 for bc in bias_correction1])
 
-        bias_correction2_sqrt = [math.sqrt(bc) for bc in bias_correction2]
+        bias_correction2_sqrt = [torch.sqrt(bc) for bc in bias_correction2]
 
         if amsgrad:
             # Maintains the maximum of all 2nd moment running avg. till now

@@ -217,7 +217,6 @@ def _single_tensor_adamax(params: List[Tensor],
         step_t = state_steps[i]
         # update step
         step_t += 1
-        step = step_t.item()
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
@@ -241,7 +240,7 @@ def _single_tensor_adamax(params: List[Tensor],
         else:
             exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
-        bias_correction = 1 - beta1 ** step
+        bias_correction = 1 - beta1 ** step_t
         clr = lr / bias_correction
 
         param.addcdiv_(exp_avg, exp_inf, value=-clr)
@@ -294,6 +293,6 @@ def _multi_tensor_adamax(params: List[Tensor],
         ], 0)
         torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
 
-    bias_corrections = [1 - beta1 ** step.item() for step in state_steps]
-    clr = [-1 * (lr / bias_correction) for bias_correction in bias_corrections]
+    bias_corrections = [1 - beta1 ** step for step in state_steps]
+    clr = torch.tensor([-1 * (lr / bias_correction) for bias_correction in bias_corrections])
     torch._foreach_addcdiv_(params, exp_avgs, exp_infs, clr)

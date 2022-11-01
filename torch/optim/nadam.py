@@ -230,16 +230,15 @@ def _single_tensor_nadam(params: List[Tensor],
         step_t = state_steps[i]
         # update step
         step_t += 1
-        step = step_t.item()
 
-        bias_correction2 = 1 - beta2 ** step
+        bias_correction2 = 1 - beta2 ** step_t
 
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
         # calculate the momentum cache \mu^{t} and \mu^{t+1}
-        mu = beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay)))
-        mu_next = beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
+        mu = beta1 * (1. - 0.5 * (0.96 ** (step_t * momentum_decay)))
+        mu_next = beta1 * (1. - 0.5 * (0.96 ** ((step_t + 1) * momentum_decay)))
 
         # update mu_product
         mu_product *= mu
@@ -262,8 +261,8 @@ def _single_tensor_nadam(params: List[Tensor],
             param.addcdiv_(exp_avg, denom, value=1.0)
         else:
             denom.add_(eps)
-            param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product.item()))
-            param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next.item()))
+            param.addcdiv_(grad, denom, value=-lr * (1. - mu) / (1. - mu_product))
+            param.addcdiv_(exp_avg, denom, value=-lr * mu_next / (1. - mu_product_next))
 
 
 def _multi_tensor_nadam(params: List[Tensor],
@@ -289,10 +288,10 @@ def _multi_tensor_nadam(params: List[Tensor],
     # update steps
     torch._foreach_add_(state_steps, 1)
 
-    bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-    bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
-    mus = [beta1 * (1. - 0.5 * (0.96 ** (step.item() * momentum_decay))) for step in state_steps]
-    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step.item() + 1) * momentum_decay)))
+    bias_correction1 = [1 - beta1 ** step for step in state_steps]
+    bias_correction2 = [1 - beta2 ** step for step in state_steps]
+    mus = [beta1 * (1. - 0.5 * (0.96 ** (step * momentum_decay))) for step in state_steps]
+    mu_nexts = [beta1 * (1. - 0.5 * (0.96 ** ((step + 1) * momentum_decay)))
                 for step in state_steps]
 
     # update mu_products
@@ -313,9 +312,10 @@ def _multi_tensor_nadam(params: List[Tensor],
     torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
     denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-    step_size_grads = [(lr * (1. - mu) / (1. - mu_product.item())) * -1
-                       for mu_product, mu in zip(mu_products, mus)]
-    step_size_expavg = [(lr * mu_next / (1. - mu_product.item() * mu_next)) * -1
-                        for mu_product, mu_next in zip(mu_products, mu_nexts)]
+    step_size_grads = torch.tensor([(lr * (1. - mu) / (1. - mu_product)) * -1
+                                    for mu_product, mu in zip(mu_products, mus)])
+    step_size_expavg = torch.tensor([(lr * mu_next / (1. - mu_product * mu_next)) * -1
+                                     for mu_product, mu_next in zip(mu_products, mu_nexts)])
+
     torch._foreach_addcdiv_(params, grads, denom, step_size_grads)
     torch._foreach_addcdiv_(params, exp_avgs, denom, step_size_expavg)

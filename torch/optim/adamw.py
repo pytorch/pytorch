@@ -310,10 +310,9 @@ def _single_tensor_adamw(params: List[Tensor],
 
             param.addcdiv_(exp_avg, denom)
         else:
-            step = step_t.item()
 
-            bias_correction1 = 1 - beta1 ** step
-            bias_correction2 = 1 - beta2 ** step
+            bias_correction1 = 1 - beta1 ** step_t
+            bias_correction2 = 1 - beta2 ** step_t
 
             step_size = lr / bias_correction1
 
@@ -414,10 +413,10 @@ def _multi_tensor_adamw(params: List[Tensor],
 
         torch._foreach_addcdiv_(params, exp_avgs, denom)
     else:
-        bias_correction1 = [1 - beta1 ** step.item() for step in state_steps]
-        bias_correction2 = [1 - beta2 ** step.item() for step in state_steps]
+        bias_correction1 = [1 - beta1 ** step for step in state_steps]
+        bias_correction2 = [1 - beta2 ** step for step in state_steps]
 
-        step_size = [(lr / bc) * -1 for bc in bias_correction1]
+        step_size = torch.tensor([(lr / bc) * -1 for bc in bias_correction1])
 
         bias_correction2_sqrt = [math.sqrt(bc) for bc in bias_correction2]
 
