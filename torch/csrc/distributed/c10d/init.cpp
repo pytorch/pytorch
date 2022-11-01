@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -233,6 +234,47 @@ void _register_builtin_comm_hook(
     ::c10d::Reducer& reducer,
     ::c10d::BuiltinCommHookType comm_hook_type) {
   reducer.register_builtin_comm_hook(comm_hook_type);
+}
+
+static PyObject* reduceopmeta___instancecheck__(PyObject* self, PyObject* args) {
+  std::cerr << ">>> Custom isinstancecheck. self's type name is "
+    << self->ob_type->tp_name << " and args' type name is " << args->ob_type->tp_name << "\n";
+  if (Py_IS_TYPE(args, self->ob_type)) {
+    Py_RETURN_TRUE;
+  }
+  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") != c10::string_view::npos) {
+    Py_RETURN_TRUE;
+  }
+  std::cerr << ">>>\t Not a ReduceOp, " << args->ob_type->tp_name << ", returning False\n";
+  Py_RETURN_FALSE;
+}
+static PyMethodDef reduceopmeta_methods[] = {
+  {
+    "__instancecheck__",
+    (PyCFunction)reduceopmeta___instancecheck__,
+    METH_O,
+    "Custom `__instancecheck__` for ReduceOp"
+  },
+  {NULL, NULL}
+};
+PyTypeObject* GetReduceOpMetaclass() {
+  static auto* metaclass = [] {
+    PyTypeObject* base_metaclass = pybind11::detail::get_internals().default_metaclass;
+    PyType_Slot slots[] = {
+      {Py_tp_base, base_metaclass},
+      {Py_tp_methods, reduceopmeta_methods},
+      {0},
+    };
+    PyType_Spec spec = {};
+    spec.name = "torch._C._distributed_c10d._ReduceOpMeta";
+    spec.basicsize = base_metaclass->tp_basicsize;
+    spec.flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
+    spec.slots = slots;
+    PyTypeObject* metaclass = (PyTypeObject*)PyType_FromSpec(&spec);
+    if (!metaclass) throw py::error_already_set();
+    return metaclass;
+  }();
+  return metaclass;
 }
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
@@ -520,7 +562,9 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
   //    making `PREMUL_SUM` callable, i.e., allowing for
   //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
-  py::class_<::c10d::ReduceOp> reduce_op(module, "ReduceOp", R"(
+  py::class_<::c10d::ReduceOp> reduce_op(
+      module, "ReduceOp",
+      py::metaclass((PyObject *)GetReduceOpMetaclass()), R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
@@ -579,7 +623,8 @@ This class does not support ``__members__`` property.)");
       .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
-      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
+      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
+      .export_values();
 
   // note(crcrpar): This could be removed because users will not pass
   // `RedOpType` to reduce collective ops Ref: [Implicit

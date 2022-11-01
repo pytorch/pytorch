@@ -243,9 +243,9 @@ dist_backend = Backend
 #   I changed `ReduceOp` to struct from enum class and introduced RedOpType enum class for PREMUL_SUM,
 #   which broke an implicit contract of ReduceOp being enum-like with which users apply isinstance to
 #   `op`, for example, `isinstance(ReduceOp.SUM, ReduceOp)`: https://github.com/pytorch/pytorch/issues/87191
-DENY_LIST = ("PREMUL_SUM", )
-for _red_op_name, _red_op_value in ReduceOp.RedOpType.__members__.items():
-    setattr(ReduceOp, _red_op_name, _red_op_value if _red_op_name in DENY_LIST else ReduceOp(_red_op_value))
+# DENY_LIST = ("PREMUL_SUM", )
+# for _red_op_name, _red_op_value in ReduceOp.RedOpType.__members__.items():
+#     setattr(ReduceOp, _red_op_name, _red_op_value if _red_op_name in DENY_LIST else ReduceOp(_red_op_value))
 
 
 class _reduce_op(object):
