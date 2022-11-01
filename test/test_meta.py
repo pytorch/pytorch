@@ -416,6 +416,7 @@ def run_meta_crossref(
 
     try:
         rs = func(*args, **kwargs)
+        print(rs)
     except Exception as e:
         # A lot of OpInfo for inplace are actually broken because
         # they're not tested outside of gradcheck which only checks
@@ -915,7 +916,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 }
 
 meta_dispatch_device_skips['cpu'] = {
-    aten._embedding_bag_forward_only.default: {f16, f32, f64},
+    aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
 }
 
