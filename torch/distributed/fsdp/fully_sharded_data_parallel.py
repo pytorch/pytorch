@@ -673,6 +673,12 @@ class FullyShardedDataParallel(nn.Module):
         Reset instance so :func:`_lazy_init` will run on the next forward.
         """
         self._is_root: Optional[bool] = None
+        for p in self.params:
+            if hasattr(p, "_local_shard"):
+                # We only need to `del` `_local_shard` because
+                # `_init_param_attributes()` gates the logic based on its
+                # existence (and not any of the other attributes).
+                del p._local_shard  # type: ignore[attr-defined]
 
     def _lazy_init(self) -> None:
         """
