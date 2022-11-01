@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+#include <ATen/Dispatch.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -133,34 +134,38 @@ c10::optional<std::vector<c10::Scalar>> convert_tensor_to_scalar_list(
       scalarList_.device(),
       " instead.");
   TORCH_CHECK(
-      scalarList_.device() == c10::kCPU,
-      "Expected scalars to be of dtype float32, got ",
-      scalarList_.dtype(),
-      " instead.");
-  TORCH_CHECK(
       scalarList_.is_contiguous(), "Expected scalars to be contiguous.");
   TORCH_CHECK(
       scalarList_.dim() < 2,
       "Expected packed scalar List to be of dimension 0 or 1. Got ",
       scalarList_.dim(),
       " instead.");
-  const float* scalar_data = scalarList_.data_ptr<float>();
-  if (scalarList_.dim() == 0) {
-    for (int64_t i = 0; i < expect_length; i++) {
-      scalarList.push_back(c10::Scalar(scalar_data[0]));
-    }
-  } else {
-    TORCH_CHECK(
-        (expect_length == scalarList_.size(0)),
-        "Expected length of scalars to match input of length ",
-        expect_length,
-        " but got ",
-        scalarList_.size(0),
-        " instead.");
-    for (int64_t i = 0; i < scalarList_.size(0); i++) {
-      scalarList.push_back(c10::Scalar(scalar_data[i]));
-    }
-  }
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16,
+      scalarList_.scalar_type(),
+      "convert_tensor_to_scalar_list",
+      [&]() {
+        const scalar_t* scalar_data = scalarList_.data_ptr<scalar_t>();
+        if (scalarList_.dim() == 0) {
+          for (int64_t i = 0; i < expect_length; i++) {
+            scalarList.push_back(c10::Scalar(scalar_data[0]));
+          }
+        } else {
+          TORCH_CHECK(
+              (expect_length == scalarList_.size(0)),
+              "Expected length of scalars to match input of length ",
+              expect_length,
+              " but got ",
+              scalarList_.size(0),
+              " instead.");
+          for (int64_t i = 0; i < scalarList_.size(0); i++) {
+            scalarList.push_back(c10::Scalar(scalar_data[i]));
+          }
+        }
+      });
   return scalarList;
 }
 
