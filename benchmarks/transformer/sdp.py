@@ -104,7 +104,8 @@ def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, 
             npt = pt.eval().half().cuda()
             cpt = build_composite_mha_from_nn_mha(npt)
             x, lengths = generate_rand_batch(batch_size, max_sequence_len, embed_dimension, pad_percentage)
-            pt_output, _ = pt(x, x, x, mask)
+            pt_output, attn_weight = pt(x, x, x, mask, need_weights=False)
+            assert attn_weight is None
             cpt_output, _ = cpt(x, x, x, mask)
 
             # First order sanity check. Not a replacement for rigorous tests.
@@ -114,7 +115,7 @@ def run_timing(iters, batch_size, embed_dimension, num_heads, max_sequence_len, 
             else:
                 assert torch.allclose(pt_output, cpt_output, atol=1e-3, rtol=1e-3)
 
-            pt_time = benchmark_torch_function(iters, npt, x, x, x, mask) * 1e3
+            pt_time = benchmark_torch_function(iters, npt, x, x, x, mask, need_weights=False) * 1e3
             cp_time = benchmark_torch_function(iters, cpt, x, x, x, mask) * 1e3
             results = {}
             results["max_sequence_len"] = max_sequence_len
