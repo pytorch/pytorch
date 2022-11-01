@@ -100,6 +100,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // used to determine if it's up-to-date with its alias. The act of syncing a
   // tensor will set a tensor's generation equal to its alias's generation.
   bool is_up_to_date() const;
+  // Freezes the storage of this tensor, preventing subsequent mutations
+  void freeze_storage() const;
   // Every FunctionalTensorWrapper contains a vector<ViewMeta> objects
   // describing the series of view ops that ran to generate the current tensor
   // from the base tensor. This method is used by inplace-view ops like
@@ -196,6 +198,8 @@ TORCH_API c10::optional<Tensor> to_functional_tensor(
 TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(
     const c10::List<c10::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
+
+TORCH_API void freeze_functional_tensor(const Tensor& tensor);
 
 TORCH_API Tensor
 from_functional_tensor(const Tensor& tensor, bool assert_functional = true);

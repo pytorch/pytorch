@@ -23,7 +23,6 @@ enum class RecordType {
   Constant,
   End,
   Tensor,
-  NullTensor,
   Output,
   ReductionOp,
   Scalar,
@@ -144,13 +143,14 @@ struct RecordFunctor {
         os << ", ";
       }
       if (arg.stype == StateType::Scalar) {
-        os << "S";
+        os << "S" << arg.index;
       } else if (arg.stype == StateType::Tensor) {
-        os << "T";
+        os << "T" << arg.index;
+      } else if (arg.stype == StateType::None) {
+        os << "None";
       } else {
         TORCH_INTERNAL_ASSERT(false, "Unsupported StateType");
       }
-      os << arg.index;
     }
     if (close_function) {
       os << ")";
@@ -377,13 +377,13 @@ struct PermuteOpRecord : RecordFunctor {
   PermuteOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
-      std::vector<int64_t>& permutation)
+      std::vector<int64_t>& dims)
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "permute",
+            "ops.permute",
             RecordType::PermuteOp),
-        permutation_(std::move(permutation)) {}
+        dims_(std::move(dims)) {}
   virtual ~PermuteOpRecord() = default;
   virtual RecordFunctor* clone() final {
     return new PermuteOpRecord(*this);
@@ -391,11 +391,11 @@ struct PermuteOpRecord : RecordFunctor {
 
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    size_t permutation_hash = 0;
-    for (auto p : permutation_) {
-      permutation_hash ^= static_cast<size_t>(p);
+    size_t dims_hash = 0;
+    for (auto dim : dims_) {
+      dims_hash ^= static_cast<size_t>(dim);
     }
-    return result | (permutation_hash & 0xffff);
+    return result | (dims_hash & 0xffff);
   }
 
   virtual bool operator==(const RecordFunctor& other) const final {
@@ -403,10 +403,10 @@ struct PermuteOpRecord : RecordFunctor {
     if (auto child_ptr = dynamic_cast<const PermuteOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       if (result) {
-        result = (permutation_.size() == child_ptr->permutation_.size());
+        result = (dims_.size() == child_ptr->dims_.size());
         if (result) {
-          for (size_t i = 0; i < permutation_.size(); ++i) {
-            if (permutation_[i] != child_ptr->permutation_[i]) {
+          for (size_t i = 0; i < dims_.size(); ++i) {
+            if (dims_[i] != child_ptr->dims_[i]) {
               result = false;
               break;
             }
@@ -420,13 +420,31 @@ struct PermuteOpRecord : RecordFunctor {
   void operator()(FusionDefinition& fd) final {
     auto arg =
         fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
-    auto output = torch::jit::fuser::cuda::permute(arg, permutation_);
+    auto output = Nvf::permute(arg, dims_);
     fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
+    RecordFunctor::print(os, false);
+    os << ", dims=[";
+    bool first_arg = true;
+    for (auto dim : dims_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << dim;
+    }
+    os << "]";
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
   //! Represents the mapping from the original shape to the new shape
-  std::vector<int64_t> permutation_;
+  std::vector<int64_t> dims_;
 };
 
 struct SqueezeOpRecord : RecordFunctor {
@@ -438,7 +456,7 @@ struct SqueezeOpRecord : RecordFunctor {
       : RecordFunctor(
             std::move(_args),
             std::move(_outputs),
-            "squeeze",
+            "ops.squeeze",
             RecordType::SqueezeOp),
         original_shape_(std::move(original_shape)),
         dim_(dim) {}
@@ -974,6 +992,7 @@ struct TensorRecord : RecordFunctor {
       }
     }
     os << "], dtype=" << dtypeToPyString(dtype_);
+    os << ", is_cpu=" << (is_cpu_ ? "True" : "False");
     if (close_function) {
       os << ")";
     }
@@ -991,41 +1010,6 @@ struct TensorRecord : RecordFunctor {
   Nvf::DataType dtype_;
   //! Notes a scalar CPU Tensor
   bool is_cpu_;
-};
-
-struct NullTensorRecord : RecordFunctor {
-  NullTensorRecord(std::vector<State> _outputs)
-      : RecordFunctor(
-            {},
-            std::move(_outputs),
-            "null_tensor",
-            RecordType::NullTensor) {}
-  virtual ~NullTensorRecord() = default;
-  virtual RecordFunctor* clone() final {
-    return new NullTensorRecord(*this);
-  }
-
-  //! Nothing extra necessary in hash
-  //! Child specific hash function in lower 32 bits.
-  //! | 31 ---------------------------------------  0 |
-  //! | None                                          |
-  virtual size_t hash() const final {
-    auto result = RecordFunctor::hash();
-    return result;
-  }
-
-  virtual bool operator==(const RecordFunctor& other) const final {
-    auto result = false;
-    if (dynamic_cast<const NullTensorRecord*>(&other)) {
-      result = RecordFunctor::operator==(other);
-    }
-    return result;
-  }
-
-  virtual void operator()(FusionDefinition& fd) final {
-    Nvf::TensorView* tv = nullptr;
-    fd.setFusionState(outputs_.at(0).index, tv);
-  }
 };
 
 //! Specialized Record Functor for recording FusionDefinition outputs.
@@ -1482,12 +1466,18 @@ struct BatchNormOpRecord : RecordFunctor {
 
   void operator()(FusionDefinition& fd) final {
     auto x = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
-    auto weight = fd.getFusionState(args_.at(1).index)->as<Nvf::TensorView>();
-    auto bias = fd.getFusionState(args_.at(2).index)->as<Nvf::TensorView>();
-    auto running_mean =
-        fd.getFusionState(args_.at(3).index)->as<Nvf::TensorView>();
-    auto running_var =
-        fd.getFusionState(args_.at(4).index)->as<Nvf::TensorView>();
+    auto weight = (args_.at(1).stype == StateType::Tensor)
+        ? fd.getFusionState(args_.at(1).index)->as<Nvf::TensorView>()
+        : nullptr;
+    auto bias = (args_.at(2).stype == StateType::Tensor)
+        ? fd.getFusionState(args_.at(2).index)->as<Nvf::TensorView>()
+        : nullptr;
+    auto running_mean = (args_.at(3).stype == StateType::Tensor)
+        ? fd.getFusionState(args_.at(3).index)->as<Nvf::TensorView>()
+        : nullptr;
+    auto running_var = (args_.at(4).stype == StateType::Tensor)
+        ? fd.getFusionState(args_.at(4).index)->as<Nvf::TensorView>()
+        : nullptr;
     auto momentum = fd.getFusionState(args_.at(5).index)->as<Nvf::Val>();
     auto eps = fd.getFusionState(args_.at(6).index)->as<Nvf::Val>();
     auto output = Nvf::batch_norm(
@@ -1503,6 +1493,15 @@ struct BatchNormOpRecord : RecordFunctor {
     fd.setFusionState(outputs_.at(0).index, output.output);
     fd.setFusionState(outputs_.at(1).index, output.mean);
     fd.setFusionState(outputs_.at(2).index, output.invstd);
+  }
+
+  virtual void print(std::ostream& os, bool close_function = true) const final {
+    RecordFunctor::print(os, false);
+    os << ", training=" << (training_ ? "True" : "False");
+    os << ", channels_last=" << (channels_last_ ? "True" : "False");
+    if (close_function) {
+      os << ")";
+    }
   }
 
  private:
