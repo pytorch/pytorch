@@ -1004,7 +1004,9 @@ class FSDPTest(MultiProcessTestCase):
             for param in fsdp_model.parameters():
                 self.assertEqual(param.device, cpu_device)
         context = (
-            self.assertRaisesRegex(AssertionError, "Expected param to be on CPU")
+            self.assertRaisesRegex(
+                AssertionError, "Expects the `FlatParameter` to be offloaded to CPU"
+            )
             if expects_device_error
             else suppress()
         )
