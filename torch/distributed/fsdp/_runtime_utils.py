@@ -235,6 +235,52 @@ def _fsdp_root_pre_forward(
     return args, kwargs
 
 
+def _prepare_forward_inputs(
+    device: torch.device,
+    input_dtype: Optional[torch.dtype],
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[Any, Any]:
+    """
+    Prepares the forward inputs by moving them to ``device`` and casting them
+    to ``input_dtype`` if it is not ``None``.
+    """
+    # TODO: Do not use the side stream for tensor copies for now; investigate
+    # the perf with/without it.
+    # TODO: For mixed precision, move the inputs to the compute device and cast
+    # to reduced-precision in a single `to()` call.
+    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, device.index, False)
+    args = args_tuple[0]
+    kwargs = kwargs_tuple[0]
+    if input_dtype is not None:
+        args, kwargs = _cast_fp_inputs_to_dtype(input_dtype, *args, **kwargs)
+    return args, kwargs
+
+
+def _cast_fp_inputs_to_dtype(
+    dtype: torch.dtype,
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[Any, Any]:
+    """
+    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
+    This respects the existing ``requires_grad`` on the tensors.
+    """
+
+    def cast_fn(x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_floating_point(x):
+            return x
+        y = x.to(dtype)
+        # Explicitly copy over `requires_grad` since this runs inside
+        # `torch.no_grad()`
+        if x.is_leaf:
+            y.requires_grad = x.requires_grad
+        return y
+
+    with torch.no_grad():
+        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
+
+
 @no_type_check
 def _pre_backward_hook(
     state: _State,
@@ -813,49 +859,3 @@ def _clear_grads_if_needed(
     for handle in handles:
         if handle._use_orig_params:
             handle._clear_grads_if_needed()
-
-
-def _prepare_forward_inputs(
-    device: torch.device,
-    input_dtype: Optional[torch.dtype],
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Prepares the forward inputs by moving them to ``device`` and casting them
-    to ``input_dtype`` if it is not ``None``.
-    """
-    # TODO: Do not use the side stream for tensor copies for now; investigate
-    # the perf with/without it.
-    # TODO: For mixed precision, move the inputs to the compute device and cast
-    # to reduced-precision in a single `to()` call.
-    args_tuple, kwargs_tuple = _to_kwargs(args, kwargs, device.index, False)
-    args = args_tuple[0]
-    kwargs = kwargs_tuple[0]
-    if input_dtype is not None:
-        args, kwargs = _cast_fp_inputs_to_dtype(input_dtype, *args, **kwargs)
-    return args, kwargs
-
-
-def _cast_fp_inputs_to_dtype(
-    dtype: torch.dtype,
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
-    This respects the existing ``requires_grad`` on the tensors.
-    """
-
-    def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x):
-            return x
-        y = x.to(dtype)
-        # Explicitly copy over `requires_grad` since this runs inside
-        # `torch.no_grad()`
-        if x.is_leaf:
-            y.requires_grad = x.requires_grad
-        return y
-
-    with torch.no_grad():
-        return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
