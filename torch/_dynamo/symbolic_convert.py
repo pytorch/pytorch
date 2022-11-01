@@ -52,6 +52,7 @@ from .utils import (
     counters,
     fake_tensors_available,
     graph_break_dup_warning_checker,
+    proxy_args_kwargs,
     istype,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
@@ -125,6 +126,41 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
+        if config.rewrite_assert_with_torch_assert:
+            # detect if this jump instruction is assert
+            # Python assertion is in following format:
+            # 18 POP_JUMP_IF_TRUE       24
+            # 20 LOAD_ASSERTION_ERROR
+            # 22 RAISE_VARARGS           1
+            #
+            # We find this sequence and rewrite them as torch._assert
+
+            # DETECT POP_JUMP_IF_TRUE
+            if truth_fn is operator.truth and not push:
+                current_instruction_pointer = self.instruction_pointer
+                inst = self.instructions[current_instruction_pointer]
+                # Detect LOAD_ASSERTION_ERROR
+                if inst.opname == "LOAD_ASSERTION_ERROR":
+                    current_instruction_pointer += 1
+                    if current_instruction_pointer < len(self.instructions):
+                        inst_for_raise = self.instructions[current_instruction_pointer]
+                        # DETECT RAISE_VARARGS
+                        if inst_for_raise.opname == "RAISE_VARARGS":
+                            assert_error_msg = ConstantVariable(value="assertion failure")
+                            self.output.guards.update(assert_error_msg.guards)
+                            # Manually insert torch._assert instead of python assert and jump over
+                            # next two instructions as we don't need them anymore.
+                            self.output.create_proxy(
+                                "call_function", torch._assert, *proxy_args_kwargs((value, assert_error_msg), {}), current_tx=self
+                            )
+                            if current_instruction_pointer + 1 < len(self.instructions):
+                                self.instruction_pointer = current_instruction_pointer + 1
+                                self.next_instruction = self.instructions[self.instruction_pointer]
+                            else:
+                                self.instruction_pointer = None
+                                self.next_instruction = None
+                            return
+
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
                 push and self.push(value)

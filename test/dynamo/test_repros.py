@@ -1758,6 +1758,36 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
 
+    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 3
+            return x.cos() + b
+
+        args = (torch.Tensor([3, 4, 5]),)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(*args), opt_f(*args)))
+        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(cnt.frame_count, 1)
+
+        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+        self.assertTrue(same(exported(*args), f(*args)))
+
+        with self.assertRaisesRegex(AssertionError, ""):
+            exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+
+    @patch.object(torch._dynamo.config, "rewrite_assert_with_torch_assert", False)
+    def test_not_rewrite_assert(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 3
+            return x.cos() + b
+
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
+            torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

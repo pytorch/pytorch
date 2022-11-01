@@ -31,7 +31,7 @@ log_level = logging.WARNING
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = False
+verbose = True
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -86,6 +86,9 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 replay_record_enabled = False
+
+# Rewrite assert statement in python with torch._assert
+rewrite_assert_with_torch_assert = False
 
 # Show a warning on every graph break
 print_graph_breaks = False
