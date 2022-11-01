@@ -13301,7 +13301,7 @@
   dispatch:
     CUDA: _scaled_dot_product_attention_backward_math
     CPU: _scaled_dot_product_attention_backward_math
-  autogen: _scaled_dot_product_attention.out
+  autogen: _scaled_dot_product_attention_backward.out
 
 - func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
   variants: function
