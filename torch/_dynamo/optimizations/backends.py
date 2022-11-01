@@ -689,6 +689,8 @@ def tvm_compile_inner(
                         log_file
                     ), "TVM's meta_schedule requires a directory for storing log files."
                     work_dir = log_file
+                # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
+                # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
                 database = ms.relay_integration.tune_relay(
                     mod=mod,
                     target=target,
