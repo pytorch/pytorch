@@ -678,6 +678,38 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
 
+Tensor flash_scaled_dot_product_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal) {
+#if defined(USE_FLASH_ATTENTION)
+  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  std::vector<Tensor> output = fmha::mha_fwd(
+      query,
+      key,
+      value,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      dropout_p,
+      softmax_scale,
+      false,
+      is_causal,
+      false,
+      c10::nullopt);
+  return output[0];
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return Tensor();
+}
+
 std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
     const Tensor& query,
     const Tensor& key,
@@ -727,7 +759,7 @@ std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
   Tensor attention =
-      at::_flash_scaled_dot_product_attention(
+      flash_scaled_dot_product_attention(
           query_reshaped,
           key_reshaped,
           value_reshaped,
@@ -783,38 +815,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
         TORCH_CHECK(false, "No viable backend for scaled_dot_product_attention was found.");
         return std::make_tuple(Tensor(), Tensor());
     }
-}
-
-Tensor flash_scaled_dot_product_attention(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    const Tensor& cumulative_sequence_length_q,
-    const Tensor& cumulative_sequence_length_k,
-    const int64_t max_seqlen_batch_q,
-    const int64_t max_seqlen_batch_k,
-    double dropout_p,
-    bool is_causal) {
-#if defined(USE_FLASH_ATTENTION)
-  auto softmax_scale = std::pow(query.size(-1), -0.5);
-  std::vector<Tensor> output = fmha::mha_fwd(
-      query,
-      key,
-      value,
-      cumulative_sequence_length_q,
-      cumulative_sequence_length_k,
-      max_seqlen_batch_q,
-      max_seqlen_batch_k,
-      dropout_p,
-      softmax_scale,
-      false,
-      is_causal,
-      false,
-      c10::nullopt);
-  return output[0];
-#endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return Tensor();
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
