@@ -59,7 +59,7 @@ AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
 ]
 
 # This doesn't have to be in sync with the header, it only needs to contain
-# entries that we actually use in the codegen
+# entries that we actually use in the codegen or want pyi entries for
 class DispatchKey(Enum):
     Undefined = 0
     CatchAll = Undefined
@@ -92,6 +92,7 @@ class DispatchKey(Enum):
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
 
+    ADInplaceOrView = auto()
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeImplicitAutogradNestedTensor = auto()
