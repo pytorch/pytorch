@@ -61,8 +61,6 @@ from torch.testing._internal.common_quantized import (
     supported_qengines,
     override_qengines,
 )
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfNoCaffe2
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -71,7 +69,6 @@ hu.assert_deadline_disabled()
 
 # Standard library
 from typing import Tuple
-import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
@@ -1441,33 +1438,6 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
         q_model(indices, offsets, torch.randn(5, 5))
         self.assertTrue('QuantizedEmbedding' in str(q_model))
         self.assertTrue('DynamicQuantizedLinear' in str(q_model))
-
-class TestQuantizeEagerONNXExport(JitTestCase):
-
-    @skipIfNoFBGEMM
-    @skipIfNoCaffe2
-    def test_lower_graph_linear(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @skipIfNoFBGEMM
-    @skipIfNoCaffe2
-    def test_lower_graph_conv2d(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
-
-    @skipIfNoFBGEMM
-    @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
-    does not support conv3d")
-    def test_lower_graph_conv3d(self):
-        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
-        data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
-        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
-        self._test_lower_graph_impl(model, data)
 
 
 if __name__ == '__main__':

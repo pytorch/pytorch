@@ -21,7 +21,7 @@ from torch import Tensor
 from torch.onnx import symbolic_helper, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import registration
-from torch.testing._internal import common_utils, jit_utils
+from torch.testing._internal import common_quantization, common_utils, jit_utils
 
 
 def export_to_onnx(
@@ -932,6 +932,8 @@ class TestONNXExport(common_utils.TestCase):
 
         torch.onnx.export_to_pretty_string(Mod(), (torch.rand(3, 4), torch.rand(4, 5)))
 
+
+class TestQuantizeEagerONNXExport(common_utils.TestCase):
     def _test_lower_graph_impl(self, model, data):
         model.qconfig = torch.ao.quantization.default_qconfig
         model = torch.ao.quantization.prepare(model)
@@ -958,6 +960,39 @@ class TestONNXExport(common_utils.TestCase):
             )
 
         _export_to_onnx(model, data, input_names)
+
+    @common_quantization.skipIfNoFBGEMM
+    @common_utils.skipIfNoCaffe2
+    def test_lower_graph_linear(self):
+        model = torch.ao.quantization.QuantWrapper(
+            torch.nn.Linear(5, 10, bias=True)
+        ).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
+
+    @common_quantization.skipIfNoFBGEMM
+    @common_utils.skipIfNoCaffe2
+    def test_lower_graph_conv2d(self):
+        model = torch.ao.quantization.QuantWrapper(
+            torch.nn.Conv2d(3, 5, 2, bias=True)
+        ).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
+
+    @common_quantization.skipIfNoFBGEMM
+    @unittest.skip(
+        "onnx opset9 does not support quantize_per_tensor and caffe2 \
+    does not support conv3d"
+    )
+    def test_lower_graph_conv3d(self):
+        model = torch.ao.quantization.QuantWrapper(
+            torch.nn.Conv3d(3, 5, 2, bias=True)
+        ).to(dtype=torch.float)
+        data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
+        data = torch.from_numpy(data_numpy).to(dtype=torch.float)
+        self._test_lower_graph_impl(model, data)
 
 
 if __name__ == "__main__":
