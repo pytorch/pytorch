@@ -551,7 +551,7 @@ class TestONNXExport(common_utils.TestCase):
 
         x = torch.randn(32, 3)
         f = io.BytesIO()
-        torch.onnx._export(test_model, (x,), f, do_constant_folding=False)
+        torch.onnx.export(test_model, (x,), f, do_constant_folding=False)
         loaded_model = onnx.load_from_string(f.getvalue())
 
         actual_list = [p.name for p in loaded_model.graph.initializer]
