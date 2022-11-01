@@ -198,6 +198,10 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
+def sympy_symbol(name):
+    return sympy.Symbol(name, integer=True, positive=True)
+
+
 def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
     """
     xreplace is faster than subs, but is way more picky
@@ -205,7 +209,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
 
     def promote_strings(key):
         if isinstance(key, str):
-            return sympy.Symbol(key)
+            return sympy_symbol(key)
         return key
 
     return expr.xreplace(
@@ -238,23 +242,28 @@ instance_descriptor = collections.namedtuple(
 
 
 @contextlib.contextmanager
-def fresh_triton_cache(cache_entries=None):
+def fresh_inductor_cache(cache_entries=None):
     """
-    Contextmanager that provides a clean tmp cachedir for triton.
+    Contextmanager that provides a clean tmp cachedir for inductor.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": tmpdirname}):
-            yield
-            if isinstance(cache_entries, dict):
-                assert len(cache_entries) == 0, "expected empty cache_entries dict"
-                files = os.listdir(tmpdirname)
-                cache_entries.update(
-                    {
-                        f: os.path.getsize(os.path.join(tmpdirname, f))
-                        for f in files
-                        if ".lock" not in f
-                    }
-                )
+    with tempfile.TemporaryDirectory() as inductor_cache_dir:
+        with mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
+        ):
+            triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
+            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
+                yield
+                if isinstance(cache_entries, dict):
+                    assert len(cache_entries) == 0, "expected empty cache_entries dict"
+                    if os.path.exists(triton_cache_dir):
+                        files = os.listdir(triton_cache_dir)
+                        cache_entries.update(
+                            {
+                                f: os.path.getsize(os.path.join(triton_cache_dir, f))
+                                for f in files
+                                if ".lock" not in f
+                            }
+                        )
