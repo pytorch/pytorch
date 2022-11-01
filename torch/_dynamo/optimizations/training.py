@@ -348,10 +348,6 @@ def _has_incompatible_cudagraph_ops(gm):
     if is_any_ones and is_any_zeros:
         return True
 
-    mutated_inputs = find_input_mutations(gm.graph)
-    if len(mutated_inputs) > 0:
-        return True
-
     return False
 
 
