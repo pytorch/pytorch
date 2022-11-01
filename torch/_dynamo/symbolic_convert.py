@@ -130,8 +130,7 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif (
-            isinstance(value, (TensorVariable))
-            and self.should_compile_partial_graph()
+            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
         ):
             # compile a partial subgraph prefix then jump into user code
             self.push(value)
@@ -159,7 +158,7 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, DynamicShapeVariable):
-            eval_result = self.output.shape_env.evaluate_expr(value.dyn_shape.get_pyobj().expr)
+            eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
