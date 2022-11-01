@@ -52,8 +52,8 @@ from .utils import (
     counters,
     fake_tensors_available,
     graph_break_dup_warning_checker,
-    proxy_args_kwargs,
     istype,
+    proxy_args_kwargs,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder
@@ -121,7 +121,10 @@ def stack_op(fn: typing.Callable):
 
     return impl
 
-def _is_assert_statement(self: "InstructionTranslatorBase", truth_fn: typing.Callable, push: bool):
+
+def _is_assert_statement(
+    self: "InstructionTranslatorBase", truth_fn: typing.Callable, push: bool
+):
     # Detect if this jump instruction is assert.
     #
     #
@@ -139,7 +142,7 @@ def _is_assert_statement(self: "InstructionTranslatorBase", truth_fn: typing.Cal
     # 24 CALL_FUNCTION            1                    -> optional instruction
     # 26 RAISE_VARARGS            1
 
-    if not truth_fn is operator.truth or push:
+    if (truth_fn is not operator.truth) or push:
         return False
 
     current_instruction_pointer = self.instruction_pointer
@@ -161,16 +164,20 @@ def _is_assert_statement(self: "InstructionTranslatorBase", truth_fn: typing.Cal
     has_error_msg = False
     # DETECT RAISE_VARARGS or LOAD CONST
     if inst.opname == "LOAD_CONST":
-        assert isinstance(inst.argval, str), f"Assert rhs must be str to be rewritten, but found {type(inst.argval)}"
+        assert isinstance(
+            inst.argval, str
+        ), f"Assert rhs must be str to be rewritten, but found {type(inst.argval)}"
         self.LOAD_CONST(inst)
         has_error_msg = True
-        # if it is load constant, it should be followed by CALL_FUNCTION
+
+        # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
         current_instruction_pointer += 1
         if current_instruction_pointer >= len(self.instructions):
             return False
         inst = self.instructions[current_instruction_pointer]
         if inst.opname != "CALL_FUNCTION":
             return False
+
         # CALL_FUNCTION should be followed by RAISE_VARARGS
         current_instruction_pointer += 1
         if current_instruction_pointer >= len(self.instructions):
@@ -182,18 +189,19 @@ def _is_assert_statement(self: "InstructionTranslatorBase", truth_fn: typing.Cal
 
     if not has_error_msg:
         # Push dummy value instead of error message
-        self.push(None)
+        self.push(ConstantVariable("assertion error"))
 
     return True
+
 
 def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
-        if config.rewrite_assert_with_torch_assert and _is_assert_statement(self, truth_fn, push):
-            error_msg: Optional[VariableTracker] = self.pop()
-            if error_msg is None:
-                error_msg = ConstantVariable(value="Assertion error")
+        if config.rewrite_assert_with_torch_assert and _is_assert_statement(
+            self, truth_fn, push
+        ):
+            error_msg: VariableTracker = self.pop()
             self.output.guards.update(error_msg.guards)
             # Skip over things like `assert True`
             if value.is_python_constant() and bool(value.as_python_constant()):
@@ -203,7 +211,10 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
             # Manually insert torch._assert instead of python assert and jump over
             # assert related instructions as we don't need them anymore.
             self.output.create_proxy(
-                "call_function", torch._assert, *proxy_args_kwargs((value, error_msg), {}), current_tx=self
+                "call_function",
+                torch._assert,
+                *proxy_args_kwargs((value, error_msg), {}),
+                current_tx=self,
             )
             self.jump(inst)
             return
