@@ -19,7 +19,6 @@ if fake_tensors_available:
     )
     from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor_and_record
 
-import torch.utils._python_dispatch as py_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._pytree import tree_map
@@ -47,8 +46,8 @@ class _missing:
 
 
 def _run_node(output_graph, node, args, kwargs, nnmodule):
+    op = node.op
     try:
-        op = node.op
         if op == "call_function":
             return node.target(*args, **kwargs)
         elif op == "call_method":
@@ -60,7 +59,7 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
             return output_graph.get_submodule(node.target)
     except Exception as e:
         raise RuntimeError(
-            f"Failed running {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
+            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
         ) from e
     raise AssertionError(op)
 
@@ -512,6 +511,7 @@ class TensorVariable(VariableTracker):
                     )
                     proxy.node.meta["example_value"] = element
                     items.append(DynamicShapeVariable.create(tx, proxy, element))
+
             def extract(item):
                 if isinstance(item, ConstantVariable):
                     return item.value
@@ -648,6 +648,12 @@ class DynamicShapeVariable(VariableTracker):
 
     def as_proxy(self):
         return self.proxy
+
+    def evaluate_expr(self, output_graph):
+        if isinstance(self.dyn_shape, (bool, int)):
+            # Bool and 0/1 case fallthrough
+            return self.dyn_shape
+        return output_graph.shape_env.evaluate_expr(self.dyn_shape.get_pyobj().expr)
 
     def call_method(
         self,

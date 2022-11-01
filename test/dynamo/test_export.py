@@ -94,7 +94,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             if guard.name == 'symbolic_shape_expression':
                 hit = True
                 self.assertExpectedInline(guard.code_list, 
-                """(isinstance(x, torch.Tensor) and x.size()[0] <= 10 and x.stride()[0] == x.size()[1])"""
+                """(x.size()[0] <= 10 and x.stride()[0] == x.size()[1])"""
                 )
         
         self.assertTrue(hit)
