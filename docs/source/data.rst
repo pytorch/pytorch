@@ -65,7 +65,7 @@ in real time.
 
 See :class:`~torch.utils.data.IterableDataset` for more details.
 
-.. note:: When using an :class:`~torch.utils.data.IterableDataset` with
+.. note:: When using a :class:`~torch.utils.data.IterableDataset` with
           `multi-process data loading <Multi-process data loading_>`_. The same
           dataset object is replicated on each worker process, and thus the
           replicas must be configured differently to avoid duplicated data. See
