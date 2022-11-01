@@ -3916,6 +3916,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     if antialias and not (mode in ("bilinear", "bicubic") and input.ndim == 4):
         raise ValueError("Anti-alias option is only supported for bilinear and bicubic modes")
 
+    # Logging logic
+    is_channels_last = input.is_contiguous(memory_format=torch.channels_last)
+    is_image_or_mask = input.ndim == 4 and input.shape[1] < 4
+    log_string = f"torch.nn.functional.interpolate_dtype={input.dtype}_mode={mode}_antialias={antialias}_channelslast={is_channels_last}_imageormask={is_image_or_mask}"
+    torch._C._log_api_usage_once(log_string)
+
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == "nearest":
