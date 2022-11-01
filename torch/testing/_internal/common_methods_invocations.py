@@ -10661,6 +10661,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex32: tol(atol=1e-5, rtol=5e-3)}),
                    "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
+               DecorateInfo(
+                   toleranceOverride({torch.float: tol(atol=1.5e-5, rtol=1.5e-5), }),
+                   'TestCommon', 'test_numpy_ref_mps'),
            ),
            skips=(
                # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
