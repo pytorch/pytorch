@@ -10,6 +10,9 @@ Usage:
 
     pytest test/onnx/test_op_consistancy.py -k ceil
 
+    Read more on Running and writing tests:
+        https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
+
 Note:
 
     When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_FAILS and
@@ -280,7 +283,7 @@ def reason_onnx_does_not_support(
     operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
     """Formats the reason: ONNX doesn't support the given dtypes."""
-    return f"{operator} on {dtypes or 'dtypes'} not supported by the ONNX Spec"
+    return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
 
 
 def reason_jit_tracer_error(info: str) -> str:
@@ -375,7 +378,10 @@ class TestConsistency(common_utils.TestCase):
     This is a parameterized test suite.
     """
 
-    @common_device_type.ops(OPS_DB, allowed_dtypes=SUPPORTED_DTYPES)
+    @common_device_type.ops(
+        [op for op in OPS_DB if op.name in ALLOWLIST_OP],
+        allowed_dtypes=SUPPORTED_DTYPES,
+    )
     @common_utils.parametrize("opset", TESTED_OPSETS)
     @skip_ops(
         OPS_DB,
@@ -385,9 +391,6 @@ class TestConsistency(common_utils.TestCase):
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op, opset: int):
         assert device == "cpu"
-
-        if op.name not in ALLOWLIST_OP:
-            self.skipTest(f"'{op.name}' is not in the allow list for test on ONNX")
 
         expected_opset_fails_name_mapping = {
             fail.op_name: fail for fail in EXPECTED_OPSET_FAILS
