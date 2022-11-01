@@ -340,6 +340,7 @@ class OutputGraph(fx.Tracer):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)

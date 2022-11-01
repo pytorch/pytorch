@@ -323,6 +323,9 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->level_ = level_;
+  impl->generation_ = generation_;
+  impl->view_metas_ = view_metas_;
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;

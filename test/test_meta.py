@@ -6,7 +6,7 @@ import os
 from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch._subclasses.meta_utils import MetaConverter
+from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
     onlyCUDA,
+    OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torchgen.utils import YamlLoader
@@ -66,32 +67,7 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m2._version, m1._version)
 
     def assertMetadataMatches(self, m1, m2):
-        self.assertEqual(m1.dtype, m2.dtype)
-        self.assertEqual(m1.shape, m2.shape)
-        self.assertEqual(m1.requires_grad, m2.requires_grad)
-        self.assertEqual(m1.is_leaf, m2.is_leaf)
-        self.assertEqual(m1.grad_fn is None, m2.grad_fn is None)
-        self.assertEqual(m1.is_sparse, m2.is_sparse)
-        self.assertEqual(m1.is_inference(), m2.is_inference())
-        self.assertEqual(m1.is_conj(), m2.is_conj())
-        self.assertEqual(m1.is_neg(), m2.is_neg())
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
-            grad_not_none = m1.grad is not None
-        if grad_not_none:
-            self.assertMetadataMatches(m1.grad, m2.grad)
-        if m1.is_sparse:
-            self.assertEqual(m1.dense_dim(), m2.dense_dim())
-            self.assertEqual(m1.sparse_dim(), m2.sparse_dim())
-            self.assertEqual(m1.is_coalesced(), m2.is_coalesced())
-        else:
-            self.assertEqual(m1.stride(), m2.stride())
-            self.assertEqual(m1.storage_offset(), m2.storage_offset())
-            self.assertEqual(m1._is_view(), m2._is_view())
-            if m1._is_view():
-                self.assertMetadataMatches(m1._base, m2._base)
-        # TODO: test if is resizable (no direct query for this atm)
-        # TODO: audit AutogradMeta to see if it matches
+        assert_metadata_eq(self.assertEqual, m1, m2)
 
     def test_view_of_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
@@ -127,6 +103,21 @@ class TestMetaConverter(TestCase):
         self.assertMetadataMatches(m1, z1)
         self.assertMetadataMatches(m2, z2)
         self.assertSameVersionCounter(m1, m2)
+
+    def test_view_of_view_of_leaf(self):
+        x = torch.randn(8)
+        y = x.view(2, 4)
+        y.requires_grad = True
+        z = y.view(2, 2, 2)
+
+        to_meta = MetaConverter()
+        mx = to_meta(x)
+        mz = to_meta(z)
+
+        self.assertFalse(z.is_leaf)
+
+        self.assertMetadataMatches(mx, x)
+        self.assertMetadataMatches(mz, z)
 
     def test_leaf(self):
         x = torch.randn(4, requires_grad=True)
@@ -293,15 +284,91 @@ class TestMetaConverter(TestCase):
         del m
         self.assertIs(ref(), None)
 
+aten = torch.ops.aten
+
 CHECK_STRIDES = {
     torch.Tensor.__getitem__,
-    torch.ops.aten.index_put,
-    torch.ops.aten.index_add,
+}
+
+CHECK_STRIDES_SKIPS = {
+    aten._conj_physical.default,
+    aten._fft_c2c.default,
+    aten._fft_c2r.default,
+    aten._fft_r2c.default,
+    aten._linalg_svd.default,
+    aten._scaled_dot_product_attention_forward.default,
+    aten.add.Tensor,
+    aten.addmm.default,
+    aten.atan2.default,
+    aten.binary_cross_entropy.default,
+    aten.bitwise_and.Tensor,
+    aten.bitwise_left_shift.Tensor,
+    aten.bitwise_or.Tensor,
+    aten.bitwise_right_shift.Tensor,
+    aten.bitwise_xor.Tensor,
+    aten.clamp_max.Tensor,
+    aten.clamp_min.Tensor,
+    aten.complex.default,
+    aten.copysign.Tensor,
+    aten.div.Tensor_mode,
+    aten.div.Tensor,
+    aten.eq.Tensor,
+    aten.floor_divide.default,
+    aten.fmax.default,
+    aten.fmin.default,
+    aten.fmod.Tensor,
+    aten.gcd.default,
+    aten.ge.Tensor,
+    aten.gt.Tensor,
+    aten.heaviside.default,
+    aten.hypot.default,
+    aten.igamma.default,
+    aten.igammac.default,
+    aten.lcm.default,
+    aten.le.Tensor,
+    aten.logical_and.default,
+    aten.logical_or.default,
+    aten.logical_xor.default,
+    aten.lt.Tensor,
+    aten.maximum.default,
+    aten.minimum.default,
+    aten.mul.Tensor,
+    aten.ne.Tensor,
+    aten.nextafter.default,
+    aten.pow.Scalar,
+    aten.pow.Tensor_Scalar,
+    aten.pow.Tensor_Tensor,
+    aten.prelu.default,
+    aten.remainder.Tensor,
+    aten.rsub.Tensor,
+    aten.special_xlog1py.default,
+    aten.special_zeta.default,
+    aten.sub.Tensor,
+    aten.where.self,
+    aten.xlogy.Tensor,
+
+    # channel_last and channel_last_3d related failures
+    aten.constant_pad_nd.default,
+    aten._adaptive_avg_pool2d.default,
+    aten.constant_pad_nd.default,
+    aten.convolution.default,
+    aten.convolution.default,
+    aten._adaptive_avg_pool2d.default,
+    aten.upsample_bilinear2d.vec,
+    aten.constant_pad_nd.default,
+    aten.upsample_bilinear2d.vec,
+
+    # following ops fails if include_storage_offset = True, but these are a bit edge casey
+    # we should still fix them, leaving them here for tracking.
+    # aten._reshape_alias.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_matmul_cuda_float32
+    # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
 def should_check_strides(func):
     if func in CHECK_STRIDES:
         return True
+    if func in CHECK_STRIDES_SKIPS:
+        return False
     if not isinstance(func, torch._ops.OpOverload):
         return False
     # Prims are expected to model strides correctly
@@ -312,7 +379,7 @@ def should_check_strides(func):
     if any(r.alias_info.before_set for r in func._schema.returns if r.alias_info):
         return True
     # TODO: check for TensorIterator
-    return False
+    return True
 
 def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
@@ -803,8 +870,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
             kwargs, dtype=self.dtype, device_type=self.device_type, run_symbolic_meta=False
         )
 
-aten = torch.ops.aten
-
 # these always fail
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
@@ -969,6 +1034,55 @@ meta_dispatch_device_skips['cuda'] = {
     aten.miopen_batch_norm.default: {f32},
 }
 
+def get_strided_args(args):
+
+    def get_strided_variants(t, include_storage_offset=False):
+        variants = []
+
+        # contiguous
+        variants.append(t)
+
+        # transposed
+        if t.ndim > 1:
+            perm = list(reversed(range(t.ndim)))
+            transposed = torch.empty(
+                t.shape[::-1], device=t.device, dtype=t.dtype, requires_grad=t.requires_grad
+            ).permute(perm).copy_(t)
+            variants.append(transposed)
+
+        # nondense
+        if t.ndim > 0:
+            nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
+            variants.append(nondense)
+
+        # channel_last
+        if t.ndim == 4:
+            variants.append(t.contiguous(memory_format=torch.channels_last))
+
+        # channel_last_3d
+        if t.ndim == 5:
+            variants.append(t.contiguous(memory_format=torch.channels_last_3d))
+
+        # storage_offset
+        if include_storage_offset:
+            buffer = torch.empty(t.numel() + 1, device=t.device, dtype=t.dtype, requires_grad=t.requires_grad)
+            buffer = buffer.as_strided(t.shape, t.stride(), storage_offset=1)
+            buffer.copy_(t)
+            variants.append(buffer)
+
+        return variants
+
+    strided_args = []
+    for arg in args:
+        if isinstance(arg, torch.Tensor) and not arg.is_sparse_csr and arg.is_contiguous():
+            strided_arg_variants = get_strided_variants(arg)
+        else:
+            strided_arg_variants = [arg]
+        strided_args.append(strided_arg_variants)
+
+    for result in itertools.product(*strided_args):
+        yield result
+
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase
     device: torch.device
@@ -1062,7 +1176,7 @@ class TestMeta(TestCase):
             with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=True):
                 expected = func(*args, **kwargs)
 
-    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace):
+    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
         if inplace:
             func = op.get_inplace()
             if not func:
@@ -1081,14 +1195,21 @@ class TestMeta(TestCase):
             if inplace and sample_input.broadcasts_input:
                 continue
 
-            args = [sample_input.input] + list(sample_input.args)
+            sample_args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=symbolic_meta):
-                expected = func(*args, **kwargs)
+            if all_stride_variants and sum(isinstance(arg, torch.Tensor) for arg in sample_args) <= 5:
+                # test inputs <= 5 tensors to avoid combinatorial explosion
+                strided_args = get_strided_args(sample_args)
+            else:
+                strided_args = [sample_args]
 
-                if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
-                    func(*args, **kwargs, out=expected)
+            for args in strided_args:
+                with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=symbolic_meta):
+                    expected = func(*args, **kwargs)
+
+                    if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
+                        func(*args, **kwargs, out=expected)
 
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -1121,6 +1242,26 @@ class TestMeta(TestCase):
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    # only test one dtype, as output stride behavior is the same for all dtypes
+    @ops(op_db, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    # Only test on CUDA, as CUDA kernel's stride is the reference
+    @onlyCUDA
+    def test_dispatch_symbolic_meta_outplace_all_strides(self, device, dtype, op):
+        self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False, all_stride_variants=True)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @skipIfCrossRef
+    @suppress_warnings
+    # only test one dtype, as output stride behavior is the same for all dtypes
+    @ops(op_db, dtypes=OpDTypes.any_common_cpu_cuda_one)
+    # Only test on CUDA, as CUDA kernel's stride is the reference
+    @onlyCUDA
+    def test_dispatch_symbolic_meta_inplace_all_strides(self, device, dtype, op):
+        self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True, all_stride_variants=True)
+
 
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
@@ -1142,65 +1283,56 @@ class TestMeta(TestCase):
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
 
-    def get_stride_variants(self, t):
-        results = []
-
-        # contiguous
-        results.append(t)
-
-        # transposed
-        if t.ndim > 1:
-            perm = list(reversed(range(t.ndim)))
-            transposed = torch.empty(t.shape[::-1], device=t.device, dtype=t.dtype).permute(perm).copy_(t)
-            results.append(transposed)
-
-        # nondense
-        nondense = torch.repeat_interleave(t, 2, dim=-1)[..., ::2]
-        results.append(nondense)
-
-        return results
-
-    @onlyCUDA
-    def test_index_add_stride(self, device):
+    def test_meta__fused_moving_avg_obs_fq_helper(self, device):
+        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
         to_meta = MetaConverter()
 
-        x = torch.ones(5, 3, device=device)
-        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float, device=device)
-        index = torch.tensor([0, 4, 2], device=device)
+        x = torch.randn(5, 5, device=device)
+        running_min_op = torch.tensor(float("inf"), device=device)
+        running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.01
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
 
-        xs = self.get_stride_variants(x)
-        ts = self.get_stride_variants(t)
+        mod = FusedMovingAvgObsFakeQuantize()
+        torch.ao.quantization.enable_fake_quant(mod)
+        torch.ao.quantization.enable_observer(mod)
+        mod.to(device)
 
-        for x, t in itertools.product(xs, ts):
-            args = (x, 0, index, t)
-            meta_args = tree_map(to_meta, args)
+        meta_x = to_meta(x)
 
-            r = torch.ops.aten.index_add(*args)
-            meta_r = torch.ops.aten.index_add(*meta_args)
+        args = [
+            x,
+            mod.observer_enabled,
+            mod.fake_quant_enabled,
+            running_min_op,
+            running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+        ]
 
-            self.assertEqual(r.size(), meta_r.size())
-            self.assertEqual(r.stride(), meta_r.stride())
+        meta_args = args.copy()
+        meta_args[0] = meta_x
 
-    @onlyCUDA
-    def test_index_put_stride(self, device):
-        to_meta = MetaConverter()
+        kwargss = [
+            {},
+            {"per_row_fake_quant": False, "symmetric_quant": False},
+            {"per_row_fake_quant": False, "symmetric_quant": True},
+        ]
 
-        x = torch.rand(5, 5, device=device)
-        t = torch.rand(5, device=device)
-        index = torch.tensor([True, False, True, True, False], device=device)
+        for kwargs in kwargss:
+            ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
+            meta_out = aten._fused_moving_avg_obs_fq_helper.default(*meta_args, **kwargs)
 
-        xs = self.get_stride_variants(x)
-        ts = self.get_stride_variants(t)
+            self.assertEqual(ref_out[0].size(), meta_out[0].size())
+            self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
+            self.assertEqual(ref_out[1].size(), meta_out[1].size())
+            self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
 
-        for x, t in itertools.product(xs, ts):
-            args = (x, [index], t)
-            meta_args = tree_map(to_meta, args)
-
-            r = torch.ops.aten.index_put(*args)
-            meta_r = torch.ops.aten.index_put(*meta_args)
-
-            self.assertEqual(r.size(), meta_r.size())
-            self.assertEqual(r.stride(), meta_r.stride())
 
     def test_map_location_deserialize(self):
         import io

@@ -1,6 +1,7 @@
 import torch
 import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast, Union
+import sys
 import operator
 import builtins
 import math
@@ -24,7 +25,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
     "SymDispatchMode", "sym_float", "FloorDiv", "guard_int", "wrap_node",
-    "sym_sqrt"
+    "sym_sqrt",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -162,10 +163,10 @@ class SymNode:
 
     def wrap_float(self, num):
         assert isinstance(num, float)
-        return SymNode(sympy.Integer(num), self.shape_env, float, constant=num)
+        return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
 
     def clone(self):
-        return self
+        return SymNode(self.expr, self.shape_env, self.pytype, constant=self.constant)
 
     def str(self):
         return f"{self.expr}"
@@ -175,6 +176,13 @@ class SymNode:
 
     def __repr__(self):
         return self.str()
+
+    # These methods are metaprogrammed in below
+    def sym_int(self) -> "SymNode":
+        ...
+
+    def sym_float(self) -> "SymNode":
+        ...
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
@@ -190,27 +198,6 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         return float(self.shape_env.evaluate_expr(self.expr))
-
-    def sym_float(self):
-        if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(sym_float, (wrap_node(self),), {})
-            assert isinstance(r, (SymInt, SymFloat)), type(r)
-            return r.node
-        # TODO: consider constant prop here
-        # TODO: wrapping the expr with sympy.Float doesn't seem to work, why
-        # not?
-        return SymNode(self.expr, self.shape_env, float)
-
-    def sym_int(self):
-        raise NotImplementedError("sym_int NYI")
-        """
-        if SYM_FUNCTION_MODE:
-            return _handle_sym_dispatch(sym_int, (self,), {})
-        # TODO: consider constant prop here
-        # XXX: need to cast float to int in sympy; math.floor is wrong
-        # because negatives round to zero
-        return SymNode(self.expr, self.shape_env, int)
-        """
 
     def bool_(self):
         return bool(self.shape_env.evaluate_expr(self.shape_env.replace(self.expr)))
@@ -265,6 +252,9 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
+def _nyi():
+    raise NotImplementedError()
+
 magic_methods = {
     **reflectable_magic_methods,
     'eq': lambda a, b: sympy.Eq(a, b),
@@ -273,6 +263,8 @@ magic_methods = {
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
+    'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
+    'sym_int': lambda a: _nyi(),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -281,6 +273,7 @@ magic_methods = {
 }
 
 unary_magic_methods = {
+    'sym_float',
     'ceil',
     'floor',
     'neg',
@@ -323,6 +316,7 @@ def _make_node_magic(method, func):
         other_expr = self.shape_env.replace(other_expr)
         out = func(expr, other_expr)
         out = sympy.expand(out)
+        pytype: Type
         if method in ["truediv"]:
             pytype = float
         else:
@@ -336,8 +330,10 @@ def _make_node_magic(method, func):
         if SYM_FUNCTION_MODE:
             if method in ["ceil", "floor"]:
                 op = getattr(math, method)
-            elif method == "sqrt":
+            elif method == "sym_sqrt":
                 op = sym_sqrt
+            elif method in ["sym_float", "sym_int"]:
+                op = getattr(sys.modules[__name__], method)
             else:
                 op = getattr(operator, method)
             r = _handle_sym_dispatch(op, (wrap_node(self),), {})
@@ -347,9 +343,10 @@ def _make_node_magic(method, func):
         expr = self.shape_env.replace(self.expr)
         out = func(expr)
         out = sympy.expand(out)
+        pytype: Type
         if method in ["ceil", "floor"]:
             pytype = int
-        elif method in ["sym_sqrt"]:
+        elif method in ["sym_sqrt", "sym_float"]:
             pytype = float
         else:
             pytype = self.pytype

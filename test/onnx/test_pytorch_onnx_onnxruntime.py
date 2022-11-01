@@ -1412,8 +1412,26 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
-    def test_avgpool_2d_ceil(self):
-        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
+    @common_utils.parametrize(
+        "padding",
+        (0, 1),
+    )
+    @common_utils.parametrize(
+        "ceil_mode",
+        (True, False),
+    )
+    @common_utils.parametrize(
+        "count_include_pad",
+        (True, False),
+    )
+    def test_avgpool_2d(self, padding, ceil_mode, count_include_pad):
+        model = torch.nn.AvgPool2d(
+            3,
+            3,
+            padding=padding,
+            ceil_mode=ceil_mode,
+            count_include_pad=count_include_pad,
+        )
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
@@ -12409,8 +12427,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 y = None
             return y
 
-    #  Skip now to wait more insight on https://github.com/onnx/onnx/issues/4424
-    #  Model fails on type inference, as it's input/output type mismatch.
     class LoopNoneInput(torch.nn.Module):
         def forward(self, x) -> Optional[Tensor]:
             y: Optional[Tensor] = None
