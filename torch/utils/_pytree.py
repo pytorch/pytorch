@@ -1,7 +1,8 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union, Set
+from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
 from dataclasses import dataclass
+
 
 T = TypeVar('T')
 S = TypeVar('S')
@@ -45,12 +46,8 @@ class GradNodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
     tangenttype_fn: UnflattenFunc
 
-LEAF_NODES: Set[Type[Any]] = set()
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 GRAD_NODES: Dict[Type[Any], GradNodeDef] = {}
-
-def _register_leaf_node(typ: Any) -> None:
-    LEAF_NODES.add(typ)
 
 def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc) -> None:
     SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
@@ -109,13 +106,17 @@ def _is_namedtuple_instance(pytree: Any) -> bool:
         return False
     return all(type(entry) == str for entry in fields)
 
-def _get_node_type(pytree: Any) -> Optional[Any]:
+def _get_node_type(pytree: Any, support_nn_modules) -> Any:
+    from torch import nn
     if _is_namedtuple_instance(pytree):
         return namedtuple
-    if isinstance(pytree, type):
-        return None
-    supported_types = [i for i in type(pytree).mro() if i in SUPPORTED_NODES or i in LEAF_NODES]
-    return supported_types[0] if len(supported_types) > 0 else None
+    if support_nn_modules and isinstance(pytree, nn.Module):
+        return nn.Module
+    return type(pytree)
+
+# A leaf is defined as anything that is not a Node.
+def _is_leaf(pytree: PyTree, support_nn_modules) -> bool:
+    return _get_node_type(pytree, support_nn_modules) not in SUPPORTED_NODES.keys()
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
@@ -152,14 +153,14 @@ class LeafSpec(TreeSpec):
     def __repr__(self, indent: int = 0) -> str:
         return '*'
 
-def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], TreeSpec]:
+def tree_flatten(pytree: PyTree, grad_fn: bool = False, support_nn_modules: bool = False) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
-    node_type = _get_node_type(pytree)
-    if not node_type or node_type in LEAF_NODES:
+    if _is_leaf(pytree, support_nn_modules):
         return [pytree], LeafSpec()
 
+    node_type = _get_node_type(pytree, support_nn_modules)
     if grad_fn and node_type in GRAD_NODES:
         flatten_fn = GRAD_NODES[node_type].flatten_fn
     else:
@@ -170,7 +171,7 @@ def tree_flatten(pytree: PyTree, grad_fn: bool = False) -> Tuple[List[Any], Tree
     result : List[Any] = []
     children_specs : List['TreeSpec'] = []
     for child in child_pytrees:
-        flat, child_spec = tree_flatten(child, grad_fn)
+        flat, child_spec = tree_flatten(child, grad_fn, support_nn_modules)
         result += flat
         children_specs.append(child_spec)
 
@@ -210,8 +211,8 @@ def tree_unflatten(values: List[Any], spec: TreeSpec, grad_fn: bool = False, out
 
     return unflatten_fn(child_pytrees, spec.context)
 
-def tree_map(fn: Any, pytree: PyTree, grad_fn: bool = False) -> PyTree:
-    flat_args, spec = tree_flatten(pytree, grad_fn)
+def tree_map(fn: Any, pytree: PyTree, grad_fn: bool = False, support_nn_modules: bool = False) -> PyTree:
+    flat_args, spec = tree_flatten(pytree, grad_fn, support_nn_modules)
     return tree_unflatten([fn(i) for i in flat_args], spec, grad_fn)
 
 Type2 = Tuple[Type[T], Type[S]]
@@ -278,12 +279,12 @@ def tree_map_only(ty: Type2[T, S], fn: Fn2[T, S, Any], pytree: PyTree) -> PyTree
 def tree_map_only(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
     return tree_map(map_only(ty)(fn), pytree)
 
-def tree_all(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+def tree_all(pred: Callable[[Any], bool], pytree: PyTree, support_nn_modules: bool = False) -> bool:
+    flat_args, _ = tree_flatten(pytree, support_nn_modules)
     return all(map(pred, flat_args))
 
-def tree_any(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+def tree_any(pred: Callable[[Any], bool], pytree: PyTree, support_nn_modules: bool = False) -> bool:
+    flat_args, _ = tree_flatten(pytree, support_nn_modules)
     return any(map(pred, flat_args))
 
 @overload
@@ -294,8 +295,8 @@ def tree_all_only(ty: Type[T], pred: Fn[T, bool], pytree: PyTree) -> bool:
 def tree_all_only(ty: Type2[T, S], pred: Fn2[T, S, bool], pytree: PyTree) -> bool:
     ...
 
-def tree_all_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+def tree_all_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree, support_nn_modules: bool = False) -> bool:
+    flat_args, _ = tree_flatten(pytree, support_nn_modules)
     return all(pred(x) for x in flat_args if isinstance(x, ty))
 
 @overload
@@ -306,8 +307,8 @@ def tree_any_only(ty: Type[T], pred: Fn[T, bool], pytree: PyTree) -> bool:
 def tree_any_only(ty: Type2[T, S], pred: Fn2[T, S, bool], pytree: PyTree) -> bool:
     ...
 
-def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree, support_nn_modules: bool = False) -> bool:
+    flat_args, _ = tree_flatten(pytree, support_nn_modules)
     return any(pred(x) for x in flat_args if isinstance(x, ty))
 
 # Broadcasts a pytree to the provided TreeSpec and returns the flattened
@@ -318,14 +319,14 @@ def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
 # a user can pass in vmap(fn, in_dims)(*inputs). `in_dims` should be
 # broadcastable to the tree structure of `inputs` and we use
 # _broadcast_to_and_flatten to check this.
-def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[Any]]:
+def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec, modules_as_pytrees: bool = False) -> Optional[List[Any]]:
     assert isinstance(spec, TreeSpec)
 
-    node_type = _get_node_type(pytree)
-    if not node_type:
+    if _is_leaf(pytree, modules_as_pytrees):
         return [pytree] * spec.num_leaves
     if isinstance(spec, LeafSpec):
         return None
+    node_type = _get_node_type(pytree, modules_as_pytrees)
     if node_type != spec.type:
         return None
 
@@ -339,7 +340,7 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
     # Recursively flatten the children
     result : List[Any] = []
     for child, child_spec in zip(child_pytrees, spec.children_specs):
-        flat = _broadcast_to_and_flatten(child, child_spec)
+        flat = _broadcast_to_and_flatten(child, child_spec, modules_as_pytrees)
         if flat is not None:
             result += flat
         else:

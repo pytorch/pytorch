@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
-from functorch.experimental import replace_all_batch_norm_modules_
+from functorch.experimental import replace_all_batch_norm_modules_, modules_as_pytrees
 
 import functorch
 from functorch import (
@@ -1079,12 +1079,13 @@ class TestVmapOfGrad(TestCase):
             return result
 
         if with_pytree:
-            result = vmap(partial(grad(compute_loss), net))(data, targets)
-            expected_in = [grad(compute_loss)(net, data[i], targets[i]) for i in range(64)]
-            expected = {}
-            for key in expected_in[0]:
-                expected[key] = torch.stack([shard[key] for shard in expected_in])
-            iterator = result
+            with modules_as_pytrees():
+                result = vmap(partial(grad(compute_loss), net))(data, targets)
+                expected_in = [grad(compute_loss)(net, data[i], targets[i]) for i in range(64)]
+                expected = {}
+                for key in expected_in[0]:
+                    expected[key] = torch.stack([shard[key] for shard in expected_in])
+                iterator = result
         else:
             result = vmap(partial(grad(compute_loss), weights))(data, targets)
             expected = [grad(compute_loss)(weights, data[i], targets[i]) for i in range(64)]
@@ -2622,7 +2623,8 @@ class TestMakeFunctional(TestCase):
         def compute_loss(mod, x):
             return mod(x).sum()
 
-        result = grad(compute_loss)(mod2, x)
+        with modules_as_pytrees():
+            result = grad(compute_loss)(mod2, x)
 
         self._check_tied_names_same_weight(({'weight', 'linear.weight'}, {'bias', 'linear.bias'}), result, expected)
 
@@ -2909,10 +2911,11 @@ class TestExamplesCorrectness(TestCase):
 
         # compute some per sample grads with, then without vmap + grad
         if with_pytree:
-            result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None))(x, y, transformed_net)
-            out = partial(compute_loss, net=transformed_net)
-            named_params = {k: v for k, v in transformed_net.named_parameters()}
-            params = named_params.values()
+            with modules_as_pytrees():
+                result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None))(x, y, transformed_net)
+                out = partial(compute_loss, net=transformed_net)
+                named_params = {k: v for k, v in transformed_net.named_parameters()}
+                params = named_params.values()
         else:
             result_grads = vmap(grad(compute_loss, argnums=2), in_dims=(0, 0, None, None))(x, y, params, buffers)
             fnet, params, buffers = make_functional_with_buffers(transformed_net)
@@ -3172,13 +3175,14 @@ class TestExamplesCorrectness(TestCase):
 
         vmap_func = vmap(grad(compute_loss), in_dims=(None, 0, 0))
         if with_pytree:
-            result_grads = vmap_func(model, images, targets)
-            names, weights = zip(*model.named_parameters())
-            expected_grads = [
-                torch.autograd.grad(compute_loss(model, images[i], targets[i]), weights)
-                for i in range(batch_size)
-            ]
-            result_grads = [result_grads[i] for i in names]
+            with modules_as_pytrees():
+                result_grads = vmap_func(model, images, targets)
+                names, weights = zip(*model.named_parameters())
+                expected_grads = [
+                    torch.autograd.grad(compute_loss(model, images[i], targets[i]), weights)
+                    for i in range(batch_size)
+                ]
+                result_grads = [result_grads[i] for i in names]
         else:
             result_grads = vmap_func(weights, images, targets)
             expected_grads = [
@@ -3304,10 +3308,11 @@ class TestExamplesCorrectness(TestCase):
         input = torch.randn(3, 3)
 
         if transform == "vjp":
-            value_pytree, vjp_fn = vjp(loss_ish_pytree, model, input)
-            grad_pytree = vjp_fn(torch.ones_like(value_pytree))
-            value_make_functional, vjp_fn = vjp(partial(loss_ish_make_functional, buffers=buffers), weights, input)
-            grad_make_functional = vjp_fn(torch.ones_like(value_make_functional))
+            with modules_as_pytrees():
+                value_pytree, vjp_fn = vjp(loss_ish_pytree, model, input)
+                grad_pytree = vjp_fn(torch.ones_like(value_pytree))
+                value_make_functional, vjp_fn = vjp(partial(loss_ish_make_functional, buffers=buffers), weights, input)
+                grad_make_functional = vjp_fn(torch.ones_like(value_make_functional))
 
             self.assertEqual(value_pytree, value_make_functional)
             # x is the only differentiated value so we don't worry about ordering

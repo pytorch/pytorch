@@ -60,11 +60,13 @@ def _create_swap_params(params_and_buffers, replaced_tensors_map):
             _change_class(module, params_and_buffers)
     return _swap_parameters
 
+
 def _remove_swap(module, name: str, full_path: str) -> None:
     if hasattr(module, "_orig_class"):
         module.__class__ = module._orig_class
         delattr(module, "_orig_class")
         delattr(module, "_attr_to_path")
+
 
 @contextlib.contextmanager
 def _reparametrize_module(

@@ -36,16 +36,7 @@ from .transformer import TransformerEncoder, TransformerDecoder, \
 from .flatten import Flatten, Unflatten
 from .channelshuffle import ChannelShuffle
 from .module_pytree import _module_flatten, _module_unflatten, _module_unflatten_tangent_type
-import functools
-from ...utils._pytree import _register_pytree_node, _register_pytree_node_grad
 
-_register_pytree_node(Module,
-                      functools.partial(_module_flatten, is_grad=False),
-                      functools.partial(_module_unflatten, is_grad=False))
-_register_pytree_node_grad(Module,
-                           functools.partial(_module_flatten, is_grad=True),
-                           functools.partial(_module_unflatten, is_grad=True),
-                           _module_unflatten_tangent_type)
 
 __all__ = [
     'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
