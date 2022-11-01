@@ -214,6 +214,8 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 def _native_batch_norm_nvfuser(
     fd, input, weight, bias, running_mean, running_var, training, momentum, eps
 ):
+
+    """
     if weight is None:
         weight = fd.define_null_tensor()
     if bias is None:
@@ -222,15 +224,16 @@ def _native_batch_norm_nvfuser(
         running_mean = fd.define_null_tensor()
     if running_var is None:
         running_var = fd.define_null_tensor()
+    """
     return fd.ops.batch_norm(
         input,
         weight,
         bias,
         running_mean,
         running_var,
-        training,
         momentum,
         eps,
+        training,
     )
 
 
@@ -248,8 +251,8 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
-def _transpose_nvfuser(fd, a, permutation):
-    return fd.ops.permute(a, permutation)  # type: ignore[attr-defined]
+def _transpose_nvfuser(fd, a, dims):
+    return fd.ops.permute(a, dims)  # type: ignore[attr-defined]
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
