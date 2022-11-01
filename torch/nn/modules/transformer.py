@@ -407,7 +407,7 @@ class TransformerEncoderLayer(Module):
     # feed forward block
     def _ff_block(self, x: Tensor) -> Tensor:
         if self.activation == F.gelu:
-            x = _addmm_activation(x)
+            x = torch._addmm_activation(x)
         else:
             x = self.activation(self.linear1(x))
         x = self.linear2(self.dropout(x))
