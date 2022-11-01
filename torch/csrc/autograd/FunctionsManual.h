@@ -676,7 +676,7 @@ Tensor fft_c2r_backward(
     const Tensor& grad,
     IntArrayRef dim,
     int64_t normalization);
-Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad);
+Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x,
     const Tensor& self,
@@ -937,10 +937,10 @@ Tensor convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups);
 
 Tensor _convolution_jvp(
@@ -951,10 +951,10 @@ Tensor _convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups,
     bool benchmark,
     bool deterministic,

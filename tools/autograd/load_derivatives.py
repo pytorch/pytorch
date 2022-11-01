@@ -20,7 +20,6 @@ from torchgen.api.types import (
     Binding,
     boolT,
     CppSignatureGroup,
-    intArrayRefT,
     layoutT,
     longT,
     NamedCType,
@@ -756,31 +755,12 @@ def saved_variables(
         return f'strides_or_error({name}, "{name}")'
 
     REPLACEMENTS: List[Tuple[str, Dict[str, Any]]] = [
-        # replace self.sizes() with self_sizes
-        (
-            r"{}.sizes\(\)",
-            {
-                "suffix": "_sizes",
-                "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-            },
-        ),
         # replace self.sym_sizes() with self_sym_sizes
         (
             r"{}.sym_sizes\(\)",
             {
                 "suffix": "_sym_sizes",
                 "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
-            },
-        ),
-        # replace self->sizes() with self_sizes_opt
-        (
-            r"{}->sizes\(\)",
-            {
-                "suffix": "_sizes_opt",
-                "nctype": lambda name: NamedCType(
-                    name, OptionalCType(BaseCType(intArrayRefT))
-                ),
-                "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
             },
         ),
         # replace self->sym_sizes() with self_sym_sizes_opt
@@ -810,16 +790,6 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(typeAndSizeT)),
                 "expr": lambda name: name,  # at save-time
                 "res": lambda name: name + "_info.zeros()",  # at eval-time
-            },
-        ),
-        # replace self.size(2) with self_size_2
-        (
-            r"{}.size\((-?\w+)\)",
-            {
-                "suffix": lambda m: "_argsize_{}".format(
-                    m.groups()[0].replace("-", "minus_")
-                ),
-                "nctype": lambda name: NamedCType(name, BaseCType(longT)),
             },
         ),
         # replace self.sym_size(2) with self_sym_size_2
@@ -893,15 +863,6 @@ def saved_variables(
                 "nctype": lambda name: NamedCType(name, BaseCType(longT)),
             },
         ),
-        # replace self.strides() with self_strides
-        (
-            r"{}.strides\(\)",
-            {
-                "suffix": "_strides",
-                "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-                "expr": stride_expr,
-            },
-        ),
         # replace self.sym_strides() with self_sym_strides
         (
             r"{}.sym_strides\(\)",
@@ -932,6 +893,23 @@ def saved_variables(
     # find which arguments need to be saved
     saved: List[SavedAttribute] = []
 
+    if ".sizes()" in formula or "->sizes()" in formula:
+        raise RuntimeError(
+            ".sizes() is not supported in derivative formulas. Instead, please use the SymInt version,"
+            + f".sym_sizes(), which returned a c10::SymIntArrayRef. formula={formula}"
+        )
+    if re.search(r"\.size\([-]?\d+\)", formula) or re.search(
+        r"->size\([-]?\d+\)", formula
+    ):
+        raise RuntimeError(
+            ".size(int) is not supported in derivative formulas. Instead, please use the SymInt version,"
+            + f".sym_size(int), which returned a c10::SymIntArrayRef. formula={formula}"
+        )
+    if ".strides()" in formula or "->strides()" in formula:
+        raise RuntimeError(
+            ".strides() is not supported in derivative formulas. Instead, please use the SymInt version,"
+            + f".sym_strides(), which returned a c10::SymIntArrayRef. formula={formula}"
+        )
     for nctype in nctypes:
         name = (
             nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
