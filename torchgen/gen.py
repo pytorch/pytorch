@@ -1641,7 +1641,7 @@ def get_native_function_schema_registrations(
             custom_namespace = namespace
             tab = "\t"
             schema_registrations += f"""
-TORCH_LIBRARY({custom_namespace}, m) {{
+TORCH_LIBRARY_FRAGMENT({custom_namespace}, m) {{
   {tab.join(schema_registrations_body)}
 }};"""
     return (aten_schema_registrations, schema_registrations)
