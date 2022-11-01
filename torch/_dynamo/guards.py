@@ -15,7 +15,6 @@ import numpy as np
 import sympy
 
 import torch
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -717,7 +716,6 @@ class CheckFunctionManager:
                 ("Eq", direct_equality),
                 ("Ne", direct_negation),
                 ("Mod", sympy.Mod),
-                ("FloorDiv", FloorDiv),
             ]
         )
         closure_vars.update(CLOSURE_VARS)
