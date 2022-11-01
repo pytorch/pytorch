@@ -146,9 +146,6 @@ class FakeTensorConverter(object):
     constant_storage_mapping: Dict[StorageWeakRef, List[TensorWeakRef]]
 
     def __init__(self):
-        # In principle preserving views should be OK, but in practice
-        # AOTAutograd (or maybe autograd) seems to do the wrong thing.  See
-        # https://github.com/pytorch/torchdynamo/issues/1815
         self.meta_converter = MetaConverter()
 
         # map from to storage to corresponding constant tensors
@@ -720,7 +717,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
-        if func in [torch.ops.aten.is_coalesced.default]:
+        if func in {
+            torch.ops.aten.is_coalesced.default,
+            torch.ops.aten.dense_dim.default,
+            torch.ops.aten.sparse_dim.default,
+        }:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
