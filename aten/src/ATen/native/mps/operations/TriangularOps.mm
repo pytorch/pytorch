@@ -182,13 +182,12 @@ Tensor trace_mps_out(const Tensor& self) {
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
 
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor_ = nil;
-    MPSGraphTensor *outputTensor_ = nil;
-  };
+  struct MPSUnaryCachedGraph : public MPSCachedGraph 
+  { 
+    MPSUnaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {} 
+    MPSGraphTensor *inputTensor_ = nil; 
+    MPSGraphTensor *outputTensor_ = nil; 
+  }; 
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -205,15 +204,15 @@ Tensor trace_mps_out(const Tensor& self) {
 
   @autoreleasepool {
     string key = "trace_mps_out" + mps::getTensorsStringKey({self});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    MPSUnaryCachedGraph* cachedGraph = cache_->LookUpAs<MPSUnaryCachedGraph>(key);
 
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
-        CachedGraph *newCachedGraph = nil;
+        MPSUnaryCachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+          newCachedGraph = new MPSUnaryCachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* outputTensor = nil;
@@ -231,7 +230,7 @@ Tensor trace_mps_out(const Tensor& self) {
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+      cachedGraph = static_cast<MPSUnaryCachedGraph *>(tmpCachedGraph);
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
