@@ -128,7 +128,7 @@ template<template<class> class Op>
 std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, TensorList tensors2, const Tensor& scalars_) {
     // We know this conversion will succeed because of the fast path check.
     auto scalars = convert_tensor_to_scalar_list(scalars_, input.size());
-    return foreach_pointwise_op(input, tensors1, tensors2, scalars);
+    return foreach_pointwise_op(input, tensors1, tensors2, *scalars);
 }
 
 #define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                                                                                         \
