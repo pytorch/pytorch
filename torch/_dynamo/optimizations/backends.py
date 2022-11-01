@@ -40,6 +40,8 @@ def register_backend(fn):
 def create_backend(fn):
     @functools.wraps(fn)
     def inner(model, example_inputs=None, **kwargs):
+        if hasattr(model, "_dynamo_bound_shape_env"):
+            kwargs["shape_env"] = model._dynamo_bound_shape_env
         if model is None:
             return None
 
@@ -62,7 +64,7 @@ def create_backend(fn):
 
 
 @create_backend
-def eager(subgraph):
+def eager(subgraph, **kwargs):
     return subgraph.model
 
 
@@ -556,6 +558,10 @@ def aot_autograd(subgraph, **kwargs):
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
+    if "shape_env" in kwargs:
+        from functorch._src import config as functorch_config
+
+        functorch_config.use_dynamic_shapes = True
 
     from functorch.compile import aot_module_simplified
 

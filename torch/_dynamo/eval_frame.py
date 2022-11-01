@@ -148,6 +148,7 @@ class _TorchDynamoContext:
         on_enter = self.on_enter
         backend_ctx_ctor = self.extra_ctx_ctor
 
+        # breakpoint()
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             any_arg_is_proxy = any(
@@ -166,6 +167,7 @@ class _TorchDynamoContext:
                     return fn
 
             on_enter()
+            # print("FN IS", fn)
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()

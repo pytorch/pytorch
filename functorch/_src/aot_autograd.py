@@ -5,6 +5,7 @@ from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from torch.fx.experimental.proxy_tensor import is_sym_node
+import copy
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -22,6 +23,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
+import sympy
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -328,12 +330,62 @@ class AOTConfig:
     num_params_buffers: int
 
 
-def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+def _delta_to_eval_guard_func(delta, flat_args, shape_env):
+    # We saw new guards introduced here, disjoint from the ones installed
+    # upstream. We need to extract the values out and write a check
+    # function
+    expr_to_tensor_ref = {}
+    printer = AOTAutogradGuardPrinter(expr_to_tensor_ref, "deduped_flat_tensor_args", shape_env)
+    def extract_tensor_refs(tensor_idx, tensor):
+        def _record(tensor_ref):
+            if tensor_ref.sym_expr not in expr_to_tensor_ref:
+                expr_to_tensor_ref[tensor_ref.sym_expr] = set()
+            expr_to_tensor_ref[tensor_ref.sym_expr].add(tensor_ref)
+
+        def _extract(symbol):
+            if isinstance(symbol, int):
+                return None
+            sym_expr = symbol.get_pyobj().expr
+            if not isinstance(sym_expr, sympy.Symbol):
+                return None
+            return sym_expr
+
+        def _record_ref(e, element_index, symbol, kind, tensor_idx):
+            sym_expr = _extract(symbol)
+            if sym_expr:
+                tensor_ref = TensorReference(id(e), kind, element_index, sym_expr, tensor_idx)
+                _record(tensor_ref)
+
+        for index, symbol in enumerate(tensor.size()):
+            _record_ref(tensor, index, symbol, "size", tensor_idx)
+
+        for index, symbol in enumerate(tensor.stride()):
+            _record_ref(tensor, index, symbol, "stride", tensor_idx)
+
+        offset = tensor.storage_offset()
+        _record_ref(tensor, None, offset, "storage_offset", tensor_idx)
+
+    for idx, tensor in enumerate(flat_args):
+        extract_tensor_refs(idx, tensor)
+
+    chained = shape_env.and_chain_guards(delta)
+    return  printer.doprint(chained)
+
+
+def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
+    pre_dispatch_guards = copy.deepcopy(shape_env.guards)
+    base_cache = aot_autograd_compiled_fn_cache["base"]
+    if flat_fn.mod.code in base_cache:
+        return base_cache[flat_fn.mod.code]
+
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
-
+    delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
+    compiled_guard_expr = None
+    if len(delta) > 0:
+        compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env)
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -343,11 +395,45 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
     @wraps(compiled_fw)
     def new_fn(args):
+        nonlocal compiled_fw
+        if compiled_guard_expr is not None and eval(compiled_guard_expr) == False:
+            breakpoint()
+            # Guard failure, recompile
+            with context(), track_graph_compiling("inference"):
+                compiled_fw = aot_config.fw_compiler(fw_module, args)
+
         fw_outs = call_func_with_args(compiled_fw, args, disable_amp=disable_amp)
+
         return fw_outs
 
+    base_cache.update({flat_fn.mod.code: new_fn})
     return new_fn
 
+# TODO(voz): DO NOT LAND LIKE THIS - DEDUP WITH DYNAMO
+@dataclasses.dataclass
+class TensorReference(object):
+    """
+    TensorReference objects are entirely optional. They are created to give us hints
+    into where the symbolic shape came from.
+
+    ref_id: The id of the tensor
+    kind: A string tracking where in the tensor this value came from ("size","stride", etc)
+    idx: An index in the structure
+
+    NOTE - A symbolic shape coming from tensor at id 12345's shape dim 2, would be
+    TensorReference(ref_id=12345, kind="size", idx=2)
+    """
+
+    ref_id: Optional[int] = None
+    kind: Optional[str] = None
+    idx: Optional[int] = None
+    # Note - this is untyped because of TypeError: '_SpecialForm' object does not support item assignment
+    # But it is a Optional[Union["sympy.Expr", int]]
+    sym_expr: Optional[object] = None  # Populated after association
+    tensor_idx: Optional[int] = None
+
+    def __hash__(self):
+        return hash((self.ref_id, self.kind, self.idx))
 
 @contextmanager
 def disable_autocast_manager():
@@ -357,8 +443,16 @@ def disable_autocast_manager():
     finally:
         del guard
 
+aot_autograd_compiled_fn_cache = {}
+aot_autograd_compiled_fn_cache["autograd"] = {}
+aot_autograd_compiled_fn_cache["base"] = {}
 
-def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env):
+    pre_dispatch_guards = copy.deepcopy(shape_env.guards)
+    autograd_cache = aot_autograd_compiled_fn_cache["autograd"]
+    if flat_fn.mod.code in autograd_cache:
+        return autograd_cache[flat_fn.mod.code]
+
     # Deduplicate inputs.  Suppose you have:
     #
     #   [a, b, a, c]
@@ -461,8 +555,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             print("====== Backward graph ======")
             bw_module.print_readable()
 
+        compiled_guard_expr = None
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args)
+            compiled_fw_func.chained = None
+            delta = shape_env.guards_not_overlapping(pre_dispatch_guards)
+            if len(delta) > 0:
+                compiled_guard_expr = _delta_to_eval_guard_func(delta, flat_args, shape_env)
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -471,27 +570,52 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         num_symints = _num_symints
         flat_outs_not_requiring_grad = _flat_outs_not_requiring_grad
 
+        # Field used strict to determine recompilation
+        # NOTE: Absence of guard_expr indicates no new AOTAutograd guards
+        guard_expr = compiled_guard_expr
+
+        # Fields used stricly at recompilation
+        compiled_flat_fn = None
+        compiled_shape_env = None
+        compiled_aot_config = None
+
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
+            if CompiledFunction.guard_expr is not None:
+                Eq = sympy.Eq
+                Ne = sympy.Ne
+
+                # A guard expr is installed, which we need to evaluate before execution
+                # in case we need to recompile
+                needs_recompile = True
+                if eval(CompiledFunction.guard_expr):
+                    needs_recompile = False
+                if needs_recompile:
+                    if CompileFunction.compiled_fw in autograd_cache:
+                        del autograd_cache[CompileFunction.compiled_fw]
+                    aot_dispatch_autograd(CompiledFunction.compiled_flat_fn, deduped_flat_tensor_args, CompiledFunction.compiled_aot_config, CompiledFunction.compiled_shape_env)
+
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw, deduped_flat_tensor_args, disable_amp=disable_amp
             )
             num_outs = CompiledFunction.num_outs
             num_symints = CompiledFunction.num_symints
             # Partitioners must put symint arguments at the end separate from tensor arguments
+            to_save = None
             if num_symints > 0:
                 ctx.save_for_backward(*fw_outs[num_outs:-num_symints])
+                to_save = fw_outs[num_outs:-num_symints]
                 ctx.symints = fw_outs[-num_symints:]
             else:
                 ctx.save_for_backward(*fw_outs[num_outs:])
+                to_save = fw_outs[num_outs:]
                 ctx.symints = []
 
             fw_outs_not_requiring_grad = [
                 x for (i, x) in enumerate(fw_outs[0:num_outs]) if CompiledFunction.flat_outs_not_requiring_grad[i]
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
-
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
@@ -513,17 +637,54 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     @wraps(CompiledFunction.apply)
     def compiled_function(*args):
-        # check if the cache is being hit
-        # print(id(fw_module))
-        # print(fw_module.print_readable())
         return CompiledFunction.apply(*remove_dupe_args(args))
 
+    CompiledFunction.compiled_flat_fn = flat_fn
+    CompiledFunction.compiled_aot_config = aot_config
+    CompiledFunction.compiled_shape_env = shape_env
+
+    autograd_cache.update({flat_fn.mod.code: compiled_function})
     return compiled_function
 
 
+_enforce_shape_env_passed_in = False
+
+from sympy.printing.str import StrPrinter
+
+class AOTAutogradGuardPrinter(StrPrinter):
+    @staticmethod
+    def tensor_ref_as_str(tensor_ref, arg_list_name):
+        if tensor_ref.kind in ("size", "stride"):
+            return f"{arg_list_name}[{tensor_ref.tensor_idx}].{tensor_ref.kind}()[{tensor_ref.idx}]"
+        return f"{arg_list_name}[{tensor_ref.tensor_idx}].{tensor_ref.kind}()"
+
+    def __init__(
+        self, expr_to_tensor_ref, arg_list_name, shape_env
+    ):
+        super().__init__()
+        self.expr_to_tensor_ref = expr_to_tensor_ref
+        self.shape_env = shape_env
+        self.arg_list_name = arg_list_name
+
+    def _print_Symbol(self, expr) -> str:
+        assert isinstance(expr, sympy.core.symbol.Symbol)
+        if expr == 0:
+            return "0"
+        if expr == 1:
+            return "1"
+        if expr not in self.expr_to_tensor_ref:
+            return f"{self.shape_env.var_to_val[expr]}"
+        refs = self.expr_to_tensor_ref[expr]
+        if len(refs) == 0:
+            return super()._print_Symbol(expr)
+        tensor_ref = next(
+            iter(refs)
+        )  # Any is fine here, because we install equality guards later
+        return AOTAutogradGuardPrinter.tensor_ref_as_str(tensor_ref, self.arg_list_name)
+
 @dynamo_timed
 def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, shape_env: Optional[ShapeEnv] = None
 ):
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
@@ -564,10 +725,18 @@ def create_aot_dispatcher_function(
         # coordinate flags
         config.use_fake_tensor = False
 
+    if shape_env is not None:
+        # TODO(voz): Merge this config w/ dynamo config?
+        assert config.use_dynamic_shapes, "ShapeEnv propogated but dynamic shapes not enabled"
+
     if config.use_dynamic_shapes:
         assert config.use_fake_tensor, "Dynamic shapes only works with fake tensor"
 
-    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+    if shape_env is None:
+        global _enforce_shape_env_passed_in
+        assert not _enforce_shape_env_passed_in, "Shape env must be passed in"
+        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+
     fake_mode = FakeTensorMode(shape_env=shape_env) if config.use_fake_tensor else nullcontext()
     cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
@@ -603,10 +772,10 @@ def create_aot_dispatcher_function(
         # TODO: Do this properly
         if needs_autograd:
             return make_boxed_func(
-                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
+                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config, shape_env)
             )
         else:
-            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
+            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config, shape_env)
 
 
 # Inspired by autodidax (thanks!)
@@ -647,6 +816,7 @@ def aot_function(
     num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
+    shape_env: Optional[ShapeEnv] = None,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -756,6 +926,7 @@ def aot_function(
                 flat_fn,
                 flat_args,
                 aot_config,
+                shape_env,
             )
             cached_res = (compiled_fn, out_spec)
         cached_fn, out_spec = cached_res
@@ -864,6 +1035,7 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         decompositions: Optional[Dict] = None,
         hasher_type=None,
         static_argnums=None,
+        shape_env: Optional[ShapeEnv] = None
     ) -> Callable:
         assert static_argnums is None
         if bw_compiler is None:
@@ -887,11 +1059,14 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
                     fn,
                     args,
                     aot_config,
+                    shape_env,
                 )
             return compiled_fn(args)
 
         return new_func
-    compiled_f = aot_function_simplified(functional_call, *top_args, **top_kwargs)
+    fn_call = functional_call
+    fn_call.mod = mod
+    compiled_f = aot_function_simplified(fn_call, *top_args, **top_kwargs)
 
     if top_kwargs:
 

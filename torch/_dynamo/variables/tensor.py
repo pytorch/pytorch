@@ -51,6 +51,7 @@ def _run_node(output_graph, node, args, kwargs, nnmodule):
         if op == "call_function":
             return node.target(*args, **kwargs)
         elif op == "call_method":
+            # print("CALLING METHOD", args[0], node.target, *args[1:], **kwargs)
             return getattr(args[0], node.target)(*args[1:], **kwargs)
         elif op == "call_module":
             assert nnmodule is not None

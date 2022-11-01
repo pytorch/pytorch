@@ -105,6 +105,9 @@ class OutputGraph(fx.Tracer):
         self.initial_random_state = ()
         self.unspec_variable_map = {}
         self.shape_env = ShapeEnv() if config.dynamic_shapes else None
+        if self.shape_env:
+            from functorch._src import aot_autograd
+            aot_autograd._enforce_shape_env_passed_in = True
         self.tensor_id_to_sym_shape_ref = {}
         self.intermediary_symbols = {}
 
@@ -444,6 +447,10 @@ class OutputGraph(fx.Tracer):
                 else ""
             )
             _step_logger()(logging.INFO, f"calling compiler function {name}")
+            if self.shape_env:
+                # TODO(voz): There's not an amazing way to bind kwargs / contextual
+                # data here atm, refactor.
+                gm._dynamo_bound_shape_env = self.shape_env
             compiled_fn = self.compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"

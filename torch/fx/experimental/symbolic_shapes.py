@@ -525,13 +525,46 @@ class ShapeEnv(object):
         pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
         return all(guard.xreplace(new_env.var_to_val) for guard, _ in self.guards)
 
+    def guards_not_overlapping(self, guards):
+        """
+        Given a set of guards `guards` in the same structure as self.guards, return all current
+        guards on the shape_env that are not found in the provided list `guards`.
+
+        NOTE: Order does not matter
+        NOTE: provided guards can be a superset, subset, empty, or totally disjoint
+        NOTE: This does not modify the underlying shape_env guards
+
+        ex:
+        shape_env.guards = [foo, bar, baz]
+        shape_env.guards_not_overlapping([foo]) -> [bar, baz]
+        shape_env.guards_not_overlapping([bar]) -> [foo, baz]
+        shape_env.guards_not_overlapping([]) -> [foo, bar, baz]
+        shape_env.guards_not_overlapping([baz, foo, bar, cat]) -> []
+        """
+        curr_guards = dict(self.guards)
+        for guard, _ in guards:
+            if guard in curr_guards:
+                del curr_guards[guard]
+        return [(k, v) for k, v in curr_guards.items()]
+
+    @staticmethod
+    def and_chain_guards(guards):
+        """
+        Returns a sympy expression representing a bitwise chain for all the
+        symbolic expressions in the guards.
+
+        NOTE: Guards must be provided in shape env guard format
+        """
+        return sympy.And(*[guard for guard, _ in guards])
+
     def get_guard_expr(self):
         """
         Returns a sympy expression representing all of the shape env guards.
 
         NOTE: Does not include implicit 0/1 or duck-shaping guards
         """
-        return sympy.And(*[guard for guard, _ in self.guards])
+        # breakpoint()
+        return ShapeEnv.and_chain_guards(self.guards)
 
     def get_nontrivial_guards(self):
         return [self.simplify(guard) for guard, _ in self.guards if self._maybe_evaluate_static(guard) is None]

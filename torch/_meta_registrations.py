@@ -1178,7 +1178,7 @@ def meta_zero_(self):
         aten.logical_xor_.default,
     ],
 )
-def meta_binop_inplace(self, other):
+def meta_binop_inplace(self, other, alpha=None):
     return self
 
 

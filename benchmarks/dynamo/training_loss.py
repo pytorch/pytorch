@@ -109,7 +109,7 @@ def parse_args():
         description="TorchDynamo end to end training/evaluation benchmark"
     )
     parser.add_argument(
-        "--epochs", type=int, default=10, help="number of epochs to train (default: 10)"
+        "--epochs", type=int, default=2, help="number of epochs to train (default: 10)"
     )
     parser.add_argument(
         "--num-samples",
