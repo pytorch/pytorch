@@ -2,6 +2,7 @@ import contextlib
 import copy
 import functools
 import inspect
+import itertools
 import logging
 import os
 import sys
@@ -149,6 +150,21 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            any_arg_is_proxy = any(
+                map(
+                    lambda arg: isinstance(arg, torch.fx.Proxy),
+                    itertools.chain(args, kwargs.values()),
+                )
+            )
+            if any_arg_is_proxy:
+                if config.error_on_nested_fx_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to symbolically trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                else:
+                    return fn
+
             on_enter()
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
