@@ -6779,6 +6779,59 @@ TEST_F(NVFuserTest, FusionPropagateVectorizePredicate_CUDA) {
   TORCH_CHECK(t0.equal(cg_outputs[0]));
 }
 
+TEST_F(NVFuserTest, FusionSqueezeOnlyWelford_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({-1, -1, 1, 1, 1});
+  fusion.addInput(tv0);
+
+  // welford with squeeze and reduction
+  auto w1 = Welford(tv0, {1, 2, 3, 4});
+  // welford with only squeeze
+  auto w2 = Welford(tv0, {2, 3, 4});
+  // feed w2 to a new welfword
+  auto new_result_tv = [&](DataType dtype) -> TensorView* {
+    auto dim0 = IterDomainBuilder(w1.avg->axis(0)).build();
+    auto dim1 = IterDomainBuilder(w1.avg->axis(1)).build();
+    auto td = IrBuilder::create<TensorDomain>(
+        std::vector<IterDomain*>{dim0, dim1}, std::vector<bool>{true, true});
+    auto tv = IrBuilder::create<TensorView>(td, dtype);
+    return tv;
+  };
+  auto avg = new_result_tv(DataType::Float);
+  auto var_sum = new_result_tv(DataType::Float);
+  auto n = new_result_tv(DataType::Index);
+  IrBuilder::create<WelfordOp>(
+      avg,
+      var_sum,
+      n,
+      w2.avg,
+      w2.var_sum,
+      w2.n,
+      IrBuilder::create<Double>(0),
+      IrBuilder::create<Double>(0),
+      fusion.zeroVal());
+
+  fusion.addOutput(w1.avg);
+  fusion.addOutput(w1.var_sum);
+  fusion.addOutput(w1.n);
+  fusion.addOutput(avg);
+  fusion.addOutput(var_sum);
+  fusion.addOutput(n);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({10, 4, 1, 1, 1}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion_ptr));
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+  ASSERT_TRUE(at::allclose(cg_outputs[0], cg_outputs[3]));
+  ASSERT_TRUE(at::allclose(cg_outputs[1], cg_outputs[4]));
+  ASSERT_TRUE(at::allclose(cg_outputs[2], cg_outputs[5]));
+}
+
 // Test file size should be up to 10K LoC. Create a new file for more tests.
 
 } // namespace jit

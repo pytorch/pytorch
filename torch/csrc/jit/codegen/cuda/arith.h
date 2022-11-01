@@ -132,6 +132,17 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     // import IrBuilder just for this one interface.
     Int* init_N = nullptr);
 
+//! Create a raw WelfordOp. Don't convert size-1 or size-0 reduction into
+//! squeeze/full.
+TORCH_CUDA_CU_API WelfordResult WelfordRaw(
+    TensorView* tv,
+    const std::vector<int>& axes,
+    TensorView* init_avg = nullptr,
+    TensorView* init_var = nullptr,
+    // Initializes to 0 in function definition, doing this so we don't have to
+    // import IrBuilder just for this one interface.
+    Int* init_N = nullptr);
+
 // RNG OPERATIONS
 TORCH_CUDA_CU_API TensorView* rand(
     const std::vector<Val*>& shape,
@@ -148,6 +159,10 @@ TORCH_CUDA_CU_API TensorView* uniform(
 // TENSOR FACTORIES
 TORCH_CUDA_CU_API TensorView* full(
     const std::vector<Val*>& shape,
+    Val* fill_value,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* full_like(
+    TensorView* tv,
     Val* fill_value,
     DataType dtype);
 TORCH_CUDA_CU_API TensorView* full_like(TensorView* tv, Val* fill_value);

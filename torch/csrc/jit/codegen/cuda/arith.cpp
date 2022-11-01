@@ -506,14 +506,18 @@ TensorView* full(
   return out;
 }
 
-TensorView* full_like(TensorView* tv, Val* fill_value) {
+TensorView* full_like(TensorView* tv, Val* fill_value, DataType dtype) {
   std::vector<Val*> shape;
   auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
   shape.reserve(dom.size());
   for (auto id : dom) {
     shape.emplace_back(id->getMaybeExpandedExtent());
   }
-  return full(shape, fill_value, tv->dtype());
+  return full(shape, fill_value, dtype);
+}
+
+TensorView* full_like(TensorView* tv, Val* fill_value) {
+  return full_like(tv, fill_value, tv->dtype());
 }
 
 Val* full_like(Val* v, Val* fill_value) {
@@ -1612,7 +1616,7 @@ TensorView* expand_as(TensorView* inp, TensorView* other) {
   return out_tensor;
 }
 
-WelfordResult Welford(
+WelfordResult WelfordRaw(
     TensorView* tv,
     const std::vector<int>& axes,
     TensorView* init_avg,
@@ -1684,15 +1688,103 @@ WelfordResult Welford(
   IrBuilder::create<WelfordOp>(
       out_avg,
       out_var,
-      out_N, /*out var/avg/count */
-      tv, /*in var/avg/count */
+      out_N, /*out avg/var/count */
+      tv, /*in avg/var/count */
       FusionGuard::getCurFusion()->zeroVal(),
       FusionGuard::getCurFusion()->oneVal(),
       init_avg_val,
       init_var_val,
-      init_N); /*init var/avg/count */
+      init_N); /*init avg/var/count */
 
   return WelfordResult(out_avg, out_var, out_N);
+}
+
+WelfordResult Welford(
+    TensorView* tv,
+    const std::vector<int>& axes,
+    TensorView* init_avg,
+    TensorView* init_var,
+    Int* init_N) {
+  TORCH_CHECK(
+      TensorDomain::sameAs(tv->getMaybeRFactorDomain(), tv->domain()->domain()),
+      "Reducing a tensor once it's gone under transformations is not permitted at this time. \n",
+      "Please set reductions before calling split/merge/computeAt.\n  RFactor: ",
+      tv->getMaybeRFactorDomain(),
+      "\n  Domain: ",
+      tv->domain()->toString());
+
+  TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
+  TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  // Check and collect reduction axes
+  std::vector<unsigned int> uint_axes;
+  auto tv_root = tv->domain()->noReductions();
+  const int ndims = tv_root.size();
+  for (int axis : axes) {
+    if (axis < 0) {
+      axis += ndims;
+    }
+
+    TORCH_CHECK(
+        axis >= 0 && axis < ndims,
+        "Reduction on invalid axis, received: ",
+        axis,
+        " however tensor view only has ",
+        ndims,
+        " non-reduction dims.");
+
+    uint_axes.push_back((unsigned int)axis);
+  }
+  std::sort(uint_axes.begin(), uint_axes.end());
+
+  // Squeeze before reduction
+  std::vector<int> reduction_axes;
+  std::vector<bool> is_trivial_reduction(ndims, false);
+  int offset = 0;
+  for (unsigned int axis : uint_axes) {
+    auto id = tv_root[axis];
+    is_trivial_reduction[axis] = id->isBroadcast() &&
+        !id->hasExpandedExtent() && id->extent()->isOneInt();
+    if (!is_trivial_reduction[axis]) {
+      reduction_axes.push_back(axis + offset);
+    } else {
+      offset--;
+    }
+  }
+
+  TensorView* squeezed = tv;
+  if (offset < 0) {
+    squeezed = squeeze(tv, is_trivial_reduction);
+  }
+
+  if (!reduction_axes.empty()) {
+    return WelfordRaw(squeezed, reduction_axes, init_avg, init_var, init_N);
+  }
+
+  // if squeeze only
+
+  if (init_N == nullptr) {
+    init_N = FusionGuard::getCurFusion()->zeroVal();
+  }
+  TensorView* out_N = full_like(
+      squeezed,
+      add(init_N, FusionGuard::getCurFusion()->oneVal()),
+      DataType::Index);
+
+  // Initial values for welford op are tensors, so their dims have to match the
+  // output dim
+  if (!init_N->isZeroInt()) {
+    TORCH_CHECK(
+        init_var != nullptr,
+        "welford op: init variance value need to be provided");
+    TORCH_CHECK(
+        squeezed->getRootDomain().size() == init_var->getRootDomain().size(),
+        "welford op: initial tensor mismatch");
+    return WelfordResult(squeezed, init_var, out_N);
+  } else {
+    return WelfordResult(
+        squeezed, full_like(squeezed, IrBuilder::create<Double>(0)), out_N);
+  }
 }
 
 WelfordResult::WelfordResult(
@@ -1700,6 +1792,11 @@ WelfordResult::WelfordResult(
     TensorView* in_var_sum,
     TensorView* in_n)
     : avg(in_avg), var_sum(in_var_sum), n(in_n) {
+  if (avg->definition()->isA<SqueezeOp>()) {
+    // For a squeeze-only welford, the definition of outputs does not have to be
+    // the same.
+    return;
+  }
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(var_sum->definition()));
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(n->definition()));
 }
