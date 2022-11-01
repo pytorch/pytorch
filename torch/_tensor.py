@@ -396,6 +396,7 @@ class Tensor(torch._C._TensorBase):
                 self.stride(),
                 self.requires_grad,
                 backward_hooks,
+                torch._utils.get_math_bits(self),
             )  # previously was self._backward_hooks
             return (torch._utils._rebuild_tensor_v2, args)
 

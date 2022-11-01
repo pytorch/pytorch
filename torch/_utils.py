@@ -1,3 +1,4 @@
+import enum
 import sys
 import traceback
 import warnings
@@ -147,11 +148,40 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
     return t.set_(storage.untyped(), storage_offset, size, stride)
 
 
+class _MathBits(enum.Enum):
+    CONJ = 0
+    NEG = 1
+
+
+def get_math_bits(t):
+    assert isinstance(t, torch.Tensor)
+    bits = {_MathBits.CONJ: t.is_conj(), _MathBits.NEG: t.is_neg()}
+    return bits
+
+
+def set_math_bits(t, math_bits):
+    for bit, val in math_bits.items():
+        if val:
+            if bit == _MathBits.CONJ:
+                t = t.conj()
+            elif bit == _MathBits.NEG:
+                t = t._neg_view()
+            else:
+                RuntimeError("Invalid bit!")
+
+    return t
+
+
 def _rebuild_tensor_v2(
-    storage, storage_offset, size, stride, requires_grad, backward_hooks
+    storage, storage_offset, size, stride, requires_grad, backward_hooks, math_bits=None
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
+    if math_bits is None:
+        # Bits will be set to default i.e. `0`.
+        math_bits = get_math_bits(tensor)
+
+    tensor = set_math_bits(tensor, math_bits)
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
