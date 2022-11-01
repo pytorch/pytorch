@@ -130,26 +130,21 @@ class elementwise_type_promotion_wrapper(object):
 
 # TODO: handle tuples of tensors
 def _maybe_resize_out(out: TensorLikeType, shape):
+    # If the shapes are correct there's nothing to do
     if out.shape == shape:
         return out
-
-    if out.numel() == 0:
-        return out.resize_(shape)
-
-    if out.numel() != reduce(operator.mul, shape, 1):
-        msg = (
-            "An output with one or more elements was resized since it had shape {0} "
-            "which does not match the required output shape {1}. "
-            "This behavior is deprecated, and in a future PyTorch release outputs will not "
-            "be resized unless they have zero elements. "
-            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0).".format(
-                str(out.shape), str(shape)
+    else:
+        # We warn if out has elements but an incorrect number of them
+        if out.numel() not in (0, reduce(operator.mul, shape, 1)):
+            msg = (
+                f"An output with one or more elements was resized since it had shape {str(out.shape)} "
+                "which does not match the required output shape {str(shape)}. "
+                "This behavior is deprecated, and in a future PyTorch release outputs will not "
+                "be resized unless they have zero elements. "
+                "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
             )
-        )
-        warnings.warn(msg)
+            warnings.warn(msg)
         return out.resize_(shape)
-
-    return out
 
 
 def _safe_copy_out(
