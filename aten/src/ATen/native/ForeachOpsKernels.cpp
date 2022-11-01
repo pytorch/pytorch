@@ -203,26 +203,26 @@ void foreach_tensor_##OP##_scalarlist_slow_(TensorList input, TensorList tensors
       TensorList input,                                                    \
       TensorList tensors1,                                                 \
       TensorList tensors2,                                                 \
-      Tensor scalars_) {                                                   \
+      const Tensor& scalars_) {                                            \
     auto scalars = convert_tensor_to_scalar_list(scalars_, input.size());  \
     TORCH_CHECK(                                                           \
         scalars, "Expected conversion from Tensor of scalars to succeed"); \
     check_foreach_api_restrictions(input, tensors1, tensors2, *scalars);   \
     return foreach_tensor_##OP##_scalarlist_slow(                          \
-        input, tensors1, tensors2, *scalars);                               \
+        input, tensors1, tensors2, *scalars);                              \
   }                                                                        \
                                                                            \
   void foreach_tensor_##OP##_tensor_slow_(                                 \
       TensorList input,                                                    \
       TensorList tensors1,                                                 \
       TensorList tensors2,                                                 \
-      Tensor scalars_) {                                                   \
+      const Tensor& scalars_) {                                            \
     auto scalars = convert_tensor_to_scalar_list(scalars_, input.size());  \
     TORCH_CHECK(                                                           \
         scalars, "Expected conversion from Tensor of scalars to succeed"); \
     check_foreach_api_restrictions(input, tensors1, tensors2, *scalars);   \
     foreach_tensor_##OP##_scalarlist_slow_(                                \
-        input, tensors1, tensors2, *scalars);                               \
+        input, tensors1, tensors2, *scalars);                              \
   }
 
 FOREACH_BINARY_OP_LIST_ALPHA(add);

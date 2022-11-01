@@ -165,7 +165,7 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
       TensorList input,                                                        \
       TensorList tensors1,                                                     \
       TensorList tensors2,                                                     \
-      Tensor scalars) {                                                        \
+      const Tensor& scalars) {                                                 \
     auto maybe_scalarList =                                                    \
         convert_tensor_to_scalar_list(scalars, input.size());                  \
     TORCH_CHECK(                                                               \
@@ -187,7 +187,7 @@ void foreach_tensor_##NAME##_scalarlist_cuda_(TensorList input, TensorList tenso
       TensorList input,                                                        \
       TensorList tensors1,                                                     \
       TensorList tensors2,                                                     \
-      Tensor scalars) {                                                        \
+      const Tensor& scalars) {                                                 \
     auto maybe_scalarList =                                                    \
         convert_tensor_to_scalar_list(scalars, input.size());                  \
     check_foreach_api_restrictions(                                            \
