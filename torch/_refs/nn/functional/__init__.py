@@ -20,9 +20,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch._refs import (
-    _make_inplace,
-)
+from torch._refs import _make_inplace
 
 from torch._subclasses.fake_tensor import FakeTensor
 
@@ -182,7 +180,8 @@ def elu(
         utils.is_weakly_lesser_type(type(alpha), python_type),
         lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
     )
-    return torch.where(a > 0, scale * a, alpha * torch.expm1(a * input_scale))
+
+    return torch.where(a > 0, scale * a, (alpha * scale) * torch.expm1(a * input_scale))
 
 
 @register_decomposition(torch.ops.aten.relu)

@@ -291,7 +291,6 @@ CHECK_STRIDES = {
 }
 
 CHECK_STRIDES_SKIPS = {
-    aten._conj_physical.default,
     aten._fft_c2c.default,
     aten._fft_c2r.default,
     aten._fft_r2c.default,
@@ -666,7 +665,6 @@ meta_function_expected_failures = {
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
-    torch.Tensor.conj_physical_: {c128, c32, c64},
 }
 
 meta_function_expected_failures_only_outplace = {
@@ -938,7 +936,6 @@ meta_dispatch_expected_failures = {
     aten.unique_consecutive.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
-    aten.conj_physical_.default: {c128, c32, c64},
 }
 
 # these sometimes pass and sometimes fail
