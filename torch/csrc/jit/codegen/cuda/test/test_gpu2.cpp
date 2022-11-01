@@ -977,7 +977,7 @@ TEST_F(NVFuserTest, FusionTrivialReduction_CUDA) {
   fusion.addOutput(tv1);
 
   TORCH_CHECK(
-      ir_utils::getReductionOps(&fusion, true /* ignore_trivial */).empty(),
+      ir_utils::getReductionOps(&fusion).empty(),
       "Trivial reduction picked up by fusion");
 
   const auto options =
@@ -1058,40 +1058,6 @@ TEST_F(NVFuserTest, FusionTrivialReduction3_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
-}
-
-// Test detection of partially trivial reduction
-TEST_F(NVFuserTest, FusionDetectTrivialReduction2_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(2);
-  fusion.addInput(tv0);
-  auto tv1 = sum(tv0, {1});
-  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
-  fusion.addOutput(tv2);
-
-  tv1->split(1, 1);
-  // tv1->axis(1): non-trivial
-  // tv1->axis(2): trivial
-
-  auto tv3 = tv1->rFactor({-1});
-
-  // Just to suppress register-allocation warning
-  tv0->computeAt(tv2, 1);
-  tv3->computeAt(tv1, -1);
-
-  GpuLower gpulw(&fusion);
-
-  // tv3's reduction axis is a trivial reduction. The only
-  // ReductionOp should be for tv1.
-  for (const auto expr : gpulw.kernel()->as<Fusion>()->exprs()) {
-    if (expr->isA<ReductionOp>()) {
-      auto reduction_out =
-          expr->as<ReductionOp>()->outputs()[0]->as<TensorView>();
-      TORCH_CHECK(reduction_out->name() == 1);
-    }
-  }
 }
 
 TEST_F(NVFuserTest, FusionInputsIdLookup_CUDA) {

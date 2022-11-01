@@ -80,15 +80,11 @@ TORCH_CUDA_CU_API inline c10::optional<size_t> mergeDims(
 
 // Merge all reduction to the right side and returns total number of
 // reduction axes. Don't merge is typically used for trivial reductions.
-size_t mergeReduction(
-    TensorView* tv,
-    const std::unordered_set<IterDomain*>& dont_merge = {});
+size_t mergeReduction(TensorView* tv);
 
 // merge all non-reduction axes to the left side and returns total number of
 // iteration axes. Don't merge is typically used for trivial reductions.
-size_t mergeNonReduction(
-    TensorView* tv,
-    const std::unordered_set<IterDomain*>& dont_merge = {});
+size_t mergeNonReduction(TensorView* tv);
 
 // Propagate the parallelization from the selected dimensions of the reference
 // tensor to their corresponding dimensions in all selected tensors in the DAG.
@@ -196,14 +192,9 @@ TORCH_CUDA_CU_API PersistentBufferSizeReturn persistentBufferSize(
     PersistentBufferInfo& persistent_buffers,
     HeuristicSummary* data_cache = nullptr);
 
-// Returns a set of all iteration domains (in roots of tensors) that map to a
-// trivial reduction
-std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion);
-
 // Merges tensor view to the form:
-// [IterationDomain, ReductionDomain, TrivialReductionDim0,
-// TrivialReductionDim1, ...] Returns if <iteration dimensions, reduction
-// dimensions>
+// [IterationDomain, ReductionDomain] Returns if <iteration dimensions,
+// reduction dimensions>
 std::pair<bool, bool> canonicalDimReduction(
     Fusion* fusion,
     TensorView* tv,
@@ -211,9 +202,7 @@ std::pair<bool, bool> canonicalDimReduction(
 
 // Return a list of tensor views that are outputs of reduction operations. If
 // multiple outputs of an expression are found, only include one in the list
-TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(
-    Fusion* fusion,
-    bool ignore_trivial = true);
+TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(Fusion* fusion);
 
 // Returns a list of TensorViews that are the consumer tv for a view operation.
 std::vector<TensorView*> getViewTVs(Fusion* fusion);

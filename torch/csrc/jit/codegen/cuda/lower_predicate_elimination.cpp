@@ -112,8 +112,7 @@ class PredicateAnalyzer : public OptOutDispatch {
 
     // If consumer_id is not going to be materialized as a loop (e.g.,
     // broadcast), no need to predicate
-    if (consumer_id->isBroadcast() ||
-        GpuLower::current()->trivialReductionInfo().isDerived(consumer_id)) {
+    if (consumer_id->isBroadcast()) {
       return;
     }
 
@@ -493,9 +492,7 @@ class PredicateChcker : public IterVisitor {
           output->getMaybeRFactorDomain().end(),
           std::inserter(split_root, split_root.end()),
           [&](auto rf_root) {
-            if (rf_root->isBroadcast() ||
-                GpuLower::current()->trivialReductionInfo().isDerived(
-                    rf_root)) {
+            if (rf_root->isBroadcast()) {
               return false;
             }
             for (Expr* use : rf_root->uses()) {

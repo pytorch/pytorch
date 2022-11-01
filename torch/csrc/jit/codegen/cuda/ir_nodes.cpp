@@ -1795,37 +1795,6 @@ IterDomain* IterDomain::cloneWithoutRFactor() const {
   return cloned;
 }
 
-bool IterDomain::isTrivialReduction() const {
-  if (!isReduction()) {
-    return false;
-  }
-
-  if (extent()->isOneInt()) {
-    return true;
-  }
-
-  // If this domain is an output of an expression, i.e., not a root
-  // domain, check if all root domains are trivial reductions. This is
-  // almost the same as the analysis done in TrivialReductionInfo, but
-  // is limited within a single tensor, whereas TrivialReductionInfo
-  // does more expensive analysis potentially traversing through
-  // rfactor domains
-  if (definition()) {
-    // Note: There's no const version of IterVisitor.
-    auto id_inputs = InputsOf::output(fusion(), const_cast<IterDomain*>(this));
-    if (std::all_of(
-            ir_utils::filterByType<IterDomain>(id_inputs).begin(),
-            ir_utils::filterByType<IterDomain>(id_inputs).end(),
-            [](IterDomain* root_id) {
-              return root_id->isReduction() && root_id->extent()->isOneInt();
-            })) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 std::vector<IterDomain*> IterDomain::clone(
     const std::vector<IterDomain*>& domains) {
   std::vector<IterDomain*> cloned_domains;
@@ -1847,9 +1816,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       !outer->extent()->isZeroInt() && !inner->extent()->isZeroInt(),
       "Merging IterDomains with ending values that are 0 is not supported at this time.");
   TORCH_CHECK(
-      outer->isReduction() == inner->isReduction() ||
-          (!outer->isReduction() && inner->isTrivialReduction()) ||
-          (outer->isTrivialReduction() && !inner->isReduction()),
+      outer->isReduction() == inner->isReduction(),
       "Merging IterDomains requires that their iteration types match. ",
       "Outer: ",
       outer->toString(),
@@ -1876,21 +1843,6 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       (outer->getIterType() == IterType::Iteration ||
        inner->getIterType() == IterType::Iteration)) {
     itype = IterType::Iteration;
-  }
-
-  // Merging trivial reduction with iter domain, that's fine, just make it an
-  // iter domain.
-  if ((outer->isTrivialReduction() || inner->isTrivialReduction()) &&
-      (outer->getIterType() == IterType::Iteration ||
-       inner->getIterType() == IterType::Iteration)) {
-    itype = IterType::Iteration;
-  }
-
-  // Merging trivial reduction with broadcasting, that's fine, just make it a
-  // broadcasting.
-  if ((outer->isTrivialReduction() || inner->isTrivialReduction()) &&
-      (outer->isBroadcast() || inner->isBroadcast())) {
-    itype = IterType::Broadcast;
   }
 
   Val* expanded_extent = nullptr;
@@ -2141,7 +2093,7 @@ TensorDomain::TensorDomain(
       root_domain_.size());
 
   // Just due to clang-tidy, correct value set in resetDomains
-  has_nontrivial_reduction_ = false;
+  has_reduction_ = false;
   domain_ = root_domain_;
   resetDomains();
 }
@@ -2180,7 +2132,7 @@ TensorDomain::TensorDomain(
   });
 
   // Just due to clang-tidy, correct value set in resetDomains
-  has_nontrivial_reduction_ = false;
+  has_reduction_ = false;
   resetDomains();
 }
 
@@ -2230,7 +2182,7 @@ TensorDomain::TensorDomain(
   });
 
   // Just due to clang-tidy, correct value set in resetDomains
-  has_nontrivial_reduction_ = false;
+  has_reduction_ = false;
   resetDomains();
 }
 
@@ -2242,7 +2194,7 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       no_reduction_domain_(ir_cloner->clone(src->no_reduction_domain_)),
       rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
       contiguity_(src->contiguity()),
-      has_nontrivial_reduction_(src->has_nontrivial_reduction_) {}
+      has_reduction_(src->has_reduction_) {}
 
 bool TensorDomain::hasBlockBroadcast() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
@@ -2330,7 +2282,7 @@ void TensorDomain::setContiguity(const std::vector<bool>& contig) {
 }
 
 bool TensorDomain::hasReduction() const {
-  return has_nontrivial_reduction_;
+  return has_reduction_;
 }
 
 bool TensorDomain::hasBlockReduction() const {
@@ -2620,15 +2572,8 @@ bool TensorDomain::hasBroadcast(const std::vector<IterDomain*>& td) {
 }
 
 bool TensorDomain::hasReduction(const std::vector<IterDomain*>& td) {
-  for (auto id : td)
-    if (id->isReduction())
-      return true;
-  return false;
-}
-
-bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
   for (auto id : td) {
-    if (id->isReduction() && !id->isTrivialReduction()) {
+    if (id->isReduction()) {
       return true;
     }
   }

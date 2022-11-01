@@ -698,7 +698,6 @@ ComputeAtMap::ComputeAtMap(Fusion* fusion)
 }
 
 void ComputeAtMap::build(Fusion* fusion) {
-  trivial_reduction_info_.build(fusion);
   buildUniqueExactExprMaps();
   buildConcreteIds();
   buildUniqueExactExprMaps();
@@ -845,15 +844,6 @@ IterDomain* ComputeAtMap::computeConcreteId(
   if (disjoint_set_shared_ptr->vector().size() == 1) {
     // If only one entry in the disjoint set, by definition the existing ID has
     // to be the concrete ID.
-    return disjoint_set_shared_ptr->vector().front();
-  }
-
-  // Don't need to resolve disjoint sets mapped to a trivial reduction, just
-  // mark the first entry as concrete ID, they're all trivial.
-  if (std::any_of(
-          disjoint_set_shared_ptr->vector().begin(),
-          disjoint_set_shared_ptr->vector().end(),
-          [](IterDomain* id) { return id->isTrivialReduction(); })) {
     return disjoint_set_shared_ptr->vector().front();
   }
 
@@ -1058,9 +1048,7 @@ IterDomain* ComputeAtMap::computeConcreteId(
         concrete_id_root_sets.vector().begin(),
         concrete_id_root_sets.vector().end(),
         [&](std::shared_ptr<VectorOfUniqueEntries<IterDomain*>> set) {
-          return set->vector()[0]->isBroadcast() ||
-              set->vector()[0]->isTrivialReduction() ||
-              trivial_reduction_info_.isDerived(set->vector()[0]);
+          return set->vector()[0]->isBroadcast();
         });
 
     int iter_root_count =

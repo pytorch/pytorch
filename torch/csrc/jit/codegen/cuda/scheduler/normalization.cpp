@@ -803,8 +803,7 @@ TORCH_CUDA_CU_API std::shared_ptr<ReductionParams> getPersistentHeuristics(
       HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>(
           data_cache, [&fusion]() {
             return std::make_unique<std::vector<TensorView*>>(
-                scheduler_utils::getReductionTvs(
-                    fusion /*, ignore_trivial = true */));
+                scheduler_utils::getReductionTvs(fusion));
           });
 
   auto& reduction_tvs = reduction_tv_entry.get();
@@ -1003,8 +1002,7 @@ TORCH_CUDA_CU_API void schedulePersistentKernel(
 
   auto persistent_info = scheduler_utils::persistentBuffers(fusion);
 
-  auto reduction_tvs =
-      scheduler_utils::getReductionTvs(fusion /*, ignore_trivial = true */);
+  auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
   TORCH_INTERNAL_ASSERT(reduction_tvs.size());
   // Registry assumes the reference tv is the first reduction_tv, if this

@@ -671,14 +671,11 @@ class BufferUseDefInfo {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(output_tv);
       if (maybe_alloc_info.has_value()) {
         // Reductions use outputs as read-write parameters, so their
-        // outputs need to be marked as read as well (except for trivial
-        // reductions)
+        // outputs need to be marked as read as well
         const bool is_read_write = ir_utils::isReductionOp(expr) &&
             std::any_of(output_tv->getMaybeRFactorDomain().begin(),
                         output_tv->getMaybeRFactorDomain().end(),
-                        [](IterDomain* id) {
-                          return id->isReduction() && !id->isTrivialReduction();
-                        });
+                        [](IterDomain* id) { return id->isReduction(); });
         maybe_alloc_info.value()->inner_live_interval->markWrite(current_pos_);
         if (is_read_write) {
           maybe_alloc_info.value()->inner_live_interval->markRead(current_pos_);

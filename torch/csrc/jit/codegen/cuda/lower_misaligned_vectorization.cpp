@@ -460,11 +460,6 @@ class MisalignedVectorizationModifier : public kir::ExprMutator {
     for (int i = int(producer_root_domain.size()) - 1; i >= 0; --i) {
       auto producer_root_id = producer_root_domain.at(i);
 
-      TORCH_INTERNAL_ASSERT(
-          !gpu_lower->trivialReductionInfo().isDerived(producer_root_id),
-          "No trivial reduciton axis should exist: ",
-          producer_root_id);
-
       // If the producer ID is reduction or broadcast, it should be safe
       // to ignore.
       if (producer_root_id->isReduction()) {

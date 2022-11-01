@@ -733,10 +733,10 @@ std::vector<TensorView*> allTvsExcept(
   return result;
 }
 
-std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
+std::vector<Expr*> getReductionOps(Fusion* fusion) {
   std::vector<Expr*> red_ops;
 
-  auto isReduction = [&ignore_trivial](Val* out_val) {
+  auto isReduction = [](Val* out_val) {
     if (out_val == nullptr || !out_val->isA<TensorView>()) {
       return false;
     }
@@ -744,10 +744,7 @@ std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
     return std::any_of(
         out_tv->getRootDomain().begin(),
         out_tv->getRootDomain().end(),
-        [&ignore_trivial](IterDomain* id) {
-          return id->isReduction() &&
-              !(ignore_trivial && id->isTrivialReduction());
-        });
+        [](IterDomain* id) { return id->isReduction(); });
   };
 
   for (auto expr : fusion->exprs()) {

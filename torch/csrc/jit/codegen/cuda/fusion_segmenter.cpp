@@ -2080,11 +2080,6 @@ class CombineReductions {
     for (auto group : segment_candidate_finder_->groups()) {
       if (auto rop_signature =
               ReductionSignature::makeReductionSignature(group)) {
-        // Ignore pure squeeze operations in this analysis
-        if (!rop_signature->hasNonTrivialReduction()) {
-          continue;
-        }
-
         groups_with_reductions_.push_back(group);
         // Check if this reduction signature is one that we have seen before
         auto signature_match_it = std::find_if(
@@ -2476,8 +2471,7 @@ class CombineReductions {
       }
 
       if (root_domain_size_ != reduction_signature->root_domain_size_ ||
-          has_nontrivial_reduction_ !=
-              reduction_signature->has_nontrivial_reduction_ ||
+          has_reduction_ != reduction_signature->has_reduction_ ||
           reduction_axes_.size() !=
               reduction_signature->reduction_axes_.size()) {
         return false;
@@ -2496,8 +2490,8 @@ class CombineReductions {
       return sameAs(&reduction_signature);
     }
 
-    bool hasNonTrivialReduction() const {
-      return has_nontrivial_reduction_;
+    bool hasReduction() const {
+      return has_reduction_;
     }
 
     static std::unique_ptr<ReductionSignature> makeReductionSignature(
@@ -2516,8 +2510,8 @@ class CombineReductions {
 
         if (new_signature != nullptr) {
           TORCH_INTERNAL_ASSERT(
-              signature == nullptr || !signature->has_nontrivial_reduction_ ||
-                  !new_signature->has_nontrivial_reduction_ ||
+              signature == nullptr || !signature->has_reduction_ ||
+                  !new_signature->has_reduction_ ||
                   signature->sameAs(new_signature.get()),
               "Conflicting signature found in this group");
           signature = std::move(new_signature);
@@ -2529,7 +2523,7 @@ class CombineReductions {
     template <typename REDUCTION = ReductionOp>
     ReductionSignature(REDUCTION* rop) {
       auto out_tv = rop->out()->template as<TensorView>();
-      has_nontrivial_reduction_ = out_tv->hasReduction();
+      has_reduction_ = out_tv->hasReduction();
       TORCH_INTERNAL_ASSERT(out_tv != nullptr);
       auto& root_domain = out_tv->getRootDomain();
       root_domain_size_ = root_domain.size();
@@ -2550,16 +2544,14 @@ class CombineReductions {
         if (root_domain[i]->isReduction()) {
           reduction_axes_.push_back(i);
         }
-        if (!root_domain[i]->isTrivialReduction()) {
-          has_nontrivial_reduction_ = true;
-        }
+        has_reduction_ = true;
       }
     }
 
    private:
     size_t root_domain_size_ = 0;
     std::vector<int> reduction_axes_;
-    bool has_nontrivial_reduction_ = false;
+    bool has_reduction_ = false;
   };
 
   //! Keeps track of groups with reduction expressions,
@@ -2583,7 +2575,7 @@ bool CombineReductions::shouldRun(
   for (auto group : segment_candidate_finder->groups()) {
     if (auto reduction_signature =
             ReductionSignature::makeReductionSignature(group)) {
-      if (reduction_signature->hasNonTrivialReduction() &&
+      if (reduction_signature->hasReduction() &&
           std::any_of(
               known_reductions.begin(),
               known_reductions.end(),
@@ -2804,8 +2796,8 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
-  auto reduction_ops = ir_utils::getReductionOps(
-      segmented_fusion_->completeFusion(), true /* ignore_trivial */);
+  auto reduction_ops =
+      ir_utils::getReductionOps(segmented_fusion_->completeFusion());
   auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
 
   if (options_.run_translate_welford &&

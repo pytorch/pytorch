@@ -123,8 +123,7 @@ class SchedulerTopologyChecker {
           for (auto entry : forward_p2c_root_map) {
             auto p_id = entry.first;
             auto c_id = entry.second;
-            if (p_id->isBroadcast() &&
-                (!c_id->isBroadcast() && !c_id->isTrivialReduction())) {
+            if (p_id->isBroadcast() && !c_id->isBroadcast()) {
               ids_to_resolve.emplace_back(std::make_pair(c_id, c_id));
             }
           }
@@ -263,8 +262,7 @@ class SchedulerTopologyChecker {
             for (auto entry : p2c_root_map) {
               auto p_id = entry.first;
               auto c_id = entry.second;
-              if (p_id->isBroadcast() &&
-                  (!c_id->isBroadcast() && !c_id->isTrivialReduction())) {
+              if (p_id->isBroadcast() && !c_id->isBroadcast()) {
                 return true;
               }
             }
@@ -288,8 +286,7 @@ class SchedulerTopologyChecker {
     bool fastest_dim_reduction = true;
     auto red_root_dom = reduction_tvs[0]->getRootDomain();
     for (size_t i = red_root_dom.size(); i > 0; i--) {
-      if (red_root_dom[i - 1]->isBroadcast() ||
-          red_root_dom[i - 1]->isTrivialReduction()) {
+      if (red_root_dom[i - 1]->isBroadcast()) {
         continue;
       } else if (red_root_dom[i - 1]->isReduction()) {
         fastest_dim_reduction = true;
@@ -604,13 +601,7 @@ bool reductionInterferingView(
     return dims_removed;
   };
 
-  // Remove trivial reduction dimensions
-  auto mapped_to_trivial_reduction =
-      scheduler_utils::getTrivialReductionMap(fusion);
-
-  std::vector<IterDomain*> dims = remove_dims(
-      reduction_reference->getMaybeRFactorDomain(),
-      mapped_to_trivial_reduction);
+  std::vector<IterDomain*> dims = reduction_reference->getMaybeRFactorDomain();
 
   // The disjoint groups we need for this scheduler
   std::vector<std::vector<IterDomain*>> groups;
@@ -1149,8 +1140,7 @@ class NoOpScheduler : public SchedulerEntry {
       return true;
     }
     // Check there're no non-trivial reduction ops.
-    for (auto reduction :
-         ir_utils::getReductionOps(fusion, true /* ignore_trivial */)) {
+    for (auto reduction : ir_utils::getReductionOps(fusion)) {
       for (auto output :
            ir_utils::filterByType<TensorView>(reduction->outputs())) {
         auto concrete_dimension =
@@ -1223,14 +1213,13 @@ class ReductionScheduler : public SchedulerEntry {
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
     // Needs at least one non-trivial reduction to consider.
-    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+    if (ir_utils::getReductionOps(fusion).empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Reduction, "No reduction op to schedule");
       return false;
     }
 
-    auto reduction_tvs =
-        scheduler_utils::getReductionTvs(fusion, false /* ignore_trivial */);
+    auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
     if (reduction_tvs.size() == 0) {
       // Use pointwise logic
@@ -1264,8 +1253,7 @@ class ReductionScheduler : public SchedulerEntry {
     }
 
     // Make sure reduction axes are consistent through the fusion
-    auto reduction_ops =
-        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
     if (reduction_ops.size() > 1) {
       // Before examining the reduction axes want to quickly
       //   check the reductions have the same axis width
@@ -1389,9 +1377,7 @@ class TransposeScheduler : public SchedulerEntry {
       return false;
     }
 
-    // TODO: add support for trivial reduction
-    auto reduction_ops =
-        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
 
     if (!reduction_ops.empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
@@ -1470,8 +1456,7 @@ class PointWiseScheduler : public SchedulerEntry {
       }
     }
 
-    auto reduction_ops =
-        ir_utils::getReductionOps(fusion, true /* ignore_trivial */);
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
 
     if (!reduction_ops.empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
@@ -1539,14 +1524,13 @@ class PersistentKernelScheduler : public SchedulerEntry {
 
   static bool canScheduleCompileTime(Fusion* fusion) {
     // Needs at least one non-trivial reduction to consider.
-    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+    if (ir_utils::getReductionOps(fusion).empty()) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Persistent, "needs a reduction op");
       return false;
     }
 
-    auto reduction_ops =
-        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
+    auto reduction_ops = ir_utils::getReductionOps(fusion);
 
     if (hasNonUniqueBcast(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
@@ -1555,8 +1539,7 @@ class PersistentKernelScheduler : public SchedulerEntry {
       return false;
     }
 
-    auto reduction_tvs =
-        scheduler_utils::getReductionTvs(fusion, false /* ignore_trivial */);
+    auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
     if (reduction_tvs.size() == 0) {
       // Use pointwise logic
@@ -1660,8 +1643,7 @@ class PersistentKernelScheduler : public SchedulerEntry {
         HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>(
             data_cache, [&fusion]() {
               return std::make_unique<std::vector<TensorView*>>(
-                  scheduler_utils::getReductionTvs(
-                      fusion /*, ignore_trivial = true*/));
+                  scheduler_utils::getReductionTvs(fusion));
             });
 
     auto& reduction_tvs = reduction_tv_entry.get();

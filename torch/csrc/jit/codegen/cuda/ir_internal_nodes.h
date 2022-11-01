@@ -1463,10 +1463,6 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return isBroadcast() && extent()->isOneInt();
   }
 
-  //! Check if IterDomain is a reduction axis with size of 1, i.e.
-  //! a "squeeze" operator, or solely derived from such axes.
-  bool isTrivialReduction() const;
-
   //! Split for stride by a given factor. It effectively does an inner
   //! split by the factor and sets the inner domain as a Stride
   //! domain.
@@ -1679,7 +1675,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   void resetDomains() {
     no_reduction_domain_ = noReductions(domain_);
     no_bcast_domain_ = noBroadcasts(domain_);
-    has_nontrivial_reduction_ = hasNontrivialReduction(domain_);
+    has_reduction_ = hasReduction(domain_);
   }
 
   // i here is int, as we want to accept negative value and ::size_type can be a
@@ -1734,7 +1730,6 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   static bool hasBroadcast(const std::vector<IterDomain*>&);
   static bool hasReduction(const std::vector<IterDomain*>&);
-  static bool hasNontrivialReduction(const std::vector<IterDomain*>&);
 
   // Get a vector of the same size as the given rfactor domain filled with true
   // except at the expanded dims and the dims right before expanded dims.
@@ -1787,7 +1782,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   std::vector<IterDomain*> no_reduction_domain_;
   const std::vector<IterDomain*> rfactor_domain_;
   std::vector<bool> contiguity_;
-  bool has_nontrivial_reduction_;
+  bool has_reduction_;
 };
 
 //! Representation a split on an IterDomain by "factor"

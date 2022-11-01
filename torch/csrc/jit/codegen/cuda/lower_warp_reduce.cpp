@@ -412,8 +412,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
     bool reduction_has_single_warp = false, broadcast_has_single_warp = false;
 
     for (auto id : reduction_out_tv->domain()->domain()) {
-      if (id->isReduction() && id->isThread() && !id->isTrivialReduction() &&
-          !isSingleWarp(id)) {
+      if (id->isReduction() && id->isThread() && !isSingleWarp(id)) {
         return false;
       }
       if (id->isReduction() && isSingleWarp(id)) {

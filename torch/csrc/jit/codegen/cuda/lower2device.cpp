@@ -21,7 +21,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_replace_size.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
-#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
@@ -236,14 +235,6 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
 
   // Replaces integers that are tensor sizes by named scalars as "T0.size[0]"
   replaceSymbolicSizes(fusion_);
-
-  // Traverse through reductions and termine if any iteration domains are
-  // trivial reductions. Add these iteration domains to trivial_reduction_info_
-  // which simply holds a map of which axes are trivial and which are not.
-  trivial_reduction_info_.build(fusion_);
-  // Replaces trivial reduction expressions (all id's being reduced are trivial)
-  // with set unary op
-  trivialReductionReplacement(fusion_, trivial_reduction_info_);
 
   // Build what's refered to as the compute at map. This map contains the
   // mappings of all iteration domains across the fusion. There are three types

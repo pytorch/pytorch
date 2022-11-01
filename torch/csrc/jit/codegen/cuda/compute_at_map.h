@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
-#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 
 #include <deque>
 #include <unordered_map>
@@ -142,8 +141,6 @@ class TORCH_CUDA_CU_API IterDomainGraph {
   c10::optional<std::tuple<TensorView*, IterDomain*, IterDomain*, std::string>>
       self_mapping_info_ = c10::nullopt;
 };
-
-class TrivialReductionInfo;
 
 using DoubleBufferIndices = std::unordered_map<DoubleBufferLoopStage, Int*>;
 
@@ -300,9 +297,6 @@ class TORCH_CUDA_CU_API ComputeAtMap {
 
   // Used specifically for concrete ID computation
   ConcretizedBroadcastDomains concretized_bcasts_;
-
-  // TODO: Remove
-  TrivialReductionInfo trivial_reduction_info_;
 
   // Prevent needing to recompute concrete_id's in compute at map.
   // VectorOfUniqueEntries is unique across mapping modes, so don't need to use

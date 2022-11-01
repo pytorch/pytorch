@@ -117,8 +117,7 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::map(
     // In exact mapping, do not map broadcast domains with
     // non-broadcast domains, except with a broadcast producer and a
     // consumer trivial reduction
-    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast() &&
-        !(producer_id->isBroadcast() && consumer_id->isTrivialReduction())) {
+    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast()) {
       itc++;
       itp++;
       continue;
@@ -160,10 +159,8 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
     IterDomain* consumer_id = consumer_root[i];
 
     // In exact mapping, do not map broadcast domains with
-    // non-broadcast domains, except with a broadcast producer and a
-    // consumer trivial reduction
-    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast() &&
-        !(producer_id->isBroadcast() && consumer_id->isTrivialReduction())) {
+    // non-broadcast domains
+    if (is_exact_ && producer_id->isBroadcast() != consumer_id->isBroadcast()) {
       continue;
     }
 

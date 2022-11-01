@@ -58,8 +58,8 @@ IterDomain* mergeInnermostDomains(
   bool is_merge_done = false;
   for (const auto i : c10::irange(num_merged_domains)) {
     auto id = domain.at(ndims - 1 - i);
-    // broadcast and trivial reductions are ignored
-    if (id->isBroadcast() || id->isTrivialReduction()) {
+    // broadcast are ignored
+    if (id->isBroadcast()) {
       continue;
     }
     if (merged_id == nullptr) {

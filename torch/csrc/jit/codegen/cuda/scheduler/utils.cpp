@@ -28,18 +28,12 @@ namespace scheduler_utils {
 //  where R5{1} and R6{1} are in dont_merge, resulting domain should be:
 // [I2*I4, R1*R3, R4, R5{1}, R6{1}]
 // with return value 3
-size_t merge_3d(
-    TensorView* tv,
-    const std::unordered_set<IterDomain*>& dont_merge) {
+size_t merge_3d(TensorView* tv) {
   bool active_is_reduction = false;
   bool first_dim = true;
   int prev_i = -1;
 
   for (int i = static_cast<int>(tv->nDims()) - 1; i >= 0; i--) {
-    if (dont_merge.count(tv->axis(i))) {
-      continue;
-    }
-
     if (first_dim) {
       active_is_reduction = tv->axis(i)->isReduction();
       prev_i = i;
@@ -66,10 +60,6 @@ size_t merge_3d(
 
   for (int i = static_cast<int>(tv->nDims()) - 2; i >= 0; i--) {
     auto id = tv->axis(i);
-    if (dont_merge.count(id)) {
-      continue;
-    }
-
     if (first_dim) {
       active_is_reduction = id->isReduction();
       prev_i = i;
@@ -95,10 +85,6 @@ size_t merge_3d(
   prev_i = -1;
 
   for (int i = static_cast<int>(tv->nDims()) - 3; i >= 0; i--) {
-    if (dont_merge.count(tv->axis(i))) {
-      continue;
-    }
-
     if (first_dim) {
       active_is_reduction = tv->axis(i)->isReduction();
       prev_i = i;
@@ -194,13 +180,11 @@ c10::optional<size_t> mergeDims(
   return left;
 }
 
-size_t mergeReduction(
-    TensorView* tv,
-    const std::unordered_set<IterDomain*>& dont_merge) {
+size_t mergeReduction(TensorView* tv) {
   int prev_i = -1;
   size_t num_merged = 0;
   for (int i = static_cast<int>(tv->nDims()) - 1; i >= 0; i--) {
-    if (!tv->axis(i)->isReduction() || dont_merge.count(tv->axis(i))) {
+    if (!tv->axis(i)->isReduction()) {
       continue;
     }
     if (prev_i == -1) {
@@ -218,16 +202,14 @@ size_t mergeReduction(
   return prev_i == -1 ? 0 : num_merged + 1;
 }
 
-size_t mergeNonReduction(
-    TensorView* tv,
-    const std::unordered_set<IterDomain*>& dont_merge) {
+size_t mergeNonReduction(TensorView* tv) {
   int prev_i = -1;
   size_t num_merged = 0;
   if (tv->nDims() == 0) {
     return 0;
   }
   for (int i = static_cast<int>(tv->nDims()) - 1; i >= 0; i--) {
-    if (tv->axis(i)->isReduction() || dont_merge.count(tv->axis(i))) {
+    if (tv->axis(i)->isReduction()) {
       continue;
     }
     if (prev_i == -1) {
@@ -508,7 +490,7 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   }
 
   // Find projectable persistent buffers
-  auto reduction_tvs = getReductionTvs(fusion /*, ignore_trivial=true */);
+  auto reduction_tvs = getReductionTvs(fusion);
   for (auto persistent_buffer : persistent_buffer_info.persistent_buffers) {
     // Inputs marked as persistent buffers can't be projected any further back
     if (persistent_buffer->isFusionInput()) {
@@ -572,8 +554,7 @@ TvProperties getProperties(
   // Is there a non trivial reduction on the inner most dimension or is there an
   // iteration domain.
   for (size_t i = root_dom.size(); i > 0; i--) {
-    if (root_dom[i - 1]->isBroadcast() ||
-        root_dom[i - 1]->isTrivialReduction()) {
+    if (root_dom[i - 1]->isBroadcast()) {
       continue;
     } else if (root_dom[i - 1]->isReduction()) {
       fastest_dim_reduction = true;
@@ -598,7 +579,7 @@ TvProperties getProperties(
   // i4] then compute the inner most dimension to compute separately.
   for (size_t i = root_dom.size(); i > 0; i--) {
     auto id = root_dom[i - 1];
-    if (id->isBroadcast() || id->isTrivialReduction()) {
+    if (id->isBroadcast()) {
       continue;
     }
     if (id->isReduction() != cur_dim_is_reduction) {
@@ -904,68 +885,26 @@ PersistentBufferSizeReturn persistentBufferSize(
   return persistent_buffer_size;
 }
 
-std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion) {
-  auto all_tvs = ir_utils::allTvs(fusion);
-  std::unordered_set<IterDomain*> mapped_to_trivial_reduction;
-  for (auto tv : all_tvs) {
-    // root domain vs domain shouldn't matter as at this point we shouldn't have
-    // any transformations.
-    for (auto id : tv->getRootDomain()) {
-      if (id->isTrivialReduction()) {
-        mapped_to_trivial_reduction.emplace(id);
-      }
-    }
-  }
-
-  if (!mapped_to_trivial_reduction.empty()) {
-    // Use the loop map as that is the most permissive
-    auto ca_map = ComputeAtMap(fusion);
-    // Make a copy we need to check mappings of all
-    auto trivial_ids = mapped_to_trivial_reduction;
-    for (auto tv : all_tvs) {
-      for (auto id : tv->getRootDomain()) {
-        if (!id->extent()->isOneInt()) {
-          continue;
-        }
-        if (std::any_of(
-                trivial_ids.begin(),
-                trivial_ids.end(),
-                [&ca_map, &id](IterDomain* trivial_id) {
-                  return ca_map.areMapped(
-                      id, trivial_id, IdMappingMode::PERMISSIVE);
-                })) {
-          mapped_to_trivial_reduction.emplace(id);
-        }
-      }
-    }
-  }
-  return mapped_to_trivial_reduction;
-}
-
 std::pair<bool, bool> canonicalDimReduction(
     Fusion* fusion,
     TensorView* tv,
     bool schedule_3D) {
-  std::unordered_set<IterDomain*> mapped_to_trivial_reduction =
-      getTrivialReductionMap(fusion);
-
   TORCH_INTERNAL_ASSERT(tv != nullptr);
 
   if (!schedule_3D) {
     // We coalesce all reduction axes to the right;
-    bool has_red_axis = mergeReduction(tv, mapped_to_trivial_reduction) > 0;
+    bool has_red_axis = mergeReduction(tv) > 0;
 
-    bool has_iter_axis = mergeNonReduction(tv, mapped_to_trivial_reduction) > 0;
+    bool has_iter_axis = mergeNonReduction(tv) > 0;
     return {has_iter_axis, has_red_axis};
   } else {
     TORCH_INTERNAL_ASSERT(
-        merge_3d(tv, mapped_to_trivial_reduction) == 3,
-        "Tried 3D merge, but result is not 3D.");
+        merge_3d(tv) == 3, "Tried 3D merge, but result is not 3D.");
     return {true, true};
   }
 }
 
-std::vector<TensorView*> getReductionTvs(Fusion* fusion, bool ignore_trivial) {
+std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
   auto all_tvs = ir_utils::allTvs(fusion);
   std::vector<TensorView*> reduction_tvs;
   for (auto tv : all_tvs) {
@@ -973,10 +912,7 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion, bool ignore_trivial) {
         std::any_of(
             tv->domain()->domain().begin(),
             tv->domain()->domain().end(),
-            [&ignore_trivial](IterDomain* id) {
-              return id->isReduction() &&
-                  !(ignore_trivial && id->isTrivialReduction());
-            })) {
+            [](IterDomain* id) { return id->isReduction(); })) {
       reduction_tvs.emplace_back(tv);
     }
   }
@@ -1102,8 +1038,7 @@ IterDomain* projectIdToRoot(
     if (expr->isA<Merge>()) {
       auto merge = expr->as<Merge>();
       if (merge->out() == projected_id) {
-        if (!merge->inner()->isBroadcast() &&
-            !merge->inner()->isTrivialReduction()) {
+        if (!merge->inner()->isBroadcast()) {
           projected_id = merge->inner();
         } else {
           projected_id = merge->outer();
@@ -1163,8 +1098,7 @@ IterDomain* projectIdToRFactor(
       if (merge->inner() == projected_id) {
         projected_id = merge->out();
       } else if (merge->outer() == projected_id) {
-        if (merge->inner()->isBroadcast() ||
-            merge->inner()->isTrivialReduction() || !inner_only) {
+        if (merge->inner()->isBroadcast() || !inner_only) {
           projected_id = merge->out();
         } else {
           projected_id = nullptr;
@@ -1216,12 +1150,6 @@ IterDomain* innerMostRootDim(TensorView* tv) {
       continue;
     }
     if ((*it)->isBroadcast()) {
-      if (inner_most_id == nullptr) {
-        inner_most_id = *it;
-      }
-      continue;
-    }
-    if ((*it)->isTrivialReduction()) {
       if (inner_most_id == nullptr) {
         inner_most_id = *it;
       }

@@ -1464,7 +1464,6 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
   FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalProducerIndex");
-  const auto gpu_lower = GpuLower::current();
 
   // Replay producer to look like consumer so we can index on producer since
   // our loop nests look like consumer
@@ -1590,10 +1589,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   std::vector<Val*> strided_inds(
       root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
-    // If the domain is derived from a trivial reduction, no indexing
-    // to create.
-    if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
-        gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
+    if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast()) {
       continue;
     }
 
@@ -1806,7 +1802,6 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   for (auto root_id : root_dom) {
     // Already taken care of because we can detect no indexing required
     if (root_id->isBroadcast() || root_id->isReduction() ||
-        gpu_lower->trivialReductionInfo().isDerived(root_id) ||
         root_id->isStride()) {
       skip_indexing.insert(root_id);
       continue;
@@ -1815,13 +1810,6 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     // Already an entry for this root domain, continue
     if (index_map.find(root_id) != index_map.end()) {
       continue;
-    }
-
-    // Maps to consumers trivial reduction, don't index
-    if (p2c_alloc_map.find(root_id) != p2c_alloc_map.end() &&
-        gpu_lower->trivialReductionInfo().isDerived(
-            p2c_alloc_map.at(root_id))) {
-      skip_indexing.emplace(root_id);
     }
   }
 
@@ -1999,7 +1987,6 @@ std::vector<Val*> Index::getRootIndices(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops,
     const IndexFromIdGraph& index_from_id_graph) {
-  auto gpu_lower = GpuLower::current();
   auto root_dom = tv->getMaybeRFactorDomain();
   auto indexing = index_from_id_graph.index;
 
@@ -2008,7 +1995,6 @@ std::vector<Val*> Index::getRootIndices(
   for (const auto i : c10::irange(root_dom.size())) {
     // See a comment in indexing to root domains in getGlobalProducerIndex.
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
-        gpu_lower->trivialReductionInfo().isDerived(root_dom[i]) ||
         root_dom[i]->isStride()) {
       continue;
     }
@@ -2113,7 +2099,6 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
       root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
-        gpu_lower->trivialReductionInfo().isDerived(root_dom[i]) ||
         root_dom[i]->isStride()) {
       continue;
     }
@@ -2155,7 +2140,6 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
     Val* stride = nullptr;
     for (const auto j : c10::irange(i + 1, root_dom.size())) {
       if (root_dom[j]->isBroadcast() || root_dom[j]->isReduction() ||
-          gpu_lower->trivialReductionInfo().isDerived(root_dom[j]) ||
           root_dom[j]->isStride()) {
         continue;
       }
@@ -2970,8 +2954,7 @@ std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
   for (auto contig_id_entry : contig_id_infos) {
     auto contig_id = contig_id_entry.id;
     // No predicates needed for braodcasted indices.
-    if (contig_id->isBroadcast() ||
-        gpu_lower->trivialReductionInfo().isDerived(contig_id)) {
+    if (contig_id->isBroadcast()) {
       continue;
     }
 

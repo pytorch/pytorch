@@ -304,9 +304,7 @@ TORCH_CUDA_CU_API std::vector<TensorView*> allTvsExcept(
     Fusion* fusion,
     const std::unordered_set<TensorView*>& except);
 
-TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
-    Fusion* fusion,
-    bool ignore_trivial = true);
+TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(Fusion* fusion);
 
 // Returns the initialization value of tv or nullptr if not initialized.
 TORCH_CUDA_CU_API Val* getReductionInitValOf(TensorView* tv);

@@ -757,9 +757,8 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
 
   // maybe has_reduction for scheduling should be done on a per output tensor
   // basis.
-  // TODO: add support for trivial reduction
   TORCH_INTERNAL_ASSERT(
-      ir_utils::getReductionOps(fusion, /*ignore_trivial=*/false).empty(),
+      ir_utils::getReductionOps(fusion).empty(),
       "This scheduler only handles pointwise ops.");
 
   // Cache inputs

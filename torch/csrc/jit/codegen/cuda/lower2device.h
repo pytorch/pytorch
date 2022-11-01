@@ -16,7 +16,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
-#include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/non_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
@@ -79,10 +78,6 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
 
   std::shared_ptr<const ComputeAtMap> caMap() const {
     return std::const_pointer_cast<const ComputeAtMap>(compute_at_map_);
-  }
-
-  const TrivialReductionInfo& trivialReductionInfo() const {
-    return trivial_reduction_info_;
   }
 
   std::shared_ptr<const HaloInfo> haloInfo() const {
@@ -204,7 +199,6 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;
   std::shared_ptr<ComputeAtMap> compute_at_map_;
-  TrivialReductionInfo trivial_reduction_info_;
   std::shared_ptr<HaloInfo> halo_info_;
   LocalAllocationInfoMap local_allocation_info_map_;
   WarpPaddedParallelInfo warp_pad_info_;

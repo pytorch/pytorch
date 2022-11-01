@@ -25,13 +25,11 @@ void MaxPosCalculator::buildUnmappableDims() {
     for (auto consumer : consumers) {
       // Grab dimensions in producer and consumer that are mappable to eachother
       // based on the computeAtRootDomainMap. This will tell us which dimensions
-      // can be inlined based on avoiding trying to inline non-trivial
-      // reduction structures.
+      // can be inlined based on avoiding trying to inline reduction structures.
       auto mappable_roots =
           root_map.getMappableDims(tv->domain(), consumer->domain());
       for (auto tv_root_id : tv->getMaybeRFactorDomain()) {
         if (mappable_roots.find(tv_root_id) == mappable_roots.end() &&
-            !tv_root_id->isTrivialReduction() &&
             !ir_utils::isSqueezedID(tv, tv_root_id)) {
           unmappable_dims_.emplace(tv_root_id);
         }

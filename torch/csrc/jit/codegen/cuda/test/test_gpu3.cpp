@@ -2318,53 +2318,6 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexPointwiseSchedule_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionTrivialReductionForwarding3_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(2);
-  fusion.addInput(tv0);
-
-  auto tv1 = sum(tv0, {1});
-  auto tv2 = add(tv1, IrBuilder::create<Double>(1));
-  fusion.addOutput(tv2);
-
-  // Similar pattern as FusionTrivialReductionForwarding2 but trivial
-  // reduciton at non-root domain
-
-  // Create a trivial reduction by splitting with a factor of 1
-  tv1->split(1, 1, false);
-  // Merging with a trivial reduction
-  tv1->merge(0, 1);
-  auto tv1_merge_out_id = tv1->axis(0);
-  tv1->split(0, 5);
-
-  tv2->split(0, 5);
-
-  // The merge of tv1 is done with a non-root trivial
-  // reduciton. BestEffortReplay should forward the merge.
-
-  PairwiseRootDomainMap root_map(tv1, tv2);
-  auto p2c = BestEffortReplay::replayCasP(tv2, tv1, 2, root_map).getReplay();
-
-  // The two tensors should look like:
-  // tv1: [I1*1//5, 5, I2//1]
-  // tv2: [I1//5, 5]
-  //
-  // BestEffortRepaly should forward the merge of (I1 * 1) and create
-  // mappings of:
-  // I1*1//5 -> I1//5
-  // 5 -> 5
-  // I1*1 -> I1
-
-  TORCH_CHECK(p2c.size() == 3, "Unexpected number of mappings");
-  TORCH_CHECK(p2c.count(tv1->axis(0)) && p2c[tv1->axis(0)] == tv2->axis(0));
-  TORCH_CHECK(p2c.count(tv1->axis(1)) && p2c[tv1->axis(1)] == tv2->axis(1));
-  TORCH_CHECK(
-      p2c.count(tv1_merge_out_id) &&
-      p2c[tv1_merge_out_id] == tv2->getRootDomain()[0]);
-}
-
 TEST_F(NVFuserTest, FusionTrivialReductionForwarding4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

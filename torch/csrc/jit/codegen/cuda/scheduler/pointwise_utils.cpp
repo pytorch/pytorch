@@ -16,8 +16,7 @@ bool DomainMap::areAllInputIdsMappedTo(TensorView* input_tv, TensorView* tv)
     // like T0[I0, b] + T1[b, I1]
     auto concrete =
         ca_map_.getConcreteMappedID(in_id, IdMappingMode::PERMISSIVE);
-    if (!concrete->isBroadcast() && !in_id->isReduction() &&
-        !concrete->isTrivialReduction()) {
+    if (!concrete->isBroadcast() && !in_id->isReduction()) {
       in_concrete_ids.insert(concrete);
     }
   }

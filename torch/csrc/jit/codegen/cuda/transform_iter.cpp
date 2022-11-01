@@ -72,11 +72,9 @@ void ReplayTransformations::handle(Merge* m) {
   auto it_inner = id_map_.find(id_inner);
 
   const bool outer_found = it_outer != id_map_.end();
-  const bool outer_bcast =
-      id_outer->isBroadcast() || id_outer->isTrivialReduction();
+  const bool outer_bcast = id_outer->isBroadcast();
   const bool inner_found = it_inner != id_map_.end();
-  const bool inner_bcast =
-      id_inner->isBroadcast() || id_outer->isTrivialReduction();
+  const bool inner_bcast = id_inner->isBroadcast();
 
   // If either are not found
   if (!outer_found || !inner_found) {
@@ -762,8 +760,6 @@ struct ProducerForwardingInfo {
             producer->domain()->domain().begin(),
             producer->domain()->domain().end()));
 
-    // !!!!!! squeeze !!!!!!
-
     // Collect which root axes are in producer that are not in consumer because
     // of squeeze
     std::unordered_set<IterDomain*> producer_bcast_roots_not_in_consumer;
@@ -829,21 +825,6 @@ struct ProducerForwardingInfo {
         for (auto forwarded_id : forwarded_ids) {
           compliment_map.emplace(std::make_pair(forwarded_id, compliment_ids));
         }
-      }
-    }
-
-    // !!!!!! trivial reduction !!!!!!
-
-    for (auto merge : ir_utils::filterByType<Merge>(producer_history)) {
-      auto inner = merge->inner();
-      auto outer = merge->outer();
-      if ((inner->isTrivialReduction() && !outer->isReduction()) ||
-          (outer->isTrivialReduction() && !inner->isReduction())) {
-        auto compliment_id = inner->isTrivialReduction() ? inner : outer;
-        auto forwarded_id = inner->isTrivialReduction() ? outer : inner;
-        forwarding_map.emplace(std::make_pair(forwarded_id, merge->out()));
-        compliment_map.emplace(std::make_pair(
-            forwarded_id, std::vector<IterDomain*>{compliment_id}));
       }
     }
   }
