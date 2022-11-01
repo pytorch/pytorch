@@ -11,7 +11,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import NumberType, TensorLike, TensorSequenceType
+from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -1073,7 +1073,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten.split_with_sizes, disable_meta=True)
+@register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -1087,7 +1087,7 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition(aten.split.Tensor, disable_meta=True)
+@register_decomposition(aten.split.Tensor)
 def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -1402,7 +1402,6 @@ def _to_copy(
     return x
 
 
-@register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
     return aten.where(
@@ -1414,46 +1413,6 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
             self * aten.log(other),
         ),
     )
-
-
-@register_decomposition(aten.var.correction)
-@reduction_complex_to_real
-def var_correction(
-    x: Tensor,
-    dim: Optional[List[int]],
-    correction: Optional[int] = None,
-    keepdim: bool = False,
-):
-    dims: List[int] = [] if dim is None else dim
-
-    if x.is_complex():
-        # For complex, calculate variance of real and imaginary components
-        # separately then add to get overall variance.
-        real_in = x.real
-        var_real = torch.var(real_in, dims, correction=correction, keepdim=keepdim)
-        imag_in = x.imag
-        var_imag = torch.var(imag_in, dims, correction=correction, keepdim=keepdim)
-        return var_real + var_imag
-
-    if correction is None:
-        correction = 1
-
-    if len(dims) == 0:
-        n = prod(x.shape)  # type: ignore[arg-type]
-    else:
-        n = 1
-        for d in dims:
-            n *= x.shape[d]
-
-    mean = torch.mean(x, dims, True)
-    sub = x - mean
-    sq = sub * sub
-    sum = torch.sum(sq, dims, keepdim)
-
-    if correction:
-        n = n - correction
-
-    return sum / n
 
 
 @register_decomposition(aten.std.correction)
@@ -1470,7 +1429,7 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
+@register_decomposition([aten.detach, aten.lift, aten.lift_fresh])
 def nop_decomposition(x):
     return aten.alias(x)
 
@@ -1636,7 +1595,7 @@ def cudnn_batch_norm_backward(
     )
 
 
-@register_decomposition(aten._adaptive_avg_pool2d, disable_meta=True)
+@register_decomposition(aten._adaptive_avg_pool2d)
 @pw_cast_for_opmath
 def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     # Preconditions
@@ -1709,7 +1668,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         return torch.mean(vals, dim=(-3, -1))
 
     def maybe_mask(vals, length, range_max, adaptive, dim):
-        if isinstance(length, int):
+        if isinstance(length, IntLike):
             return vals, length
         else:
             # zero-out the things we didn't really want to select
@@ -1898,7 +1857,7 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
 
 
-@register_decomposition([aten._reshape_alias, aten._unsafe_view], disable_meta=True)
+@register_decomposition([aten._reshape_alias, aten._unsafe_view])
 def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
@@ -2164,7 +2123,7 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot, disable_meta=True)
+@register_decomposition(aten.dot)
 @out_wrapper()
 @pw_cast_for_opmath
 def dot(self, other):
