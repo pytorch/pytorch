@@ -12,7 +12,7 @@ from torch.utils import cpp_backtrace
 _ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
 
 
-def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16):
+def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32):
     """Returns the current C++ call stack.
 
     This function utilizes `torch.utils.cpp_backtrace` to get the current C++ call stack.
