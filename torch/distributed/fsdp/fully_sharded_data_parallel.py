@@ -55,6 +55,10 @@ from torch.distributed.fsdp._init_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _clear_grads_if_needed,
     _prepare_forward_inputs,
+    _reshard,
+    _reshard_grads,
+    _unshard,
+    _unshard_grads,
     _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
@@ -524,80 +528,6 @@ class FullyShardedDataParallel(nn.Module):
         )
         self.register_load_state_dict_post_hook(_post_load_state_dict_hook)
 
-    def _unshard(
-        self,
-        handles: List[FlatParamHandle],
-        unshard_stream: torch.cuda.Stream,
-        pre_unshard_stream: torch.cuda.Stream,
-    ) -> None:
-        """
-        Unshards the handles in ``handles``. If the handles are in
-        :meth:`summon_full_params` and are using mixed precision, then they are
-        forced to full precision.
-
-        Postcondition: Each handle's ``FlatParameter`` 's data is the padded
-        unsharded flattened parameter on the compute device.
-        """
-        if not handles:
-            return
-        if self.limit_all_gathers:
-            event = self._free_event_queue.dequeue_if_needed()
-            if event:
-                event.synchronize()
-        any_ran_pre_unshard = False
-        with torch.cuda.stream(pre_unshard_stream):
-            for handle in handles:
-                ran_pre_unshard = handle.pre_unshard()
-                any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
-        if any_ran_pre_unshard:
-            unshard_stream.wait_stream(pre_unshard_stream)
-        with torch.cuda.stream(unshard_stream):
-            for handle in handles:
-                handle.unshard()
-                handle.post_unshard()
-
-    def _reshard(
-        self,  # unused
-        handles: List[FlatParamHandle],
-        free_unsharded_flat_params: List[bool],
-    ) -> None:
-        """
-        Reshards the handles in ``handles``. ``free_unsharded_flat_params``
-        should have the same length as ``handles``, and each element should
-        give whether the corresponding handle should free its padded unsharded
-        flattened parameter.
-        """
-        if not handles:
-            return
-        p_assert(
-            len(handles) == len(free_unsharded_flat_params),
-            "Expects both lists to have equal length but got "
-            f"{len(handles)} and {len(free_unsharded_flat_params)}",
-        )
-        for handle, free_unsharded_flat_param in zip(
-            handles,
-            free_unsharded_flat_params,
-        ):
-            handle.reshard(free_unsharded_flat_param)
-            if self.limit_all_gathers and free_unsharded_flat_param:
-                free_event = torch.cuda.Event()
-                free_event.record()
-                self._free_event_queue.enqueue(free_event)
-            handle.post_reshard()
-        # Since we prefetch entire handles keys at a time, conservatively mark
-        # the entire key as no longer prefetched once we free at least one
-        handles_key = tuple(handles)
-        if any(free_unsharded_flat_params):
-            self._handles_prefetched.pop(handles_key, None)
-
-    def _unshard_grads(self, handles: List[FlatParamHandle]) -> None:
-        for handle in handles:
-            handle.unshard_grad()
-
-    def _reshard_grads(self, handles: List[FlatParamHandle]) -> None:
-        for handle in handles:
-            handle.reshard_grad()
-
     @property
     def module(self) -> nn.Module:
         """
@@ -1010,8 +940,11 @@ class FullyShardedDataParallel(nn.Module):
         for handles_key in handles_to_prefetch:
             # Prefetch the next set of handles without synchronizing to allow
             # the sync to happen as late as possible to maximize overlap
-            self._unshard(
-                handles_key, self._streams["unshard"], self._streams["pre_unshard"]
+            _unshard(
+                self,
+                handles_key,
+                self._streams["unshard"],
+                self._streams["pre_unshard"],
             )
             self._handles_prefetched[handles_key] = True
 
@@ -1353,7 +1286,8 @@ class FullyShardedDataParallel(nn.Module):
                 for handle in self._handles
             ]
             reshard_fn = functools.partial(
-                self._reshard,
+                _reshard,
+                self,
                 self._handles,
                 free_unsharded_flat_params,
             )
@@ -1405,8 +1339,8 @@ class FullyShardedDataParallel(nn.Module):
     ) -> None:
         """Unshards parameters in the pre-forward."""
         if handles:
-            self._unshard(
-                handles, self._streams["unshard"], self._streams["pre_unshard"]
+            _unshard(
+                self, handles, self._streams["unshard"], self._streams["pre_unshard"]
             )
             handles_key = tuple(handles)
             self._needs_pre_forward_unshard[handles_key] = False
@@ -1639,15 +1573,15 @@ class FullyShardedDataParallel(nn.Module):
         # No need to call `wait_stream()` since we unshard in the computation
         # stream directly
         computation_stream = torch.cuda.current_stream()
-        self._unshard(self._handles, computation_stream, computation_stream)
+        _unshard(self, self._handles, computation_stream, computation_stream)
         if with_grads:
-            self._unshard_grads(self._handles)
+            _unshard_grads(self._handles)
 
         if rank0_only and self.rank != 0:
             # Free the unsharded flattened parameter early
-            self._reshard(self._handles, free_unsharded_flat_params)
+            _reshard(self, self._handles, free_unsharded_flat_params)
             if with_grads:
-                self._reshard_grads(self._handles)
+                _reshard_grads(self._handles)
             try:
                 yield
             finally:
@@ -1674,9 +1608,9 @@ class FullyShardedDataParallel(nn.Module):
                     stack.close()
                     if writeback:
                         self._writeback_to_local_shard(self._handles, with_grads)
-                    self._reshard(self._handles, free_unsharded_flat_params)
+                    _reshard(self, self._handles, free_unsharded_flat_params)
                     if with_grads:
-                        self._reshard_grads(self._handles)
+                        _reshard_grads(self._handles)
                     self.training_state = TrainingState.IDLE
                     for handle in self._handles:
                         handle._training_state = HandleTrainingState.IDLE
@@ -1946,8 +1880,11 @@ class FullyShardedDataParallel(nn.Module):
 
                 # If the handles have been prefetched, this `_unshard()` simply
                 # switches to using the unsharded parameter
-                self._unshard(
-                    _handles, self._streams["unshard"], self._streams["pre_unshard"]
+                _unshard(
+                    self,
+                    _handles,
+                    self._streams["unshard"],
+                    self._streams["pre_unshard"],
                 )
                 torch.cuda.current_stream().wait_stream(self._streams["unshard"])
 
@@ -2052,7 +1989,7 @@ class FullyShardedDataParallel(nn.Module):
                 )
 
             free_unsharded_flat_param = self._should_free_unsharded_flat_param(handle)
-            self._reshard([handle], [free_unsharded_flat_param])
+            _reshard(self, [handle], [free_unsharded_flat_param])
 
             # TODO (awgu): Post-backward prefetching does not support the
             # multiple handles per module case (which was why we keyed by
@@ -2286,7 +2223,7 @@ class FullyShardedDataParallel(nn.Module):
                         self._should_free_unsharded_flat_param(handle)
                     )
                     handles_to_reshard.append(handle)
-                self._reshard(handles_to_reshard, free_unsharded_flat_params)
+                _reshard(self, handles_to_reshard, free_unsharded_flat_params)
             except Exception as e:
                 p_assert(
                     False,
