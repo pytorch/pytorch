@@ -51,6 +51,8 @@ from torch.distributed.utils import (
     _replace_by_prefix,
     _sync_params_and_buffers,
     _to_kwargs,
+    _apply_to_tensors,
+    _apply_to_modules,
 )
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
@@ -66,8 +68,6 @@ from ._optim_utils import (
 )
 from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
 from ._utils import (
-    _apply_to_modules,
-    _apply_to_tensors,
     _contains_batchnorm,
     _free_storage,
     _is_fsdp_flattened,
