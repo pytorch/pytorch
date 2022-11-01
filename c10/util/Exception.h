@@ -519,15 +519,8 @@ namespace detail {
 // build, and does nothing in release build.  It is appropriate to use
 // in situations where you want to add an assert to a hotpath, but it is
 // too expensive to run this assert on production builds.
-#ifdef NDEBUG
-// Optimized version - generates no code.
-#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
-  while (false)                               \
-  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
-#else
 #define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
   C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
-#endif
 
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
