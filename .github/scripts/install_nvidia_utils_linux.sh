@@ -36,8 +36,9 @@ install_nvidia_driver_amzn2() {
         # Check if NVIDIA driver has already been installed
         if [ -x "$(command -v nvidia-smi)" ]; then
             set +e
-            # The driver exists, check its version next
-            INSTALLED_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
+            # The driver exists, check its version next. Also check only the first GPU if there are more than one of them
+            # so that the same driver version is not print over multiple lines
+            INSTALLED_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader --id=0)
             NVIDIA_SMI_STATUS=$?
 
             if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
