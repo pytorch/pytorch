@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
+#include <tuple>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -29,8 +31,22 @@ bool idIsALeafDomain(IterDomain* id, TensorView* tv) {
 
 } // namespace
 
-IterDomainGraph::IterDomainGraph(Fusion* fusion) {
+IterDomainGraph::IterDomainGraph(Fusion* fusion, bool allow_self_mapping) {
   build(fusion);
+
+  if (!allow_self_mapping) {
+    TORCH_INTERNAL_ASSERT(
+        !hasSelfMapping(),
+        "Unsupported domain mapping detected in ",
+        std::get<0>(*self_mapping_info_)->toString(),
+        ". ",
+        std::get<3>(*self_mapping_info_),
+        " domains, ",
+        std::get<1>(*self_mapping_info_)->toString(),
+        " and ",
+        std::get<2>(*self_mapping_info_)->toString(),
+        ", are mapped with each other.");
+  }
 }
 
 //! Map corresponding inputs and outputs of swizzle op together
@@ -55,7 +71,11 @@ void mapMaybeSwizzleOp(
   }
 }
 
-bool IterDomainGraph::exprsMap(Expr* first, Expr* second, bool forward) {
+bool IterDomainGraph::exprsMap(
+    Expr* first,
+    Expr* second,
+    bool forward,
+    const DisjointSets<IterDomain*>& id_map) {
   if (first == nullptr || second == nullptr) {
     return false;
   }
@@ -101,8 +121,7 @@ bool IterDomainGraph::exprsMap(Expr* first, Expr* second, bool forward) {
             zipped_ids.begin(),
             zipped_ids.end(),
             [&](std::pair<IterDomain*, IterDomain*> id_pair) {
-              return !exact_nodes_.strictAreMapped(
-                  id_pair.first, id_pair.second);
+              return !id_map.strictAreMapped(id_pair.first, id_pair.second);
             })) {
       return false;
     }
@@ -151,7 +170,7 @@ void IterDomainGraph::mapThroughExpr(Expr* first, Expr* second, bool forward) {
     return;
   }
 
-  if (!exprsMap(first, second, forward)) {
+  if (!exprsMap(first, second, forward, exact_nodes_)) {
     return;
   }
 
@@ -172,6 +191,78 @@ void IterDomainGraph::mapThroughExpr(Expr* first, Expr* second, bool forward) {
     permissive_nodes_.mapEntries(first_ids[out_i], second_ids[out_i]);
   }
 }
+
+namespace {
+
+// Returns a pair of mapped IDs
+c10::optional<std::pair<IterDomain*, IterDomain*>> detectMappablePair(
+    const std::vector<IterDomain*>& ids,
+    const IterDomainGraph& id_graph) {
+  for (auto id1 : ids) {
+    for (auto id2 : ids) {
+      if (id1 == id2) {
+        continue;
+      }
+      if (id_graph.permissiveNodes().disjointSetMap().at(id1)->has(id2)) {
+        return std::make_pair(id1, id2);
+      }
+    }
+  }
+
+  return {};
+}
+
+// It is assumed that for any tensor represented by a list of domains,
+// those domains should never be mapped with each other. It may be
+// possible to lift this assumption, but it's unclear if it could
+// matter in practice.
+c10::optional<std::tuple<TensorView*, IterDomain*, IterDomain*, std::string>>
+findFirstSelfMapping(Fusion* fusion, const IterDomainGraph& id_graph) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    // For each tensor, make sure root, rfactor and leaf domains
+    // should not include domains that are mapped with another domain
+    // in the same set of domains. This may be overly conservative,
+    // and it maybe enough to check the root domains.
+
+    // Root domains
+    auto self_mappped_root_pair =
+        detectMappablePair(tv->getRootDomain(), id_graph);
+    if (self_mappped_root_pair.has_value()) {
+      return std::make_tuple(
+          tv,
+          self_mappped_root_pair->first,
+          self_mappped_root_pair->second,
+          "Root");
+    }
+
+    // Rfactor domains
+    if (tv->hasRFactor()) {
+      auto self_mappped_rf_pair =
+          detectMappablePair(tv->getRFactorDomain(), id_graph);
+      if (self_mappped_rf_pair.has_value()) {
+        return std::make_tuple(
+            tv,
+            self_mappped_rf_pair->first,
+            self_mappped_rf_pair->second,
+            "RFactor");
+      }
+    }
+
+    // Leaf domains
+    auto self_mappped_leaf_pair =
+        detectMappablePair(tv->domain()->domain(), id_graph);
+    if (self_mappped_leaf_pair.has_value()) {
+      return std::make_tuple(
+          tv,
+          self_mappped_leaf_pair->first,
+          self_mappped_leaf_pair->second,
+          "Leaf");
+    }
+  }
+  return c10::nullopt;
+}
+
+} // namespace
 
 void IterDomainGraph::build(Fusion* fusion) {
   FusionGuard fg(fusion);
@@ -515,6 +606,7 @@ void IterDomainGraph::build(Fusion* fusion) {
       }
     }
   }
+  self_mapping_info_ = findFirstSelfMapping(fusion, *this);
 }
 
 void IterDomainGraph::initializeId(
@@ -587,7 +679,7 @@ void ComputeAtMap::allocateIndexVariables() {
                   // Halo extended parallel loops currently are handled
                   // differently and an index variable would still
                   // be allocated in this case.
-                  (GpuLower::current()->haloInfo().getExtent(id) == nullptr)) {
+                  (GpuLower::current()->haloInfo()->getExtent(id) == nullptr)) {
                 ptype = id->getParallelType();
                 return true;
               }

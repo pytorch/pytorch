@@ -18,16 +18,19 @@ namespace fuser {
 namespace cuda {
 
 namespace {
+// Alias used for std::transform
+IterDomain* exactConcreteId(IterDomain* id) {
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
+}
 
-//! Checks that the current loop nest is not realizing a serial
-//!  broadcast so that each index of producer buffer will only
-//!  be visited once, which is the only case where aggressive
-//!  inner sharing is valid.
-//!
+//! Checks that the current loop nest is realizing a serial
+//!  broadcast so that each index of producer buffer can be visited
+//!  multiple times, in which case the aggressive is not valid.
 bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
   //! Note: see issue #1785:
   //!  serial broadcast resolution doesn't only happen to
-  //! immediate producers of broadcast ops. We can also have
+  //! immediate outputs of broadcast ops. We can also have
   //! example:
   //!  T1[I,B] = broadcast(T0[I]])
   //!  T3[I,I] = T1[I,B] + T2[I,I]
@@ -83,7 +86,7 @@ bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
       std::inserter(
           producer_exact_concrete_root_ids,
           producer_exact_concrete_root_ids.begin()),
-      ir_utils::caMapExactConcreteId);
+      exactConcreteId);
 
   // Check if serial loop roots indexes any exact root id's that
   //  is not within the set of producer's root exact id's. These
@@ -92,7 +95,8 @@ bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
   for (auto serial_loop_root :
        ir_utils::filterByType<IterDomain>(serial_loop_roots)) {
     if (!producer_exact_concrete_root_ids.count(
-            ir_utils::caMapExactConcreteId(serial_loop_root))) {
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                serial_loop_root, IdMappingMode::EXACT))) {
       return true;
     }
   }

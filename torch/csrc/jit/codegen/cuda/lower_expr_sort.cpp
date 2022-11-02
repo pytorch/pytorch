@@ -709,7 +709,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
   std::sort(
       merged_domain.begin(),
       merged_domain.end(),
-      IterDomainDependencySorter(
+      ir_utils::IterDomainDependencySorter(
           concrete_id_dependencies, GpuLower::current()->caMap()));
   return merged_domain;
 }
@@ -1398,6 +1398,9 @@ std::vector<Expr*> ExprSegmentationSorter::getExprs() const {
 
 std::vector<Expr*> reorderExprsForComputeAt() {
   auto fusion = FusionGuard::getCurFusion();
+  if (fusion->exprs().empty()) {
+    return {};
+  }
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
   ExprSegmentationSorter sorter(fusion);
   sorter.sort();

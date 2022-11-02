@@ -95,8 +95,14 @@ void Val::dispatch(T handler, Val* val) {
 template <typename T>
 void Expr::dispatch(T handler, Expr* expr) {
   switch (*(expr->getExprType())) {
+    case ExprType::FullOp:
+      ptr(handler)->handle(expr->as<FullOp>());
+      return;
     case ExprType::ARangeOp:
       ptr(handler)->handle(expr->as<ARangeOp>());
+      return;
+    case ExprType::EyeOp:
+      ptr(handler)->handle(expr->as<EyeOp>());
       return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
@@ -281,8 +287,14 @@ void Val::constDispatch(T handler, const Val* val) {
 template <typename T>
 void Expr::constDispatch(T handler, const Expr* expr) {
   switch (*(expr->getExprType())) {
+    case ExprType::FullOp:
+      ptr(handler)->handle(expr->as<FullOp>());
+      return;
     case ExprType::ARangeOp:
       ptr(handler)->handle(expr->as<ARangeOp>());
+      return;
+    case ExprType::EyeOp:
+      ptr(handler)->handle(expr->as<EyeOp>());
       return;
     case ExprType::UnaryOp:
       ptr(handler)->handle(expr->as<UnaryOp>());
@@ -475,8 +487,14 @@ void Val::mutatorDispatch(T mutator, Val* val) {
 template <typename T>
 void Expr::mutatorDispatch(T mutator, Expr* expr) {
   switch (*(expr->getExprType())) {
+    case ExprType::FullOp:
+      ptr(mutator)->mutate(expr->as<FullOp>());
+      return;
     case ExprType::ARangeOp:
       ptr(mutator)->mutate(expr->as<ARangeOp>());
+      return;
+    case ExprType::EyeOp:
+      ptr(mutator)->mutate(expr->as<EyeOp>());
       return;
     case ExprType::UnaryOp:
       ptr(mutator)->mutate(expr->as<UnaryOp>());
@@ -734,7 +752,13 @@ void OptOutConstDispatch::handle(const kir::IntPair* stmt) {
 }
 
 // Exprs
+void OptOutConstDispatch::handle(const FullOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const ARangeOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const EyeOp* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const UnaryOp* stmt) {
@@ -890,7 +914,13 @@ void OptOutDispatch::handle(kir::IntPair* stmt) {
 }
 
 // Exprs
+void OptOutDispatch::handle(FullOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutDispatch::handle(ARangeOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(EyeOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(UnaryOp* stmt) {
