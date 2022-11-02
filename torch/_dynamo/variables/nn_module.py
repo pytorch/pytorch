@@ -554,13 +554,21 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 items = []
                 named_parameters_kwargs = {}
                 if len(args) > 0:
-                    assert len(args) == 1, f"Expected one positional arg for parameters(recurse), got {args}"
-                    assert not kwargs, f"Expected at most one arg for parameters, got {args} and {kwargs}"
+                    assert (
+                        len(args) == 1
+                    ), f"Expected one positional arg for parameters(recurse), got {args}"
+                    assert (
+                        not kwargs
+                    ), f"Expected at most one arg for parameters, got {args} and {kwargs}"
                     named_parameters_kwargs = {"recurse": args[0]}
                 elif len(kwargs):
-                    assert len(kwargs)  == 1 and "recurse" in kwargs, f"Expected only 'recurse' kwarg, got {kwargs}"
+                    assert (
+                        len(kwargs) == 1 and "recurse" in kwargs
+                    ), f"Expected only 'recurse' kwarg, got {kwargs}"
                     named_parameters_kwargs.update(kwargs)
-                for name, value in self.value.named_parameters(**named_parameters_kwargs):
+                for name, value in self.value.named_parameters(
+                    **named_parameters_kwargs
+                ):
                     items.append(
                         VariableBuilder(tx, AttrSource(self.source, name))(
                             value
@@ -569,8 +577,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return variables.ListIteratorVariable(
                     items, mutable_local=MutableLocal(), **options
                 )
-
-            if id(method.__code__) in self._nn_module_method_ids():
-                unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+            else:
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(method.__func__, **options),
+                    [self] + args,
+                    kwargs,
+                )
+            # TODO(whc) do we still want to filter out some methods? what is this for?
+            # if id(method.__code__) in self._nn_module_method_ids():
+            # unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
         return super().call_method(tx, name, args, kwargs)
