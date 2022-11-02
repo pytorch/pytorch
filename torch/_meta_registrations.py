@@ -249,11 +249,6 @@ def meta_bernoulli_(self, p=0.5, generator=None):
     return self
 
 
-@register_meta(aten.bernoulli.p)
-def meta_bernoulli_p(self, p, generator=None):
-    return torch.empty_like(self)
-
-
 @register_meta(aten._fused_moving_avg_obs_fq_helper.default)
 def meta__fused_moving_avg_obs_fq_helper(
     self,
