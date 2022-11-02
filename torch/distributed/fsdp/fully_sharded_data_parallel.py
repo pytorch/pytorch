@@ -56,6 +56,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _get_buffers_and_dtypes_for_checkpoint,
     _lazy_init,
     _post_forward,
+    _post_forward_reshard,
     _pre_forward,
     _pre_forward_unshard,
     _reshard,
@@ -91,7 +92,7 @@ from ._state_dict_utils import (
     _pre_load_state_dict_hook,
 )
 from ._utils import p_assert
-from .flat_param import FlatParameter, FlatParamHandle, HandleShardingStrategy
+from .flat_param import FlatParameter, FlatParamHandle
 from .wrap import ParamExecOrderWrapPolicy
 
 _TORCH_FX_AVAIL = True
@@ -938,21 +939,7 @@ class FullyShardedDataParallel(nn.Module):
             args, kwargs = _fsdp_root_pre_forward(self, *args, **kwargs)
             unused = None
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
-            # Do not free the root's parameters in the post-forward for
-            # `FULL_SHARD` with the intention that they are immediately used
-            # for backward computation (though this may not be true)
-            free_unsharded_flat_params = [
-                not self._is_root
-                and handle._config.sharding_strategy
-                == HandleShardingStrategy.FULL_SHARD
-                for handle in self._handles
-            ]
-            reshard_fn = functools.partial(
-                _reshard,
-                self,
-                self._handles,
-                free_unsharded_flat_params,
-            )
+            reshard_fn = functools.partial(_post_forward_reshard, self, self._handles)
             _pre_forward(
                 self, self._handles, unshard_fn, self._fsdp_wrapped_module, unused
             )

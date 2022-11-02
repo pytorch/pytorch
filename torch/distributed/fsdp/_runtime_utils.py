@@ -290,6 +290,25 @@ def _post_forward(
 
 
 @no_type_check
+def _post_forward_reshard(
+    state: _State,
+    handles: List[FlatParamHandle],
+) -> None:
+    """Reshards parameters in the post-forward."""
+    if not handles:
+        return
+    # Do not free the root's parameters in the post-forward for `FULL_SHARD`
+    # with the intention that they are immediately used for backward
+    # computation (though this may not be true)
+    free_unsharded_flat_params = [
+        not state._is_root
+        and handle._config.sharding_strategy == HandleShardingStrategy.FULL_SHARD
+        for handle in handles
+    ]
+    _reshard(state, handles, free_unsharded_flat_params)
+
+
+@no_type_check
 def _fsdp_root_pre_forward(
     state: _State,
     *args,
