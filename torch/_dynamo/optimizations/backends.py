@@ -100,13 +100,13 @@ def nnc_ofi(subgraph):
 
 
 @create_backend
-def nvfuser(subgraph):
+def ts_nvfuser(subgraph):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model(subgraph)
 
 
 @create_backend
-def nvfuser_ofi(subgraph):
+def ts_nvfuser_ofi(subgraph):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model_ofi(subgraph)
 
