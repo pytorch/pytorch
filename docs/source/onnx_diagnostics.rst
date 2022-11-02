@@ -28,8 +28,6 @@ Diagnostic Rules
 API Reference
 -------------
 
-.. autofunction:: torch.onnx._internal.diagnostics.diagnose
-
 .. autoclass:: torch.onnx._internal.diagnostics.ExportDiagnostic
     :members:
 
