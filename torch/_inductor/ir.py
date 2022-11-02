@@ -684,6 +684,28 @@ class Reduction(Loops):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
+
+        if reduction_numel == 0:
+
+            if reduction_type in ('argmin', 'argmax', 'min', 'max'):
+                raise NotImplementedError(f"{reduction_type} not supported for zero-dimension tensors!")
+
+            rtypes_to_inits = {
+                'sum' : 0,
+                'prod' : 1,
+            }
+    
+            assert reduction_type in rtypes_to_inits
+            def const_fn(index):
+                return ops.constant(0.0, src_dtype)
+
+            return Pointwise.create(
+                device=device,
+                dtype=src_dtype,
+                inner_fn=const_fn,
+                ranges=list(ranges),
+            )
+
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
