@@ -140,6 +140,8 @@ def _get_fake_value(node, tx):
                 unimplemented(f"data dependent operator: {e.func}")
         elif isinstance(e, DynamicOutputShapeException):
             unimplemented(f"dynamic shape operator: {e.func}")
+        else:
+            raise TorchRuntimeError() from e
 
 
 def _clone_input(value):
