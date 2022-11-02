@@ -520,7 +520,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
         with self.prefix.indent():
-            inp_len = len(V.graph.graph_inputs.keys())
+            inputs_len = len(V.graph.graph_inputs.keys())
             output_refs = [x.codegen_reference() for x in V.graph.graph_outputs]
             if output_refs:
                 if len(output_refs) == 1:
@@ -533,7 +533,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 output_types = "void"
 
-            if inp_len != 0:
+            if inputs_len != 0:
                 inputs_args = ["at::Tensor"] * len(V.graph.graph_inputs.keys())
                 inputs_args = ", ".join(inputs_args)
                 inputs_args = f"std::tuple<{inputs_args}>"

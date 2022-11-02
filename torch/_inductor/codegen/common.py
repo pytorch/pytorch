@@ -317,11 +317,11 @@ class KernelArgs:
             self.input_buffers.keys(), self.output_buffers.keys(), self.sizevars.keys()
         )
 
-    def get_ptr_type(self, dtype):
-        return "c_void_p"
+    def wrap_ptr_arg(self, buf, dtype):
+        return f"c_void_p({buf}.data_ptr())"
 
-    def get_idx_type(self):
-        return "c_long(", ")"
+    def wrap_size_arg(self, size):
+        return f"c_long({size})"
 
     def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP, INDEX_TYPE
@@ -335,8 +335,6 @@ class KernelArgs:
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
 
-        lhs_idx_type, rhs_idx_type = self.get_idx_type()
-
         call_args = []
         arg_defs = []
         arg_types = []
@@ -344,29 +342,26 @@ class KernelArgs:
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
-            ptr_type = self.get_ptr_type(dtype)
             arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            call_args.append(f"{ptr_type}({outer}.data_ptr())")
+            call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{DTYPE_TO_CPP[dtype]}*")
         for outer, inner in self.input_buffers.items():
             if outer in self.inplace_buffers:
                 continue
             dtype = buffer_types[outer]
-            ptr_type = self.get_ptr_type(dtype)
             arg_defs.append(f"const {DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            call_args.append(f"{ptr_type}({outer}.data_ptr())")
+            call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {DTYPE_TO_CPP[dtype]}*")
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or inner == "REMOVED":
                 continue
             dtype = buffer_types[outer]
-            ptr_type = self.get_ptr_type(dtype)
             arg_defs.append(f"{DTYPE_TO_CPP[dtype]}* __restrict__ {inner}")
-            call_args.append(f"{ptr_type}({outer}.data_ptr())")
+            call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{DTYPE_TO_CPP[dtype]}*")
         for outer, inner in self.sizevars.items():
             arg_defs.append(f"const {INDEX_TYPE} {inner}")
-            call_args.append(f"{lhs_idx_type}{outer}{rhs_idx_type}")
+            call_args.append(self.wrap_size_arg(outer))
             arg_types.append(f"const {INDEX_TYPE}")
         return arg_defs, call_args, arg_types
 
@@ -410,13 +405,13 @@ class KernelArgs:
 
 
 class CppWrapperKernelArgs(KernelArgs):
-    def get_ptr_type(self, dtype):
+    def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        return f"({DTYPE_TO_CPP[dtype]}*)"
+        return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
 
-    def get_idx_type(self):
-        return "", ""
+    def wrap_size_arg(self, size):
+        return f"{size}"
 
 
 class CSE:

@@ -133,8 +133,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def disable_cpp_wrapper(self, cond):
         self._can_use_cpp_wrapper = False
-        if config.debug:
-            print("Set _can_use_cpp_wrapper to False due to", cond)
+        log.debug("Set _can_use_cpp_wrapper to False due to %s", cond)
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
