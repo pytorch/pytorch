@@ -447,7 +447,7 @@ static inline void compute_source_index_and_lambda(
     lambda0 = static_cast<scalar_t>(1);
     lambda1 = static_cast<scalar_t>(0);
   } else {
-    using accscalar_t = at::acc_type<scalar_t, false>;
+    using accscalar_t = at::acc_type<scalar_t, true>;
     const accscalar_t real_input_index =
         area_pixel_compute_source_index<accscalar_t>(
             ratio, output_index, align_corners, /*cubic=*/false);

@@ -441,7 +441,7 @@ void cpu_upsample_linear_backward_channels_last(
   int64_t input_width = input_sizes[ndim - 1];
   int64_t output_width = output_sizes[ndim - 1];
 
-  using accscalar_t = at::acc_type<scalar_t, false>;
+  using accscalar_t = at::acc_type<scalar_t, true>;
   using Vec = vec::Vectorized<scalar_t>;
   auto acc = [](scalar_t* gin, scalar_t* gout, accscalar_t w, int64_t size) {
     int64_t d = 0;

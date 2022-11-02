@@ -471,7 +471,7 @@ void cpu_upsample_linear_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
-  using accscalar_t = at::acc_type<scalar_t, false>;
+  using accscalar_t = at::acc_type<scalar_t, true>;
   using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
     const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
@@ -775,7 +775,7 @@ struct HelperInterpNearest : public HelperInterpBase {
         // index_f32 = (output_index) * scale
         // input_index = floor(index_f32)
         // Same as OpenCV INTER_NEAREST
-        using accscalar_t = at::acc_type<scalar_t, false>;
+        using accscalar_t = at::acc_type<scalar_t, true>;
         for (const auto i : c10::irange(output_size)) {
           const accscalar_t real_input_index =
               area_pixel_compute_source_index<accscalar_t>(
@@ -826,7 +826,7 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // index_f32 = (output_index + 0.5) * scale - 0.5
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
-        using accscalar_t = at::acc_type<scalar_t, false>;
+        using accscalar_t = at::acc_type<scalar_t, true>;
         for (const auto i : c10::irange(output_size)) {
           const accscalar_t real_input_index =
               area_pixel_compute_source_index<accscalar_t>(
@@ -975,7 +975,7 @@ struct HelperInterpCubic : public HelperInterpBase {
 
         int64_t * idx_ptr;
         scalar_t * wt_ptr;
-        using accscalar_t = at::acc_type<scalar_t, false>;
+        using accscalar_t = at::acc_type<scalar_t, true>;
         for (const auto i : c10::irange(output_size)) {
           const accscalar_t real_input_index =
               area_pixel_compute_source_index<accscalar_t>(
