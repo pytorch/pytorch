@@ -2732,6 +2732,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
+    def test_callable(self):
+        class Mock:
+            def __call__(self, x, y):
+                return torch.add(x, y)
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        mock = Mock()
+        ref = mock(a, b)
+        opt_mock = torch._dynamo.optimize("eager")(mock)
+        res = opt_mock(a, b)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod

@@ -172,7 +172,10 @@ class _TorchDynamoContext:
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
-            always_optimize_code_objects[fn.__code__] = True
+            if hasattr(fn, "__code__"):
+                always_optimize_code_objects[fn.__code__] = True
+            else:
+                always_optimize_code_objects[fn.__call__.__code__] = True
 
         return _fn
 
