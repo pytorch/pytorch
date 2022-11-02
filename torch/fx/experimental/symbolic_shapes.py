@@ -264,7 +264,7 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
     'floor': lambda a: sympy.floor(a),
     'sym_float': lambda a: a,  # TODO: why can't I wrap with sympy.Float?
-    'sym_int': lambda a: _nyi(),
+    'sym_int': lambda a: sympy.floor(a),
     'ceil': lambda a: sympy.ceiling(a),
     'neg': lambda a: -a,
     'min': lambda a, b: sympy.Min(a, b),
@@ -274,6 +274,7 @@ magic_methods = {
 
 unary_magic_methods = {
     'sym_float',
+    'sym_int',
     'ceil',
     'floor',
     'neg',
@@ -282,7 +283,8 @@ unary_magic_methods = {
 
 float_magic_methods = {
     "add", "sub", "mul", "truediv", "ceil", "floor", "eq",
-    "gt", "lt", "le", "ge", "pow", "sym_sqrt"
+    "gt", "lt", "le", "ge", "pow", "sym_sqrt", "sym_int",
+    "floordiv",
 }
 
 def wrap_node(x):
@@ -348,6 +350,8 @@ def _make_node_magic(method, func):
             pytype = int
         elif method in ["sym_sqrt", "sym_float"]:
             pytype = float
+        elif method in ["sym_int"]:
+            pytype = int
         else:
             pytype = self.pytype
 

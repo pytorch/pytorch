@@ -13,6 +13,7 @@ import torch
 from torch._prims_common import (
     Number,
 )
+from torch.fx.experimental.symbolic_shapes import sym_int, sym_float
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
@@ -29,7 +30,7 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import ConstDictVariable
-from .tensor import DynamicShapeVariable, FakeItemVariable
+from .tensor import DynamicShapeVariable, FakeItemVariable, TensorVariable
 
 log = logging.getLogger(__name__)
 
@@ -331,8 +332,22 @@ class BuiltinVariable(VariableTracker):
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
 
         # Handle cases like int(torch.seed())
-        if self.fn is int and isinstance(args[0], DynamicShapeVariable):
-            return args[0]
+        # Also handle sym_float to sym_int cases
+        if self.fn in (int, float) and isinstance(args[0], DynamicShapeVariable):
+            fn_ = sym_int if self.fn is int else sym_float
+            out = TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    fn_,
+                    (args[0].as_proxy(),),
+                    {},
+                    current_tx=tx,
+                ),
+                **options,
+            )
+            return out
+
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:
