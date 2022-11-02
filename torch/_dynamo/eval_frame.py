@@ -2,6 +2,7 @@ import contextlib
 import copy
 import functools
 import inspect
+import itertools
 import logging
 import os
 import sys
@@ -14,7 +15,6 @@ from unittest.mock import patch
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx._symbolic_trace import is_fx_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
@@ -43,6 +43,7 @@ null_context = contextlib.nullcontext
 unset = object()
 compile_lock = threading.RLock()
 most_recent_backend = None
+
 
 def remove_from_cache(f):
     """
@@ -119,9 +120,30 @@ class _TorchDynamoContext:
         if isinstance(fn, torch.nn.Module):
             mod = fn
             optimized_forward = self(mod.forward)
-            new_mod = copy.copy(fn)
-            new_mod.forward = optimized_forward
 
+            class TorchDynamoNNModuleWrapper:
+                """
+                A wrapper that redirects the forward call to the optimized
+                forward, while for rest it redirects the calls to the original
+                module.
+                """
+
+                def __getattr__(self, name):
+                    return getattr(mod, name)
+
+                def forward(self, *args, **kwargs):
+                    return optimized_forward(*args, **kwargs)
+
+                def __call__(self, *args, **kwargs):
+                    return self.forward(*args, **kwargs)
+
+                def __repr__(self, *args, **kwargs):
+                    return self.__repr__(*args, **kwargs)
+
+            new_mod = TorchDynamoNNModuleWrapper()
+            # Save the function pointer to find the original callable while nesting
+            # of decorators.
+            new_mod._torchdynamo_orig_callable = mod
             return new_mod
 
         assert callable(fn)
@@ -131,13 +153,20 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if is_fx_tracing():
+            any_arg_is_proxy = any(
+                map(
+                    lambda arg: isinstance(arg, torch.fx.Proxy),
+                    itertools.chain(args, kwargs.values()),
+                )
+            )
+            if any_arg_is_proxy:
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to symbolically trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
-                return fn
+                else:
+                    return fn
 
             on_enter()
             prior = set_eval_frame(callback)
@@ -310,7 +339,6 @@ def optimize(
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
-
     Args:
         backend: One of the two things:
             - Either, a function/callable taking a torch.fx.GraphModule and
@@ -323,9 +351,7 @@ def optimize(
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
         disable: If True, turn this decorator into a no-op
-
     Example Usage:
-
         @torch._dynamo.optimize()
         def toy_example(a, b):
             ...
