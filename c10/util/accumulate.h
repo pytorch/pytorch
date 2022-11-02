@@ -3,7 +3,7 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-
+#include <c10/core/SymInt.h>
 #include <iterator>
 #include <numeric>
 #include <type_traits>
@@ -70,6 +70,23 @@ inline int64_t multiply_integers(Iter begin, Iter end) {
   // `int64_t` here to avoid this.
   return std::accumulate(
       begin, end, static_cast<int64_t>(1), std::multiplies<int64_t>());
+}
+
+template <
+    typename Iter,
+    typename = std::enable_if_t<
+        std::is_same<
+            typename std::iterator_traits<Iter>::value_type, c10::SymInt
+            >::value>>
+inline c10::SymInt  multiply_integers(Iter begin, Iter end) {
+  // std::accumulate infers return type from `init` type, so if the `init` type
+  // is not large enough to hold the result, computation can overflow. We use
+  // `int64_t` here to avoid this.
+  c10::SymInt out = 1;
+  for(auto it = begin; it != end; it++) {
+    out *= *it;
+  }
+  return out;
 }
 
 /// Return product of all dimensions starting from k

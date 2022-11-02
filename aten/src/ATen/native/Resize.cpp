@@ -33,6 +33,25 @@ bool resize_output_check(const Tensor& output, IntArrayRef shape) {
   return true;
 }
 
+// Returns true if resize is necessary
+bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape) {
+  // Tests for resizing of tensors with one or more elements
+  if (output.sym_sizes().equals(shape)) {
+    return false;
+  }
+  if (output.numel() != 0) {
+    TORCH_WARN(
+      "An output with one or more elements was resized since it had ",
+      "shape ", output.sizes(), ", which does not match the required ",
+      "output shape ", shape, ". ",
+      "This behavior is deprecated, and in a future PyTorch release outputs ",
+      "will not be resized unless they have zero elements. You can explicitly ",
+      "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+      "t.resize_(0).");
+  }
+  return true;
+}
+
 bool resize_output(const Tensor& output, IntArrayRef shape) {
   if (resize_output_check(output, shape)) {
     // avoid a redispatch for cpu and cuda.
@@ -45,6 +64,25 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
       at::native::resize_(output, shape);
     } else {
       output.resize_(shape);
+    }
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool resize_output_symint(const Tensor& output, SymIntArrayRef shape) {
+  if (resize_output_check_symint(output, shape)) {
+    // avoid a redispatch for cpu and cuda.
+    // TODO: when resize_cuda_ is re-written to be unified with resize_,
+    // we can provide the same benefit for cuda.
+    //
+    // TODO(#61485): functorch wrapped tensors should not go through the
+    // fast path. This is a hack, longer term solutions are in the issue
+    if (output.is_cpu() && !isTensorSubclassLike(output)) {
+      at::native::resize__symint(output, shape);
+    } else {
+      output.resize__symint(shape);
     }
     return true;
   } else {

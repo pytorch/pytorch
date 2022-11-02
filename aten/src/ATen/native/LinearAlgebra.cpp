@@ -1793,8 +1793,8 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
 bool should_fold(const Tensor& tensor1, const int64_t dim_tensor2) {
   const auto dim_tensor1 = tensor1.dim();
   if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
-    const auto t1_sizes_ptr = tensor1.sizes().cbegin();
-    const auto t1_strides = tensor1.strides();
+    const auto t1_sizes_ptr = tensor1.sym_sizes().cbegin();
+    const auto t1_strides = tensor1.sym_strides();
     if (dim_tensor1 == 3 && dim_tensor2 == 2 &&
         t1_strides.back() != 1 &&
         t1_strides.front() == t1_sizes_ptr[1] * t1_sizes_ptr[2]) {
@@ -1875,24 +1875,24 @@ Tensor _matmul_impl(
     // Why not t1->view(-1, sizes_1.back())?
     // If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
     // This can happen in e.g. [3, 5, 0] @ [0, 0].
-    const auto sizes_1 = t1->sizes();
-    auto output_shape = DimVector(sizes_1.begin(), sizes_1.end() - 1);
+    const auto sizes_1 = t1->sym_sizes();
+    auto output_shape = SymDimVector(sizes_1.begin(), sizes_1.end() - 1);
     const auto folded_dim1 = c10::multiply_integers(output_shape);
 
     // Readjust output_shape if we are multiplying by a matrix
     const auto t2_is_matrix = t2->dim() == 2;
     if (t2_is_matrix) {
-      output_shape.push_back(t2->sizes()[1]);
+      output_shape.push_back(t2->sym_sizes()[1]);
     }
-    const auto t1_folded = t1->reshape({folded_dim1, sizes_1.back()});
+    const auto t1_folded = t1->reshape_symint({folded_dim1, sizes_1.back()});
     if (!has_out) {
       if (t2_is_matrix) {
         // FIXME This path always does an unnecessary copy when transpose == true as the returned
         // result from BLAS is already C-transposed
-        const auto output = at::_unsafe_view(t1_folded.mm(*t2), output_shape);
+        const auto output = at::_unsafe_view_symint(t1_folded.mm(*t2), output_shape);
         return transpose ? output.mT().contiguous() : output;
       } else {
-        return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
+        return at::_unsafe_view_symint(t1_folded.mv(*t2), output_shape);
       }
     } else {
       // Resize output into the correct shape
@@ -1900,18 +1900,18 @@ Tensor _matmul_impl(
       if (transpose_out) {
         // Swap last two elements of output_shape
         std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
-        at::native::resize_output(out, output_shape);
+        at::native::resize_output_symint(out, output_shape);
         std::iter_swap(output_shape.end() - 2, output_shape.end() - 1);
       } else {
-        at::native::resize_output(out, output_shape);
+        at::native::resize_output_symint(out, output_shape);
       }
       const auto out_ = transpose_out ? c10::MaybeOwned<Tensor>::owned(out.mT())
                                       : c10::MaybeOwned<Tensor>::borrowed(out);
 
       // We then reshape the output to the expected shape and call mm/mv
       // and transpose back if necessary
-      auto reshaped_out = t2_is_matrix ? out_->reshape({folded_dim1, t2->sizes().back()})
-                                       : out_->reshape({folded_dim1});
+      auto reshaped_out = t2_is_matrix ? out_->reshape_symint({folded_dim1, t2->sym_sizes().back()})
+                                       : out_->reshape_symint({folded_dim1});
       if (t2_is_matrix) {
         at::mm_out(reshaped_out, t1_folded, *t2);
       } else {
