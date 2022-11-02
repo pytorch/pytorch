@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import abc
 import collections
 import copy
 import dataclasses
@@ -2658,6 +2659,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         def gn(x, y=Foo.FOO):
             if y is Foo.FOO:
                 return x
+            else:
+                return x + 1
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(2, 3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_user_function_variable_supports_type_abcmeta_argument(self):
+        class Foo(metaclass=abc.ABCMeta):
+            @abc.abstractclassmethod
+            def read(self):
+                pass
+
+        class Bar(Foo):
+            def read(self):
+                return "Hello World!"
+
+        class Baz:
+            pass
+
+        def gn(x, tys=(Bar, Baz)):
+            if Bar in tys:
+                return x - 1
             else:
                 return x + 1
 

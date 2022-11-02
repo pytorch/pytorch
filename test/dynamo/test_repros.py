@@ -1471,8 +1471,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 10)
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sort_out(self):
 
         dtype = torch.float32
@@ -1490,8 +1488,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sigmoid_out(self):
 
         dtype = torch.float32
