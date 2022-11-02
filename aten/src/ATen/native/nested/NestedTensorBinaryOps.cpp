@@ -1,4 +1,5 @@
 #include <ATen/native/nested/NestedTensorMath.h>
+#include  <ATen/native/nested/NestedTensorBinaryOps.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -17,6 +18,8 @@
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(nested_dense_elementwise_stub);
 
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
 get_elementwise_nested_tensor_impl(
@@ -98,6 +101,7 @@ Tensor NestedTensor_elementwise_Tensor(
   // special case when other is dense
   if (self.is_nested() && !other.is_nested()) {
     // check for the [B, *, D], [B, 1, D] esuhm case
+    // this if statement is ugly and should be refactored
     auto self_ptr = get_nested_tensor_impl(self);
     if (self_ptr->dim() == 3 &&
         other.dim() == 3 &&
@@ -107,7 +111,21 @@ Tensor NestedTensor_elementwise_Tensor(
         self_ptr->opt_size(2).value() == other.size(2) &&
         self.is_cuda() &&
         other.is_cuda()) {
-      return at::_nested_add_dense_esuhm(self, other);
+      if (!nested_tensor_impl_is_contiguous(self_ptr)) {
+        self_ptr = get_nested_tensor_impl(self.contiguous());
+      }
+      const auto self_buffer = self_ptr->get_buffer();
+      const auto self_sizes = self_ptr->get_nested_size_tensor();
+      auto result_buffer = self_buffer.clone();
+      auto result = wrap_buffer(result_buffer, self_sizes);
+      if (op_name == "add") {
+        nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::ADD);
+      } else if (op_name == "mul") {
+        nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::MUL);
+      } else {
+        TORCH_CHECK(false, "Unsupported nested dense elementwise op");
+      }
+      return result;
     }
     TORCH_CHECK(false, "Expected both self and other to be nested, but got a nested self and non-nested other.");
   }
@@ -223,6 +241,17 @@ Tensor& fill_nested_(Tensor& self, const Tensor& value) {
   self_buf.fill_(value);
   return self;
 }
+
+void _nested_op_dense_esuhm_cpu(Tensor& result, const Tensor& self, const Tensor& other, const NESTED_DENSE_OP& op) {
+  // TODO: implement CPU kernel
+  TORCH_CHECK(false);
+}
+
+REGISTER_ARCH_DISPATCH(nested_dense_elementwise_stub, DEFAULT, &_nested_op_dense_esuhm_cpu);
+REGISTER_AVX512_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
+REGISTER_AVX2_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
+REGISTER_VSX_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
+REGISTER_ZVECTOR_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
 
 } // namespace native
 } // namespace at
