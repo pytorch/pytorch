@@ -15,6 +15,8 @@ import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
+from torch.distributed.elastic.multiprocessing.api import _get_kill_signal
+
 
 __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
 
@@ -81,7 +83,7 @@ class FileTimerClient(TimerClient):
     def __init__(self, file_path: str, signal: Optional[_signal.Signals] = None) -> None:
         super().__init__()
         self._file_path = file_path
-        self.signal = _signal.SIGKILL if signal is None else signal
+        self.signal = _get_kill_signal() if signal is None else signal
 
     def _open_non_blocking(self) -> Optional[io.TextIOWrapper]:
         try:
