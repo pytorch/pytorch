@@ -9,11 +9,11 @@
 
 namespace c10d {
 
-class TORCH_API ProcessGroupWrapper : public ProcessGroup {
+class TORCH_API ProcessGroupWrapper : public Backend {
  public:
   explicit ProcessGroupWrapper(
       c10::intrusive_ptr<ProcessGroup> pg,
-      c10::intrusive_ptr<ProcessGroupGloo> glooPg);
+      c10::intrusive_ptr<ProcessGroup> glooPg);
 
   const std::string getBackendName() const override;
 
@@ -124,7 +124,7 @@ class TORCH_API ProcessGroupWrapper : public ProcessGroup {
   c10::intrusive_ptr<ProcessGroup> pg_;
   // Gloo process group responsible for internal coordination such as monitored
   // barrier, sequence number checking, collective fingerprint collecting.
-  c10::intrusive_ptr<ProcessGroupGloo> glooPg_;
+  c10::intrusive_ptr<ProcessGroup> glooPg_;
   // Conducts several checks to ensure that the underlying collective is well
   // formed with the goal of notifying the user about incorrect collective use
   // in the application.

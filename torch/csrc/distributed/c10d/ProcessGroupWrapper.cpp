@@ -261,8 +261,8 @@ std::ostream& operator<<(
 
 ProcessGroupWrapper::ProcessGroupWrapper(
     c10::intrusive_ptr<ProcessGroup> pg,
-    c10::intrusive_ptr<ProcessGroupGloo> glooPg)
-    : ProcessGroup(pg->getRank(), pg->getSize()), pg_(pg), glooPg_(glooPg) {
+    c10::intrusive_ptr<ProcessGroup> glooPg)
+    : Backend(pg->getRank(), pg->getSize()), pg_(pg), glooPg_(glooPg) {
   // Set the sequence number for the underlying process group.
   pg_->setSequenceNumberForGroup();
 }

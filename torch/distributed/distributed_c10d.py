@@ -187,8 +187,6 @@ class Backend(object):
                 "Gloo or MPI backend for collective operations "
                 "on CPU tensors."
             )
-        elif value == Backend.UNDEFINED:
-            raise ValueError("Invalid backend: '{}'".format(name))
         elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
             value = name.lower()
         return value
@@ -229,6 +227,9 @@ class Backend(object):
         setattr(Backend, name.upper(), name.upper())
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
 
+class BackendConfig(object):
+    def __new__(cls, backend_list: str):
+        return backend_list
 
 # `_backend`, `dist_backend`, and `reduce_op` are here to maintain backward
 # compatibility with pre-c10d distributed package.
@@ -735,7 +736,13 @@ def init_process_group(
     elif init_method is None:
         init_method = "env://"
 
-    backend = Backend(backend)
+    if backend:
+        backend = Backend(backend)
+    else:
+        backend = Backend("undefined")
+    print(backend)
+    # print(backend)
+    # backendConfig = BackendConfig()
 
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
@@ -946,6 +953,22 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
             _pg_map[pg] = (Backend.UCC, store)
+            _pg_names[pg] = group_name
+        elif backend == Backend.UNDEFINED:
+            pg = ProcessGroup(prefix_store, group_rank, group_size, timeout=timeout)
+            # TODO: default backends, we won't instantiate here
+            gloo_prefix_store = PrefixStore("gloo", prefix_store)
+            gloo_pg = ProcessGroupGloo(gloo_prefix_store, group_rank, group_size, timeout=timeout)
+            print("finished creating gloo")
+            nccl_pg_options = ProcessGroupNCCL.Options()
+            nccl_pg_options.is_high_priority_stream = False
+            nccl_pg_options._timeout = timeout
+            nccl_prefix_store = PrefixStore("nccl", prefix_store)
+            nccl_pg = ProcessGroupNCCL(nccl_prefix_store, group_rank, group_size, nccl_pg_options)
+            print("finished creating nccl")
+            pg._set_backend(torch.device("cpu"), gloo_pg)
+            pg._set_backend(torch.device("cuda"), nccl_pg)
+            _pg_map[pg] = (Backend.UNDEFINED, store)
             _pg_names[pg] = group_name
         else:
             assert backend.upper() in Backend._plugins, (

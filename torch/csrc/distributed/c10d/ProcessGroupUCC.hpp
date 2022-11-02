@@ -53,7 +53,7 @@ struct event_pool_t {
 class Comm;
 
 // UCC does not support multiple CUDA devices per process.
-class TORCH_API ProcessGroupUCC : public ProcessGroup {
+class TORCH_API ProcessGroupUCC : public Backend {
  private:
   void set_timeout(ucc_coll_args_t& args);
 

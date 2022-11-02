@@ -562,7 +562,7 @@ ProcessGroupUCC::ProcessGroupUCC(
     int rank,
     int size,
     std::chrono::duration<float> timeout)
-    : ProcessGroup(rank, size), timeout_(timeout) {
+    : Backend(rank, size), timeout_(timeout) {
   c10::call_once(torch_ucc_config.flag, read_config);
   oob = std::make_shared<torch_ucc_oob_coll_info_t>();
   oob->rank = rank;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -10,12 +11,7 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/Types.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
-#include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/sequence_num.hpp>
-
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
 // versions 1.7 and 1.8.
@@ -67,7 +63,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     const std::string backend;
   };
 
-  explicit ProcessGroup(int rank, int size);
+  // Not used, only used for TypeDef in Ops.cpp
+  explicit ProcessGroup();
+
+  explicit ProcessGroup(const c10::intrusive_ptr<::c10d::Store>& store, int rank, int size, c10::intrusive_ptr<Options> options);
   virtual ~ProcessGroup();
 
   int getRank() const {
@@ -318,6 +317,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             "ProcessGroup ", getBackendName(), " does not support barrier"));
   }
 
+  void setBackend(c10::DeviceType device_type, const c10::intrusive_ptr<Backend>& backend) {
+    backends_[device_type] = backend;
+  }
+
+  c10::intrusive_ptr<Backend> getBackend(c10::DeviceType device_type) const {
+    TORCH_CHECK(
+        backends_.find(device_type) != backends_.end(),
+        "Backend for device type ",
+        device_type,
+        " is not registered");
+    return backends_.at(device_type);
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -330,6 +342,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
+
+  // Backend classes for this ProcessGroup
+  std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>> backends_;
 };
 
 } // namespace c10d

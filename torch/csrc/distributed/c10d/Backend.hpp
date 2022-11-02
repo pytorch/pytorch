@@ -10,7 +10,6 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -22,27 +21,27 @@ constexpr auto kDefaultTimeout =
 
 namespace c10d {
 
-// Options is a base struct that defines the basic options
-// when constructing a Backend. Each Backend subclass should
-// extend this struct and define its options if it wants to provide more
-// config options (beyond basic ones defined here) to end user.
-struct TORCH_API Options : torch::CustomClassHolder {
-  explicit Options(
-      std::string backend,
-      std::chrono::milliseconds timeout = kDefaultTimeout)
-      : timeout(timeout), backend(backend) {}
-  virtual ~Options() = default;
-
-  std::chrono::milliseconds timeout;
-
-  // backend name
-  const std::string backend;
-};
-
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
   explicit Backend(int rank, int size);
   virtual ~Backend() = 0;
+
+  int getRank() const {
+    return rank_;
+  }
+
+  int getSize() const {
+    return size_;
+  }
+
+  virtual void startCoalescing() {
+    // no-op for backends that have not implemented startCoalescing
+  }
+
+  virtual void endCoalescing(
+      std::vector<c10::intrusive_ptr<Work>>& /* reqs */) {
+    // no-op for backends that have not implemented endCoalescing
+  }
 
   // Subclasses must override this method to return the backend name
   virtual const std::string getBackendName() const {
@@ -255,14 +254,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), "does not support barrier"));
   }
 
-  int getRank() const {
-    return rank_;
-  }
-
-  int getSize() const {
-    return size_;
-  }
-
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -272,6 +263,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   const int rank_;
   const int size_;
+  // Debug level setting. It is parsed once when ProcessGroup is constructed and
+  // remains the same across use of this process group.
+  DebugLevel dist_debug_level_;
 };
 
 } // namespace c10d

@@ -731,7 +731,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : ProcessGroup(rank, size),
+    : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(options),
       stop_(false),

@@ -50,7 +50,7 @@ constexpr const char* GLOO_BACKEND_NAME = "gloo";
 // number can be automatically tuned, but only if we let a single
 // process take charge, and have it broadcast the limits.
 //
-class TORCH_API ProcessGroupGloo : public ProcessGroup {
+class TORCH_API ProcessGroupGloo : public Backend {
  public:
   // AsyncWork is the Gloo specific superclass for asynchronous work items.
   // We can split asynchronous work into 3 phases:

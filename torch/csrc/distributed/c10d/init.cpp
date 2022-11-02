@@ -1064,7 +1064,29 @@ Arguments:
           ::c10d::ProcessGroup,
           c10::intrusive_ptr<::c10d::ProcessGroup>,
           ::c10d::PyProcessGroup>(module, "ProcessGroup")
-          .def(py::init<int, int>())
+          .def(
+              py::init<
+                  const c10::intrusive_ptr<::c10d::Store>&,
+                  int,
+                  int,
+                  c10::intrusive_ptr<::c10d::ProcessGroup::Options>>(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size,
+                          const std::chrono::milliseconds& timeout) {
+                auto options =
+                    c10::make_intrusive<::c10d::ProcessGroup::Options>(
+                        "undefined", timeout);
+                return c10::make_intrusive<::c10d::ProcessGroup>(
+                    store, rank, size, options);
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::call_guard<py::gil_scoped_release>())
           .def("rank", &::c10d::ProcessGroup::getRank)
           .def("size", &::c10d::ProcessGroup::getSize)
           .def("name", &::c10d::ProcessGroup::getBackendName)
@@ -1442,6 +1464,24 @@ Arguments:
               "_end_coalescing",
               &::c10d::ProcessGroup::endCoalescing,
               py::arg("reqs"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_backend",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const c10::Device& device,
+                 const c10::intrusive_ptr<::c10d::Backend>& backend) {
+                self->setBackend(device.type(), backend);
+              },
+              py::arg("device"),
+              py::arg("backend"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_backend",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const c10::Device& device) {
+                return self->getBackend(device.type());
+              },
+              py::arg("device"),
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
@@ -1456,12 +1496,16 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
           .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
 
+  auto backend =
+      py::class_<::c10d::Backend, c10::intrusive_ptr<::c10d::Backend>>(
+          module, "Backend");
+
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
 
   auto processGroupGloo =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
-          module, "ProcessGroupGloo", processGroup);
+          module, "ProcessGroupGloo", backend);
 
   shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
 
@@ -1543,12 +1587,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupWrapper>(
           module, "_ProcessGroupWrapper", processGroup)
           .def(
-              py::init([](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
-                          const c10::intrusive_ptr<::c10d::ProcessGroupGloo>&
-                              gloo_pg) {
-                return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
-                    pg, gloo_pg);
-              }),
+              py::init(
+                  [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+                     const c10::intrusive_ptr<::c10d::ProcessGroup>& gloo_pg) {
+                    return c10::make_intrusive<::c10d::ProcessGroupWrapper>(
+                        pg, gloo_pg);
+                  }),
               py::arg("pg"),
               py::arg("gloo_pg"),
               py::call_guard<py::gil_scoped_release>())
@@ -1559,7 +1603,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #ifdef USE_C10D_NCCL
   auto processGroupNCCL =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
-          module, "ProcessGroupNCCL", processGroup)
+          module, "ProcessGroupNCCL", backend)
           .def(
               py::init<
                   const c10::intrusive_ptr<::c10d::Store>&,
