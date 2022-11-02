@@ -2897,10 +2897,10 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_cudnn = 'cudnn' in op and not\
-                    ('TORCH_CUDNN_V8_API_ENABLED' in os.environ and
-                     int(os.environ['TORCH_CUDNN_V8_API_ENABLED']) and
-                     torch.cuda.get_device_capability() >= (8, 0))
+                should_error_from_cudnn = 'cudnn' in op and \
+                    ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
+                     int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
+                     torch.cuda.get_device_capability() < (8, 0))
                 should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
