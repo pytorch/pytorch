@@ -235,25 +235,3 @@ non_native:
     opkind: ltc_cast
     properties:
       - ShapeCompute
-
-  # View ops only required until proper functionalization pass is introduced into LTC
-  - func: as_strided_view_update(Tensor target, Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
-    opkind: ltc_as_strided_view_update
-  - func: as_strided(Tensor input, int[] size, int[] stride, int storage_offset) -> Tensor
-  - func: diagonal_view_update(Tensor target, Tensor input, int offset, int dim1, int dim2) -> Tensor
-    opkind: ltc_diagonal_view_update
-    properties:
-      - ShapeCompute
-  - func: diagonal(Tensor input, int offset, int dim1, int dim2) -> Tensor
-  - func: narrow_view_update(Tensor input, Tensor source, int[] base_indices) -> Tensor
-    opkind: ltc_narrow_view_update
-  - func: narrow(Tensor input, int[] base_indices, int[] sizes) -> Tensor
-  - func: permute(Tensor input, int[] dims) -> Tensor
-  - func: resize(Tensor input, int[] size) -> Tensor
-  - func: select_view_update(Tensor target, Tensor source, int dim, int start, int end, int stride) -> Tensor
-    opkind: ltc_select_view_update
-    properties:
-      - ShapeCompute
-  - func: select(Tensor input, int dim, int start, int end, int stride) -> Tensor
-  - func: squeeze(Tensor input, int dim) -> Tensor
-  - func: unsqueeze(Tensor input, int dim) -> Tensor
