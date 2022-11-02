@@ -98,13 +98,16 @@ def triton_compute_type(dtype):
     return f"tl.{triton_type_name}"
 
 
-def triton_constant(value):
+def triton_constant(value, dtype):
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
         return 'float("-inf")'
     elif math.isnan(value):
         return 'float("nan")'
+    # 0 -> 0.0, otherwise triton will treat 0 as an int
+    if dtype.is_floating_point and isinstance(value, int):
+        value = float(value)
     return repr(value)
 
 
@@ -119,7 +122,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def constant(value, dtype):
-        return triton_constant(value)
+        return triton_constant(value, dtype)
 
     @staticmethod
     def abs(x):
@@ -838,7 +841,7 @@ class TritonKernel(Kernel):
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
+        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype), src_dtype)
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
