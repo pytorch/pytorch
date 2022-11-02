@@ -14,8 +14,6 @@ from . import _legacy
 
 
 __all__ = [
-    "rand",
-    "randn",
     "assert_allclose",
     "get_all_device_types",
     "make_non_contiguous",
@@ -38,10 +36,6 @@ def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dic
         return inner_wrapper
 
     return outer_wrapper
-
-
-rand = warn_deprecated("Use torch.rand() instead.")(torch.rand)
-randn = warn_deprecated("Use torch.randn() instead.")(torch.randn)
 
 
 _DTYPE_PRECISIONS = {
