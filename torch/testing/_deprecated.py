@@ -4,17 +4,13 @@ we don't internalize without warning, but still go through a deprecation cycle.
 """
 
 import functools
-import random
 import warnings
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 
 
-__all__ = [
-    "assert_allclose",
-    "make_non_contiguous",
-]
+__all__ = ["assert_allclose"]
 
 
 def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dict[str, Any], Any], str]]) -> Callable:
@@ -79,41 +75,3 @@ def assert_allclose(
         check_stride=False,
         msg=msg or None,
     )
-
-
-@warn_deprecated(
-    "Depending on the use case there a different replacement options:\n\n"
-    "- If you are using `make_non_contiguous` in combination with a creation function to create a noncontiguous tensor "
-    "with random values, use `torch.testing.make_tensor(..., noncontiguous=True)` instead.\n"
-    "- If you are using `make_non_contiguous` with a specific tensor, you can replace this call with "
-    "`torch.repeat_interleave(input, 2, dim=-1)[..., ::2]`.\n"
-    "- If you are using `make_non_contiguous` in the PyTorch test suite, use "
-    "`torch.testing._internal.common_utils.noncontiguous_like` instead."
-)
-def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
-    if tensor.numel() <= 1:  # can't make non-contiguous
-        return tensor.clone()
-    osize = list(tensor.size())
-
-    # randomly inflate a few dimensions in osize
-    for _ in range(2):
-        dim = random.randint(0, len(osize) - 1)
-        add = random.randint(4, 15)
-        osize[dim] = osize[dim] + add
-
-    # narrow doesn't make a non-contiguous tensor if we only narrow the 0-th dimension,
-    # (which will always happen with a 1-dimensional tensor), so let's make a new
-    # right-most dimension and cut it off
-
-    input = tensor.new(torch.Size(osize + [random.randint(2, 3)]))
-    input = input.select(len(input.size()) - 1, random.randint(0, 1))
-    # now extract the input of correct size from 'input'
-    for i in range(len(osize)):
-        if input.size(i) != tensor.size(i):
-            bounds = random.randint(1, input.size(i) - tensor.size(i))
-            input = input.narrow(i, bounds, tensor.size(i))
-
-    input.copy_(tensor)
-
-    # Use .data here to hide the view relation between input and other temporary Tensors
-    return input.data
