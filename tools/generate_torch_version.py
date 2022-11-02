@@ -26,8 +26,10 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
 def get_tag(pytorch_root: Union[str, Path]) -> str:
     try:
         tag = (
-            subprocess.check_output(
-                ["git", "describe", "--tags", "--exact"], cwd=pytorch_root
+            subprocess.run(
+                ["git", "describe", "--tags", "--exact"], 
+                cwd=pytorch_root,
+                capture_output=True
             )
             .decode("ascii")
             .strip()
