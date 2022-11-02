@@ -51,6 +51,44 @@ datatype. E.g.:
     a.norm() # produces tensor(inf)
     a.double().norm() # produces tensor(1.4142e+20, dtype=torch.float64), representable in fp32
 
+.. _Linear Algebra Stability:
+
+Linear algebra (`torch.linalg`)
+-------------------------------
+
+Functions within `torch.linalg` are particularly problematic when dealing with extremal values.
+We currently rely on external libraries (backends) for their implementation. These libraries do their
+best to be consistent amongst each other when dealing with finite values, but they provide no
+guarantees on their behaviour when given an input with IEEE 754 special values, such as `inf` or
+`NaN`. If you are lucky, they will error-out on these inputs, but some backends may even segfault!
+For most `linalg` functions, we use different libraries for different devices, so the results
+may vary from one device to another. Even more, for some functions such as :func:`torch.linalg.svd`,
+we choose amongst different backends depending on the shape of the given input to choose the fastest
+available algorithm.
+Therefore, as to be consistent and not pesimize the default speed of these operations,
+it is left to the user to check that the inputs they provide to these functions do not contain any
+special values.
+
+A similar issue happens with extremal values. Some `linalg` functions are not defined for all inputs.
+For example, :func:`torch.linalg.solve` is only defined when the input matrix `A` is invertible.
+Now, as is the case in most of PyTorch (see :ref:`Extremal Values<Extremal values>`), if `solve` is
+run on a matrix that's almost non-invertible (for example, a matrix that a has a very small
+singular value), then the algorithm implemented in `solve` may return a matrix that's far from the correct result.
+These matrices are said to be `ill-conditioned <https://nhigham.com/2020/03/19/what-is-a-condition-number/>`_.
+All the linear solvers, and some backends for `lstsq` require the matrices to be invertible (or full-rank).
+If provided with ill-conditioned inputs, their results may vary from backend to backend with some
+of them even being outrageously wrong! Similarly, spectral operations like `svd`, `eig`, and `svd`
+may return incorrect results (and their gradients may be infinite) when their inputs have repeated eigenvalues
+or they have eigenvalues that are too close to each other.
+The results may also vary when running the function on a single input or on a batched set of inputs,
+as the algorithms used may change.
+As in the case of NaNs and INFs, there is no one-size-fits-all solution.
+Running the computation in `float64` often helps, but it does not solve the issue in all cases.
+If one wants to guard themselves from this, they would need to compute the condition number of
+the input matrices (:func:`torch.linalg.cond`) and then decide what to do with the ill-conditioned
+inputs.
+
+
 TensorFloat-32(TF32) on Nvidia Ampere devices
 ---------------------------------------------
 

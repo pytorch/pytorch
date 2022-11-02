@@ -6,6 +6,8 @@ torch.linalg
 
 Common linear algebra operations.
 
+See :ref:`Linear Algebra Stability` for some common numerical edge-cases.
+
 .. automodule:: torch.linalg
 .. currentmodule:: torch.linalg
 
