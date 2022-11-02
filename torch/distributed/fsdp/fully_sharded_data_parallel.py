@@ -48,14 +48,13 @@ from torch.distributed.fsdp._init_utils import (
     _init_process_group_state,
     _init_runtime_state,
     _init_state_dict_state,
-    _init_streams,
 )
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
     _fsdp_root_pre_forward,
     _get_buffers_and_dtypes_for_checkpoint,
-    _get_buffers_and_dtypes_for_computation,
+    _lazy_init,
     _post_forward,
     _pre_forward,
     _pre_forward_unshard,
@@ -562,7 +561,7 @@ class FullyShardedDataParallel(nn.Module):
         return super().__getitem__(key)
 
     def check_is_root(self) -> bool:
-        self._lazy_init()
+        _lazy_init(self, self)
         assert self._is_root is not None
         return self._is_root
 
@@ -673,65 +672,6 @@ class FullyShardedDataParallel(nn.Module):
         Reset instance so :func:`_lazy_init` will run on the next forward.
         """
         self._is_root: Optional[bool] = None
-
-    def _lazy_init(self) -> None:
-        """
-        Performs initialization lazily, typically right before the first
-        forward pass. The laziness is needed to ensure that the parameter
-        device/dtype and the FSDP hierarchy have finalized.
-
-        This method's actual logic only runs on the root FSDP instance, which
-        performs initialization for all non-root FSDP instances to avoid
-        partial initialization.
-        """
-        if self._is_root is not None:
-            return  # no-op: already initialized
-        if not torch.cuda.is_available():
-            # Allow the FSDP constructor to run even without CUDA but check
-            # this once we start real execution
-            raise RuntimeError("FSDP does not support CPU only execution")
-        # The following logic is only run on the root FSDP instance since it
-        # will set `_is_root=False` for the non-root instances
-        self._is_root = True
-        self._assert_state(TrainingState.IDLE)
-        _init_streams(self)
-        buffers, buffer_dtypes = _get_buffers_and_dtypes_for_computation(self, self)
-        _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, self.compute_device)
-        for handle in self._handles:
-            handle.init_flat_param_attributes()
-        self._exec_order_data.init(self, self.process_group)
-        # Initialize non-root FSDP instances and share attributes from the root
-        # to non-root instances
-        inconsistent_limit_all_gathers = False
-        for fsdp_module in self.fsdp_modules(self):
-            if fsdp_module is not self:
-                # Relax the assert for non-root FSDP instances in case the
-                # nested initialized module is wrapped again in FSDP later (e.g.
-                # after training to run inference)
-                assert fsdp_module._is_root is None or not fsdp_module._is_root, (
-                    "Non-root FSDP instance's `_is_root` should not have been "
-                    "set yet or should have been set to `False`"
-                )
-                fsdp_module._is_root = False
-                fsdp_module._streams = self._streams
-                fsdp_module._exec_order_data = self._exec_order_data
-                if fsdp_module.limit_all_gathers != self.limit_all_gathers:
-                    # Prefer the root's value
-                    inconsistent_limit_all_gathers = True
-                    fsdp_module.limit_all_gathers = self.limit_all_gathers
-                fsdp_module._free_event_queue = self._free_event_queue
-                fsdp_module._handles_prefetched = self._handles_prefetched
-                fsdp_module._needs_pre_backward_unshard = (
-                    self._needs_pre_backward_unshard
-                )
-                for handle in fsdp_module._handles:
-                    handle.init_flat_param_attributes()
-        if inconsistent_limit_all_gathers:
-            warnings.warn(
-                "Found inconsistent `limit_all_gathers` values across FSDP "
-                f"instances on rank {self.rank}. Using the root FSDP's value "
-                f"of {self.limit_all_gathers} for all instances."
-            )
 
     @staticmethod
     def set_state_dict_type(
@@ -929,7 +869,7 @@ class FullyShardedDataParallel(nn.Module):
         # is available.
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        self._lazy_init()
+        _lazy_init(self, self)
         if self._is_root:
             _clear_grads_if_needed(self._fsdp_handles(self))
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
@@ -994,7 +934,7 @@ class FullyShardedDataParallel(nn.Module):
         with torch.autograd.profiler.record_function(
             "FullyShardedDataParallel.forward"
         ):
-            self._lazy_init()
+            _lazy_init(self, self)
             args, kwargs = _fsdp_root_pre_forward(self, *args, **kwargs)
             unused = None
             unshard_fn = functools.partial(_pre_forward_unshard, self, self._handles)
@@ -1166,7 +1106,7 @@ class FullyShardedDataParallel(nn.Module):
             return
 
         torch.cuda.synchronize()
-        self._lazy_init()
+        _lazy_init(self, self)
         self._assert_state([TrainingState.IDLE])
         for handle in self._handles:
             assert handle._training_state == HandleTrainingState.IDLE
@@ -1596,7 +1536,7 @@ class FullyShardedDataParallel(nn.Module):
             offloaded to CPU when inside the context manager. Instead, they
             will only be offloaded right after the eventual sync.
         """
-        self._lazy_init()
+        _lazy_init(self, self)
         if not self._is_root:
             raise RuntimeError(
                 "`no_sync()` on inner FSDP instances is not supported. Please call `no_sync()` on root FSDP module."
@@ -1644,7 +1584,7 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: This needs to be called on all ranks since it uses
             collective communications.
         """
-        self._lazy_init()
+        _lazy_init(self, self)
         if not self._is_root:
             raise RuntimeError(
                 "`clip_grad_norm_()` should only be called on the root FSDP instance"
