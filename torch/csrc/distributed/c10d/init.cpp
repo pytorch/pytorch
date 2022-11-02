@@ -1498,7 +1498,15 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
   auto backend =
       py::class_<::c10d::Backend, c10::intrusive_ptr<::c10d::Backend>>(
-          module, "Backend");
+          module, "Backend")
+          .def(
+              "_set_sequence_number_for_group",
+              &::c10d::Backend::setSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_get_sequence_number_for_group",
+              &::c10d::Backend::getSequenceNumberForGroup,
+              py::call_guard<py::gil_scoped_release>());
 
 #ifdef USE_C10D_GLOO
   static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
