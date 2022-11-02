@@ -13,7 +13,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
 
-from .. import config
+from .. import config, disable
 from ..utils import clone_inputs, count_calls, counters
 from .analysis import has_mutation
 from .backends import BACKENDS
@@ -352,7 +352,7 @@ def create_nvprims_backend(*, executor, cudagraphs):
         def candidate(self):
             from functorch.compile import aot_module_simplified
 
-            @torch._dynamo.disable
+            @disable
             def fw_compiler(model: torch.fx.GraphModule, example_inputs):
                 num_fixed = len(example_inputs) - self.num_example_inputs
                 return partial(
@@ -362,7 +362,7 @@ def create_nvprims_backend(*, executor, cudagraphs):
                     cudagraphs=self.cudagraphs,
                 )(model, example_inputs)
 
-            @torch._dynamo.disable
+            @disable
             def bw_compiler(model: torch.fx.GraphModule, example_inputs):
                 from torch._inductor.compile_fx import count_tangents
 
@@ -384,7 +384,7 @@ def create_nvprims_backend(*, executor, cudagraphs):
 
 
 class nvfuser_config:
-    cudagraphs = True and not torch._dynamo.config.dynamic_shapes
+    cudagraphs = True and not config.dynamic_shapes
 
 
 aot_nvprims_nvfuser = create_nvprims_backend(
