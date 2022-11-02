@@ -1575,14 +1575,14 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
-Tensor reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    TORCH_CHECK(0, "reshape is not implemented for sparse tensors");
+    TORCH_CHECK(0, "_reshape_copy is not implemented for sparse tensors");
   }
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
 
   if (self.is_mkldnn()) {
-    TORCH_CHECK(0, "reshape_copy not implemented for mkldnn tesnors");
+    TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
   }
 
   if (self.is_contiguous()) {
