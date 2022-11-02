@@ -4223,12 +4223,14 @@ if HAS_CPU:
             x2 = torch.randn((10, 20))
 
             with patch.object(config.cpp, "simdlen", 8):
+                torch._dynamo.reset()
                 metrics.reset()
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
+                torch._dynamo.reset()
                 metrics.reset()
                 x1 = x1.permute(1, 0)
                 x2 = torch.randn((20, 10))
@@ -4237,6 +4239,7 @@ if HAS_CPU:
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
+                torch._dynamo.reset()
                 metrics.reset()
                 x1 = torch.randn((10, 7))
                 x2 = torch.randn((10, 7))

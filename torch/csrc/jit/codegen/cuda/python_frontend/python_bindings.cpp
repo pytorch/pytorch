@@ -40,6 +40,24 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("ComplexDouble", Nvf::DataType::ComplexDouble)
       .value("Null", Nvf::DataType::Null);
 
+  nvfuser.def(
+      "compute_contiguity",
+      [](const std::vector<int64_t>& sizes,
+         const std::vector<int64_t>& strides) {
+        py::tuple contiguity(sizes.size());
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "compute_contiguity: Sizes and strides must have the same number of dimensions");
+        if (sizes.size() == 0) {
+          return contiguity;
+        }
+        contiguity[sizes.size() - 1] = strides.back() == 1;
+        for (int64_t i = static_cast<int64_t>(sizes.size()) - 2; i >= 0; --i) {
+          contiguity[i] = strides[i] == strides[i + 1] * sizes[i + 1];
+        }
+        return contiguity;
+      });
+
   //! Binding the FusionCache that holds a cache of Fusions
   //! This is only bound to provide an interface to get the number of fusions
   //! that are cached.
@@ -1182,15 +1200,15 @@ void initNvFuserPythonBindings(PyObject* module) {
       "permute",
       [](nvfuser::FusionDefinition::Operators& self,
          nvfuser::Tensor arg,
-         std::vector<int64_t>& permutation) -> nvfuser::Tensor {
+         std::vector<int64_t>& dims) -> nvfuser::Tensor {
         nvfuser::FusionDefinition* fd = self.fusion_definition;
         nvfuser::Tensor output = fd->defineTensor();
         self.fusion_definition->defineRecord(new nvfuser::PermuteOpRecord(
-            {fd->recordingState(arg())},
-            {fd->recordingState(output())},
-            permutation));
+            {fd->recordingState(arg())}, {fd->recordingState(output())}, dims));
         return output;
       },
+      py::arg("arg"),
+      py::arg("dims"),
       py::return_value_policy::reference);
 
   nvf_ops.def(
