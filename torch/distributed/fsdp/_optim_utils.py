@@ -948,7 +948,7 @@ def _get_flat_param_to_fsdp_module(model: torch.nn.Module):
     flat_param_to_fsdp_module = {}
     for module in model.modules():
         if isinstance(module, fsdp_file.FullyShardedDataParallel):
-            module._lazy_init()
+            fsdp_file._lazy_init(module, module)
             for param in module.params:  # may have none
                 flat_param_to_fsdp_module[param] = module
     return flat_param_to_fsdp_module
