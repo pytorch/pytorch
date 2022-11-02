@@ -616,7 +616,39 @@ This class does not support ``__members__`` property.)");
           "__deepcopy__",
           [](const ::c10d::ReduceOp& self, const py::dict& memo) {
             return ::c10d::ReduceOp(self);
-          });
+          })
+      .def(py::pickle(
+          [](const ::c10d::ReduceOp& r) {
+            // __getstate__
+            if (r.op_ != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
+              return py::make_tuple(r.op_, py::none());
+            }
+            TORCH_CHECK(r.supplement_.defined(), "Invalid PREMUL_SUM ReduceOp");
+            const auto* preMulSupplement =
+                reinterpret_cast<::c10d::NCCLPreMulSumSupplement*>(
+                    r.supplement_.get());
+            if (preMulSupplement->tensor_factors.empty()) {
+              return py::make_tuple(r.op_, preMulSupplement->double_factor);
+            } else {
+              return py::make_tuple(r.op_, preMulSupplement->tensor_factors);
+            }
+          },
+          [](const py::tuple t) {
+            // __setstate__
+            TORCH_CHECK(t.size() == 2, "Invalid state");
+            const auto op =
+                static_cast<::c10d::ReduceOp::RedOpType>(t[0].cast<uint8_t>());
+            if (op != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
+              return ::c10d::ReduceOp(op);
+            }
+            const auto preMulSupplement_factor = t[1];
+            if (py::isinstance<py::float_>(preMulSupplement_factor)) {
+              return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
+            } else {
+              return ::c10d::makeNCCLPreMulSum(
+                  t[1].cast<std::vector<at::Tensor>>());
+            }
+          }));
 
   // note(crcrpar): Deliberately skip
   // [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
