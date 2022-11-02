@@ -164,7 +164,7 @@ op_db: List[OpInfo] = [
             # Dispatch stub: unsupported device typemeta
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestGradients",
+                "TestFwdGradients",
                 "test_fn_fwgrad_bwgrad",
                 device_type="meta",
             ),
