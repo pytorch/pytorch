@@ -193,7 +193,7 @@ def redistribute_dtensor(
 
 class Redistribute(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore
+    def forward(  # type: ignore[override]
         # pyre-fixme[2]: Parameter must be annotated.
         ctx,
         input: "dtensor.DTensor",
@@ -205,7 +205,7 @@ class Redistribute(torch.autograd.Function):
         return redistribute_dtensor(input, device_mesh, placements)
 
     @staticmethod
-    def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore
+    def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_placement = ctx.previous_placement
         previous_device_mesh = ctx.previous_device_mesh
         # When we run backward pass of redistribute (i.e. manual redistribute from

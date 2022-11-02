@@ -1,9 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
+
 import torch
 import torch.nn as nn
 import functools
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.common_dtensor import DTensorTestBase, with_comms, NUM_DEVICES, skip_unless_torch_gpu  # type: ignore
+from torch.testing._internal.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+    NUM_DEVICES,
+    skip_unless_torch_gpu,
+)
 from torch.distributed._tensor import (
     distribute_tensor,
     distribute_module,

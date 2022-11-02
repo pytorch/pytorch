@@ -71,4 +71,4 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
         dims = [normalize_dim(dim, ndim) for dim in dims]
     elif isinstance(dims, tuple):
         dims = tuple([normalize_dim(dim, ndim) for dim in dims])
-    return dims  # type: ignore
+    return dims

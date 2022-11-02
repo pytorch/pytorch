@@ -307,8 +307,8 @@ def _pre_load_state_dict(
 ) -> Tuple[torch.Tensor, List[Shard]]:
     shards = cast(ShardedTensor, tensor).local_shards()
     if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
-        inner_tensor = cast(ShardedTensor, shards[0].tensor)
-        shards = inner_tensor.local_shards()
+        inner_tensor = shards[0].tensor
+        shards = inner_tensor.local_shards()  # pyre-ignore[16]
         tensor = inner_tensor
 
     return (tensor, shards if len(shards) > 0 else [])
@@ -349,7 +349,7 @@ try:
             self,
             tensor: torch.Tensor,
         ) -> Tuple[torch.Tensor, List[Shard]]:
-            return _pre_load_state_dict(tensor)  # type: ignore
+            return _pre_load_state_dict(tensor)
 
     _set_fsdp_extensions(DTensorExtensions())
 

@@ -28,8 +28,8 @@ def _view_with_sharding_dim_change(
 class _ViewAndRedistribute(torch.autograd.Function):
     @staticmethod
     # pyre-fixme[14]: Inconsistent override.
-    def forward(  # type: ignore
-        ctx,  # type: ignore
+    def forward(  # type: ignore[override]
+        ctx,  # pyre-ignore[2]: Parameter must be annotated.
         self: DT,
         sharding_dim: int,
         shape: Tuple[int, ...],
@@ -47,7 +47,7 @@ class _ViewAndRedistribute(torch.autograd.Function):
             or self.placements[0].is_partial()
         ):
             # pyre-fixme[7]: Incompatible return type.
-            return self.view(shape)  # type: ignore
+            return self.view(shape)  # type: ignore[return-value]
         else:
             if sharding_dim < 0:
                 sharding_dim += self.dim()
@@ -60,7 +60,7 @@ class _ViewAndRedistribute(torch.autograd.Function):
             try:
                 infer_idx = shape.index(-1)
             except ValueError:
-                infer_idx = None  # type: ignore
+                infer_idx = None  # type: ignore[assignment]
 
             # Infer the dim which is specified with -1.
             if infer_idx is not None:
@@ -90,7 +90,7 @@ class _ViewAndRedistribute(torch.autograd.Function):
             )
 
     @staticmethod
-    def backward(ctx, grad_output: DT) -> Tuple[DT, None, None]:  # type: ignore
+    def backward(ctx, grad_output: DT) -> Tuple[DT, None, None]:  # type: ignore[override]
         previous_placement = ctx.previous_placement
         previous_device_mesh = ctx.previous_device_mesh
         previous_local_tensor_size = ctx.previous_local_shape

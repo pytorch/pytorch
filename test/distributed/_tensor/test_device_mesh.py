@@ -1,4 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
+
 import torch
 
 from torch.distributed.distributed_c10d import (
@@ -8,7 +10,7 @@ from torch.distributed.distributed_c10d import (
     get_world_size,
 )
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.common_dtensor import (  # type: ignore
+from torch.testing._internal.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
