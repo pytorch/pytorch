@@ -831,10 +831,6 @@ def _new_process_group_helper(
             "Expected timeout argument to be of type" "datetime.timedelta"
         )
 
-    # update the global state
-    _pg_map[pg] = (backend, store)
-    _pg_names[pg] = group_name
-
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
 
@@ -929,6 +925,10 @@ def _new_process_group_helper(
                         world_size=group_size,
                         timeout=timeout,
                     )
+
+    # update global state
+    _pg_map[pg] = (backend, store)
+    _pg_names[pg] = group_name
     return pg
 
 
