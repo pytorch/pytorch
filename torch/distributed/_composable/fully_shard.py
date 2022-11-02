@@ -3,7 +3,7 @@ from typing import Callable, Iterable, Optional, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable import contract
+from torch.distributed._composable.contract import contract
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
     _init_core_state,
