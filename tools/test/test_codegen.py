@@ -217,9 +217,11 @@ class TestGenSchemaRegistration(unittest.TestCase):
             loc=torchgen.model.Location(__file__, 1),
             valid_tags=set(),
         )
-        self.fragment_custom_native_function, _ = torchgen.model.NativeFunction.from_yaml(
-            {"func": "custom::func2() -> bool",
-             "tags": set("fragment")},
+        (
+            self.fragment_custom_native_function,
+            _,
+        ) = torchgen.model.NativeFunction.from_yaml(
+            {"func": "custom::func2() -> bool", "tags": set("fragment")},
             loc=torchgen.model.Location(__file__, 1),
             valid_tags=set("fragment"),
         )
@@ -247,7 +249,7 @@ TORCH_LIBRARY(custom, m) {
         )
 
     def test_fragment_custom_namespace_schema_registration_code_valid(self) -> None:
-        """ Sometimes we want to extend an existing namespace, for example quantized
+        """Sometimes we want to extend an existing namespace, for example quantized
         namespace, which is already defined in native/quantized/library.cpp
         """
         _, registrations = get_native_function_schema_registrations(
@@ -263,12 +265,17 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
 };""",
         )
 
-    def test_fragment_custom_namespace_multi_ops_schema_registration_code_valid(self) -> None:
-        """ This is to test as long as one op has the tag fragment, we'll register
+    def test_fragment_custom_namespace_multi_ops_schema_registration_code_valid(
+        self,
+    ) -> None:
+        """This is to test as long as one op has the tag fragment, we'll register
         all the ops through fragment macro
         """
         _, registrations = get_native_function_schema_registrations(
-            native_functions=[self.custom_native_function, self.fragment_custom_native_function],
+            native_functions=[
+                self.custom_native_function,
+                self.fragment_custom_native_function,
+            ],
             schema_selector=self.selector,
         )
         self.assertEqual(
@@ -403,7 +410,8 @@ TORCH_API bool kernel_1();
         self.one_return_func, _ = NativeFunction.from_yaml(
             es[0], loc=Location(__file__, 1), valid_tags=set("fragment")
         )
-        self.assertTrue("fragment" in one_return_func.tags)
+        self.assertTrue("fragment" in self.one_return_func.tags)
+
 
 # Test for native_function_generation
 class TestNativeFunctionGeneratrion(unittest.TestCase):
