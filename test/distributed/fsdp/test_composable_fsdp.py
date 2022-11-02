@@ -3,6 +3,7 @@
 import copy
 import functools
 import sys
+from typing import Any, Tuple
 
 import torch
 import torch.distributed as dist
@@ -10,6 +11,7 @@ import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._fsdp import fully_sharded_data_parallel
+from torch.distributed.fsdp._runtime_utils import _root_pre_forward
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -65,6 +67,9 @@ class Model(nn.Module):
             transformer_auto_wrap_policy, transformer_layer_cls={SubModel}
         )
 
+    def get_input(self, device=torch.device) -> Tuple[Any, ...]:
+        return (torch.randn((8, 5), device=device),)
+
 
 class TestFSDPInitialization(FSDPTest):
     """Tests composable FSDP initialization."""
@@ -78,7 +83,6 @@ class TestFSDPInitialization(FSDPTest):
         """Tests passing an ``auto_wrap_policy``."""
 
         local_model = Model(device=torch.device("cuda"))
-
         fsdp_wrapped_model = FSDP(
             copy.deepcopy(local_model),
             auto_wrap_policy=Model.auto_wrap_policy(),
@@ -207,6 +211,57 @@ class TestFSDPInitialization(FSDPTest):
             fsdp_wrapped_model.parameters(),
         ):
             self.assertEqual(composable_param, fsdp_wrapped_param)
+
+
+class TestFSDPRuntime(FSDPTest):
+    """Tests composable FSDP runtime."""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_training(self):
+        """Tests training (forward, backward, optimizer)."""
+        device = torch.device("cuda")
+        local_model = Model(device=device)
+        fsdp_wrapped_model = FSDP(
+            copy.deepcopy(local_model),
+            auto_wrap_policy=Model.auto_wrap_policy(),
+            use_orig_params=True,
+        )
+        composable_module = copy.deepcopy(local_model)
+        fsdp_state = fully_sharded_data_parallel(
+            composable_module,
+            auto_wrap_policy=Model.auto_wrap_policy(),
+        )
+        del local_model  # not needed anymore
+        LR = 1e-2
+        fsdp_wrapped_optim = torch.optim.Adam(fsdp_wrapped_model.parameters(), lr=LR)
+        composable_optim = torch.optim.Adam(composable_module.parameters(), lr=LR)
+        for _ in range(5):
+            inp = composable_module.get_input(device)
+            losses = []
+            for model, optim in (
+                (fsdp_wrapped_model, fsdp_wrapped_optim),
+                (composable_module, composable_optim),
+            ):
+                optim.zero_grad(set_to_none=True)
+                # TODO (awgu): Remove this after resolving the root pre-forward
+                # hook registration, currently blocked by kwarg support
+                if model is composable_module:
+                    args, kwargs = _root_pre_forward(
+                        fsdp_state, composable_module, *inp
+                    )
+                else:
+                    args = inp
+                    kwargs = {}
+                out = model(*args, **kwargs)
+                loss = out.sum()
+                losses.append(loss)
+                loss.backward()
+                optim.step()
+            self.assertEqual(losses[0], losses[1])
 
 
 instantiate_parametrized_tests(TestFSDPInitialization)

@@ -57,7 +57,7 @@ def _is_composable(state: _State):
 
 
 @no_type_check
-def _all_handles(state: _State):
+def _all_handles(state: _State) -> List:
     return (
         state._handles
         if _is_composable(state)

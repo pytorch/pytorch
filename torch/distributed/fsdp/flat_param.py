@@ -159,6 +159,8 @@ class FlatParameter(nn.Parameter):
             (i.e. some per-parameter state) used to customize pre-flatten and
             post-unflatten behavior. This is experimental, and users should not
             depend on its existence in the future.
+        _modules (Set[nn.Module]): Modules that contain some original parameter
+            that is flattened into the ``FlatParameter``.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -255,6 +257,9 @@ class FlatParameter(nn.Parameter):
         self._fqns = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._param_extensions = tuple(param_extensions)
+        self._modules = set(pi.module for pi in self._param_infos).union(
+            set(spi.module for spi in self._shared_param_infos)
+        )
         assert (params is None) == (shared_params is None)
         if params is not None:
             assert shared_params is not None and len(shared_params) == len(

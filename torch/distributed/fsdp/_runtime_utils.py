@@ -1,6 +1,6 @@
 import functools
 import warnings
-from typing import Any, Callable, List, no_type_check, Optional, Tuple
+from typing import Any, Callable, Iterable, List, no_type_check, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -56,7 +56,7 @@ def _lazy_init(
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
     for handle in state._handles:
         handle.init_flat_param_attributes()
-    state._exec_order_data.init(state, state.process_group)
+    state._exec_order_data.init(state, root_module, state.process_group)
     if _is_composable(state):
         # Return early since there is no need to share data structures
         return state
@@ -219,7 +219,8 @@ def _pre_forward(
             the current forward.
         unshard_fn (Optional[Callable]): A callable to unshard any currently
             sharded parameters or ``None`` to not do any unsharding.
-        module (nn.Module): Module whose forward this method runs right before.
+        module (nn.Module): Module whose forward this method runs right before;
+            expected by the hook signature.
         input (Any): Unused; expected by the hook signature.
     """
     state.training_state = TrainingState.FORWARD_BACKWARD
@@ -309,9 +310,9 @@ def _post_forward_reshard(
 
 
 @no_type_check
-def _fsdp_root_pre_forward(
+def _root_pre_forward(
     state: _State,
-    root_module: nn.Module,
+    module: nn.Module,
     *args,
     **kwargs,
 ):
@@ -321,8 +322,12 @@ def _fsdp_root_pre_forward(
     lazy initialization (which only runs non-vacuously once). Otherwise, if
     this is called on a non-root FSDP instance, then the forward inputs are
     returned directly.
+
+    Args:
+        module (nn.Module): Module for which this logic tries to run. It may or
+            may not be the root. If not, then this method does not do anything.
     """
-    _lazy_init(state, root_module)
+    _lazy_init(state, module)
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
@@ -419,7 +424,10 @@ def _pre_backward_hook(
             _register_post_backward_final_callback(state)
             _clear_grads_if_needed(_all_handles(state))
         elif _handles_key:
-            _assert_in_training_states(state, [TrainingState.IDLE])
+            allowed_states = [TrainingState.IDLE]
+            if _is_composable(state):
+                allowed_states.append(TrainingState.FORWARD_BACKWARD)
+            _assert_in_training_states(state, allowed_states)
         state.training_state = TrainingState.FORWARD_BACKWARD
         # Queueing the post-backward callback is the only logic that is not
         # per-handle in the pre-backward hook, so we can return early here if
@@ -847,6 +855,87 @@ def _get_training_state(
         f"Expects uniform training state but got {training_states}",
     )
     return next(iter(training_states))
+
+
+@no_type_check
+def _register_pre_forward_hooks(
+    state: _State,
+    modules: Iterable[nn.Module],
+) -> None:
+    """
+    Registers pre-forward hooks on all modules in ``modules``. The pre-forward
+    hooks are partially applied based on the current ``FlatParamHandle``
+    construction, meaning that they must be re-registered if the construction
+    changes.
+    """
+    for forward_handle in state._pre_forward_handles:
+        forward_handle.remove()
+    state._pre_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            unshard_fn = functools.partial(
+                _pre_forward_unshard,
+                state,
+                module_param_handles,
+            )
+            hook = functools.partial(
+                _pre_forward, state, module_param_handles, unshard_fn
+            )
+            state._pre_forward_handles.append(module.register_forward_pre_hook(hook))
+
+
+@no_type_check
+def _register_post_forward_hooks(
+    state: _State,
+    modules: Iterable[nn.Module],
+) -> None:
+    """
+    Registers post-forward hooks on all modules in ``modules``. The
+    post-forward hooks are partially applied based on the current
+    ``FlatParamHandle`` construction, meaning that they must be re-registered
+    if the construction changes.
+    """
+    for forward_handle in state._post_forward_handles:
+        forward_handle.remove()
+    state._post_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            reshard_fn = functools.partial(
+                _post_forward_reshard,
+                state,
+                module_param_handles,
+            )
+            hook = functools.partial(
+                _post_forward,
+                state,
+                module_param_handles,
+                reshard_fn,
+            )
+            state._post_forward_handles.append(module.register_forward_hook(hook))
+
+
+@no_type_check
+def _register_root_pre_forward_hooks(
+    state: _State,
+    modules: Iterable[nn.Module],
+):
+    """
+    # TODO (awgu): This requires kwarg support for hooks registered by
+    ``register_forward_pre_hook()``. ``_root_pre_forward()`` does not have the
+    supported hook signature right now.
+    """
+    for forward_handle in state._root_pre_forward_handles:
+        forward_handle.remove()
+    state._root_pre_forward_handles.clear()
+    for module in modules:
+        module_param_handles = state._module_to_handles[module]
+        if module_param_handles:
+            hook = functools.partial(_root_pre_forward, state, module)
+            state._root_pre_forward_handles.append(
+                module.register_forward_pre_hook(hook)
+            )
 
 
 @no_type_check
