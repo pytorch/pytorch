@@ -19,6 +19,7 @@ enum class RecordType {
   Op,
   BatchNormOp,
   BroadcastOp,
+  BroadcastInDimOp,
   CastOp,
   Constant,
   End,
@@ -536,8 +537,8 @@ struct SqueezeOpRecord : RecordFunctor {
 
 //! Specialized Record Functor for the FusionDefinition's broadcast_in_dim op.
 
-struct BroadcastOpRecord : RecordFunctor {
-  BroadcastOpRecord(
+struct BroadcastInDimOpRecord : RecordFunctor {
+  BroadcastInDimOpRecord(
       std::vector<State> _args,
       std::vector<State> _outputs,
       std::string _name,
@@ -547,12 +548,12 @@ struct BroadcastOpRecord : RecordFunctor {
             std::move(_args),
             std::move(_outputs),
             _name,
-            RecordType::BroadcastOp),
+            RecordType::BroadcastInDimOp),
         output_shape_(std::move(output_shape)),
         broadcast_dims_(std::move(broadcast_dims)) {}
-  virtual ~BroadcastOpRecord() = default;
+  virtual ~BroadcastInDimOpRecord() = default;
   virtual RecordFunctor* clone() final {
-    return new BroadcastOpRecord(*this);
+    return new BroadcastInDimOpRecord(*this);
   }
 
   //! Child specific hash function in lower 32 bits.
@@ -574,7 +575,7 @@ struct BroadcastOpRecord : RecordFunctor {
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (auto child_ptr = dynamic_cast<const BroadcastOpRecord*>(&other)) {
+    if (auto child_ptr = dynamic_cast<const BroadcastInDimOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
       if (result) {
         result =
@@ -696,6 +697,77 @@ struct BroadcastOpRecord : RecordFunctor {
   //! For instance, for output [2, 3, 4] and input [3]. This vector would
   //! contain [1].
   std::vector<int64_t> broadcast_dims_;
+};
+
+//! Specialized Record Functor for the FusionDefinition's broadcast op.
+
+struct BroadcastOpRecord : RecordFunctor {
+  BroadcastOpRecord(
+      std::vector<State> _args,
+      std::vector<State> _outputs,
+      std::string _name,
+      std::vector<bool>& is_broadcast_dim)
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            _name,
+            RecordType::BroadcastOp),
+        is_broadcast_dim_(std::move(is_broadcast_dim)) {}
+  virtual ~BroadcastOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new BroadcastOpRecord(*this);
+  }
+
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    size_t is_broadcast_dim_hash = 0;
+    for (size_t i = 0; i < is_broadcast_dim_.size(); ++i) {
+      is_broadcast_dim_hash |=
+          (is_broadcast_dim_[i] << (is_broadcast_dim_.size() - 1 - i));
+    }
+    return result | (is_broadcast_dim_hash & 0xfff);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const BroadcastOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      result &= std::equal(
+          is_broadcast_dim_.begin(),
+          is_broadcast_dim_.end(),
+          child_ptr->is_broadcast_dim_.begin());
+    }
+    return result;
+  }
+
+  virtual void operator()(FusionDefinition& fd) final {
+    auto arg =
+        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto output = Nvf::broadcast(arg, is_broadcast_dim_);
+    fd.setFusionState(outputs_.at(0).index, output);
+  }
+
+  virtual void print(std::ostream& os, bool close_function = true) const {
+    RecordFunctor::print(os, false);
+    os << ", is_broadcast_dim=[";
+    bool first_arg = true;
+    for (auto dim : is_broadcast_dim_) {
+      if (first_arg) {
+        first_arg = false;
+      } else {
+        os << ", ";
+      }
+      os << (dim ? "True" : "False");
+    }
+    os << "]";
+    if (close_function) {
+      os << ")";
+    }
+  }
+
+ private:
+  //! Communicates which dimensions in the output are broadcasted.
+  std::vector<bool> is_broadcast_dim_;
 };
 
 template <class OutType, class ArgType>

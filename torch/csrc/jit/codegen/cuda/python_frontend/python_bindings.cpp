@@ -1364,7 +1364,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             output_shape.size() >= broadcast_dims.size(),
             "broadcast_dims vector size is too big for output shape!");
         nvfuser::Tensor output = fd->defineTensor();
-        fd->defineRecord(new nvfuser::BroadcastOpRecord(
+        fd->defineRecord(new nvfuser::BroadcastInDimOpRecord(
             {fd->recordingState(arg())},
             {fd->recordingState(output())},
             "ops.broadcast_in_dim",
@@ -1375,6 +1375,24 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("arg"),
       py::arg("output_shape"),
       py::arg("broadcast_dims"),
+      py::return_value_policy::reference);
+  nvf_ops.def(
+      "broadcast",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor arg,
+         std::vector<bool>& is_broadcast_dim) -> nvfuser::Tensor {
+        FUSER_PERF_SCOPE("Operators.broadcast");
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::BroadcastOpRecord(
+            {fd->recordingState(arg())},
+            {fd->recordingState(output())},
+            "ops.broadcast",
+            is_broadcast_dim));
+        return output;
+      },
+      py::arg("arg"),
+      py::arg("is_broadcast_dim"),
       py::return_value_policy::reference);
 }
 
