@@ -392,9 +392,7 @@ def slice(g: jit_utils.GraphContext, self, *args):
             end = g.op("Constant", value_t=torch.tensor(_INT64_MAX))
     else:
         start = [0 if is_start_none else symbolic_helper._parse_arg(start, "i")]
-        end = [
-            _INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
-        ]
+        end = [_INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")]
         dim = [symbolic_helper._parse_arg(dim, "i")]
         dynamic_slice = False
     return symbolic_helper._slice_helper(
