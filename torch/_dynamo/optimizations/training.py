@@ -428,7 +428,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
-        return disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
+        return disable(disable(bw_compiler)(*args, **kwargs))  # type: ignore[operator]
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
