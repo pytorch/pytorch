@@ -1,7 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 from collections.abc import Sequence
-from functools import partial
+from functools import partial, wraps
 import warnings
 import unittest
 import itertools
@@ -1576,6 +1576,121 @@ class TestMathBits(TestCase):
             is_bit_set,
             torch.is_complex,
         )
+
+    @onlyCUDA
+    def test_opinfo_aten_ops_coverage(self):
+        all_aten_ops = {
+            torch.ops.aten.__getattr__(attr)
+            for attr in dir(torch.ops.aten)
+            if not attr.startswith('__') and attr not in {'name'} and
+            isinstance(torch.ops.aten.__getattr__(attr), torch._ops.OpOverloadPacket)
+        }
+
+        # Copies inputs to inplace operations to avoid inplace modifications
+        #   to leaves requiring gradient
+        def _get_safe_inplace(inplace_variant):
+            @wraps(inplace_variant)
+            def _fn(t, *args, **kwargs):
+                return inplace_variant(t.clone(), *args, **kwargs)
+            return _fn
+
+        seen_aten_ops = set()
+
+        class CollectDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                seen_aten_ops.add(func.overloadpacket)
+                kwargs = kwargs or {}
+                return func(*args, **kwargs)
+
+        for device in ["cpu", "cuda"]:
+            for op in op_db:
+                supported_dtypes = op.supported_backward_dtypes(device) or op.supported_dtypes(device)
+
+                if not supported_dtypes:
+                    continue
+
+                dtype = next(iter(supported_dtypes))
+
+                func = op.get_op()
+                inplace_func = op.get_inplace()
+                if inplace_func:
+                    inplace_func = _get_safe_inplace(inplace_func)
+
+                requires_grad = (
+                    op.supports_autograd
+                    and dtype in op.supported_backward_dtypes(torch.device(device).type)
+                    # TODO: OpInfo really ought to error out for this case, but it's
+                    # not exercised in test_ops_gradients atm.  The problem is not
+                    # complex32 per-se (which is supported by data movement only ops)
+                    # but that when we do backwards we expect other ops like add to work
+                    and not dtype == torch.complex32
+                )
+
+                samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
+                for sample_input in samples:
+                    args = [sample_input.input] + list(sample_input.args)
+                    kwargs = sample_input.kwargs
+
+                    try:
+                        with CollectDispatchMode():
+                            out = func(*args, **kwargs)
+                            out.sum().backward()
+                    except Exception as e:
+                        pass
+
+                    if inplace_func:
+                        try:
+                            with CollectDispatchMode():
+                                out = inplace_func(*args, **kwargs)
+                                out.sum().backward()
+                        except Exception as e:
+                            pass
+
+        remaining_aten_ops = (all_aten_ops - seen_aten_ops)
+        untested_aten_ops = set()
+
+        for aten_op in remaining_aten_ops:
+            overload = aten_op.overloads()[0]
+            overload = getattr(aten_op, overload)
+
+            try:
+                if not torch._ops.has_key(overload, "CompositeImplicitAutograd"):  # noqa: W601
+                    untested_aten_ops.add(aten_op)
+                    continue
+            except Exception as e:
+                untested_aten_ops.add(aten_op)
+
+        known_untested_aten_ops = {
+            aten._embedding_bag_forward_only,
+            aten._fused_dropout,
+            aten._fused_moving_avg_obs_fq_helper,
+            aten._list_to_tensor,
+            aten._nested_tensor_from_tensor_list,
+            aten._pin_memory,
+            aten._reshape_alias,
+            aten._resize_output_,
+            aten._resize_output,
+            aten._sparse_coo_tensor_with_dims_and_tensors,
+            aten.cudnn_batch_norm,
+            aten.cudnn_batch_norm_backward,
+            aten.empty_strided,
+            aten.fill,
+            aten.hardswish_,
+            aten.hardtanh_,
+            aten.is_pinned,
+            aten.is_same_size,
+            aten.lift,
+            aten.quantized_gru,
+            aten.quantized_lstm,
+            aten.rand_like,
+            aten.randperm,
+            aten.relu_,
+            aten.uniform,
+        }
+
+        unexpected_untested_aten_ops = untested_aten_ops - known_untested_aten_ops
+        self.assertTrue(not unexpected_untested_aten_ops,
+                        f"Found untested aten ops: {unexpected_untested_aten_ops}")
 
 # input strides and size may have been altered due to the result of an inplace op
 def check_inplace_view(func, input, rs, input_size, input_strides):
