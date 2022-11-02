@@ -139,12 +139,11 @@ class PythonKernelHolder : public c10::OperatorKernel {
               ->python_op_registration_trampoline(op, dispatch_key_, stack);
           return;
         }
-      } else if (
-          ivalue.isTensorList() ||
-          (ivalue.isOptionalTensorList() && !ivalue.isNone())) {
+      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
         // NB: use toListRef as it doesn't induce refcount bumps
         // (toTensorListRef is not a thing)
         for (const auto& nv : ivalue.toListRef()) {
+          if (nv.isNone()) continue;
           auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
           if (interpreter &&
               nv.unsafeToTensorImpl()->key_set().has(
