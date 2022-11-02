@@ -139,3 +139,4 @@ runs:
         retention-days: 14
         if-no-files-found: ignore
         path: usage_log.txt
+      continue-on-error: true
