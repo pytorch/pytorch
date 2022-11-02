@@ -277,7 +277,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def masked(mask, body, other):
         code = BracesBuffer()
-        var = V.kernel.cse.newvar()
+        var = V.kernel.cse.newvar(is_scalar=False)
         if other == float("-inf"):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
         elif other == float("inf"):
@@ -336,7 +336,8 @@ class CppKernel(Kernel):
         line = f"{var}[{cexpr(index)}]"
         if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
             line = f"static_cast<float>({line})"
-        return self.cse.generate(self.loads, line)
+        # Not tracking whether results of loads are scalar
+        return self.cse.generate(self.loads, line, is_scalar_expr=False)
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
@@ -355,8 +356,10 @@ class CppKernel(Kernel):
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        # Not trackign whether results of reductions are scalar
         tmpvar = self.cse.generate(
-            self.loads, f"reduction {name} {cexpr(index)}", write=False
+            self.loads, f"reduction {name} {cexpr(index)}",
+            is_scalar_expr=False, write=False
         )
         index = self.rename_indexing(index)
         self.reduction_vars[tmpvar] = reduction_type

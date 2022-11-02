@@ -751,6 +751,9 @@ class TritonKernel(Kernel):
             # https://github.com/openai/triton/issues/633
             mask = ["None"]
 
+        if self.cse.is_scalar(str(index)):
+            mask = ["None"]
+
         return index_str, " & ".join(mask)
 
     def var_ranges(self):
@@ -772,7 +775,8 @@ class TritonKernel(Kernel):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         if prior:
-            mask = self.cse.generate(self.compute, f"{mask} & {prior}")
+            # Masks are never scalar
+            mask = self.cse.generate(self.compute, f"{mask} & {prior}", is_scalar_expr=False)
 
         self._load_mask = mask
         with self.swap_buffers(self.compute, self.compute):
@@ -802,7 +806,9 @@ class TritonKernel(Kernel):
 
         if V.graph.is_unspec_arg(name):
             line = var
+            is_scalar_expr = False
         else:
+            is_scalar_expr = self.cse.is_scalar(index)
             line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
             if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
@@ -815,9 +821,9 @@ class TritonKernel(Kernel):
         ):
             # can lift a common load outside of reduction loop
             # One exception is when this is an indirect_load.
-            tmp = self.cse.generate(self.body, line)
+            tmp = self.cse.generate(self.body, line, is_scalar_expr)
         else:
-            tmp = self.cse.generate(self.loads, line)
+            tmp = self.cse.generate(self.loads, line, is_scalar_expr)
 
         if not self.inside_reduction or "rmask" not in mask:
             self.outside_loop_vars.add(tmp)
@@ -852,7 +858,8 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         dim = len(self.range_trees) - 1
-        result_var = self.cse.newvar()
+        # not tracking whether result of reductions is scalar
+        result_var = self.cse.newvar(is_scalar=False)
         if (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
