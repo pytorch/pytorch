@@ -39,7 +39,6 @@ class ConcaterIterDataPipe(IterDataPipe):
         [0, 1, 2, 0, 1, 2, 3, 4]
     """
     datapipes: Tuple[IterDataPipe]
-    length: Optional[int]
 
     def __init__(self, *datapipes: IterDataPipe):
         if len(datapipes) == 0:
@@ -577,7 +576,6 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
     datapipes: Tuple[IterDataPipe]
-    length: Optional[int]
 
     def __init__(self, *datapipes: IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
@@ -585,7 +583,6 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
                             "for `ZipIterDataPipe`.")
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]
-        self.length = None
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
@@ -593,12 +590,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
             yield data
 
     def __len__(self) -> int:
-        if self.length is not None:
-            if self.length == -1:
-                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-            return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            self.length = min(len(dp) for dp in self.datapipes)
+            return min(len(dp) for dp in self.datapipes)
         else:
-            self.length = -1
-        return len(self)
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
