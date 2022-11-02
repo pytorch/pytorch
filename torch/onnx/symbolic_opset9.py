@@ -2237,7 +2237,10 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     self_scalar_type = _type_utils.JitScalarType.from_value(self)
-    if _type_utils.JitScalarType.from_value(other) != self_scalar_type:
+    if (
+        _type_utils.JitScalarType.from_value(other, _type_utils.JitScalarType.UNDEFINED)
+        != self_scalar_type
+    ):
         other = g.op(
             "Cast",
             other,
@@ -2264,7 +2267,10 @@ def __lshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     self_scalar_type = _type_utils.JitScalarType.from_value(self)
-    if _type_utils.JitScalarType.from_value(other) != self_scalar_type:
+    if (
+        _type_utils.JitScalarType.from_value(other, _type_utils.JitScalarType.UNDEFINED)
+        != self_scalar_type
+    ):
         other = g.op(
             "Cast",
             other,
@@ -2340,7 +2346,9 @@ def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
 def _log_softmax(g: jit_utils.GraphContext, input, dim, half_to_float):
     if (
         half_to_float
-        and _type_utils.JitScalarType.from_value(input)
+        and _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.UNDEFINED
+        )
         == _type_utils.JitScalarType.HALF
     ):
         input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
@@ -4792,7 +4800,12 @@ def _pack_padded_sequence(g: jit_utils.GraphContext, input, lengths, batch_first
     # We know it's a TensorType so this check is now safe.
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
-    if _type_utils.JitScalarType.from_value(lengths) != _type_utils.JitScalarType.INT:
+    if (
+        _type_utils.JitScalarType.from_value(
+            lengths, _type_utils.JitScalarType.UNDEFINED
+        )
+        != _type_utils.JitScalarType.INT
+    ):
         lengths = g.op("Cast", lengths, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
@@ -4932,9 +4945,10 @@ def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
             "Bernoulli", "generator is not supported for bernoulli", input
         )
 
-    try:
-        dtype = _type_utils.JitScalarType.from_value(input)
-    except errors.OnnxExporterError:
+    dtype = _type_utils.JitScalarType.from_value(
+        input, _type_utils.JitScalarType.UNDEFINED
+    )
+    if dtype == _type_utils.JitScalarType.UNDEFINED:
         return symbolic_helper._unimplemented(
             "Bernoulli", "input dtype not accessible", input
         )
@@ -5082,7 +5096,9 @@ def argmin(
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
 def scatter(g: jit_utils.GraphContext, self, dim, index, src):
-    src_type = _type_utils.JitScalarType.from_value(src)
+    src_type = _type_utils.JitScalarType.from_value(
+        src, _type_utils.JitScalarType.UNDEFINED
+    )
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
         return g.op("Scatter", self, index, src, axis_i=dim)
@@ -5150,7 +5166,9 @@ def __isnot_(g: jit_utils.GraphContext, self, other):
 def one_hot(g: jit_utils.GraphContext, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     # onnxruntime supports limited type combinations for OneHot.
-    if _type_utils.JitScalarType.from_value(num_classes) in {
+    if _type_utils.JitScalarType.from_value(
+        num_classes, _type_utils.JitScalarType.UNDEFINED
+    ) in {
         _type_utils.JitScalarType.UINT8,
         _type_utils.JitScalarType.INT8,
         _type_utils.JitScalarType.INT,
@@ -5384,7 +5402,9 @@ def index(g: jit_utils.GraphContext, self, index):
     @_beartype.beartype
     def try_mask_to_index(index):
         if not symbolic_helper._is_none(index) and (
-            _type_utils.JitScalarType.from_value(index)
+            _type_utils.JitScalarType.from_value(
+                index, _type_utils.JitScalarType.UNDEFINED
+            )
             == _type_utils.JitScalarType.UINT8
             or symbolic_helper._is_bool(index)
         ):

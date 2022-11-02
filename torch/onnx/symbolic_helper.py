@@ -505,7 +505,9 @@ def _is_tuple_construct(x: _C.Value) -> bool:
 @_beartype.beartype
 def is_complex_value(x: _C.Value) -> bool:
     assert _is_value(x)
-    return _type_utils.JitScalarType.from_value(x) in {
+    return _type_utils.JitScalarType.from_value(
+        x, _type_utils.JitScalarType.UNDEFINED
+    ) in {
         _type_utils.JitScalarType.COMPLEX32,
         _type_utils.JitScalarType.COMPLEX64,
         _type_utils.JitScalarType.COMPLEX128,
@@ -1241,14 +1243,14 @@ def _arange_cast_helper(
 ]:
     def _is_all_integral(scalars):
         for scalar in scalars:
-            try:
-                if (
-                    _type_utils.JitScalarType.from_value(scalar)
-                    != _type_utils.JitScalarType.INT64
-                ):
-                    return False
-            except (errors.OnnxExporterError, errors.SymbolicValueError):
-                pass
+            scalar_type = _type_utils.JitScalarType.from_value(
+                scalar, _type_utils.JitScalarType.UNDEFINED
+            )
+            if (
+                scalar_type != _type_utils.JitScalarType.INT64
+                and scalar_type != _type_utils.JitScalarType.UNDEFINED
+            ):
+                return False
         return True
 
     # This logic is based on torch.arange docs. If "dtype" is provided,
@@ -1573,11 +1575,16 @@ def quantize_helper(
         )
 
     assert scale is not None
-    if _type_utils.JitScalarType.from_value(scale) != _type_utils.JitScalarType.FLOAT:
+    if (
+        _type_utils.JitScalarType.from_value(scale, _type_utils.JitScalarType.UNDEFINED)
+        != _type_utils.JitScalarType.FLOAT
+    ):
         scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
     assert zero_point is not None
-    if _type_utils.JitScalarType.from_value(zero_point) not in {
+    if _type_utils.JitScalarType.from_value(
+        zero_point, _type_utils.JitScalarType.UNDEFINED
+    ) not in {
         _type_utils.JitScalarType.UINT8,
         _type_utils.JitScalarType.INT8,
     }:

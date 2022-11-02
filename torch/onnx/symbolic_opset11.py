@@ -1072,7 +1072,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     if _type_utils.JitScalarType.from_value(
-        other
+        other, _type_utils.JitScalarType.UNDEFINED
     ) != _type_utils.JitScalarType.from_value(self):
         other = g.op(
             "Cast",
@@ -1080,7 +1080,10 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
             to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
         )
 
-    if _type_utils.JitScalarType.from_value(self) == _type_utils.JitScalarType.UINT8:
+    if (
+        _type_utils.JitScalarType.from_value(self, _type_utils.JitScalarType.UNDEFINED)
+        == _type_utils.JitScalarType.UINT8
+    ):
         return g.op("BitShift", self, other, direction_s="RIGHT")
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
@@ -1103,7 +1106,7 @@ def __lshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     if _type_utils.JitScalarType.from_value(
-        other
+        other, _type_utils.JitScalarType.UNDEFINED
     ) != _type_utils.JitScalarType.from_value(self):
         other = g.op(
             "Cast",
@@ -1111,7 +1114,10 @@ def __lshift_(g: jit_utils.GraphContext, self, other):
             to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
         )
 
-    if _type_utils.JitScalarType.from_value(self) == _type_utils.JitScalarType.UINT8:
+    if (
+        _type_utils.JitScalarType.from_value(self, _type_utils.JitScalarType.UNDEFINED)
+        == _type_utils.JitScalarType.UINT8
+    ):
         return g.op("BitShift", self, other, direction_s="LEFT")
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
