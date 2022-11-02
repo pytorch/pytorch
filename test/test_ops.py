@@ -506,11 +506,6 @@ class TestCommon(TestCase):
                 noncontig_sample.kwargs,
             )
 
-            # Verifies sample input tensors should have no grad or history
-            sample_tensor = t_inp if isinstance(t_inp, torch.Tensor) else t_inp[0]
-            assert sample_tensor.grad is None
-            assert sample_tensor.grad_fn is None
-
             # validates forward
             expected = op(t_inp, *t_args, **t_kwargs)
             actual = op(n_inp, *n_args, **n_kwargs)

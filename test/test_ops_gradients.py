@@ -66,6 +66,15 @@ class TestGradients(TestCase):
                 all_args = tuple(chain((sample.input,), sample.args, sample.kwargs.values()))
             gradcheck_args = tuple(x for x in all_args if (isinstance(x, torch.Tensor) and x.requires_grad))
 
+            # Verifies sample input tensors should have no grad
+            # This may happen if the same tensor is used in two different SampleInputs
+            for t in gradcheck_args:
+                self.assertIsNone(t.grad,
+                                  "A sampled input has a gradient before running autograd. "
+                                  "This usually means that (at least) one input tensor is reused "
+                                  "across different SampleInputs. "
+                                  "Please create a new tensor for each SampleInput.")
+
             def _input_recomposition_helper(inputs, inp, input_idx):
                 if is_iterable_of_tensors(inp):
                     tensor_list = []
