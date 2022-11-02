@@ -100,7 +100,11 @@ def alpha_dropout(
 
     dropout_mask = _dropout_helper(self, 1 - p)
 
-    alpha = 1.7580993408473766
+    # From paper: Self-Normalizing Neural Networks (https://arxiv.org/pdf/1706.02515.pdf)
+    # alpha = - SELU.alpha * SELU.scale, here
+    # SELU.alpha = 1.6732632423543772848170429916717 and
+    # SELU.scale = 1.0507009873554804934193349852946
+    alpha = -1.7580993408473766
 
     a = 1.0 / math.sqrt((alpha * alpha * p + 1) * (1 - p))
     b = torch.logical_not(dropout_mask) * alpha * a + alpha * a * p
