@@ -29,6 +29,7 @@ jobs:
           { config: "inductor", shard: 5, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor", shard: 6, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor", shard: 7, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
