@@ -1089,7 +1089,7 @@ make_fx_failures = {
     xfail('narrow'),
 
     # couldn't find symbolic meta function/decomposition
-    xfail('view_copy'),
+    skip('view_copy'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
