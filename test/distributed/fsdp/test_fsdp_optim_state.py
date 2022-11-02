@@ -1384,11 +1384,11 @@ class TestFSDPOptimState(FSDPTest):
                 )
 
     @skip_if_lt_x_gpu(2)
-    def test_adam_full_osd_without_first_param_state(self):
+    def test_full_osd_without_first_param_state(self):
         """
         Tests saving and loading a full optim state dict for Adam optimizer
-        (i.e. any optimizer with a "step" key) when the first parameter does
-        not have optimizer state (e.g. unused or frozen).
+        (i.e. any optimizer with a "step" key in its state) when the first
+        parameter does not have optimizer state (e.g. unused or frozen).
         """
 
         class Model(nn.Module):
@@ -1399,7 +1399,9 @@ class TestFSDPOptimState(FSDPTest):
                 self.relu = nn.ReLU()
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
-                # Do not use `lin1`, which is the first `FlatParameter`
+                # Do not use `lin1`, which is the parameter passed to the
+                # optimizer and the one checked for "step" state to see if it
+                # is tensor or float
                 return self.relu(self.lin2(x))
 
         model = Model().cuda()
@@ -1417,10 +1419,13 @@ class TestFSDPOptimState(FSDPTest):
         loss.backward()
         optim.step()
 
-        # Check save and load
+        # Check that save and load does not error
         full_osd = FSDP.full_optim_state_dict(fsdp_model, optim, rank0_only=False)
         sharded_osd = FSDP.shard_full_optim_state_dict(full_osd, fsdp_model)
         optim.load_state_dict(sharded_osd)
+        # `load_state_dict()` will check the 0th parameter to see if "step" is
+        # represented as a tensor or float, so it is imperative that the state
+        # is non-empty.
 
         # Run an iteration as a sanity check
         inp = torch.randn((2, 5), device=device)
