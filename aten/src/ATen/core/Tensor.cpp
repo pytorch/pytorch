@@ -43,6 +43,7 @@ TensorBase TensorBase::to(
     bool non_blocking,
     bool copy,
     c10::optional<at::MemoryFormat> memory_format) const {
+  LOG(INFO) << "steventk to pytorch/aten/src/ATen/core/Tensor.cpp";
   Tensor self(*this);
   return at::_ops::to_dtype_layout::call(
       self, optTypeMetaToScalarType(options.dtype_opt()),

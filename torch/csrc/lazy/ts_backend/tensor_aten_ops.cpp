@@ -89,6 +89,9 @@ void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src) {
     if (src_tensor.sizes() != input_shape.Get().sizes()) {
       src_tensor = src_tensor.expand(input_shape.Get().sizes().vec());
     }
+    LOG(INFO) << "steventk calling UpdateFromTensor from copy_ in tensor_aten_ops.cpp";
+    LOG(INFO) << "steventk input device: " << input->GetDevice().toString();
+    LOG(INFO) << "steventk src device: " << src->GetDevice().toString();
     input->UpdateFromTensor(std::move(src_tensor), /*sync=*/false);
   }
 }

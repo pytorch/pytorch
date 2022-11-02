@@ -275,6 +275,7 @@ void LazyTensor::SetTensor(at::Tensor tensor) {
 }
 
 void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
+  std::cout << "steventk calling UpdateFromTensor from LazyTensor::UpdateFromTensor" << std::endl;
   if (sync) {
     at::Tensor typed_tensor = CopyTensor(tensor, dtype(), /*copy=*/false);
     SetIrValue(GetIrValueForTensor(typed_tensor, GetDevice()));
@@ -286,6 +287,7 @@ void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
 }
 
 void LazyTensor::UpdateFromTensorOut(at::Tensor tensor) {
+  std::cout << "steventk calling UpdateFromTensor from LazyTensor::UpdateFromTensorOut" << std::endl;
   UpdateFromTensor(std::move(tensor), /*sync=*/false);
 }
 

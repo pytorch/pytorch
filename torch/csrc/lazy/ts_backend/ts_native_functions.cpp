@@ -71,6 +71,7 @@ at::Tensor LazyNativeFunctions::_copy_from(
     // providing a new 'eager' value (self) for an existing lazy tensor (dst)
     static bool sync_update = FLAGS_torch_lazy_ts_tensor_update_sync;
     CHECK(dst_tensor);
+    std::cerr << "steventk calling UpdateFromTensor from LazyNativeFunctions::_copy_from" << std::endl;
     dst_tensor->UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
     // materializing a lazy tensor (self) and copying its value into eager
