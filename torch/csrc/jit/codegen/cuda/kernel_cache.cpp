@@ -381,7 +381,7 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     }
     std::cout << "With inputs:\n";
     for (auto i : c10::irange(args.size())) {
-      args[i]->print();
+      std::cout << "  " << args[i]->toString() << std::endl;
     }
     std::cout << "Compiler log: " << executor.compilerLog() << "\n";
     std::cout << scheduler_entry->params()->toString() << "\n";
@@ -816,6 +816,14 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
       num_of_outputs_);
 
   return outputs;
+}
+
+std::string KernelArgumentHolder::toString() const {
+  std::stringstream ss;
+  for (const auto& arg : arguments_) {
+    ss << arg->toString() << "\n";
+  }
+  return ss.str();
 }
 
 } // namespace cuda

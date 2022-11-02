@@ -958,7 +958,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     std::cout << "Arguments for fusion" << fusion_id_ << ":" << std::endl
               << "Inputs:" << std::endl;
     for (auto i : c10::irange(args.size())) {
-      args[i]->print();
+      std::cout << "  " << args[i]->toString() << std::endl;
     }
     std::cout << "Outputs:" << std::endl;
     for (const auto& output : outputs) {
@@ -1223,8 +1223,8 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   if (isDebugDumpEnabled(DebugDumpOption::KernelArgs)) {
     std::cout << "Arguments for kernel" << fusion_id_ << ":" << std::endl
               << "Inputs:" << std::endl;
-    for (auto i : c10::irange(args.size())) {
-      args[i]->print();
+    for (auto i : c10::irange(num_inputs)) {
+      std::cout << "  " << args[i]->toString() << std::endl;
     }
     std::cout << "Outputs:" << std::endl;
     // note: add aliased outputs here.

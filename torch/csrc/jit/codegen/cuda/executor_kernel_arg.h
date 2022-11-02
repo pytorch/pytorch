@@ -121,8 +121,8 @@ struct ArgAbstract {
   virtual bool isType(ArgType type) const = 0;
   virtual ArgType type() const = 0;
   virtual std::unique_ptr<ArgAbstract> copy_unique_ptr() const = 0;
-  virtual void print() const {
-    printf("input type: %s\n", argTypeToString(type()).c_str());
+  virtual std::string toString() const {
+    return "input type: " + argTypeToString(type());
   };
 };
 
@@ -143,9 +143,11 @@ struct ArgAbstract {
     return std::make_unique<TARGET_TYPE##Arg>(*this);             \
   }
 
-#define DEF_PRINT_FUNC              \
-  void print() const override {     \
-    std::cout << val_ << std::endl; \
+#define DEF_TOSTRING_FUNC                 \
+  std::string toString() const override { \
+    std::stringstream ss;                 \
+    ss << val_;                           \
+    return ss.str();                      \
   }
 
 struct PhiloxCudaStateArg : public ArgAbstract {
@@ -158,28 +160,28 @@ struct LongArg : public ArgAbstract {
   int64_t val_;
   explicit LongArg(int64_t _val) : val_(_val) {}
   DEF_HELPEE_FUNC(Long, val_)
-  DEF_PRINT_FUNC
+  DEF_TOSTRING_FUNC
 };
 
 struct DoubleArg : public ArgAbstract {
   double val_;
   explicit DoubleArg(double _val) : val_(_val) {}
   DEF_HELPEE_FUNC(Double, val_)
-  DEF_PRINT_FUNC
+  DEF_TOSTRING_FUNC
 };
 
 struct ComplexDoubleArg : public ArgAbstract {
   c10::complex<double> val_;
   explicit ComplexDoubleArg(c10::complex<double> _val) : val_(_val) {}
   DEF_HELPEE_FUNC(ComplexDouble, val_)
-  DEF_PRINT_FUNC
+  DEF_TOSTRING_FUNC
 };
 
 struct BoolArg : public ArgAbstract {
   bool val_;
   explicit BoolArg(bool _val) : val_(_val) {}
   DEF_HELPEE_FUNC(Bool, val_)
-  DEF_PRINT_FUNC
+  DEF_TOSTRING_FUNC
 };
 
 struct TensorArgAbstract : ArgAbstract {
@@ -197,19 +199,7 @@ struct TensorArgAbstract : ArgAbstract {
   virtual int64_t numel() const = 0;
   virtual at::Tensor getTensor() const = 0;
 
-  // TODO: clean it up and also print out dtype
-  void print() const override {
-    auto rank = getRank();
-    std::cout << "tensor dtype: " << getDataType() << " sizes: (";
-    for (auto i = 0; i < rank; i++) {
-      std::cout << getSize(i) << ", ";
-    }
-    std::cout << ") stride: (";
-    for (auto i = 0; i < rank; i++) {
-      std::cout << getStride(i) << ", ";
-    }
-    std::cout << ") pointer: " << getPointer() << std::endl;
-  }
+  std::string toString() const override;
 };
 
 template <typename TENSOR_TYPE, typename nvfuser_index_t>
@@ -375,11 +365,7 @@ class TORCH_CUDA_CU_API KernelArgumentHolder {
     return cache_id_;
   }
 
-  void print() const {
-    for (const auto& arg : arguments_) {
-      arg->print();
-    }
-  }
+  std::string toString() const;
 
  private:
   std::vector<std::unique_ptr<ArgAbstract>> arguments_;

@@ -10,6 +10,21 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+std::string TensorArgAbstract::toString() const {
+  std::stringstream ss;
+  auto rank = getRank();
+  ss << "tensor dtype: " << getDataType() << " sizes: (";
+  for (auto i = 0; i < rank; i++) {
+    ss << getSize(i) << ", ";
+  }
+  ss << ") stride: (";
+  for (auto i = 0; i < rank; i++) {
+    ss << getStride(i) << ", ";
+  }
+  ss << ") pointer: " << getPointer();
+  return ss.str();
+}
+
 namespace {
 
 template <typename T, typename nvfuser_index_t>

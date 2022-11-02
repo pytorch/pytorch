@@ -2168,7 +2168,7 @@ TEST_F(NVFuserTest, FusionIssue2076_CUDA) {
   auto t12 = t4 + t11;
   auto t13 = t12.view({48, 128, 128});
   // 48, 128, 128
-  auto t14 = std::get<0>(t13.max({2}));
+  auto t14 = std::get<0>(t13.max(2));
   auto t15 = t14.unsqueeze(-1);
   // 48, 128, 1
   auto t16 = t15;
