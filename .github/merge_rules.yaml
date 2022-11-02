@@ -272,6 +272,7 @@
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
   - aten/src/ATen/native/mkldnn/**
+  - test/test_mkldnn.py
   approved_by:
   - mingfeima
   - XiaobingSuper
