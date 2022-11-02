@@ -39,22 +39,16 @@ class Rule:
     message_default_template: str
     short_description: Optional[str] = None
     full_description: Optional[str] = None
+    full_description_markdown: Optional[str] = None
     help_uri: Optional[str] = None
 
     @classmethod
     def from_sarif(cls, **kwargs) -> Rule:
         """Returns a rule from the SARIF reporting descriptor."""
-        short_description = (
-            kwargs["short_description"]["text"]
-            if "short_description" in kwargs
-            else None
-        )
-        full_description = (
-            kwargs["full_description"]["markdown"]
-            if "full_description" in kwargs
-            else None
-        )
-        help_uri = kwargs["help_uri"] if "help_uri" in kwargs else None
+        short_description = kwargs.get("short_description", {}).get("text")
+        full_description = kwargs.get("full_description", {}).get("text")
+        full_description_markdown = kwargs.get("full_description", {}).get("markdown")
+        help_uri = kwargs.get("help_uri")
 
         rule = cls(
             id=kwargs["id"],
@@ -62,6 +56,7 @@ class Rule:
             message_default_template=kwargs["message_strings"]["default"]["text"],
             short_description=short_description,
             full_description=full_description,
+            full_description_markdown=full_description_markdown,
             help_uri=help_uri,
         )
         return rule
