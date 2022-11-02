@@ -142,10 +142,16 @@ def enable_functionalization(*args, **kwargs):
 
 
 def reshape_to_reshape_copy(self, shape):
-    torch._freeze_functional_tensor(self)
-    r = torch.ops.aten._reshape_copy.default(self, shape)
-    torch._freeze_functional_tensor(r)
-    return r
+    if torch._is_functional_tensor(self):
+        torch._freeze_functional_tensor(self)
+        r = torch.ops.aten._reshape_copy.default(self, shape)
+        torch._freeze_functional_tensor(r)
+        return r
+    else:
+        # TODO: Not really sure why I hit this
+        return torch.ops.aten.reshape.default._op_dk(
+            torch._C.DispatchKey.CompositeImplicitAutograd, self, shape
+        )
 
 
 # This is a version of functionalization that is specifically designed
@@ -209,7 +215,7 @@ def detach_and_functionalize_pure(f, *, preserve_requires_grad=True, preserve_re
                 },
             })
 
-        with enable_functionalization(reapply_views=True), patcher:
+        with enable_functionalization(reapply_views=True), patcher, enable_python_dispatcher():
             outs = f(*f_args, **f_kwargs)
 
         # Detect input mutation and error if found
