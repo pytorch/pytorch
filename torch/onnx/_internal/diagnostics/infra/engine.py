@@ -33,7 +33,7 @@ class DiagnosticEngine:
         >>> engine = DiagnosticEngine()
 
         Step 3: Start a new diagnostic context.
-        >>> with engine.start_diagnostic_context("torch.onnx.export", version="1.0") as context:
+        >>> with engine.create_diagnostic_context("torch.onnx.export", version="1.0") as context:
 
         Step 4: Add diagnostics in your code.
         ...     context.diagnose(rules.rule1, infra.Level.ERROR)
