@@ -4,7 +4,7 @@ This file includes private common utilities for FSDP.
 
 import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, List, no_type_check, Union
+from typing import Any, Callable, Dict, List, no_type_check, Union
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
@@ -18,15 +18,11 @@ FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
 
 
-class ComposableFSDPState:
-    """
-    This encompasses all FSDP state for composable FSDP.
-    """
-
-
 # We leverage Python's dynamic attribute definition to unify the state
-# management for the wrapper and non-wrapper approaches.
-_FSDPState = Union[nn.Module, ComposableFSDPState]
+# management for the wrapper and non-wrapper approaches. The `Any` represents
+# the `_State` object in _composable/contract.py, but we do not import it to
+# avoid circular imports.
+_FSDPState = Union[nn.Module, Any]
 
 
 class TrainingState(Enum):
