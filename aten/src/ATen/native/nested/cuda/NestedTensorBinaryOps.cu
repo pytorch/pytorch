@@ -38,7 +38,7 @@ __global__ void op_dense_esuhm(
   const int64_t grain_size = blockDim.x;
   const int64_t tid = threadIdx.x;
   const int64_t range = offsets[batch_idx + 1] - offsets[batch_idx];
-  // each thread handles (embedding_dim // grain_size + (embedding_dim % grain_size != 0)) elems
+  // each thread handles (embedding_dim // grain_size + (embedding_dim % grain_size <= tid)) elems
   // of the dense embedding
   for (int64_t idx = tid; idx < embedding_dim; idx += grain_size) {
     const T dense_elem = dense[batch_idx * embedding_dim + idx];

@@ -101,7 +101,7 @@ Tensor NestedTensor_elementwise_Tensor(
   // special case when other is dense
   if (self.is_nested() && !other.is_nested()) {
     // check for the [B, *, D], [B, 1, D] esuhm case
-    // this if statement is ugly and should be refactored
+    // TODO: this if statement is ugly and hopefully we will remove this in the near future
     auto self_ptr = get_nested_tensor_impl(self);
     if (self_ptr->dim() == 3 &&
         other.dim() == 3 &&
@@ -116,7 +116,7 @@ Tensor NestedTensor_elementwise_Tensor(
       }
       const auto self_buffer = self_ptr->get_buffer();
       const auto self_sizes = self_ptr->get_nested_size_tensor();
-      auto result_buffer = self_buffer.clone();
+      auto result_buffer = at::empty_like(self_buffer);
       auto result = wrap_buffer(result_buffer, self_sizes);
       if (op_name == "add") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::ADD);
