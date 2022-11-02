@@ -394,6 +394,7 @@ TESTS_NOT_USING_GRADCHECK = [
     "test_cpp_extensions_jit",
     "test_jit",
     "test_ops",
+    "test_ops_jit",
     "dynamo/test_recompile_ux",
     "inductor/test_smoke",
     "test_quantization",
