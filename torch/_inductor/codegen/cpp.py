@@ -282,6 +282,8 @@ class CppOverrides(OpOverrides):
             code.writeline(f"float {var} = -std::numeric_limits<float>::infinity();")
         elif other == float("inf"):
             code.writeline(f"float {var} = std::numeric_limits<float>::infinity();")
+        elif isinstance(other, float):
+            code.writeline(f"float {var} = {other};")
         else:
             code.writeline(f"auto {var} = {other!r};")
         code.writeline(f"if({mask})")
