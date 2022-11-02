@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
-    _get_param_to_unflat_param_names,
+    _get_param_to_fqns,
     _State,
 )
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
@@ -93,7 +93,7 @@ class _ExecOrderData:
             self.handle_to_handle_index[handle] = index
         self.flat_param_to_prefixed_param_names = cast(
             Dict[FlatParameter, List[str]],
-            _get_param_to_unflat_param_names(root_module),
+            _get_param_to_fqns(root_module),
         )
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
