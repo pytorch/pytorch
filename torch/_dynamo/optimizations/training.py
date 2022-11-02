@@ -13,7 +13,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn import Module
 from torch.utils._pytree import tree_map
 
-from .. import config, disable
+from .. import config
 from ..utils import clone_inputs, count_calls, counters
 from .analysis import has_mutation
 from .backends import BACKENDS
@@ -351,6 +351,7 @@ def create_nvprims_backend(*, executor, cudagraphs):
 
         def candidate(self):
             from functorch.compile import aot_module_simplified
+            from .. import disable
 
             @disable
             def fw_compiler(model: torch.fx.GraphModule, example_inputs):
