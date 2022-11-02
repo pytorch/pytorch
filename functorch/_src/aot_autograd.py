@@ -132,94 +132,134 @@ def setup_stacktrace_preservation_hooks(roots: List):
         node.register_hook(get_posthook(special_stack))
 
 
-def create_joint_forward_backward(fn):
-    def joint_forward_backward(
-        orig_primals: List[Any], orig_tangents: List[Any]
-    ) -> Tuple[List[Any], List[Any]]:
-        primals = []
-        for orig_p in orig_primals:
-            if isinstance(orig_p, Tensor):
-                p = torch._to_functional_tensor(orig_p)
-                p.requires_grad = orig_p.requires_grad
+# This is a version of functionalization that is specifically designed
+# for the AOTAutograd use case.  It might be generally applicable though
+# (if so, move it out of this file), so I've tried to give it a name that
+# describes what it does.
+#
+# Given a function f, it produces a new function g that:
+#
+#   - Detaches all inputs before running f; the inner function
+#     does not directly participate in any pre-existing autograd.
+#     preserve_requires_grad is provided as a convenience to set the
+#     requires_grad on the new detached leaves in sync with the originals.
+#     (NB: In principle, you could backward through the pure operations
+#     produced by functionalization; this is not used for AOTAutograd
+#     and we have not tested it.)
+#
+#   - Functionalizes all operations on f, under the assumption that the passed
+#     in function f must be "observationally pure"; that is, it cannot perform any
+#     mutations (inplace data or view operations) on the passed in inputs, nor is
+#     it allowed to directly close over tensors that aren't passed via its
+#     arguments.  See
+#     https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
+#     for discussion how how to implement the more complicated case.
+#
+# Unlike functorch's variant, this doesn't use the functorch level system,
+# instead it directly uses PyTorch's conventional dispatcher to hit the
+# functionalization key.  In particular, this means that FunctionalTensorWrapper
+# can have autograd data stored directly on it.
+#
+# In typical AOTAutograd usage, the dispatch key order will look like:
+#
+#   Autograd - Functionalization ~~~~> Proxy Mode - Fake Tensor
+#       outer tensor                        inner tensor
+#
+# TODO: Provide a faster version of this that assumes flat arguments
+# (so no pytree necessary)
+def detach_and_functionalize_pure(f, preserve_requires_grad = True):
+    @wraps(f)
+    def inner(*args, **kwargs):
+        def to_fun(t):
+            if isinstance(t, Tensor):
+                r = torch._to_functional_tensor(t)
+                # NB: r is a leaf; it has no grad_fn relating
+                # it to t.  If t has autograd metadata, that
+                # metadata was preserved *inside* the r wrapper
+                if preserve_requires_grad:
+                    r.requires_grad = t.requires_grad
+                return r
             else:
-                p = orig_p
-            primals.append(p)
+                return t
+
+        f_args, f_kwargs = pytree.tree_map(to_fun, (args, kwargs))
 
         torch._enable_functionalization(reapply_views=True)
         try:
-
-            # Call the forward pass
-            outs = fn(*primals)
-            # Get the inputs that need gradients
-            grad_primals = []
-            inputs_needs_grads = []
-            for p in primals:
-                is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
-                inputs_needs_grads.append(is_grad_tensor)
-                if is_grad_tensor:
-                    grad_primals.append(p)
-
-            # Get the outputs that need gradients
-            assert len(orig_tangents) == len(outs)
-            needed_outs = []
-            needed_orig_tangents = []
-            needed_tangents = []
-            for out, orig_tangent in zip(outs, orig_tangents):
-                if isinstance(out, Tensor) and out.requires_grad:
-                    needed_outs.append(out)
-                    needed_orig_tangents.append(orig_tangent)
-                    needed_tangents.append(torch._to_functional_tensor(orig_tangent))
-
-            setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
-
-            backward_out = []
-            # Call the backwards pass
-            if grad_primals:
-                with fx_traceback.override_stack_trace():
-                    backward_out = torch.autograd.grad(
-                        needed_outs,
-                        grad_primals,
-                        grad_outputs=needed_tangents,
-                        allow_unused=True,
-                    )
+            outs = f(*f_args, **f_kwargs)
         finally:
             torch._disable_functionalization()
-        backward_out_iter = iter(backward_out)
-        grads = [next(backward_out_iter) if i else None for i in inputs_needs_grads]
 
-        def prop_mut(origs, news):
-            for orig, new in zip(origs, news):
-                if not isinstance(orig, Tensor):
-                    continue
-                assert torch._is_functional_tensor(new)
-                torch._sync(new)
-                new_orig = torch._from_functional_tensor(new)
-                if new_orig is not orig:
-                    # TODO: if internal resize_ this would fail
-                    assert new_orig.shape == orig.shape
-                    orig.copy_(new_orig)
-        prop_mut(orig_primals, primals)
-        # TODO: Actually, the input tangents shouldn't ever actually get
-        # mutated...
-        prop_mut(needed_orig_tangents, needed_tangents)
+        # Detect input mutation and error if found
+        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        flat_f_args, _ = pytree.tree_flatten((f_args, f_kwargs))
 
-        def defun(t):
+        # This is just for sanity checking, can be skipped
+        for arg, f_arg in zip(flat_args, flat_f_args):
+            if not isinstance(arg, Tensor):
+                continue
+            torch._sync(f_arg)
+            new_arg = torch._from_functional_tensor(f_arg)
+            # TODO: Improve diagnostics here.  If this assert failed,
+            # it means you passed a function that mutates inputs...
+            assert arg is new_arg
+
+        def from_fun(t):
             if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
                 return t
             torch._sync(t)
             return torch._from_functional_tensor(t)
 
-        orig_outs = [defun(t) for t in outs]
-        orig_grads = [defun(t) for t in grads]
+        return pytree.tree_map(from_fun, outs)
+    return inner
 
-        if any(g is None for g in orig_grads):
-            warnings.warn(
-                "AOTAutograd compiled a function which has unused inputs "
-                "that have requires_grad=True; this could indicate an "
-                "AOTAutograd bug."
-            )
 
-        return orig_outs, orig_grads
+# This creates a joint forwards-backwards function given both
+# the primals (to run forwards) and tangents (to run backwards).
+#
+# It has a precondition which is that the passed in function
+# must be observationally pure; it is not permitted to mutate
+# the primals or tangents.
+def create_joint_forward_backward_pure(fn):
+    def joint_forward_backward(
+        primals: List[Any], tangents: List[Any]
+    ) -> Tuple[List[Any], List[Any]]:
+        # Call the forward pass
+        outs = fn(*primals)
+        # Get the inputs that need gradients
+        grad_primals = []
+        inputs_needs_grads = []
+        for p in primals:
+            is_grad_tensor = isinstance(p, Tensor) and p.requires_grad
+            inputs_needs_grads.append(is_grad_tensor)
+            if is_grad_tensor:
+                grad_primals.append(p)
+
+        # Get the outputs that need gradients
+        assert len(tangents) == len(outs)
+        needed_outs = []
+        needed_tangents = []
+        for out, tangent in zip(outs, tangents):
+            if isinstance(out, Tensor) and out.requires_grad:
+                needed_outs.append(out)
+                needed_tangents.append(tangent)
+
+        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+
+        backward_out = []
+        # Call the backwards pass
+        if grad_primals:
+            with fx_traceback.override_stack_trace():
+                backward_out = torch.autograd.grad(
+                    needed_outs,
+                    grad_primals,
+                    grad_outputs=needed_tangents,
+                    allow_unused=True,
+                )
+        backward_out_iter = iter(backward_out)
+        return outs, [
+            next(backward_out_iter) if i else None for i in inputs_needs_grads
+        ]
 
     return joint_forward_backward
 
@@ -413,7 +453,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
-    joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
+    joint_forward_backward = create_joint_forward_backward_pure(lambda *args: flat_fn(*add_dupe_args(args)))
 
     out = flat_fn(*flat_args)
     # Collect info on which output tensors require gradients,
@@ -437,9 +477,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     disable_amp = torch._C._is_any_autocast_enabled()
 
-    fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
-    fx_g.graph.eliminate_dead_code()
-    fx_g.recompile()
+    if config.use_functionalize:
+        fx_g = make_fx(
+            detach_and_functionalize_pure(joint_forward_backward), aot_config.decompositions
+        )(*joint_inputs)
+        fx_g.graph.eliminate_dead_code()
+        fx_g.recompile()
+    else:
+        warnings.warn("graph partitioning without functionalization is not sound, we may introduce errors")
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
         print("====== Joint graph ======")

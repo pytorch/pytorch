@@ -4247,6 +4247,7 @@
   dispatch:
     SparseCPU, SparseCUDA: neg_sparse
     SparseCsrCPU, SparseCsrCUDA: neg_sparse_csr
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_neg
   tags: canonical
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
@@ -4256,6 +4257,7 @@
   dispatch:
     SparseCPU, SparseCUDA: neg_sparse_
     SparseCsrCPU, SparseCsrCUDA: neg_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_neg_
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4305,6 +4307,11 @@
   dispatch:
     CompositeImplicitAutograd: reshape_symint
     CompositeImplicitAutogradNestedTensor: reshape_nested
+
+- func: reshape_copy(Tensor self, SymInt[] size) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: reshape_copy_symint
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
@@ -13279,7 +13286,8 @@
 - func: _native_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, bool need_weights=True, bool average_attn_weights=True, int? mask_type=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_multi_head_attention
+    CPU, NestedTensorCPU: native_multi_head_attention_cpu
+    CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=False, bool is_causal=False) -> (Tensor, Tensor)
