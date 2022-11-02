@@ -4179,8 +4179,12 @@ if HAS_CPU:
             self.assertFalse(complex_memory_overlap(gathered))
             self.assertFalse(complex_memory_overlap(gathered.t()))
 
+        # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
+        # supported, the vectorization will not work and skip this test case. For ARM or
+        # other platforms support, we just need to add the ISA info to the supported_vector_isa
+        # and include proper aten vectorization head file.
         @unittest.skipIf(
-            not codecache.valid_vec_isa(), "Does not support vectorization"
+            not codecache.supported_vector_isa(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_kernel_cpu_only(self):
@@ -4215,17 +4219,10 @@ if HAS_CPU:
                 res = x + x2
                 return (res,)
 
-            @contextlib.contextmanager
-            def set_simd(simd_len):
-                org_cpp_simd_len = config.cpp.simdlen
-                config.cpp.simdlen = simd_len
-                yield
-                config.cpp.simdlen = org_cpp_simd_len
-
             x1 = torch.randn((10, 20))
             x2 = torch.randn((10, 20))
 
-            with set_simd(8):
+            with patch.object(config.cpp, "simdlen", 8):
                 metrics.reset()
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
