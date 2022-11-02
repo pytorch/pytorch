@@ -368,7 +368,7 @@ class DeviceMesh(object):
     def all_reduce(
         self,
         tensor: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore
+        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
         mesh_dim: int = 0,
         async_op: bool = False,
     ) -> Optional[Work]:
@@ -393,7 +393,7 @@ class DeviceMesh(object):
         self,
         output: torch.Tensor,
         input_list: List[torch.Tensor],
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore
+        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
         mesh_dim: int = 0,
         async_op: bool = False,
     ) -> Optional[Work]:

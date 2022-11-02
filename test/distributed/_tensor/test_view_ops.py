@@ -1,8 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
 
 from typing import List, cast
 from torch.distributed._tensor.placement_types import Placement
-from torch.testing._internal.common_dtensor import (  # type: ignore
+from torch.testing._internal.common_dtensor import (
     DTensorTestBase,
     redistribute_profiler,
     with_comms,

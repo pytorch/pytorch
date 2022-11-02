@@ -42,7 +42,7 @@ from torch.distributed._tensor.dispatch import operator_dispatch, OpSchema, Outp
 #
 class ToTorchTensor(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, input: "DTensor"):  # type: ignore
+    def forward(ctx, input: "DTensor"):  # type: ignore[override]
         ctx.dtensor_device_mesh = input.device_mesh
         ctx.dtensor_placements = input.placements
         ctx.dtensor_shape = input.shape
@@ -50,7 +50,7 @@ class ToTorchTensor(torch.autograd.Function):
         return input._local_tensor.detach()
 
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):  # type: ignore
+    def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
         device_mesh = ctx.dtensor_device_mesh
         placements = ctx.dtensor_placements
         return DTensor(
@@ -64,13 +64,13 @@ class ToTorchTensor(torch.autograd.Function):
 
 class FromTorchTensor(torch.autograd.Function):
     @staticmethod
-    def forward(  # type: ignore
-        ctx,  # type: ignore
+    def forward(  # type: ignore[override]
+        ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
         placements: Sequence[Placement],
         run_check: bool,
-    ):  # type: ignore
+    ) -> "DTensor":
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
 
@@ -107,7 +107,7 @@ class FromTorchTensor(torch.autograd.Function):
         return dist_tensor
 
     @staticmethod
-    def backward(ctx, grad_output: "DTensor"):  # type: ignore
+    def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
         previous_placement = ctx.previous_placement
         previous_device_mesh = ctx.previous_device_mesh
 
