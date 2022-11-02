@@ -270,13 +270,14 @@ def prims_executor(gm, inputs, *, executor):
     from torch._prims.executor import execute
     from torch.fx.experimental.proxy_tensor import make_fx
 
-    # First we trace the graph conditionally decomposing nodes
-    # that can be sent to the nvfuser executor
-    with TorchRefsNvfuserCapabilityMode():
-        prim_gm = make_fx(gm)(*inputs)
+    # AOT Autograd might not use the partitioner, so we need to make sure that
+    # the graph is transformed to use nvFuser-compatible nodes.
+    if not getattr(gm, "_nvprim_transformed", False):
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(gm)(*inputs)
 
-    # Then we return a callable that executes the "prim_gm" graph
-    return make_boxed_func(partial(execute, prim_gm, executor=executor))
+    # Then we return a callable that executes the "gm" graph
+    return make_boxed_func(partial(execute, gm, executor=executor))
 
 
 def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
@@ -315,9 +316,14 @@ def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
         torch.ops.nvprims.amin,
     }
 
-    return min_cut_rematerialization_partition(
+    fw_gm, bw_gm = min_cut_rematerialization_partition(
         prim_gm, joint_inputs, recomputable_ops=recomputable_ops
     )
+    # AOT Autograd might not use the partitioner, so we need to make sure that
+    # the graph is marked as already transformed to use nvFuser-compatible nodes
+    fw_gm._nvprim_transformed = True
+    bw_gm._nvprim_transformed = True
+    return fw_gm, bw_gm
 
 
 def create_nvprims_backend(*, executor):
