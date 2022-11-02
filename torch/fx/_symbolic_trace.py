@@ -306,7 +306,7 @@ class Tracer(TracerBase):
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
         self.root_module_name: str = ""
-        ## Maps the containing module's name to the operator name
+        # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
