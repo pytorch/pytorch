@@ -146,7 +146,7 @@ class InferLaunchParams : public kir::IrVisitor {
  public:
   static c10::optional<LaunchParams> get(
       const std::vector<Expr*>& exprs,
-      const std::unordered_map<std::string, IntOrDouble>& known_values) {
+      const std::unordered_map<std::string, EvaluatorValue>& known_values) {
     if (exprs.empty()) {
       return c10::nullopt;
     }
@@ -156,7 +156,7 @@ class InferLaunchParams : public kir::IrVisitor {
  private:
   InferLaunchParams(
       const std::vector<Expr*>& exprs,
-      const std::unordered_map<std::string, IntOrDouble>& known_values) {
+      const std::unordered_map<std::string, EvaluatorValue>& known_values) {
     for (auto pair : known_values) {
       expr_eval_.bind(pair.first, pair.second);
     }
@@ -186,7 +186,7 @@ class InferLaunchParams : public kir::IrVisitor {
               launch_params_->bind(stop->as<int64_t>(), ptype);
             } else {
               TORCH_INTERNAL_ASSERT(
-                  launch_params_->getDim(ptype) == stop,
+                  launch_params_->getDim(ptype) == stop->as<int64_t>(),
                   "Unable to infer launch parameters");
             }
           }
@@ -204,7 +204,7 @@ class BankConflictInfo : public kir::IrVisitor {
   static std::unordered_map<const Expr*, std::pair<int, int>> get(
       const std::vector<Expr*>& exprs,
       c10::optional<LaunchParams> launch_params,
-      const std::unordered_map<std::string, IntOrDouble>& known_values) {
+      const std::unordered_map<std::string, EvaluatorValue>& known_values) {
     if (exprs.empty()) {
       return {};
     }
@@ -216,7 +216,7 @@ class BankConflictInfo : public kir::IrVisitor {
   BankConflictInfo(
       const std::vector<Expr*>& exprs,
       c10::optional<LaunchParams> launch_params,
-      const std::unordered_map<std::string, IntOrDouble>& known_values)
+      const std::unordered_map<std::string, EvaluatorValue>& known_values)
       : launch_params_(launch_params) {
     expr_eval_common_.bind("blockIdx.x", 0);
     expr_eval_common_.bind("blockIdx.y", 0);
@@ -299,7 +299,7 @@ class BankConflictInfo : public kir::IrVisitor {
 std::unordered_map<const Expr*, std::pair<int, int>> getBankConflictInfo(
     kir::Kernel* kernel,
     c10::optional<LaunchParams> launch_params,
-    const std::unordered_map<std::string, IntOrDouble>& known_values) {
+    const std::unordered_map<std::string, EvaluatorValue>& known_values) {
   for (auto pair : known_values) {
     TORCH_CHECK(
         !isThreadIdx(pair.first),

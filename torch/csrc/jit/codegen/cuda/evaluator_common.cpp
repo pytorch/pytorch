@@ -190,7 +190,7 @@ void PrecomputedValues::initializeValueList(
   num_of_values_ = sorted_value_list.size();
   defined_ = std::vector<bool>(num_of_values_, false);
   is_constant_ = std::vector<bool>(num_of_values_, false);
-  values_ = std::vector<IntOrDouble>(num_of_values_, -1);
+  values_ = std::vector<EvaluatorValue>(num_of_values_, EvaluatorValue(-1));
 
   // Fill in constants and assign evaluator indices
   for (const auto i : c10::irange(num_of_values_)) {
@@ -198,18 +198,21 @@ void PrecomputedValues::initializeValueList(
     if (sorted_value_list[i]->isConstScalar()) {
       is_constant_[i] = true;
       if (sorted_value_list[i]->isAnInt()) {
-        values_[i] = sorted_value_list[i]->evaluateInt();
+        values_[i] = EvaluatorValue(sorted_value_list[i]->evaluateInt());
       }
-      is_constant_[i] = true;
       if (sorted_value_list[i]->isADouble()) {
-        values_[i] = sorted_value_list[i]->evaluateDouble();
+        values_[i] = EvaluatorValue(sorted_value_list[i]->evaluateDouble());
+      }
+      if (sorted_value_list[i]->isABool()) {
+        values_[i] = EvaluatorValue(sorted_value_list[i]->evaluateBool());
       }
     }
     sorted_value_list[i]->setEvaluatorIndex(i);
   }
 }
 
-c10::optional<IntOrDouble> PrecomputedValues::getMaybeValueFor(const Val* val) {
+c10::optional<EvaluatorValue> PrecomputedValues::getMaybeValueFor(
+    const Val* val) {
   auto index = val->evaluatorIndex();
   if (index < 0) {
     return c10::nullopt;
@@ -404,7 +407,7 @@ void NaiveValueMachine::runInstruction(int index) {
 }
 
 void NaiveValueMachine::runUnaryOp(int index) {
-  using namespace IntOrDouble_functions;
+  using namespace EvaluatorValue_functions;
   int src_index = src0_[index];
   bool src_defined = precomputed_values_.defined_[src_index];
   bool src_is_const = precomputed_values_.is_constant_[src_index];
@@ -426,9 +429,11 @@ void NaiveValueMachine::runUnaryOp(int index) {
       break;
     case UnaryOpType::Cast:
       if (data_type_[index] == DataType::Double) {
-        dest = src.template cast<double>();
+        dest = EvaluatorValue(src.template cast<double>());
       } else if (data_type_[index] == DataType::Int) {
-        dest = src.template cast<int64_t>();
+        dest = EvaluatorValue(src.template cast<int64_t>());
+      } else if (data_type_[index] == DataType::Bool) {
+        dest = EvaluatorValue(src.template cast<bool>());
       } else {
         TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
       }
@@ -444,7 +449,7 @@ void NaiveValueMachine::runUnaryOp(int index) {
 }
 
 void NaiveValueMachine::runBinaryOp(int index) {
-  using namespace IntOrDouble_functions;
+  using namespace EvaluatorValue_functions;
   int src0_index = src0_[index];
   int src1_index = src1_[index];
   bool src0_is_const = precomputed_values_.is_constant_[src0_index];
@@ -486,7 +491,7 @@ void NaiveValueMachine::runBinaryOp(int index) {
       dest = ceildiv(lhs, rhs);
       break;
     case BinaryOpType::And:
-      dest = Int::ScalarType(lhs && rhs);
+      dest = lhs && rhs;
       break;
     case BinaryOpType::Max:
       dest = lhs > rhs ? lhs : rhs;

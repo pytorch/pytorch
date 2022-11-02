@@ -146,7 +146,7 @@ class PrecomputedValues {
 
   //! Returns value for the given IR node if it's stored
   //!  in the workspace and has been evaluated.
-  c10::optional<IntOrDouble> getMaybeValueFor(const Val* val);
+  c10::optional<EvaluatorValue> getMaybeValueFor(const Val* val);
 
   //! Debugging helper, prints all the currently known values
   void print() const;
@@ -168,13 +168,17 @@ class PrecomputedValues {
 
   //! Bind concrete value to the given index
   //!  if the index is valid.
-  void bindValue(int index, IntOrDouble value) {
+  void bindValue_(int index, const EvaluatorValue& value) {
     if (index < 0 || is_constant_[index]) {
       return;
     }
     defined_[index] = true;
     values_[index] = value;
     binding_log_.emplace_back(index, value);
+  }
+  template <typename T>
+  void bindValue(int index, const T& value) {
+    bindValue_(index, EvaluatorValue(value));
   }
 
   //! Invalidate all computed values in the workspace.
@@ -239,7 +243,7 @@ class PrecomputedValues {
   std::vector<bool> is_constant_;
 
   //! Stores the concrete values at each index.
-  std::vector<IntOrDouble> values_;
+  std::vector<EvaluatorValue> values_;
 
   //! Stores the IR nodes corresponding to each index.
   std::vector<Val*> symbols_;
@@ -247,7 +251,7 @@ class PrecomputedValues {
   //! An internal log to keep track of all the bindings
   //!  used in each evaluation cycle. To be used for
   //!  consistency check.
-  std::vector<std::pair<int, IntOrDouble>> binding_log_;
+  std::vector<std::pair<int, EvaluatorValue>> binding_log_;
 
   //! Integer runtime for realizing the values computations.
   std::unique_ptr<NaiveValueMachine> value_machine_;

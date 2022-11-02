@@ -11,312 +11,309 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class TORCH_CUDA_CU_API IntOrDouble {
-  c10::variant<double, int64_t> value_;
+class TORCH_CUDA_CU_API EvaluatorValue {
+  c10::variant<double, int64_t, bool> value_;
 
  public:
-  IntOrDouble(int64_t i) : value_(i) {}
-  IntOrDouble(double d) : value_(d) {}
-  IntOrDouble(int i) : value_((int64_t)i) {}
-  IntOrDouble(size_t i) : value_((int64_t)i) {}
-  IntOrDouble() : IntOrDouble(0) {}
+  explicit EvaluatorValue(int64_t i) : value_(i) {}
+  explicit EvaluatorValue(double d) : value_(d) {}
+  explicit EvaluatorValue(bool b) : value_(b) {}
+  explicit EvaluatorValue(int i) : value_((int64_t)i) {}
+  explicit EvaluatorValue(size_t i) : value_((int64_t)i) {}
+  EvaluatorValue() : EvaluatorValue(0) {}
 
   // Avoid using copy constructor of c10::variant as it's
   // deprecated.
-  IntOrDouble(const IntOrDouble& other) {
+  EvaluatorValue(const EvaluatorValue& other) {
     value_ = other.value_;
   }
 
   // Explicitly define copy assignment operator as its implicit definition is
   // deprecated
-  IntOrDouble& operator=(const IntOrDouble& other) {
+  EvaluatorValue& operator=(const EvaluatorValue& other) {
     value_ = other.value_;
     return *this;
   }
 
-  bool is_int() const {
+  bool isInt() const {
     return c10::holds_alternative<int64_t>(value_);
+  }
+
+  bool isDouble() const {
+    return c10::holds_alternative<double>(value_);
+  }
+
+  bool isBool() const {
+    return c10::holds_alternative<bool>(value_);
   }
 
   template <typename T>
   T as() const {
     TORCH_CHECK(
         c10::holds_alternative<T>(value_),
-        "The expected dtype and the actual dtype does not match in IntOrDouble");
+        "The expected dtype and the actual dtype does not match in EvaluatorValue");
     return c10::get<T>(value_);
   }
 
   template <typename T>
-  T cast() const;
+  T cast() const {
+    if (isInt()) {
+      return (T)as<int64_t>();
+    }
+    if (isBool()) {
+      return (T)as<bool>();
+    }
+    if (isDouble()) {
+      return (T)as<double>();
+    }
+    TORCH_INTERNAL_ASSERT(false);
+  }
 
 #define DEFINE_ARITHMETIC_OP(op)                                  \
-  IntOrDouble operator op(const IntOrDouble& other) const {       \
-    switch ((int)is_int() << 1 | (int)other.is_int()) {           \
-      case 0b00:                                                  \
-        return IntOrDouble(as<double>() op other.as<double>());   \
-      case 0b01:                                                  \
-        return IntOrDouble(as<double>() op other.as<int64_t>());  \
-      case 0b10:                                                  \
-        return IntOrDouble(as<int64_t>() op other.as<double>());  \
-      case 0b11:                                                  \
-        return IntOrDouble(as<int64_t>() op other.as<int64_t>()); \
+  template <typename T>                                           \
+  EvaluatorValue operator op(T other) const {                     \
+    if (isInt()) {                                                \
+      return EvaluatorValue(as<int64_t>() op other);              \
+    }                                                             \
+    if (isDouble()) {                                             \
+      return EvaluatorValue(as<double>() op other);               \
+    }                                                             \
+    if (isBool()) {                                               \
+      return EvaluatorValue(as<bool>() op other);                 \
     }                                                             \
     TORCH_INTERNAL_ASSERT(false);                                 \
   }                                                               \
-  template <typename T>                                           \
-  IntOrDouble operator op(T other) const {                        \
-    if (is_int()) {                                               \
-      return IntOrDouble(as<int64_t>() op other);                 \
+  EvaluatorValue operator op(const EvaluatorValue& other) const { \
+    if (other.isInt()) {                                          \
+      return operator op(other.as<int64_t>());                    \
     }                                                             \
-    return IntOrDouble(as<double>() op other);                    \
+    if (other.isDouble()) {                                       \
+      return operator op(other.as<double>());                     \
+    }                                                             \
+    if (other.isBool()) {                                         \
+      return operator op(other.as<bool>());                       \
+    }                                                             \
+    TORCH_INTERNAL_ASSERT(false);                                 \
   }
 
   DEFINE_ARITHMETIC_OP(+)
   DEFINE_ARITHMETIC_OP(-)
   DEFINE_ARITHMETIC_OP(*)
   DEFINE_ARITHMETIC_OP(/)
-  DEFINE_ARITHMETIC_OP(&&)
+  DEFINE_ARITHMETIC_OP(>)
+  DEFINE_ARITHMETIC_OP(>=)
+  DEFINE_ARITHMETIC_OP(<)
+  DEFINE_ARITHMETIC_OP(<=)
+  DEFINE_ARITHMETIC_OP(==)
+  DEFINE_ARITHMETIC_OP(!=)
 
 #undef DEFINE_ARITHMETIC_OP
 
-#define DEFINE_ASSIGN_OP(assign, op)                                      \
-  IntOrDouble& operator assign(const IntOrDouble& other) {                \
-    switch ((int)is_int() << 1 | (int)other.is_int()) {                   \
-      case 0b00:                                                          \
-        return *this = IntOrDouble(as<double>() op other.as<double>());   \
-      case 0b01:                                                          \
-        return *this = IntOrDouble(as<double>() op other.as<int64_t>());  \
-      case 0b10:                                                          \
-        return *this = IntOrDouble(as<int64_t>() op other.as<double>());  \
-      case 0b11:                                                          \
-        return *this = IntOrDouble(as<int64_t>() op other.as<int64_t>()); \
-    }                                                                     \
-    TORCH_INTERNAL_ASSERT(false);                                         \
-  }                                                                       \
-  template <typename T>                                                   \
-  IntOrDouble& operator assign(T other) {                                 \
-    if (is_int()) {                                                       \
-      return *this = IntOrDouble(as<int64_t>() op other);                 \
-    }                                                                     \
-    return *this = IntOrDouble(as<double>() op other);                    \
+#define DEFINE_BITWISE_OP(op)                                     \
+  template <typename T>                                           \
+  EvaluatorValue operator op(T other) const {                     \
+    if (isInt()) {                                                \
+      return EvaluatorValue(as<int64_t>() op other);              \
+    }                                                             \
+    if (isBool()) {                                               \
+      return EvaluatorValue(as<bool>() op other);                 \
+    }                                                             \
+    TORCH_INTERNAL_ASSERT(false);                                 \
+  }                                                               \
+  EvaluatorValue operator op(const EvaluatorValue& other) const { \
+    if (other.isInt()) {                                          \
+      return operator op(other.as<int64_t>());                    \
+    }                                                             \
+    if (other.isBool()) {                                         \
+      return operator op(other.as<bool>());                       \
+    }                                                             \
+    TORCH_INTERNAL_ASSERT(false);                                 \
+  }
+
+  DEFINE_BITWISE_OP(|)
+  DEFINE_BITWISE_OP(^)
+  DEFINE_BITWISE_OP(&)
+
+#undef DEFINE_BITWISE_OP
+
+#define DEFINE_LOGICAL_OP(op)                                     \
+  template <typename T>                                           \
+  EvaluatorValue operator op(T other) const {                     \
+    return EvaluatorValue(cast<bool>() op other);                 \
+  }                                                               \
+  EvaluatorValue operator op(const EvaluatorValue& other) const { \
+    return operator op(other.cast<bool>());                       \
+  }
+
+  DEFINE_LOGICAL_OP(||)
+  DEFINE_LOGICAL_OP(&&)
+
+#undef DEFINE_LOGICAL_OP
+
+#define DEFINE_ASSIGN_OP(assign, op)                             \
+  EvaluatorValue& operator assign(const EvaluatorValue& other) { \
+    *this = *this op other;                                      \
+    return *this;                                                \
+  }                                                              \
+  template <typename T>                                          \
+  EvaluatorValue& operator assign(T other) {                     \
+    *this = *this op other;                                      \
+    return *this;                                                \
   }
 
   DEFINE_ASSIGN_OP(+=, +)
   DEFINE_ASSIGN_OP(-=, -)
   DEFINE_ASSIGN_OP(*=, *)
   DEFINE_ASSIGN_OP(/=, /)
+  DEFINE_ASSIGN_OP(&=, &)
+  DEFINE_ASSIGN_OP(|=, |)
+  DEFINE_ASSIGN_OP(^=, ^)
 
 #undef DEFINE_ASSIGN_OP
 
-  IntOrDouble operator%(const IntOrDouble& other) const {
-    if (is_int() && other.is_int()) {
-      return IntOrDouble(as<int64_t>() % other.as<int64_t>());
+  EvaluatorValue operator%(const EvaluatorValue& other) const {
+    if (isInt() && other.isInt()) {
+      return EvaluatorValue(as<int64_t>() % other.as<int64_t>());
     }
     TORCH_INTERNAL_ASSERT(false);
   }
-  IntOrDouble operator%(int64_t other) const {
-    if (is_int()) {
-      return IntOrDouble(as<int64_t>() % other);
+  EvaluatorValue operator%(int64_t other) const {
+    if (isInt()) {
+      return EvaluatorValue(as<int64_t>() % other);
     }
     TORCH_INTERNAL_ASSERT(false);
   }
-  IntOrDouble& operator%=(const IntOrDouble& other) {
-    if (is_int() && other.is_int()) {
-      return *this = IntOrDouble(as<int64_t>() % other.as<int64_t>());
+  EvaluatorValue& operator%=(const EvaluatorValue& other) {
+    if (isInt() && other.isInt()) {
+      return *this = EvaluatorValue(as<int64_t>() % other.as<int64_t>());
     }
     TORCH_INTERNAL_ASSERT(false);
   }
-  IntOrDouble& operator%=(int64_t other) {
-    if (is_int()) {
-      return *this = IntOrDouble(as<int64_t>() % other);
-    }
-    TORCH_INTERNAL_ASSERT(false);
-  }
-  IntOrDouble operator^(const IntOrDouble& other) const {
-    if (is_int() && other.is_int()) {
-      return IntOrDouble(as<int64_t>() ^ other.as<int64_t>());
-    }
-    TORCH_INTERNAL_ASSERT(false);
-  }
-  IntOrDouble operator^(int64_t other) const {
-    if (is_int()) {
-      return IntOrDouble(as<int64_t>() ^ other);
+  EvaluatorValue& operator%=(int64_t other) {
+    if (isInt()) {
+      return *this = EvaluatorValue(as<int64_t>() % other);
     }
     TORCH_INTERNAL_ASSERT(false);
   }
 
-#define DEFINE_COMPARE_OP(op)                           \
-  bool operator op(const IntOrDouble& other) const {    \
-    switch ((int)is_int() << 1 | (int)other.is_int()) { \
-      case 0b00:                                        \
-        return as<double>() op other.as<double>();      \
-      case 0b01:                                        \
-        return as<double>() op other.as<int64_t>();     \
-      case 0b10:                                        \
-        return as<int64_t>() op other.as<double>();     \
-      case 0b11:                                        \
-        return as<int64_t>() op other.as<int64_t>();    \
-    }                                                   \
-    TORCH_INTERNAL_ASSERT(false);                       \
-  }                                                     \
-  bool operator op(double other) {                      \
-    if (is_int()) {                                     \
-      return as<int64_t>() op other;                    \
-    }                                                   \
-    return as<double>() op other;                       \
-  }                                                     \
-  bool operator op(int64_t other) {                     \
-    if (is_int()) {                                     \
-      return as<int64_t>() op other;                    \
-    }                                                   \
-    return as<double>() op other;                       \
-  }                                                     \
-  bool operator op(int other) {                         \
-    if (is_int()) {                                     \
-      return as<int64_t>() op other;                    \
-    }                                                   \
-    return as<double>() op other;                       \
-  }
-
-  DEFINE_COMPARE_OP(>)
-  DEFINE_COMPARE_OP(>=)
-  DEFINE_COMPARE_OP(<)
-  DEFINE_COMPARE_OP(<=)
-  DEFINE_COMPARE_OP(==)
-  DEFINE_COMPARE_OP(!=)
-
-#undef DEFINE_COMPARE_OP
-
-  IntOrDouble operator-() const {
-    if (is_int()) {
-      return IntOrDouble(-as<int64_t>());
+  EvaluatorValue operator-() const {
+    if (isInt()) {
+      return EvaluatorValue(-as<int64_t>());
     }
-    return IntOrDouble(-as<double>());
+    if (isDouble()) {
+      return EvaluatorValue(-as<double>());
+    }
+    if (isBool()) {
+      return EvaluatorValue(-as<bool>());
+    }
+    TORCH_INTERNAL_ASSERT(false);
   }
 
   explicit operator double() const;
   explicit operator int64_t() const;
   explicit operator size_t() const;
   explicit operator int() const;
-};
+  explicit operator bool() const;
+}; // namespace cuda
 
-#define DEFINE_ARITHMETIC_OP(op)                           \
-  template <typename T>                                    \
-  inline IntOrDouble operator op(T lhs, IntOrDouble rhs) { \
-    if (rhs.is_int()) {                                    \
-      return IntOrDouble(lhs op rhs.as<int64_t>());        \
-    }                                                      \
-    return IntOrDouble(lhs op rhs.as<double>());           \
+#define DEFINE_ARITHMETIC_OP(op)                                 \
+  template <typename T>                                          \
+  inline EvaluatorValue operator op(T lhs, EvaluatorValue rhs) { \
+    return EvaluatorValue(lhs) op rhs;                           \
   }
 
 DEFINE_ARITHMETIC_OP(+)
 DEFINE_ARITHMETIC_OP(-)
 DEFINE_ARITHMETIC_OP(*)
 DEFINE_ARITHMETIC_OP(/)
+DEFINE_ARITHMETIC_OP(&&)
+DEFINE_ARITHMETIC_OP(&)
+DEFINE_ARITHMETIC_OP(||)
+DEFINE_ARITHMETIC_OP(|)
+DEFINE_ARITHMETIC_OP(^)
+DEFINE_ARITHMETIC_OP(>)
+DEFINE_ARITHMETIC_OP(>=)
+DEFINE_ARITHMETIC_OP(<)
+DEFINE_ARITHMETIC_OP(<=)
+DEFINE_ARITHMETIC_OP(==)
+DEFINE_ARITHMETIC_OP(!=)
 
 #undef DEFINE_ARITHMETIC_OP
 
-template <>
-inline double IntOrDouble::cast<double>() const {
-  if (is_int()) {
-    return (double)as<int64_t>();
-  }
+inline EvaluatorValue::operator double() const {
   return as<double>();
 }
 
-template <>
-inline int64_t IntOrDouble::cast<int64_t>() const {
-  if (!is_int()) {
-    return (int64_t)as<double>();
-  }
+inline EvaluatorValue::operator int64_t() const {
   return as<int64_t>();
 }
 
-inline IntOrDouble::operator double() const {
-  return as<double>();
-}
-
-inline IntOrDouble::operator int64_t() const {
+inline EvaluatorValue::operator size_t() const {
   return as<int64_t>();
 }
 
-inline IntOrDouble::operator size_t() const {
+inline EvaluatorValue::operator int() const {
   return as<int64_t>();
 }
 
-inline IntOrDouble::operator int() const {
-  return as<int64_t>();
+inline EvaluatorValue::operator bool() const {
+  return as<bool>();
 }
-
-#define DEFINE_EQ_OP(op)                                         \
-  inline bool operator op(double lhs, const IntOrDouble& rhs) {  \
-    if (rhs.is_int()) {                                          \
-      return false;                                              \
-    }                                                            \
-    return lhs op rhs.as<double>();                              \
-  }                                                              \
-                                                                 \
-  inline bool operator op(int64_t lhs, const IntOrDouble& rhs) { \
-    if (rhs.is_int()) {                                          \
-      return lhs op rhs.as<int64_t>();                           \
-    }                                                            \
-    return false;                                                \
-  }                                                              \
-                                                                 \
-  inline bool operator op(int lhs, const IntOrDouble& rhs) {     \
-    return operator op((int64_t)lhs, rhs);                       \
-  }
-
-DEFINE_EQ_OP(==)
-DEFINE_EQ_OP(!=)
 
 #undef DEFINE_EQ_OP
 
-inline std::ostream& operator<<(std::ostream& os, const IntOrDouble& val) {
-  if (val.is_int()) {
+inline std::ostream& operator<<(std::ostream& os, const EvaluatorValue& val) {
+  if (val.isInt()) {
     return os << val.as<int64_t>();
   }
-  return os << val.as<double>();
+  if (val.isBool()) {
+    return os << val.as<bool>();
+  }
+  if (val.isDouble()) {
+    return os << val.as<double>();
+  }
+  TORCH_INTERNAL_ASSERT(false);
 }
 
-namespace IntOrDouble_functions {
+namespace EvaluatorValue_functions {
 
-inline IntOrDouble ceildiv(const IntOrDouble& a, const IntOrDouble& b) {
-  if (a.is_int() && b.is_int()) {
+inline EvaluatorValue ceildiv(
+    const EvaluatorValue& a,
+    const EvaluatorValue& b) {
+  if (a.isInt() && b.isInt()) {
     auto aa = a.as<int64_t>();
     auto bb = b.as<int64_t>();
     if (bb > 0) {
-      return (aa + bb - 1) / bb;
+      return EvaluatorValue((aa + bb - 1) / bb);
     } else {
-      return (aa + bb + 1) / bb;
+      return EvaluatorValue((aa + bb + 1) / bb);
     }
   }
-  return std::ceil((a / b).as<double>());
+  return EvaluatorValue(std::ceil((a / b).as<double>()));
 }
 
-inline IntOrDouble max(const IntOrDouble& a, const IntOrDouble& b) {
-  if (a.is_int() && b.is_int()) {
-    return std::max(a.as<int64_t>(), b.as<int64_t>());
+inline EvaluatorValue max(const EvaluatorValue& a, const EvaluatorValue& b) {
+  return EvaluatorValue((a > b).as<bool>() ? a : b);
+}
+
+inline EvaluatorValue min(const EvaluatorValue& a, const EvaluatorValue& b) {
+  return EvaluatorValue((a < b).as<bool>() ? a : b);
+}
+
+inline EvaluatorValue abs(const EvaluatorValue& a) {
+  if (a.isInt()) {
+    return EvaluatorValue(std::abs(a.as<int64_t>()));
   }
-  return (a > b ? a : b).cast<double>();
-}
-
-inline IntOrDouble min(const IntOrDouble& a, const IntOrDouble& b) {
-  if (a.is_int() && b.is_int()) {
-    return std::min(a.as<int64_t>(), b.as<int64_t>());
+  if (a.isDouble()) {
+    return EvaluatorValue(std::abs(a.as<double>()));
   }
-  return (a < b ? a : b).cast<double>();
-}
-
-inline IntOrDouble abs(const IntOrDouble& a) {
-  if (a.is_int()) {
-    return IntOrDouble(std::abs(a.as<int64_t>()));
-  } else {
-    return IntOrDouble(std::abs(a.as<double>()));
+  if (a.isBool()) {
+    return a;
   }
+  TORCH_INTERNAL_ASSERT(false);
 }
 
-} // namespace IntOrDouble_functions
+} // namespace EvaluatorValue_functions
 
 } // namespace cuda
 } // namespace fuser

@@ -20,18 +20,27 @@ class PrecomputedValues;
 
 //! Calculate Fusion IR expressions
 class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
+  void bind_(const Val* value, const EvaluatorValue& concrete_value);
+  void bind_(const std::string& name, const EvaluatorValue& concrete_value);
+
  public:
   //! Bind a concrete value to an IR variable
-  void bind(const Val* value, const IntOrDouble& concrete_value);
+  template <typename T>
+  void bind(const Val* value, const T& concrete_value) {
+    bind_(value, EvaluatorValue(concrete_value));
+  }
 
   //! Bind a concrete value to a named scalar
-  void bind(const std::string& name, const IntOrDouble& concrete_value);
+  template <typename T>
+  void bind(const std::string& name, const T& concrete_value) {
+    bind_(name, EvaluatorValue(concrete_value));
+  }
 
   //! Set a concrete value for a parallel dimension
   void bind(ParallelType pt, Int::ScalarType concrete_value);
 
   //! Try to evaluate a Fusion IR value
-  c10::optional<IntOrDouble> evaluate(const Val* value);
+  c10::optional<EvaluatorValue> evaluate(const Val* value);
 
   //! Debugging helper, prints all the currently known values
   void print() const;
@@ -45,15 +54,16 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
   }
 
  private:
-  c10::optional<IntOrDouble> getValue(const Val* value);
+  c10::optional<EvaluatorValue> getValue(const Val* value);
 
   void handle(const UnaryOp* unary_op) final;
   void handle(const BinaryOp* binary_op) final;
+  void handle(const TernaryOp* binary_op) final;
 
  private:
   PrecomputedValues* precomputed_values_ = nullptr;
-  std::unordered_map<const Val*, IntOrDouble> known_values_;
-  std::unordered_map<std::string, IntOrDouble> known_named_scalars_;
+  std::unordered_map<const Val*, EvaluatorValue> known_values_;
+  std::unordered_map<std::string, EvaluatorValue> known_named_scalars_;
 };
 
 } // namespace cuda

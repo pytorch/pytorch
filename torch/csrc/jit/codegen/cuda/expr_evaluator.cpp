@@ -14,21 +14,28 @@ namespace cuda {
 
 namespace {
 
-bool equals(const Val* value, const IntOrDouble& concrete_value) {
+bool equals(const Val* value, const EvaluatorValue& concrete_value) {
   switch (value->getDataType().value()) {
     case DataType::Int: {
-      if (!concrete_value.is_int()) {
+      if (!concrete_value.isInt()) {
         return false;
       }
       auto val = value->getInt();
       return val.has_value() && val.value() == concrete_value.as<int64_t>();
     }
     case DataType::Double: {
-      if (concrete_value.is_int()) {
+      if (!concrete_value.isDouble()) {
         return false;
       }
       auto val = value->getDouble();
       return val.has_value() && val.value() == concrete_value.as<double>();
+    }
+    case DataType::Bool: {
+      if (!concrete_value.isBool()) {
+        return false;
+      }
+      auto val = value->getBool();
+      return val.has_value() && val.value() == concrete_value.as<bool>();
     }
     default:
       TORCH_INTERNAL_ASSERT(false);
@@ -36,24 +43,25 @@ bool equals(const Val* value, const IntOrDouble& concrete_value) {
 }
 
 template <typename T>
-c10::optional<IntOrDouble> toOptionalIntOrDouble(c10::optional<T> i) {
+c10::optional<EvaluatorValue> toOptionalEvaluatorValue(c10::optional<T> i) {
   if (!i) {
     return c10::nullopt;
   }
-  return IntOrDouble(i.value());
+  return EvaluatorValue(i.value());
 }
 
 } // namespace
 
-void ExpressionEvaluator::bind(
+void ExpressionEvaluator::bind_(
     const Val* value,
-    const IntOrDouble& concrete_value) {
+    const EvaluatorValue& concrete_value) {
   if (equals(value, concrete_value)) {
     return;
   }
   TORCH_CHECK(value->isScalar());
   TORCH_CHECK(
-      value->dtype() == DataType::Int || value->dtype() == DataType::Double);
+      value->dtype() == DataType::Int || value->dtype() == DataType::Double ||
+      value->dtype() == DataType::Bool);
   TORCH_CHECK(!value->isConstScalar(), "Tried to bind to a constant value");
   TORCH_CHECK(
       value->definition() == nullptr,
@@ -68,9 +76,9 @@ void ExpressionEvaluator::bind(
   }
 }
 
-void ExpressionEvaluator::bind(
+void ExpressionEvaluator::bind_(
     const std::string& name,
-    const IntOrDouble& concrete_value) {
+    const EvaluatorValue& concrete_value) {
   known_named_scalars_[name] = concrete_value;
 }
 
@@ -83,14 +91,14 @@ void ExpressionEvaluator::bind(
     //  in pre-computed mode.
     precomputed_values_->bindConcreteParallelTypeValue(pt, concrete_value);
   } else {
-    bind(stringifyThreadSize(pt), concrete_value);
+    bind(stringifyThreadSize(pt), EvaluatorValue(concrete_value));
   }
 }
 
-c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(const Val* value) {
+c10::optional<EvaluatorValue> ExpressionEvaluator::evaluate(const Val* value) {
   if (precomputed_values_ && precomputed_values_->ready()) {
     if (precomputed_values_->getMaybeValueFor(value).has_value()) {
-      return toOptionalIntOrDouble(
+      return toOptionalEvaluatorValue(
           precomputed_values_->getMaybeValueFor(value));
     }
   }
@@ -106,28 +114,35 @@ c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(const Val* value) {
   return maybe_concrete_value;
 }
 
-c10::optional<IntOrDouble> ExpressionEvaluator::getValue(const Val* value) {
+c10::optional<EvaluatorValue> ExpressionEvaluator::getValue(const Val* value) {
   TORCH_INTERNAL_ASSERT(
-      value->isAnInt() || value->isADouble(),
+      value->isAnInt() || value->isADouble() || value->isABool(),
       value->toString(),
       " is not a supported type in expression evaluation.");
 
   if (value->isScalar() && value->isConst()) {
     if (value->isADouble()) {
-      return toOptionalIntOrDouble(value->as<Double>()->value());
+      return toOptionalEvaluatorValue(value->as<Double>()->value());
     }
-    return toOptionalIntOrDouble(value->as<Int>()->value());
+    if (value->isABool()) {
+      return toOptionalEvaluatorValue(value->as<Bool>()->value());
+    }
+    if (value->isAnInt()) {
+      return toOptionalEvaluatorValue(value->as<Int>()->value());
+    }
+    TORCH_INTERNAL_ASSERT(
+        false, "Data type not supported by ExpressionEvaluator");
   }
 
   if (value->isA<NamedScalar>()) {
     const auto it = known_named_scalars_.find(value->as<NamedScalar>()->name());
     if (it != known_named_scalars_.end()) {
-      return c10::optional<IntOrDouble>(it->second);
+      return c10::optional<EvaluatorValue>(it->second);
     }
   }
 
   const auto it = known_values_.find(value);
-  return it != known_values_.end() ? c10::optional<IntOrDouble>(it->second)
+  return it != known_values_.end() ? c10::optional<EvaluatorValue>(it->second)
                                    : c10::nullopt;
 }
 
@@ -152,7 +167,7 @@ void ExpressionEvaluator::print() const {
 }
 
 void ExpressionEvaluator::handle(const UnaryOp* uop) {
-  using namespace IntOrDouble_functions;
+  using namespace EvaluatorValue_functions;
   const auto in = evaluate(uop->in());
   if (in.has_value()) {
     switch (uop->getUnaryOpType()) {
@@ -164,9 +179,11 @@ void ExpressionEvaluator::handle(const UnaryOp* uop) {
         break;
       case UnaryOpType::Cast:
         if (uop->out()->getDataType() == DataType::Int) {
-          known_values_[uop->out()] = in->cast<int64_t>();
+          known_values_[uop->out()] = EvaluatorValue(in->cast<int64_t>());
         } else if (uop->out()->getDataType() == DataType::Double) {
-          known_values_[uop->out()] = in->cast<double>();
+          known_values_[uop->out()] = EvaluatorValue(in->cast<double>());
+        } else if (uop->out()->getDataType() == DataType::Bool) {
+          known_values_[uop->out()] = EvaluatorValue(in->cast<bool>());
         } else {
           TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
         }
@@ -186,7 +203,7 @@ void ExpressionEvaluator::handle(const UnaryOp* uop) {
 }
 
 void ExpressionEvaluator::handle(const BinaryOp* bop) {
-  using namespace IntOrDouble_functions;
+  using namespace EvaluatorValue_functions;
   const auto lhs = evaluate(bop->lhs());
   const auto rhs = evaluate(bop->rhs());
   if (lhs.has_value() && rhs.has_value()) {
@@ -215,14 +232,35 @@ void ExpressionEvaluator::handle(const BinaryOp* bop) {
       case BinaryOpType::And:
         known_values_[bop->out()] = *lhs && *rhs;
         break;
+      case BinaryOpType::Or:
+        known_values_[bop->out()] = *lhs || *rhs;
+        break;
+      case BinaryOpType::Xor:
+        known_values_[bop->out()] = *lhs ^ *rhs;
+        break;
+      case BinaryOpType::Eq:
+        known_values_[bop->out()] = *lhs == *rhs;
+        break;
+      case BinaryOpType::NE:
+        known_values_[bop->out()] = *lhs != *rhs;
+        break;
+      case BinaryOpType::GT:
+        known_values_[bop->out()] = *lhs > *rhs;
+        break;
+      case BinaryOpType::GE:
+        known_values_[bop->out()] = *lhs >= *rhs;
+        break;
+      case BinaryOpType::LT:
+        known_values_[bop->out()] = *lhs < *rhs;
+        break;
+      case BinaryOpType::LE:
+        known_values_[bop->out()] = *lhs <= *rhs;
+        break;
       case BinaryOpType::Max:
         known_values_[bop->out()] = max(*lhs, *rhs);
         break;
       case BinaryOpType::Min:
         known_values_[bop->out()] = min(*lhs, *rhs);
-        break;
-      case BinaryOpType::Xor:
-        known_values_[bop->out()] = *lhs ^ *rhs;
         break;
       default:
         TORCH_CHECK(
@@ -231,6 +269,27 @@ void ExpressionEvaluator::handle(const BinaryOp* bop) {
             bop->getBinaryOpType(),
             " in ",
             bop->toString());
+    }
+  }
+}
+
+void ExpressionEvaluator::handle(const TernaryOp* top) {
+  using namespace EvaluatorValue_functions;
+  const auto in1 = evaluate(top->in1());
+  const auto in2 = evaluate(top->in2());
+  const auto in3 = evaluate(top->in3());
+  if (in1.has_value() && in2.has_value() && in3.has_value()) {
+    switch (top->getTernaryOpType()) {
+      case TernaryOpType::Where:
+        known_values_[top->out()] = in1->as<bool>() ? *in2 : *in3;
+        break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Unexpected operator type: ",
+            top->getTernaryOpType(),
+            " in ",
+            top->toString());
     }
   }
 }

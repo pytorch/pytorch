@@ -257,6 +257,10 @@ class TORCH_CUDA_CU_API Val : public Statement {
     return isScalar() && dtype_ == DataType::Double;
   }
 
+  bool isABool() const {
+    return isScalar() && dtype_ == DataType::Bool;
+  }
+
   // If this Val is an integer with a direct constant value associated with it,
   // will return the value of that constant integer. If this integer has
   // defining expressions it will return a c10::nullopt. Those values should be
@@ -269,6 +273,12 @@ class TORCH_CUDA_CU_API Val : public Statement {
   // infered using evaluateDouble.
   c10::optional<double> getDouble() const;
 
+  // If this Val is a bool with a direct constant value associated with it,
+  // will return the value of that constant bool. If this bool has defining
+  // expressions it will return a c10::nullopt. Those values should be infered
+  // using evaluateBool.
+  c10::optional<bool> getBool() const;
+
   // If this Val is a constant integer, and its history is comprised only of
   // constant values, will return the value of that constant integer. Cannot
   // make constant as expression evaluator takes non-constant Vals.
@@ -278,6 +288,11 @@ class TORCH_CUDA_CU_API Val : public Statement {
   // constant values, will return the value of that constant double. Cannot
   // make constant as expression evaluator takes non-constant Vals.
   double evaluateDouble();
+
+  // If this Val is a constant bool, and its history is comprised only of
+  // constant values, will return the value of that constant bool. Cannot
+  // make constant as expression evaluator takes non-constant Vals.
+  bool evaluateBool();
 
   // Returns if no dependencies and is a constant scalar.
   virtual bool isConst() const {

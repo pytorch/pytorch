@@ -236,6 +236,23 @@ double Val::evaluateDouble() {
   return evaluated_val->as<double>();
 }
 
+bool Val::evaluateBool() {
+  TORCH_INTERNAL_ASSERT(
+      ConstCheck::isConst(this),
+      "Cannot get Bool of not const bools through IR nodes, must use runtime ExpressionEvaluator.");
+
+  if (this->as<Bool>()->value().has_value()) {
+    return this->as<Bool>()->value().value();
+  }
+
+  ExpressionEvaluator ee;
+  auto evaluated_val = ee.evaluate(this);
+  TORCH_INTERNAL_ASSERT(
+      evaluated_val.has_value(),
+      "Detected a const integer but failed to infer its value.");
+  return evaluated_val->as<bool>();
+}
+
 c10::optional<int64_t> Val::getInt() const {
   if (isConstScalar() && isAnInt() && isA<Int>()) {
     return this->as<Int>()->value();
@@ -246,6 +263,13 @@ c10::optional<int64_t> Val::getInt() const {
 c10::optional<double> Val::getDouble() const {
   if (isConstScalar() && isADouble() && isA<Double>()) {
     return this->as<Double>()->value();
+  }
+  return c10::nullopt;
+}
+
+c10::optional<bool> Val::getBool() const {
+  if (isConstScalar() && isABool() && isA<Bool>()) {
+    return this->as<Bool>()->value();
   }
   return c10::nullopt;
 }

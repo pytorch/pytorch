@@ -38,7 +38,7 @@ namespace cuda {
 std::unordered_map<const Expr*, std::pair<int, int>> getBankConflictInfo(
     kir::Kernel* kernel,
     c10::optional<LaunchParams> launch_params = c10::nullopt,
-    const std::unordered_map<std::string, IntOrDouble>& known_values = {});
+    const std::unordered_map<std::string, EvaluatorValue>& known_values = {});
 
 } // namespace cuda
 } // namespace fuser

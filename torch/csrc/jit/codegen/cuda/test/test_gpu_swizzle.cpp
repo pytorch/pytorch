@@ -451,6 +451,55 @@ TEST_F(NVFuserTest, FusionTransposeBankConflictSwizzle1_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionTransposeBankConflictSwizzle2_CUDA) {
+  // ZShape should remove half of the bank confliction of a 32x32 non-vectorized
+  // transpose.
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(0)->parallelize(ParallelType::TIDy);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDy);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::TIDy);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  // 32-way bank confliction
+  auto bank_conflict_info = fusion.bankConflictInfo();
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{32, 0};
+    TORCH_CHECK(
+        info.second == expect,
+        "Expecting 32-way bank conflict, but got ",
+        info.second,
+        ". Something in our lowering or bank conflict checker must have changed, ",
+        "please update them or this test consistently.");
+  }
+
+  // no bank confliction after swizzle
+  tv1->swizzle(Swizzle2DType::ZShape, 0, 1);
+  bank_conflict_info = fusion.bankConflictInfo();
+  TORCH_CHECK(!bank_conflict_info.empty());
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{16, 0};
+    TORCH_CHECK(
+        info.second == expect,
+        "Expecting 16-way bank conflict, but got ",
+        info.second,
+        ". Something in our lowering or bank conflict checker must have changed, ",
+        "please update them or this test consistently.");
+  }
+}
+
 TEST_F(NVFuserTest, FusionDataSwizzleGlobal_CUDA) {
   // Data swizzle is ignored in global indexing, so we should just throw an
   // error if someone wants to do so.
