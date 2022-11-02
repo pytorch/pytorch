@@ -7,7 +7,7 @@ from typing import List
 
 import torch
 
-__all_dtype_getters__ = [
+__all__ = [
     "_validate_dtypes",
     "_dispatch_dtypes",
     "all_types",
@@ -30,11 +30,6 @@ __all_dtype_getters__ = [
     "get_all_math_dtypes",
     "integral_types",
     "integral_types_and",
-]
-
-__all__ = [
-    *__all_dtype_getters__,
-    "get_all_device_types",
 ]
 
 # Functions and classes for describing the dtypes a function supports
@@ -152,7 +147,3 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dt
 
 def get_all_qint_dtypes() -> List[torch.dtype]:
     return [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]
-
-
-def get_all_device_types() -> List[str]:
-    return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
