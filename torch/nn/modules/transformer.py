@@ -466,15 +466,14 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
         elif not (self.norm1.eps == self.norm2.eps):
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
-        elif src_mask is not None:
-            why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
-        elif src.is_nested and src_key_padding_mask is not None:
-            why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
+        elif src.is_nested and (src_key_padding_mask is not None or src_mask is not None):
+            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask are not supported with NestedTensor input"
+        elif (not src.is_nested) and (src_key_padding_mask is not None and src_mask is not None):
+            why_not_sparsity_fast_path = "src_key_padding_mask and src_mask were both supplied"
         elif self.self_attn.num_heads % 2 == 1:
             why_not_sparsity_fast_path = "num_head is odd"
         elif torch.is_autocast_enabled():
             why_not_sparsity_fast_path = "autocast is enabled"
-
         if not why_not_sparsity_fast_path:
             tensor_args = (
                 src,

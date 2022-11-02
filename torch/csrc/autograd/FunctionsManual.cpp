@@ -4834,6 +4834,9 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
 }
 
 Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
+  // We must conditionally initalize this using to_dense if sparse, sparse
+  // addition is not supported without exact shape match
+  Tensor self_p1_conj;
   if (self.layout() == c10::kSparse || self.layout() == c10::kSparseCsr ||
       self.layout() == c10::kSparseCsc || self.layout() == c10::kSparseBsr ||
       self.layout() == c10::kSparseBsc) {
@@ -4842,9 +4845,12 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
     // happens memory wise
     TORCH_WARN(
         "log1p_backward: recived self with sparse layout, but backward requires materialization of a dense tensor with this shape");
+    self_p1_conj = (self.to_dense() + 1).conj();
+  } else {
+    // Although calling self.to_dense() would just return self when it has
+    // strided layout, that would breaks functorch tests.
+    self_p1_conj = (self + 1).conj();
   }
-  // Note to dense returns self if layout is already strided
-  auto self_p1_conj = (self.to_dense() + 1).conj();
   if (grad.layout() == c10::kSparse || grad.layout() == c10::kSparseCsr ||
       grad.layout() == c10::kSparseCsc || grad.layout() == c10::kSparseBsr ||
       grad.layout() == c10::kSparseBsc) {
