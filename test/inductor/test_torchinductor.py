@@ -4003,6 +4003,25 @@ class CommonTemplate:
         self.common(forward, args)
 
     @requires_cuda()
+    def test_zero_dim_reductions(self):
+
+        inps0 = (torch.zeros(2, 0, device="cuda", dtype=torch.float16), 1)
+        failed_ops = [aten.argmin, aten.argmax, aten.max, aten.min]
+        for fo in failed_ops:
+            with self.assertRaisesRegex(
+                IndexError, "Expected reduction dim 1 to have non-zero size"
+            ):
+                mod = make_fx(fo)(*inps0)
+                _ = compile_fx_inner(mod, inps0)
+
+        pass_ops = [lambda *x: aten.sum(*x), lambda *x: aten.prod(*x)]
+        for po in pass_ops:
+            compiled = torch._dynamo.optimize("inductor")(po)
+            expected = po(*inps0)
+            actual = compiled(*inps0)
+            self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
+
+    @requires_cuda()
     def test_unspec_inputs(self):
         def fn(x, y):
             return x + y, x * y, x / y
