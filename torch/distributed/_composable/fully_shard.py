@@ -30,7 +30,6 @@ from torch.distributed.fsdp.api import (
 def fully_shard(
     module: nn.Module,
     process_group: Optional[dist.ProcessGroup] = None,
-    sharding_strategy: Optional[ShardingStrategy] = None,
     mixed_precision: Optional[MixedPrecision] = None,
     cpu_offload: Optional[CPUOffload] = None,
     auto_wrap_policy: Optional[Callable] = None,
@@ -51,7 +50,7 @@ def fully_shard(
     forward_prefetch_limit = 1
     state = _init_core_state(
         state,
-        sharding_strategy,
+        ShardingStrategy.FULL_SHARD,
         mixed_precision,
         cpu_offload,
         limit_all_gathers,
