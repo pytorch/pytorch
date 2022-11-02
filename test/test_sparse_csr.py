@@ -62,6 +62,7 @@ UNARY_EWISE_CSR_ALLOW_AUTOGRAD = [
     'abs',
     'conj_physical',
     'neg',
+    'positive'
 ]
 
 # This should be just an import from test_linalg instead of code duplication
@@ -586,9 +587,6 @@ class TestSparseCompressed(TestCase):
         require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
-
-        if layout is torch.sparse_bsc:
-            self.skipTest(f"test requires conversion from Strided layout to {layout} layout")
 
         samples = list(op.sample_inputs(device, dtype))
 

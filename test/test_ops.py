@@ -1773,6 +1773,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.logsumexp',
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
+        '_refs.norm',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
