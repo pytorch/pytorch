@@ -14,6 +14,6 @@ python benchmarks/dynamo/torchbench.py --output torchbench.csv --accuracy $FLAG 
 python benchmarks/dynamo/huggingface.py --output huggingface.csv --accuracy $FLAG 2>&1 | tee huggingface.log
 # shellcheck disable=SC2086 # Intended splitting of FLAG
 python benchmarks/dynamo/timm_models.py  --output timm_models.csv --accuracy $FLAG 2>&1 | tee timm_models.log
-cat torchbench.log huggingface.log timm_models.log | tee sweep.log | gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $FLAG (TORCHDYNAMO_DYNAMIC_SHAPES=$TORCHDYNAMO_DYNAMIC_SHAPES) - $DATE" -
-cat torchbench.csv huggingface.csv timm_models.csv | gh gist create -d "Sweep csv for $(git rev-parse --abbrev-ref HEAD) $FLAG (TORCHDYNAMO_DYNAMIC_SHAPES=$TORCHDYNAMO_DYNAMIC_SHAPES) - $DATE" -
+cat torchbench.log huggingface.log timm_models.log | tee sweep.log | gh gist create -d "Sweep logs for $(git rev-parse --abbrev-ref HEAD) $FLAG (TORCHDYNAMO_DYNAMIC_SHAPES=$TORCHDYNAMO_DYNAMIC_SHAPES) - $(git rev-parse HEAD) $DATE" -
+cat torchbench.csv huggingface.csv timm_models.csv | gh gist create -d "Sweep csv for $(git rev-parse --abbrev-ref HEAD) $FLAG (TORCHDYNAMO_DYNAMIC_SHAPES=$TORCHDYNAMO_DYNAMIC_SHAPES) - $(git rev-parse HEAD) $DATE" -
 
