@@ -164,10 +164,8 @@ def _register_lowering(
             args = args[0]
         # Only look at args that are Tensors
         indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
-        # kwargs tensors not supported yet unless it's a fallback op
-        assert not any(isinstance(x, TensorBox) for x in kwargs.values()) or all(
-            fn in fallbacks for fn in aten_fn
-        )
+        # kwargs tensors not supported yet
+        assert not any(isinstance(x, TensorBox) for x in kwargs.values())
 
         if (type_promotion_kind or convert_input_to_bool) and indices:
             if convert_input_to_bool:
