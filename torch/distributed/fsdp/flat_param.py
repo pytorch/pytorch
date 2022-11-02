@@ -106,7 +106,7 @@ class HandleConfig:
     offload_params: bool
     low_prec_param_dtype: Optional[torch.dtype]
     low_prec_reduce_dtype: Optional[torch.dtype]
-    keep_low_precision_grads: Optional[bool] = False
+    keep_low_precision_grads: bool = False
 
 
 class FlatParameter(nn.Parameter):
@@ -415,7 +415,10 @@ class FlatParamHandle:
                         else param_name
                     )
                     prefixed_param_names.append(prefixed_param_name)
-        assert requires_grad is not None
+        assert requires_grad is not None, (
+            "Passed-in `params` were not found in the module tree\n"
+            f"params: {params}\nmodule: {module}"
+        )
         self.flat_param = FlatParamHandle.flatten_params(
             params_to_flatten, requires_grad
         )
@@ -1798,8 +1801,22 @@ class FlatParamHandle:
         return self._config.low_prec_param_dtype is not None
 
     @property
+    def _uses_reduce_mixed_precision(self) -> bool:
+        return self._config.low_prec_reduce_dtype is not None
+
+    @property
+    def _keep_low_precision_grads(self) -> bool:
+        return self._config.keep_low_precision_grads
+
+    @property
     def _force_full_precision(self) -> bool:
         return (
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
         )
+
+
+# A handles key represents the group of `FlatParamHandle`s involved in a given
+# module's forward. These will be all-gathered together in the pre-forward and
+# pre-backward.
+_HandlesKey = Tuple[FlatParamHandle, ...]
