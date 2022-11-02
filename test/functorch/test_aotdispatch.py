@@ -974,6 +974,9 @@ aot_autograd_failures = {
     xfail('cholesky'),
     xfail('linalg.cholesky'),
 
+    # https://github.com/pytorch/pytorch/issues/87575
+    xfail('nn.functional.pad', 'circular'),
+
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),

@@ -167,7 +167,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 #
 # TODO: Provide a faster version of this that assumes flat arguments
 # (so no pytree necessary)
-def detach_and_functionalize_pure(f, preserve_requires_grad = True):
+def detach_and_functionalize_pure(f, preserve_requires_grad=True):
     @wraps(f)
     def inner(*args, **kwargs):
         def to_fun(t):
