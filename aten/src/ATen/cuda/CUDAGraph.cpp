@@ -195,7 +195,7 @@ void CUDAGraph::capture_end() {
     AT_CUDA_CHECK(cudaGraphDestroy(graph_));
     has_graph_ = false;
   } else {
-    TORCH_WARN("DEBUG: TORCH_CUDAGRAPHS_DEBUG_PATH detected. graph_ will not be freed");
+    TORCH_WARN("DEBUG: TORCH_CUDAGRAPHS_DEBUG_PATH detected. graph_ will not be freed until debug_dump is called.");
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
@@ -253,6 +253,7 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
     if (has_graph_) {
       TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
       C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), 1<<10)); // most verbose output
+      AT_CUDA_CHECK(cudaGraphDestroy(graph_));
     }
   } else {
     TORCH_WARN("CUDA Graphs debug not enabled, set with torch._C._cuda_enable_graphs_debug_mode");
