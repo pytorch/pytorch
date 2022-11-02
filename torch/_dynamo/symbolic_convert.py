@@ -122,11 +122,11 @@ def stack_op(fn: typing.Callable):
     return impl
 
 
-def _is_assert_statement(
+def _detect_and_normalize_assert_statement(
     self: "InstructionTranslatorBase", truth_fn: typing.Callable, push: bool
 ):
-    # Detect if this jump instruction is assert.
-    #
+    # Detect if this jump instruction is assert and normalize the assert
+    # by pushing dummy error message when nothing is given.
     #
     # Python 3.9 assertion is in following format:
     # 18 POP_JUMP_IF_TRUE       28
@@ -164,9 +164,8 @@ def _is_assert_statement(
     has_error_msg = False
     # DETECT RAISE_VARARGS or LOAD CONST
     if inst.opname == "LOAD_CONST":
-        assert isinstance(
-            inst.argval, str
-        ), f"Assert rhs must be str to be rewritten, but found {type(inst.argval)}"
+        if not isinstance(inst.argval, str):
+            return False
         self.LOAD_CONST(inst)
         has_error_msg = True
 
@@ -198,8 +197,9 @@ def generic_jump(truth_fn: typing.Callable, push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
-        if config.rewrite_assert_with_torch_assert and _is_assert_statement(
-            self, truth_fn, push
+        if (
+            config.rewrite_assert_with_torch_assert
+            and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
             error_msg: VariableTracker = self.pop()
             self.output.guards.update(error_msg.guards)
