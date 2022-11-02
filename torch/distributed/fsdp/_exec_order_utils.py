@@ -8,8 +8,8 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
     _all_handles,
+    _FSDPState,
     _get_param_to_fqns,
-    _State,
 )
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
 
@@ -74,7 +74,7 @@ class _ExecOrderData:
 
     def init(
         self,
-        state: _State,
+        state: _FSDPState,
         root_module: nn.Module,
         process_group: dist.ProcessGroup,
     ) -> None:

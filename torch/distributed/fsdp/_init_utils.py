@@ -21,9 +21,9 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
+    _FSDPState,
     _get_param_to_fqns,
     _is_fsdp_flattened,
-    _State,
     clean_tensor_name,
     TrainingState,
 )
@@ -69,9 +69,9 @@ SHARDING_STRATEGY_MAP = {
 
 @no_type_check
 def _init_process_group_state(
-    state: _State,
+    state: _FSDPState,
     process_group: Optional[dist.ProcessGroup],
-) -> _State:
+) -> _FSDPState:
     state.process_group = process_group or _get_default_group()
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
@@ -80,10 +80,10 @@ def _init_process_group_state(
 
 @no_type_check
 def _init_ignored_module_states(
-    state: _State,
+    state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
-) -> _State:
+) -> _FSDPState:
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params, state._ignored_param_names = _get_ignored_params(
         module,
@@ -99,9 +99,9 @@ def _init_ignored_module_states(
 
 @no_type_check
 def _init_buffer_state(
-    state: _State,
+    state: _FSDPState,
     module: nn.Module,
-) -> _State:
+) -> _FSDPState:
     state._buffer_names = _get_buffer_names(module)
     # Save a mapping from clean fully-qualified buffer name (starting from
     # `module`) to its original dtype for restoring that dtype during model
@@ -117,7 +117,7 @@ def _init_buffer_state(
 
 @no_type_check
 def _init_core_state(
-    state: _State,
+    state: _FSDPState,
     sharding_strategy: Optional[ShardingStrategy],
     mixed_precision: Optional[MixedPrecision],
     cpu_offload: Optional[CPUOffload],
@@ -125,7 +125,7 @@ def _init_core_state(
     use_orig_params: bool,
     backward_prefetch_limit: int,
     forward_prefetch_limit: int,
-) -> _State:
+) -> _FSDPState:
     # We clamp the strategy to `NO_SHARD` for world size of 1 since they are
     # currently functionally equivalent. This may change if/when we integrate
     # FSDP with MoE.
@@ -162,8 +162,8 @@ def _init_core_state(
 
 @no_type_check
 def _init_runtime_state(
-    state: _State,
-) -> _State:
+    state: _FSDPState,
+) -> _FSDPState:
     _root_pre_forward_handles: List[RemovableHandle] = []
     state._root_pre_forward_handles = _root_pre_forward_handles
     _pre_forward_handles: List[RemovableHandle] = []
@@ -186,10 +186,10 @@ def _init_runtime_state(
 
 @no_type_check
 def _init_prefetching_state(
-    state: _State,
+    state: _FSDPState,
     backward_prefetch: BackwardPrefetch,
     forward_prefetch: bool,
-) -> _State:
+) -> _FSDPState:
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
     _handles_prefetched: Dict[_HandlesKey, bool] = {}
@@ -205,20 +205,20 @@ def _init_prefetching_state(
     return state
 
 
-def _init_state_dict_state(state: _State) -> _State:
+def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     # TODO: after rebase
     return state
 
 
 @no_type_check
 def _init_param_handle_from_module(
-    state: _State,
+    state: _FSDPState,
     root_module: nn.Module,
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
     module_wrapper_cls: Type,
-) -> _State:
+) -> _FSDPState:
     """
     Initializes a ``FlatParamHandle`` from a module ``root_module``. This is
     the module wrapper code path.
@@ -252,13 +252,13 @@ def _init_param_handle_from_module(
 
 @no_type_check
 def _init_param_handles_from_module(
-    state: _State,
+    state: _FSDPState,
     root_module: nn.Module,
     auto_wrap_policy: Callable,
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
-) -> _State:
+) -> _FSDPState:
     """
     Initializes all ``FlatParamHandle`` s from a module ``root_module``. This
     is the non-module-wrapper code path.
@@ -311,7 +311,7 @@ def _init_param_handles_from_module(
 
 @no_type_check
 def _init_param_handle_from_params(
-    state: _State,
+    state: _FSDPState,
     params: List[nn.Parameter],
     root_module: nn.Module,
 ):
