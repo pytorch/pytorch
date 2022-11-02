@@ -14,8 +14,8 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
-from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 from torch.distributed.elastic.multiprocessing.api import _get_kill_signal
+from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
 
 
 __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
