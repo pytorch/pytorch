@@ -2806,7 +2806,7 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         input (Tensor): Input tensor to be reduced and scattered. Its size
             should be output tensor size times the world size. The input tensor
             can have one of the following shapes:
-            (i) a concatentation of the output tensors along the primary
+            (i) a concatenation of the output tensors along the primary
             dimension, or
             (ii) a stack of the output tensors along the primary dimension.
             For definition of "concatenation", see ``torch.cat()``.
@@ -3215,7 +3215,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
     whole group exits the function successfully, making it useful for debugging
     and synchronizing. However, it can have a performance impact and should only
     be used for debugging or scenarios that require full synchronization points
-    on the host-side. For debugging purposees, this barrier can be inserted
+    on the host-side. For debugging purposes, this barrier can be inserted
     before the application's collective calls to check if any ranks are
     desynchronized.
 

@@ -291,7 +291,7 @@ def prepare_fx(
       * `_equalization_config`: config for specifying how to perform equalization on the model
 
       * `backend_config` (BackendConfig): config that specifies how operators are quantized
-         in a backend, this includes how the operaetors are observed,
+         in a backend, this includes how the operators are observed,
          supported fusion patterns, how quantize/dequantize ops are
          inserted, supported dtypes etc. See :class:`~torch.ao.quantization.backend_config.BackendConfig` for more details
 
@@ -489,7 +489,7 @@ def prepare_qat_fx(
         qconfig_mapping = get_default_qat_qconfig("fbgemm")
 
         # We can customize qconfig_mapping in different ways, please take a look at
-        # the doctring for :func:`~torch.ao.quantization.prepare_fx` for different ways
+        # the docstring for :func:`~torch.ao.quantization.prepare_fx` for different ways
         # to configure this
 
         # example_inputs is a tuple of inputs, that is used to infer the type of the

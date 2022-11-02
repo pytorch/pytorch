@@ -1997,7 +1997,7 @@ linear(input, weight, bias=None) -> Tensor
 
 Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
-This opperation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
+This operation supports 2-D :attr:`weight` with :ref:`sparse layout<sparse-docs>`
 
 {sparse_beta_warning}
 

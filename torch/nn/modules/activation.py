@@ -1344,7 +1344,7 @@ class Softmax(Module):
     .. math::
         \text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}
 
-    When the input Tensor is a sparse tensor then the unspecifed
+    When the input Tensor is a sparse tensor then the unspecified
     values are treated as ``-inf``.
 
     Shape:
