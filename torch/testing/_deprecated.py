@@ -10,8 +10,6 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 
-from . import _legacy
-
 
 __all__ = [
     "assert_allclose",
@@ -81,17 +79,6 @@ def assert_allclose(
         check_stride=False,
         msg=msg or None,
     )
-
-
-getter_instructions = (
-    lambda name, args, kwargs, return_value: f"This call can be replaced with {return_value}."  # noqa: E731
-)
-
-# Deprecate and expose all dtype getters
-for name in _legacy.__all__:
-    fn = getattr(_legacy, name)
-    globals()[name] = warn_deprecated(getter_instructions)(fn)
-    __all__.append(name)
 
 
 @warn_deprecated(
