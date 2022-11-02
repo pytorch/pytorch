@@ -5,6 +5,7 @@ from contextlib import contextmanager, nullcontext
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from torch.fx.experimental.proxy_tensor import is_sym_node
+from torch._dispatch.python import enable_python_dispatcher
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -391,24 +392,25 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if config.use_functionalize:
-        # Trace once without decompositions, into a graph of ATen ops.
-        # NB: tracing_mode is real, as it's assumed the calling context setup
-        # fake tensor mode / symbolic shapes if that is needed
-        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+        with enable_python_dispatcher():
+            # Trace once without decompositions, into a graph of ATen ops.
+            # NB: tracing_mode is real, as it's assumed the calling context setup
+            # fake tensor mode / symbolic shapes if that is needed
+            fx_g = make_fx(joint_forward_backward)(*joint_inputs)
 
-        context = disable_autocast_manager if disable_amp else nullcontext
+            context = disable_autocast_manager if disable_amp else nullcontext
 
-        def fake_fn(primals, tangents):
-            with torch.fx.traceback.override_stack_trace():
-                return torch.fx.Interpreter(fx_g).run(primals, tangents)
+            def fake_fn(primals, tangents):
+                with torch.fx.traceback.override_stack_trace():
+                    return torch.fx.Interpreter(fx_g).run(primals, tangents)
 
-        # Trace a second time, running functionalization, and THEN running decompositions.
-        # functionalization only acts on ATen today, and doesn't currently handle
-        # view and inplace ops that come from primtorch.
-        # Eventually, functionalization should support primtorch view/inplace ops,
-        # which will make it ok to run decompositions before functionalization.
-        with context():
-            fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+            # Trace a second time, running functionalization, and THEN running decompositions.
+            # functionalization only acts on ATen today, and doesn't currently handle
+            # view and inplace ops that come from primtorch.
+            # Eventually, functionalization should support primtorch view/inplace ops,
+            # which will make it ok to run decompositions before functionalization.
+            with context():
+                fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
