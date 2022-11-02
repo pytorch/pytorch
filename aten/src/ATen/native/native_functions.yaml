@@ -3651,37 +3651,18 @@
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
-  structured_delegate: mul.out
+  manual_cpp_binding: True
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA: mul_sparse
-    SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr
-    MkldnnCPU: mkldnn_mul
-    ZeroTensor: mul_zerotensor
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
   tags: canonical
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured_delegate: mul.out
   variants: method
-  dispatch:
-    SparseCPU, SparseCUDA: mul_sparse_
-    SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr_
-    MkldnnCPU: mkldnn_mul_
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul__Tensor
+  manual_cpp_binding: True
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured: True
-  structured_inherits: TensorIteratorBase
-  dispatch:
-    CPU, CUDA: mul_out
-    MPS: mul_out_mps
-    SparseCPU: mul_out_sparse_cpu
-    SparseCUDA: mul_out_sparse_cuda
-    SparseCsrCPU, SparseCsrCUDA: mul_out_sparse_csr
-    MkldnnCPU: mkldnn_mul_out
+  manual_cpp_binding: True
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor

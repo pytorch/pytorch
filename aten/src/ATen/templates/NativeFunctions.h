@@ -25,9 +25,32 @@
 #include <c10/core/QScheme.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/Functions.h>
 #include <tuple>
 #include <vector>
 
 ${NativeFunctions_includes}
 
 ${NativeFunctions_declarations}
+
+namespace at {
+  namespace native {
+    struct TORCH_API structured_mul_out : public at::meta::structured_mul_Tensor {
+    void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & out);
+    };
+
+    inline TORCH_API at::Tensor mul(const at::Tensor & self, const at::Tensor & other) {
+      return self.mul(other);
+    }
+
+    inline TORCH_API at::Tensor & mul_(at::Tensor& self, const at::Tensor & other) {
+      self.mul_(other);
+      return self;
+    }
+
+    inline TORCH_API at::Tensor & mul_out(at::Tensor const& self, at::Tensor const& other, at::Tensor& out) {
+      return at::mul_out(out, self, other);
+    }
+
+  } // namespace native
+} // namespace at

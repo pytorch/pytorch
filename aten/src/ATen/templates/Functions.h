@@ -96,6 +96,15 @@ TORCH_API inline std::tuple<Tensor, Tensor> std_mean(const Tensor& self, int dim
   return at::std_mean(self, IntArrayRef{dim});
 }
 
+// aten::mul.Tensor(Tensor self, Tensor other) -> Tensor
+TORCH_API at::Tensor mul(const at::Tensor & self, const at::Tensor & other);
+
+// aten::mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+TORCH_API at::Tensor & mul_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other);
+
+// aten::mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+TORCH_API at::Tensor & mul_outf(const at::Tensor & self, const at::Tensor & other, at::Tensor & out);
+
 inline int64_t numel(const Tensor& tensor) {
   return tensor.numel();
 }

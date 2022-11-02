@@ -175,6 +175,10 @@ std::vector<Shape> compute_shape_abs(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<torch::lazy::Shape> compute_shape_mul(const at::Tensor & self, const at::Tensor & other) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_bernoulli(
     const at::Tensor& self,
     c10::optional<at::Generator> generator) {

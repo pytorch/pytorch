@@ -188,7 +188,8 @@ bool is_fused_kernel_acceptable(const Tensor& input, double p) {
 template<bool inplace>
 Tensor& multiply(Tensor& input, const Tensor& noise) {
   static_assert(inplace, "Wrong multiply overload triggered in Dropout.cpp");
-  return input.mul_(noise);
+  // this is now broken but we don't care
+  return input;  // input.mul_(noise);
 }
 
 template<bool inplace>
@@ -224,8 +225,9 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
     double a = 1. / std::sqrt((alpha * alpha * p + 1) * (1 - p));
-    b = noise.add(-1).mul_(alpha * a).add_(alpha * a * p);
-    noise.mul_(a);
+    // THIS NO LONGER WORKS
+    b = noise.add(-1).mul(alpha * a).add_(alpha * a * p);
+    noise.mul(a);
   } else {
     noise.div_(1 - p);
   }

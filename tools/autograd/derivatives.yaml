@@ -1122,10 +1122,10 @@
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
-- name: mul.Tensor(Tensor self, Tensor other) -> Tensor
-  self: mul_tensor_backward(grad, other, self.scalar_type())
-  other: mul_tensor_backward(grad, self, other.scalar_type())
-  result: other_t * self_p + self_t * other_p
+# - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
+#   self: mul_tensor_backward(grad, other, self.scalar_type())
+#   other: mul_tensor_backward(grad, self, other.scalar_type())
+#   result: other_t * self_p + self_t * other_p
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: mul_tensor_backward(grad, at::lift_fresh(at::scalar_to_tensor(other)), self.scalar_type())

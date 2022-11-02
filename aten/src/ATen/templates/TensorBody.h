@@ -623,6 +623,9 @@ class TORCH_API Tensor: public TensorBase {
     TensorBase::requires_grad_(_requires_grad);
     return *this;
   }
+
+  at::Tensor mul(const at::Tensor & other) const;
+  at::Tensor & mul_(const at::Tensor & other) const;
 };
 
 namespace detail {
@@ -637,7 +640,6 @@ Tensor make_tensor(Args&&... args) {
 } // namespace detail
 
 } // namespace at
-
 
 namespace at {
 ${tensor_method_definitions}
@@ -742,3 +744,7 @@ inline c10::MaybeOwned<Tensor> Tensor::expect_contiguous(MemoryFormat memory_for
   }
 }
 } // namespace at
+
+at::Tensor wrapper_mul_Tensor(const at::Tensor & self, const at::Tensor & other);
+at::Tensor & wrapper_mul_out_out(const at::Tensor & self, const at::Tensor & other, at::Tensor & out);
+at::Tensor & wrapper_mul__Tensor(at::Tensor & self, const at::Tensor & other);

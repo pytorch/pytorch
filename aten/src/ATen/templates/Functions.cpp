@@ -3,6 +3,9 @@
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
 
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
+
 namespace at {
 
 Tensor TensorMaker::make_tensor() {
@@ -96,6 +99,16 @@ Tensor TensorMaker::make_tensor() {
      }
    }
    return IntArrayRef(zeros, 1);
+ }
+
+ TORCH_API at::Tensor mul(const at::Tensor & self, const at::Tensor & other) {
+ return wrapper_mul_Tensor(self, other);
+ }
+ TORCH_API at::Tensor & mul_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other) {
+ return wrapper_mul_out_out(self, other, out);
+ }
+ TORCH_API at::Tensor & mul_outf(const at::Tensor & self, const at::Tensor & other, at::Tensor & out) {
+ return wrapper_mul_out_out(self, other, out);
  }
 
 } // namespace at

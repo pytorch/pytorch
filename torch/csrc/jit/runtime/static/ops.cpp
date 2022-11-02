@@ -589,12 +589,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto& in1_t = p_node->Input(1).toTensor();
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::mul(in0_t, in1_t);
+      // p_node->Output(0) = at::cpu::mul(in0_t, in1_t);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::cpu::mul_out(out_t, in0_t, in1_t);
+    // at::cpu::mul_out(out_t, in0_t, in1_t);
   };
 });
 
