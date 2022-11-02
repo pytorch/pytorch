@@ -11,7 +11,6 @@ from functorch.compile import min_cut_rematerialization_partition
 
 import torch.fx
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.utils._mode_utils import no_dispatch
 
 from . import config, overrides
 from .debug import DebugContext
@@ -85,7 +84,7 @@ def _step_logger():
 
 
 @DebugContext.wrap
-@no_dispatch()
+@dynamo_utils.disable_current_modes()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
