@@ -478,7 +478,6 @@ def _post_backward_hook(
         "FullyShardedDataParallel._post_backward_hook"
     ):
         _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
-        state.training_state = TrainingState.FORWARD_BACKWARD
         p_assert(
             handle._training_state == HandleTrainingState.BACKWARD_PRE,
             f"Expects `BACKWARD_PRE` state but got {handle._training_state}",
