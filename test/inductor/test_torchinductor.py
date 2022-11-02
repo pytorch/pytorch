@@ -727,6 +727,12 @@ class CommonTemplate:
         for i in inputs:
             self.common(fn, (i,))
 
+    def test_reduction5(self):
+        def fn(a):
+            return (a.sum(2), a.any(2), a.all(2))
+
+        self.common(fn, (torch.randn(4, 5, 0),))
+
     @patch.object(config, "dynamic_shapes", False)
     def test_unroll_small_reduction(self):
         def fn(x):

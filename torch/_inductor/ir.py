@@ -597,7 +597,7 @@ class Reduction(Loops):
             )
 
     @staticmethod
-    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type):
+    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, dst_dtype):
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
             V.graph.sizevars.guard_static_shape(x) for x in reduction_ranges
@@ -668,6 +668,15 @@ class Reduction(Loops):
 
             return lambda index: fn(index)[1]
         else:
+            if all(rr == 0 for rr in reduction_ranges):
+                if reduction_type == "sum":
+                    return lambda index: ops.constant(0, dst_dtype)
+                elif reduction_type == "any":
+                    return lambda index: ops.constant(False, dst_dtype)
+                elif reduction_type == "all":
+                    return lambda index: ops.constant(False, dst_dtype)
+                else:
+                    raise AssertionError(f"Expected reduction dim to have non-zero size")
             value_fn = inner_fn
             return fn
 
@@ -708,7 +717,9 @@ class Reduction(Loops):
             return Pointwise.create(
                 device,
                 dst_dtype,
-                cls._unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type),
+                cls._unroll_reduction_fn(
+                    inner_fn, reduction_ranges, reduction_type, dst_dtype
+                ),
                 ranges,
             )
 

@@ -11,6 +11,7 @@ from typing import Dict, List
 import sympy
 
 import torch
+from torch._prims_common import is_float_dtype
 
 from .. import config, ir, scheduler
 from ..ir import ReductionHint
@@ -98,13 +99,15 @@ def triton_compute_type(dtype):
     return f"tl.{triton_type_name}"
 
 
-def triton_constant(value):
+def triton_constant(value, dtype):
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
         return 'float("-inf")'
     elif math.isnan(value):
         return 'float("nan")'
+    elif value == 0:
+        return "0.0" if is_float_dtype(dtype) else "0"
     return repr(value)
 
 
@@ -119,7 +122,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def constant(value, dtype):
-        return triton_constant(value)
+        return triton_constant(value, dtype)
 
     @staticmethod
     def abs(x):
@@ -838,7 +841,9 @@ class TritonKernel(Kernel):
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
+        default = triton_constant(
+            ir.Reduction.default_value(reduction_type, src_dtype), dtype
+        )
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
