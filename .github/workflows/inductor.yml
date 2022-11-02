@@ -1,9 +1,9 @@
 name: inductor
 
 on:
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
   push:
-    branches:
-      - master
     tags:
       - ciflow/inductor/*
   workflow_dispatch:
