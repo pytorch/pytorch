@@ -219,7 +219,7 @@ class SymInt:
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
     def __sym_float__(self):
-        ...
+        raise NotImplementedError("NYI")
 
     def __repr__(self):
         return self.node.str()
@@ -248,7 +248,7 @@ class SymFloat:
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
 
     def __sym_int__(self):
-        ...
+        raise NotImplementedError("NYI")
 
     def __repr__(self):
         return self.node.str()
