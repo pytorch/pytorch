@@ -1105,7 +1105,7 @@ class CppScheduling:
 
     def can_vec(self, nodes):
         # TODO: Query cpu arch and vec length from aten
-        if not codecache.supported_vector_isa():
+        if codecache.supported_vector_isa() == codecache._SupportedVecIsa.INVALID:
             return False
 
         _, (group, reduction_group) = max(
