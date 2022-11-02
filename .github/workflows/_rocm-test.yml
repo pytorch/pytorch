@@ -97,6 +97,7 @@ jobs:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_JIT_ENABLE_NVFUSER: 1
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.leak-check && '1' || '0'}}
         timeout-minutes: 270
         run: |
           set -x
@@ -146,6 +147,7 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \

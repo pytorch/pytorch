@@ -38,6 +38,7 @@ def parse_args() -> Any:
     parser.add_argument("--test-matrix", type=str, required=True, help="the original test matrix")
     parser.add_argument("--pr-number", type=str, help="the pull request number")
     parser.add_argument("--tag", type=str, help="the associated tag if it exists")
+    parser.add_argument("--event-name", type=str, help="name of the event that triggered the job (pull, schedule, etc)")
     return parser.parse_args()
 
 
@@ -158,6 +159,10 @@ def main() -> None:
     else:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
+
+    if args.event_name == "schedule":
+        for config in filtered_test_matrix.get("include", []):
+            config["leak-check"] = "leak-check"
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))

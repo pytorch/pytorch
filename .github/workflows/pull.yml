@@ -9,6 +9,8 @@ on:
       - release/*
       - landchecks/*
   workflow_dispatch:
+  schedule:
+    - cron: 0 0 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
