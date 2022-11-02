@@ -770,7 +770,8 @@ void handle_view_on_rebase(
       modified_obj = "is being";
     }
 
-    if (creation_meta == CreationMeta::INFERENCE_MODE || creation_meta == CreationMeta::NO_GRAD_MODE || !grad_fn) {
+    if (creation_meta == CreationMeta::INFERENCE_MODE ||
+        creation_meta == CreationMeta::NO_GRAD_MODE || !grad_fn) {
       std::string prefix;
       if (grad_fn) {
         prefix = c10::str(
@@ -791,7 +792,8 @@ void handle_view_on_rebase(
       } else {
         // create_meta is not necessarily CreationMeta::NO_GRAD_MODE
         // e.g. CreationMeta::IN_CUSTOM_FUNCTION is possible, but we know that
-        // if there is no grad_fn, that means that the view was performed in no-grad mode
+        // if there is no grad_fn, that means that the view was performed in
+        // no-grad mode
         msg = c10::str(
             prefix,
             " no_grad mode and ",
