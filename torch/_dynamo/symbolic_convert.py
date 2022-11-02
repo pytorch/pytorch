@@ -832,7 +832,9 @@ class InstructionTranslatorBase(object):
         if isinstance(obj, NNModuleVariable):
             # We don't allow side effects during export
             # https://github.com/pytorch/torchdynamo/issues/1475
-            assert not self.export, f"Mutating module attribute {inst.argval} during export."
+            assert (
+                not self.export
+            ), f"Mutating module attribute {inst.argval} during export."
 
         try:
             self.output.guards.update(

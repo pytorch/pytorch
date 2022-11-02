@@ -3,6 +3,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 
+
 class MutationExportTests(torch._dynamo.test_case.TestCase):
     def check_failure_on_export(self, mod, *args):
         with self.assertRaises(AssertionError):
@@ -93,7 +94,6 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
 
         self.check_same_with_export(Foo(), torch.Tensor(3, 2))
 
-
     def test_module_attribute_mutation_violation_negative_4(self):
         # Mutating attribute with a Tensor type
         # But not exporting but using eager mode as well as dynamo optimize mode
@@ -111,6 +111,7 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
         real_result = mod(arg)
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
         self.assertTrue(torch._dynamo.utils.same(opt_mod(arg), real_result))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
