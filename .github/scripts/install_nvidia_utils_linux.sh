@@ -51,7 +51,18 @@ install_nvidia_driver_amzn2() {
             sudo rm -fv /tmp/nvidia_driver
         fi
 
-        nvidia-smi
+        (
+            set +e
+            nvidia-smi
+            status=$?
+            # Allowable exit statuses for nvidia-smi, see: https://github.com/NVIDIA/gpu-operator/issues/285
+            if [ $status -eq 0 ] || [ $status -eq 14 ]; then
+                echo "INFO: Ignoring allowed status ${status}"
+            else
+                echo "ERROR: nvidia-smi exited with unresolved status ${status}"
+                exit ${status}
+            fi
+        )
     )
 }
 

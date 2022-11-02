@@ -12,8 +12,9 @@ import itertools
 import io
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, sym_float, guard_int, SymNode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch import SymInt
 
 aten = torch.ops.aten
 
@@ -116,9 +117,6 @@ def create_symbolic_tensor(name, arg, shape_env, storage_offset=0):
     sym_shapes, sym_strides = shape_env.create_symbolic_sizes_strides(arg)
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, storage_offset)
 
-
-CPP_SYMINT_CLASS = type(torch.SymIntNode.new_symint(1))
-
 def create_symint(shape_env, i):
     return shape_env.create_symintnode(shape_env.create_symbol(i))
 
@@ -156,8 +154,8 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
 
-        self.assertTrue(not isinstance(x.shape[0], PySymInt))
-        self.assertTrue(isinstance(x.shape[0], CPP_SYMINT_CLASS))
+        self.assertTrue(not isinstance(x.shape[0], SymNode))
+        self.assertTrue(isinstance(x.shape[0], SymInt))
 
         self.assertTrue(x.shape[0] == 5)
         self.assertTrue(x.shape[1] == 4)
@@ -165,17 +163,17 @@ class TestPySymInt(TestCase):
 
         self.assertTrue(x.size()[0], 5)
         self.assertTrue(x.size()[1], 4)
-        self.assertTrue(isinstance(x.size()[1], CPP_SYMINT_CLASS))
+        self.assertTrue(isinstance(x.size()[1], SymInt))
         self.assertTrue(x.size()[2] == 3)
 
         self.assertTrue(x.size(0) == 5)
         self.assertTrue(x.size(1) == 4)
         self.assertTrue(x.size(2) == 3)
-        self.assertTrue(isinstance(x.size(2), CPP_SYMINT_CLASS))
+        self.assertTrue(isinstance(x.size(2), SymInt))
 
         offset = create_symint(shape_env, 2)
         y = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env, offset)
-        self.assertTrue(isinstance(y.storage_offset(), CPP_SYMINT_CLASS))
+        self.assertTrue(isinstance(y.storage_offset(), SymInt))
         self.assertTrue(y.storage_offset() == 2)
 
         offset = 2
@@ -267,7 +265,7 @@ class TestPySymInt(TestCase):
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
-        self.assertIsInstance(x.stride()[0], CPP_SYMINT_CLASS)
+        self.assertIsInstance(x.stride()[0], SymInt)
 
     @skipIfNoSympy
     def test_size_expressions(self):
@@ -290,7 +288,7 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
         r = sym_float(x.shape[0])
-        self.assertTrue(isinstance(r, torch.SymFloatNode))
+        self.assertIsInstance(r, torch.SymFloat, msg=type(r))
 
     @skipIfNoSympy
     def test_aten_ops(self):
@@ -320,15 +318,14 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
         r = torch.empty(a0, device='meta')
-        self.assertIsInstance(r.shape[0], CPP_SYMINT_CLASS)
+        self.assertIsInstance(r.shape[0], SymInt)
 
     @skipIfNoSympy
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
-        self.assertEqual(a0.guard_int(), 2)
-        self.assertEqual(str(shape_env.guards[0][0]), "s0")
-        self.assertEqual(shape_env.guards[0][1], 2)
+        self.assertEqual(guard_int(a0), 2)
+        self.assertEqual(str(shape_env.guards[0][0]), "Eq(s0, 2)")
 
     @skipIfNoSympy
     def test_int_conversion(self):
@@ -348,7 +345,9 @@ class TestPySymInt(TestCase):
                 assert func == torch.ops.aten.add.Tensor
 
                 nonlocal sym_int_encountered
-                sym_int_encountered = kwargs["alpha"] is a0
+                # WARNING: do not do identity tests on the outer
+                # SymInt/SymFloat, they are NOT STABLE
+                sym_int_encountered = kwargs["alpha"].node is a0.node
                 kwargs["alpha"] = 0
                 return func(*args)
 

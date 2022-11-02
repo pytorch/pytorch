@@ -1,7 +1,7 @@
 import functools
 import sys
 import warnings
-from typing import Callable, Sequence
+from typing import Callable
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -41,6 +41,7 @@ __all__ = [
     "quantized_add_relu",
     "quantized_add",
     "quantized_cat",
+    "quantized_conv1d_relu",
     "quantized_conv2d_relu",
     "quantized_conv2d",
     "quantized_group_norm",
@@ -250,47 +251,12 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
 )
 @_beartype.beartype
 def _avg_pool(name, tuple_fn):
-    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
-    @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
-    @_beartype.beartype
-    def symbolic_fn(
-        g,
-        input: _C.Value,
-        kernel_size: Sequence[int],
-        stride: Sequence[int],
-        padding: Sequence[int],
-        ceil_mode: int,
-        count_include_pad: int,
-        divisor_override=None,
-    ):
-        if not stride:
-            stride = kernel_size
-        padding = symbolic_helper._avgpool_helper(
-            tuple_fn, padding, kernel_size, stride, divisor_override, name
-        )
-        assert isinstance(padding, tuple)
-        if count_include_pad:
-            input = opset9._op_with_optional_float_cast(
-                g,
-                "Pad",
-                input,
-                pads_i=((0,) * 2 + padding) * 2,
-                mode_s="constant",
-                value_f=0.0,
-                opset_before=11,
-            )
-            padding = (0,) * len(padding)
-        output = g.op(
-            "AveragePool",
-            input,
-            kernel_shape_i=tuple_fn(kernel_size),
-            strides_i=tuple_fn(stride),
-            pads_i=padding * 2,
-            ceil_mode_i=ceil_mode,
-        )
-        return output
-
-    return symbolic_fn
+    # Although onnx::AvgPool provides count_include_pad and ceil_mode,
+    # The corner case of Average Pooling with ceil_mode on
+    # PyTorch allows sliding window go off bound, which leads to
+    # this accommodation.
+    # More detail on https://github.com/pytorch/pytorch/issues/57178
+    return opset9._avg_pool(name, tuple_fn)
 
 
 @_onnx_symbolic(
@@ -600,7 +566,7 @@ def fake_quantize_per_tensor_affine(
 @_onnx_symbolic("aten::isinf")
 @_beartype.beartype
 def isinf(g: jit_utils.GraphContext, input):
-    return g.op("IsInf", opset9._cast_Double(g, input, False))  # type: ignore[attr-defined]
+    return g.op("IsInf", g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE))
 
 
 @_onnx_symbolic("aten::isfinite")
@@ -822,6 +788,31 @@ def quantized_instance_norm(
     output = opset9.instance_norm(
         g, input, weight, bias, None, None, False, 0.0, eps, False
     )
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv1d_relu")
+@_beartype.beartype
+def quantized_conv1d_relu(
+    g: jit_utils.GraphContext,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv1d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 

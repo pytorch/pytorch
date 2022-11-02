@@ -95,6 +95,7 @@ ALLOW_LIST = [
     ("aten::_linalg_inv_out_helper", datetime.date(2022, 10, 1)),
     ("aten::col2im_backward", datetime.date(2022, 12, 1)),
     ("aten::im2col_backward", datetime.date(2022, 12, 1)),
+    ("aten::diag_backward", datetime.date(2022, 12, 1)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
@@ -290,6 +291,8 @@ ALLOW_LIST = [
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_tensor", datetime.date(2022, 10, 15)),
     ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
+    ("aten::_torch_cuda_cu_linker_symbol_op", datetime.date(2022, 11, 1)),
+
     ("aten::upsample_linear1d_backward", datetime.date(2022, 12, 15)),
     ("aten::upsample_bicubic2d_backward", datetime.date(2022, 12, 15)),
     ("aten::upsample_trilinear3d", datetime.date(2022, 12, 15)),

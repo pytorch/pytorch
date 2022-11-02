@@ -1052,7 +1052,7 @@ jobs:
                 $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
             }
 
-            retry conda install -c conda-forge numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi requests typing_extensions --yes
 
             # sync submodules
             cd ${PROJ_ROOT}
@@ -1447,86 +1447,6 @@ workflows:
             branches:
               only:
                 - postnightly
-      - mac_build:
-          name: macos-12-py3-x86-64-build
-          build-environment: macos-12-py3-x86-64
-          xcode-version: "13.3.1"
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-      - mac_test:
-          name: macos-12-py3-x86-64-test-1-2-default
-          build-environment: macos-12-py3-x86-64
-          xcode-version: "13.3.1"
-          shard-number: "1"
-          num-test-shards: "2"
-          requires:
-            - macos-12-py3-x86-64-build
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-      - mac_test:
-          name: macos-12-py3-x86-64-test-2-2-default
-          build-environment: macos-12-py3-x86-64
-          xcode-version: "13.3.1"
-          shard-number: "2"
-          num-test-shards: "2"
-          requires:
-            - macos-12-py3-x86-64-build
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-      - mac_test:
-          name: macos-12-py3-x86-64-test-1-1-functorch
-          build-environment: macos-12-py3-x86-64
-          xcode-version: "13.3.1"
-          shard-number: "1"
-          num-test-shards: "1"
-          test-config: functorch
-          requires:
-            - macos-12-py3-x86-64-build
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-      - mac_build:
-          name: macos-12-py3-x86-64-lite-interpreter-build-test
-          build-environment: macos-12-py3-lite-interpreter-x86-64
-          xcode-version: "13.3.1"
-          build-generates-artifacts: false
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-      - mac_build:
-          name: macos-12-py3-arm64-build
-          build-environment: macos-12-py3-arm64
-          xcode-version: "13.3.1"
-          python-version: "3.9.12"
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
-      - upload_test_stats:
-          name: upload test status
-          requires:
-            - macos-12-py3-x86-64-test-1-2-default
-            - macos-12-py3-x86-64-test-2-2-default
-            - macos-12-py3-x86-64-test-1-1-functorch
-          filters:
-            branches:
-              ignore:
-                - nightly
-                - postnightly
       - pytorch_ios_build:
           build_environment: ios-12-5-1-x86-64
           filters:
@@ -1538,8 +1458,6 @@ workflows:
           ios_platform: SIMULATOR
           lite_interpreter: "1"
           name: ios-12-5-1-x86-64
-          when:
-            not: True
       - pytorch_ios_build:
           build_environment: ios-12-5-1-x86-64-coreml
           filters:
@@ -1552,6 +1470,4 @@ workflows:
           lite_interpreter: "1"
           name: ios-12-5-1-x86-64-coreml
           use_coreml: "1"
-          when:
-            not: True
     when: << pipeline.parameters.run_build >>

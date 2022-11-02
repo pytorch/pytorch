@@ -1098,15 +1098,15 @@ Tensor convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups) {
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
-      at::convolution(
+      at::convolution_symint(
           input_t,
           weight_p,
           c10::nullopt,
@@ -1116,7 +1116,7 @@ Tensor convolution_jvp(
           transposed,
           output_padding,
           groups) +
-      at::convolution(
+      at::convolution_symint(
           input_p,
           weight_t,
           bias_t_opt,
@@ -1136,10 +1136,10 @@ Tensor _convolution_jvp(
     const Tensor& bias_p,
     const Tensor& bias_t,
     IntArrayRef stride,
-    IntArrayRef padding,
+    at::SymIntArrayRef padding,
     IntArrayRef dilation,
     bool transposed,
-    IntArrayRef output_padding,
+    at::SymIntArrayRef output_padding,
     int64_t groups,
     bool benchmark,
     bool deterministic,
@@ -1148,7 +1148,7 @@ Tensor _convolution_jvp(
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
-      at::_convolution(
+      at::_convolution_symint(
           input_t,
           weight_p,
           c10::nullopt,
@@ -1162,7 +1162,7 @@ Tensor _convolution_jvp(
           deterministic,
           cudnn_enabled,
           allow_tf32) +
-      at::_convolution(
+      at::_convolution_symint(
           input_p,
           weight_t,
           bias_t_opt,
@@ -4859,15 +4859,15 @@ Tensor sparse_constructor_values_backward(
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p
 // in pads])
-Tensor constant_pad_nd_backward(const Tensor& grad, IntArrayRef pad) {
+Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
   auto negated_pad = pad.vec();
   // NOLINTNEXTLINE(modernize-use-transparent-functors)
   std::transform(
       negated_pad.cbegin(),
       negated_pad.cend(),
       negated_pad.begin(),
-      std::negate<int64_t>());
-  return at::constant_pad_nd(grad, negated_pad, 0);
+      std::negate<c10::SymInt>());
+  return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 
 Tensor embedding_dense_double_backward(

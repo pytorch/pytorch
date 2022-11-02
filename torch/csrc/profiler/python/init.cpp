@@ -129,7 +129,7 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
   py::class_<TensorMetadata>(m, "_TensorMetadata")
-      .def_readonly("impl_ptr", &TensorMetadata::impl_)
+      .def_property_readonly("impl_ptr", &TensorMetadata::impl)
       .def_readonly("storage_data_ptr", &TensorMetadata::data_)
       .def_readonly("id", &TensorMetadata::id_)
       .def_property_readonly(
@@ -181,49 +181,35 @@ void initPythonBindings(PyObject* module) {
 
   py::class_<NNModuleInfo>(m, "_NNModuleInfo")
       .def_property_readonly(
-          "params",
+          "parameters",
           [](const NNModuleInfo& s) {
-            py::list list;
-            for (auto& p : s.params_) {
-              list.append(std::tuple<
-                          std::string,
-                          TensorMetadata,
-                          c10::optional<TensorMetadata>>(
-                  p.param_name_, p.param_, p.grad_));
+            py::list out;
+            for (const auto& p : s.parameters_) {
+              out.append(
+                  py::make_tuple(p.name_, p.metadata_, p.grad_metadata_));
             }
-            return list;
+            return out;
           })
       .def_property_readonly(
-          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
+          "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); })
+      .def_readonly("self_ptr", &NNModuleInfo::self_)
+      .def_readonly("cls_ptr", &NNModuleInfo::cls_);
 
-  py::class_<OptimizerInfo>(m, "_OptInfo")
-      .def_property_readonly(
-          "self",
-          [](const OptimizerInfo& a) {
-            return reinterpret_cast<intptr_t>(a.self_.value_of());
-          })
-      .def_property_readonly(
-          "param_addrs",
-          [](const OptimizerInfo& s) {
-            py::list params_addrs;
-            for (auto& addr : s.params_addr_) {
-              params_addrs.append(addr);
-            }
-            return params_addrs;
-          })
-      .def_property_readonly("opt_state", [](const OptimizerInfo& s) {
-        py::list states;
-        for (auto& a : s.opt_state_) {
-          states.append(std::make_pair(a.first, a.second));
+  py::class_<OptimizerInfo>(m, "_OptimizerInfo")
+      .def_readonly("self_ptr", &OptimizerInfo::self_)
+      .def_property_readonly("parameters", [](const OptimizerInfo& s) {
+        py::list out;
+        for (const auto& p : s.parameters_) {
+          out.append(py::make_tuple(p.metadata_, p.grad_metadata_, p.state_));
         }
-        return states;
+        return out;
       });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
-      .def_readonly("opt", &ExtraFields<EventType::PyCall>::opt_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)
-      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_);
+      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
+      .def_readonly("optimizer", &ExtraFields<EventType::PyCall>::optimizer_);
 
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);

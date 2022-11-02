@@ -166,6 +166,14 @@ a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
 See :doc:`/notes/randomness` for more information.""",
 }
 
+sparse_support_notes = {
+    "sparse_beta_warning": """
+.. warning::
+    Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported,
+    or may not have autograd support. If you notice missing functionality please
+    open a feature request.""",
+}
+
 add_docstr(
     torch.abs,
     r"""
@@ -534,6 +542,12 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. If
+:attr:`input` is sparse the result will have the same layout and if :attr:`out`
+is provided it must have the same layout as :attr:`input`.
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -557,7 +571,7 @@ Example::
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -3726,7 +3740,7 @@ Examples::
 add_docstr(
     torch.as_strided_scatter,
     r"""
-as_strided_scatter(input, src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(input, src, size, stride, storage_offset=None) -> Tensor
 
 Embeds the values of the :attr:`src` tensor into :attr:`input` along
 the elements corresponding to the result of calling
@@ -7462,6 +7476,12 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`.
+If :attr:`out` is provided it's layout will be used. Otherwise, the result
+layout will be deduced from that of :attr:`input`.
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7481,7 +7501,7 @@ Example::
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -7538,6 +7558,12 @@ The behavior depends on the dimensionality of the tensors as follows:
   tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
   matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. In particular the
+matrix-matrix (both arguments 2-dimensional) supports sparse arguments with the same restrictions
+as :func:`torch.mm`
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7582,7 +7608,7 @@ Example::
     torch.Size([10, 3, 5])
 
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -11129,7 +11155,7 @@ add_docstr(
     r"""
 flip(input, dims) -> Tensor
 
-Reverse the order of a n-D tensor along given axis in dims.
+Reverse the order of an n-D tensor along given axis in dims.
 
 .. note::
     `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
@@ -11286,7 +11312,7 @@ add_docstr(
     r"""
 rot90(input, k=1, dims=[0,1]) -> Tensor
 
-Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
+Rotate an n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
 
 Args:
@@ -12371,7 +12397,7 @@ Alias for :func:`torch.linalg.det`
 add_docstr(
     torch.where,
     r"""
-where(condition, x, y) -> Tensor
+where(condition, x, y, *, out=None) -> Tensor
 
 Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
 
@@ -12382,7 +12408,8 @@ The operation is defined as:
         \text{x}_i & \text{if } \text{condition}_i \\
         \text{y}_i & \text{otherwise} \\
     \end{cases}
-
+"""
+    + r"""
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
@@ -12392,6 +12419,9 @@ Arguments:
                           where :attr:`condition` is ``True``
     y (Tensor or Scalar): value (if :attr:`y` is a scalar) or values selected at indices
                           where :attr:`condition` is ``False``
+
+Keyword args:
+    {out}
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -12424,7 +12454,9 @@ Example::
 
 .. note::
     See also :func:`torch.nonzero`.
-""",
+""".format(
+        **common_args
+    ),
 )
 
 add_docstr(

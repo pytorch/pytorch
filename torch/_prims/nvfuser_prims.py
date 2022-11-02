@@ -214,6 +214,8 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 def _native_batch_norm_nvfuser(
     fd, input, weight, bias, running_mean, running_var, training, momentum, eps
 ):
+
+    """
     if weight is None:
         weight = fd.define_null_tensor()
     if bias is None:
@@ -222,15 +224,16 @@ def _native_batch_norm_nvfuser(
         running_mean = fd.define_null_tensor()
     if running_var is None:
         running_var = fd.define_null_tensor()
+    """
     return fd.ops.batch_norm(
         input,
         weight,
         bias,
         running_mean,
         running_var,
-        training,
         momentum,
         eps,
+        training,
     )
 
 
@@ -248,8 +251,8 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
-def _transpose_nvfuser(fd, a, permutation):
-    return fd.ops.permute(a, permutation)  # type: ignore[attr-defined]
+def _transpose_nvfuser(fd, a, dims):
+    return fd.ops.permute(a, dims)  # type: ignore[attr-defined]
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
@@ -538,6 +541,10 @@ def register_var_mean():
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
+def _nvprims_view_impl_aten(a, original_shape, new_shape):
+    return a.reshape(new_shape)
+
+
 def register_view():
     """This function is used to register the view function in torch.ops.view module."""
     # View is implemented as a decomposition into prims.split_dim,
@@ -568,7 +575,8 @@ def register_view():
     for p in (prim_packet, prim):
         p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
         p.impl_nvfuser = _nvfuser_impls["view"]
-        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
+        p.return_type = torch._prims_common.RETURN_TYPE.VIEW  # type: ignore[attr-defined]
+        p.impl_aten = _nvprims_view_impl_aten
 
 
 def register_nvprims():
@@ -594,3 +602,4 @@ def register_nvprims():
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
+            p.impl_aten = main_prim.impl_aten

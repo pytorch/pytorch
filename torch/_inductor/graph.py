@@ -4,11 +4,11 @@ import os
 import time
 
 import sympy
-from sympy import Integer
 
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -18,10 +18,10 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, TensorBox
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
-from .utils import dynamo_logging, dynamo_utils
+from .utils import dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -34,35 +34,16 @@ class GraphLowering(torch.fx.Interpreter):
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
-        size = [self.sizevars[i] for i in ex.size()]
-        stride = [None] * len(size)
-        for i, val in enumerate(ex.stride()):
-            if val in (0, 1):
-                stride[i] = Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex.size(i) * ex.stride()[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None and ex.stride()[i] >= 0
-            }
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex.stride()[i], i) for i in range(len(stride)) if stride[i] is None]
-            )
-            for _, i in val_list:
-                if stride[i] is None and ex.stride()[i] in candidates:
-                    stride[i] = candidates[ex.stride()[i]]
-                    candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = sorted(
-                    [
-                        (ex.stride()[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ]
-                )[0]
-                stride[i] = self.sizevars[val]
+        if self.reuse_shape_env:
+            size = ex.size()
+            stride = ex.stride()
+        else:
+            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+
+        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
+        stride = [
+            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
+        ]
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
@@ -73,9 +54,18 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    def __init__(self, gm: torch.fx.GraphModule, num_dynamic_inputs=None):
+    def __init__(
+        self, gm: torch.fx.GraphModule, shape_env=None, num_static_inputs=None
+    ):
         super().__init__(gm)
-        self.sizevars = SizeVarAllocator("s")
+        if shape_env is None:
+            shape_env = ShapeEnv()
+            self.reuse_shape_env = False
+        else:
+            self._shape_env = shape_env
+            self.reuse_shape_env = True
+        self._shape_env = shape_env
+        self.sizevars = SizeVarAllocator(shape_env)
         self.graph_inputs = {}
         self.graph_inputs_original = {}
         self.graph_outputs = None
@@ -85,8 +75,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
         self.wrapper_code = None
-        self.num_dynamic_inputs = num_dynamic_inputs
-        self.num_static_inputs = None
+        self.num_static_inputs = num_static_inputs
         self.mutated_inputs = set()
         self.unaligned_buffers = set()
         self.randomness_offset = sympy.Integer(0)
@@ -137,9 +126,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_utils.dynamo_timed
     def run(self, *args):
-        if self.num_dynamic_inputs is None:
-            self.num_dynamic_inputs = len(args)
-        self.num_static_inputs = len(args) - self.num_dynamic_inputs
         return super().run(*args)
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
@@ -222,8 +208,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        if example.dim() != 0:
-            self.device_types.add(example.device.type)
+        self.device_types.add(example.device.type)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -251,7 +236,8 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            return lowerings[target](*args, **kwargs)
+            out = lowerings[target](*args, **kwargs)
+            return out
         except Exception as e:
             raise LoweringException(e, target, args, kwargs) from e
 
@@ -279,7 +265,9 @@ class GraphLowering(torch.fx.Interpreter):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
-            isinstance(x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer))
+            isinstance(
+                x, (TensorBox, ir.Constant, type(None), ir.ConstantBuffer, sympy.Expr)
+            )
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
@@ -309,14 +297,27 @@ class GraphLowering(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         with ir.IRNode.current_origins({n}):
             result = super().run_node(n)
+
+            # Realize if (1) any user need inputs realized, or (2) there is
+            # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
-                    if user.target in needs_realized_inputs or user.op == "output":
+                    if user.target in needs_realized_inputs:
                         result.realize_hint()
+                    elif user.op == "output":
+                        if isinstance(result.data.data, (Pointwise, Reduction)):
+                            result.realize()
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
+
+            # Realize if the IRNode already has accumulated lots of reads
+            if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
+                # Prevent excessive accumulation in a computed buffer, when
+                # there are multiple branches meach with small number of memory
+                # reads, but they converge to a user.
+                result.realize_hint()
         return result
 
     def codegen(self):
@@ -339,7 +340,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        log.log(dynamo_logging.CODE, "Output code: %s", mod.__file__)
+        log.log(logging.CODE, "Output code: %s", mod.__file__)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
@@ -352,4 +353,14 @@ class GraphLowering(torch.fx.Interpreter):
             node.get_name()
             for node in self.graph_outputs
             if not isinstance(node, ir.NoneAsConstantBuffer)
+            and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]
+
+    def is_unspec_arg(self, name):
+        # dynamo wraps unspec variable as 0d CPU tensor,
+        # need to convert to scalar during codegen (triton only)
+        return (
+            name in self.graph_inputs.keys()
+            and self.graph_inputs[name].get_numel() == 1
+            and self.graph_inputs[name].get_device().type == "cpu"
+        )

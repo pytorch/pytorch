@@ -44,16 +44,16 @@ Tensor nested_from_padded_cuda(
     const Tensor& sizes,
     bool do_transform_0213) {
   if (padded.dim() > 1 && padded.dim() < 5) {
+    // Instead of erroring call the generic version
+    if(!(padded.dim() == 4 && do_transform_0213) && !(padded.dim() == 3 && !do_transform_0213)){
+      return at::native::nested_from_padded_generic(padded, sizes, do_transform_0213);
+    }
     if (padded.dtype() != kFloat && padded.dtype() != kHalf) {
       TORCH_WARN_ONCE(
           "nested_from_padded CUDA kernels only support fp32/fp16; falling "
           "back to slower generic kernel");
       return at::native::nested_from_padded_generic(padded, sizes, do_transform_0213);
     }
-    TORCH_CHECK(
-        (padded.dim() == 4 && do_transform_0213) ||
-            (padded.dim() == 3 && !do_transform_0213),
-        "padded tensor size error");
     Tensor target_offsets =
         NestedTensor_batch_offsets_from_size_tensor(sizes, 0);
     Tensor padded_sizes_tensor = at::tensor(padded.sizes());
@@ -234,7 +234,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_nested(
         return std::make_tuple(Tensor(), Tensor());
     }
 }
-
+namespace{
 
 /**
  * This function is used to calculate two pieces of metadata that are needed
@@ -242,9 +242,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_nested(
  * cumulative sequence_length over a batch of sequences and the maximum sequence
  * length.
  *
- * @return A tuple of cumulative sequence lengths and the maximum sequence length
+ * @return A tuple of cumulative sequence lengths and the maximum sequence length,
+ * and the last element in the cumulative_sequence_lengths
  */
-std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
+std::tuple<Tensor, int64_t, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
   TORCH_CHECK(
       qkv.is_nested(),
       "QKV must be nested for flash cumulative_seq_len calculation.")
@@ -274,90 +275,71 @@ std::tuple<Tensor, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
   // Send to GPU, this is pretty light weight calc for normal batch size
   // but maybe this needs to be on gpu
   cumulative_seqlen = cumulative_seqlen.to(TensorOptions().device(at::kCUDA));
-  return std::tuple<Tensor, int64_t>{cumulative_seqlen, max_seqlen};
+  return std::tuple<Tensor, int64_t, int64_t>{cumulative_seqlen, max_seqlen, sum};
 }
+
 /**
- * This function checks if the input query, key, value tensors are valid for
+ * This function checks if a nested tensor is valid for
  * use with the flash-attention and efficient_attention kernels without
  * needing to call contiguous on the nested tensor input.
- * It checks that the storage offsets' adjacent_difference constant over each of the
- * tensor in the nested tensor and that the strides are monitonically decreasing.
+ * It checks that the storage offsets' adjacent_differences are a constant mutiple
+ * of the previous tensor in the nested tensor and that the strides are monitonically decreasing.
  * This check is done after calling transpose on the nested tensor.
  *
  * @return A boolean indicating of contiguous needs to be called for input
  */
-bool is_safe_to_get_storage_as_tensor(
-    const NestedTensorImpl* query,
-    const NestedTensorImpl* key,
-    const NestedTensorImpl* value) {
-  const auto& query_offsets = query->get_storage_offsets();
-  const auto& key_offsets = key->get_storage_offsets();
-  const auto& value_offsets = value->get_storage_offsets();
+bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
+  const auto& tensor_offsets = tensor->get_storage_offsets();
+  const Tensor& tensor_sizes = tensor->get_nested_size_tensor();
+  const Tensor& tensor_strides = tensor->get_nested_stride_tensor();
 
-  std::vector<int64_t> query_offset_differences(query_offsets.size());
-  std::vector<int64_t> key_offset_differences(key_offsets.size());
-  std::vector<int64_t> value_offset_differences(value_offsets.size());
+  const int64_t n_tensors = tensor_strides.size(0);
+  const int64_t n_dims = tensor_strides.size(1);
 
-  std::adjacent_difference(
-      query_offsets.cbegin(),
-      query_offsets.cend(),
-      query_offset_differences.begin());
-  std::adjacent_difference(
-      key_offsets.cbegin(), key_offsets.cend(), key_offset_differences.begin());
-  std::adjacent_difference(
-      value_offsets.cbegin(),
-      value_offsets.cend(),
-      value_offset_differences.begin());
-
-  // The first adjacent differences is offsets[0], so skip for comparision
-  bool same_offsets = std::equal(
-                          query_offset_differences.cbegin() + 1,
-                          query_offset_differences.cend(),
-                          key_offset_differences.cbegin() + 1) &&
-      std::equal(key_offset_differences.cbegin() + 1,
-                 key_offset_differences.cend(),
-                 value_offset_differences.cbegin() + 1);
-  if (!same_offsets) {
-    return false;
+  if (n_tensors <= 1) {
+    return true;
   }
-  const Tensor& query_strides = query->get_nested_stride_tensor();
-  const Tensor& key_strides = key->get_nested_stride_tensor();
-  const Tensor& value_strides = value->get_nested_stride_tensor();
 
-  const int64_t n_tensors = query_strides.size(0);
-  const int64_t n_dims = query_strides.size(1);
-
-  std::vector<int64_t> previous_q_stride(
-      query_strides.data_ptr<int64_t>(),
-      query_strides.data_ptr<int64_t>() + n_dims);
-  std::vector<int64_t> previous_k_stride(
-      key_strides.data_ptr<int64_t>(),
-      key_strides.data_ptr<int64_t>() + n_dims);
-  std::vector<int64_t> previous_v_stride(
-      value_strides.data_ptr<int64_t>(),
-      value_strides.data_ptr<int64_t>() + n_dims);
-
+  int64_t* previous_tensor_stride = tensor_strides.data_ptr<int64_t>();
   // Check initially that they are in strictly descending order
   for (int i{1}; i < n_dims; i++) {
-    if (previous_q_stride[i - 1] < previous_q_stride[i] ||
-        previous_k_stride[i - 1] < previous_k_stride[i] ||
-        previous_v_stride[i - 1] < previous_v_stride[i]) {
+    if (previous_tensor_stride[i - 1] <= previous_tensor_stride[i]) {
       return false;
     }
   }
+  // Check that each tensor i in the nested tensor has the same strides
+  auto tensor_stride_0 = tensor_strides.stride(0);
 
   for (int i{1}; i < n_tensors; i++) {
     for (const int64_t j : c10::irange(n_dims)) {
-      if (previous_q_stride[j] != query_strides[i][j].item<int64_t>() ||
-          previous_k_stride[j] != key_strides[i][j].item<int64_t>() ||
-          previous_v_stride[j] != value_strides[i][j].item<int64_t>()) {
+      if (previous_tensor_stride[j] !=
+          previous_tensor_stride[i * tensor_stride_0 + j]) {
         return false;
       }
     }
   }
+  // Check the offsets are a constant multiple from the previous numels
+  const int64_t* tensor_size_ptr = tensor_sizes.data_ptr<int64_t>();
+  const int64_t* tensor_stride_ptr = tensor_strides.data_ptr<int64_t>();
+
+  int64_t numel_0 = (tensor_size_ptr[0] * tensor_stride_ptr[0]);
+  TORCH_INTERNAL_ASSERT(numel_0 > 0, "numels must be positive!");
+
+  int64_t offset_constant = (tensor_offsets[1] - tensor_offsets[0]) / numel_0;
+  for (int64_t i = 2; i < n_tensors; i++) {
+    // TODO: When 0 seq_len nested tensors are allowed we need to guard against this
+    int64_t previous_numel = tensor_size_ptr[(i - 1) * tensor_stride_0] * tensor_stride_ptr[(i - 1) * tensor_stride_0];
+    TORCH_INTERNAL_ASSERT(previous_numel > 0, "numels must be positive!");
+    int64_t current_offset_constant = (tensor_offsets[i] - tensor_offsets[i - 1]) / previous_numel;
+    if (current_offset_constant != offset_constant) {
+      return false;
+    }
+  }
+  // Congrats you made it!
   return true;
 }
 
+} // namespace
 std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
     const Tensor& query,
     const Tensor& key,
@@ -375,19 +357,19 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  auto cumulative_and_max_q = cumulative_and_max_seq_len(q_t);
-  auto cumulative_and_max_k = cumulative_and_max_seq_len(k_t);
+  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(q_t);
+  auto cumulative_and_max_k_and_nnz_k = cumulative_and_max_seq_len(k_t);
 
   // K and V have to have the same Nnz, should probably torch_check
   // assume in order to not iterate over v
 
-  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q);
-  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k);
+  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q_and_nnz_q);
+  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k_and_nnz_k);
 
-  const int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q);
+  const int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q_and_nnz_q);
 
-  const int64_t Nnz_q = cumulative_sequence_length_q[-1].item<int64_t>();
-  const int64_t Nnz_kv = cumulative_sequence_length_k[-1].item<int64_t>();
+  const int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
+  const int64_t Nnz_kv = std::get<2>(cumulative_and_max_k_and_nnz_k);
 
   Tensor query_buffer_reshaped;
   Tensor key_buffer_reshaped;
@@ -399,14 +381,17 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
 
   // If the physical layout of the NestedTensor's storage
   // is not: batch, {seq_len}, num_heads, head_dim then we need
-  //  to call contiguous
-  if (!is_safe_to_get_storage_as_tensor(query_impl, key_impl, value_impl)) {
+  // to call contiguous
+  if (!q_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(query_impl)) {
     q_t = q_t.contiguous();
-    k_t = k_t.contiguous();
-    v_t = v_t.contiguous();
-
     query_impl = get_nested_tensor_impl(q_t);
+  }
+  if (!k_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(key_impl)) {
+    k_t = k_t.contiguous();
     key_impl = get_nested_tensor_impl(k_t);
+  }
+  if (!v_t.is_contiguous() && !is_safe_to_get_storage_as_tensor(value_impl)) {
+    v_t = v_t.contiguous();
     value_impl = get_nested_tensor_impl(v_t);
   }
 
@@ -419,14 +404,21 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
 
   auto query_stride_tensor = query_impl->get_nested_stride_tensor();
   auto key_stride_tensor = key_impl->get_nested_stride_tensor();
+  auto value_stride_tensor = value_impl->get_nested_stride_tensor();
 
-  const int64_t nnz_q_stride = query_stride_tensor[0][0].item<int64_t>();
-  const int64_t head_q_stride = query_stride_tensor[0][1].item<int64_t>();
-  const int64_t head_dim_stride = query_stride_tensor[0][2].item<int64_t>();
+  const int64_t head_dim_stride = 1;
 
-  const int64_t nnz_kv_stride = key_stride_tensor[0][0].item<int64_t>();
-  const int64_t head_kv_stride = key_stride_tensor[0][1].item<int64_t>();
-  const int64_t head_dim_kv_stride = key_stride_tensor[0][2].item<int64_t>();
+  const int64_t* q_strides = query_stride_tensor.data_ptr<int64_t>();
+  const int64_t nnz_q_stride = q_strides[0];
+  const int64_t head_q_stride = q_strides[1];
+
+  const int64_t* k_strides = key_stride_tensor.data_ptr<int64_t>();
+  const int64_t nnz_k_stride = k_strides[0];
+  const int64_t head_k_stride = k_strides[1];
+
+  const int64_t* v_strides = value_stride_tensor.data_ptr<int64_t>();
+  const int64_t nnz_v_stride = v_strides[0];
+  const int64_t head_v_stride = v_strides[1];
 
   query_buffer_reshaped = q_storage_as_tensor.as_strided(
       {Nnz_q, num_heads, head_dim},
@@ -434,13 +426,12 @@ std::tuple<Tensor, Tensor> mem_efficient_helper_nested_unpacked(
       query_impl->get_storage_offsets()[0]);
   key_buffer_reshaped = k_storage_as_tensor.as_strided(
       {Nnz_kv, num_heads, head_dim},
-      {nnz_kv_stride, head_kv_stride, head_dim_kv_stride},
+      {nnz_k_stride, head_k_stride, head_dim_stride},
       key_impl->get_storage_offsets()[0]);
   value_buffer_reshaped = v_storage_as_tensor.as_strided(
       {Nnz_kv, num_heads, head_dim},
-      {nnz_kv_stride, head_kv_stride, head_dim_kv_stride},
+      {nnz_v_stride, head_v_stride, head_dim_stride},
       value_impl->get_storage_offsets()[0]);
-
   std::tuple<Tensor, Tensor> attention_and_weights =
       at::_efficient_attention_forward(
           query_buffer_reshaped.unsqueeze(0),
@@ -471,15 +462,15 @@ Tensor flash_attention_helper(
   int64_t head_dim{query.size(-1)};
   int64_t num_heads{query.size(-2)};
 
-  auto cumulative_and_max_q = cumulative_and_max_seq_len(query);
-  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q);
-  int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q);
+  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(query);
+  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q_and_nnz_q);
+  int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q_and_nnz_q);
 
   TORCH_CHECK(
       key.is_same(key) && query.is_same(value),
       "Key and Value must be the same tensor");
 
-  int64_t Nnz_q{cumulative_sequence_length_q[-1].item<int64_t>()};
+  int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
 
   // For the packed case we need to set the output size for dim 2 to 1
   auto atten_size = get_nested_size_tensor(query).clone();
