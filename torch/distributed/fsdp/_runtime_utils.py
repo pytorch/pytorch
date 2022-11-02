@@ -311,14 +311,18 @@ def _post_forward_reshard(
 @no_type_check
 def _fsdp_root_pre_forward(
     state: _State,
+    root_module: nn.Module,
     *args,
     **kwargs,
 ):
     """
     Runs pre-forward logic specific to the root FSDP instance, which should run
-    before any individual module's pre-forward. If this is called on a non-root
-    FSDP instance, then the forward inputs are returned directly.
+    before any individual module's pre-forward. This starts with an attempt at
+    lazy initialization (which only runs non-vacuously once). Otherwise, if
+    this is called on a non-root FSDP instance, then the forward inputs are
+    returned directly.
     """
+    _lazy_init(state, root_module)
     p_assert(state._is_root is not None, "Expects a root FSDP to have been set")
     if not state._is_root:
         return args, kwargs
