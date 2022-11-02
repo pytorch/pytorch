@@ -8,7 +8,7 @@ from typing import Any, Tuple
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fully_shard import fully_shard
+from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._runtime_utils import _root_pre_forward
