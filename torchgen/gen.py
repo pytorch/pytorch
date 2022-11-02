@@ -49,6 +49,7 @@ from torchgen.model import (
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
     FunctionSchema,
+    FRAGMENT_NAMESPACES,
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
     is_ufunc_dispatch_key,
@@ -1640,12 +1641,11 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
-            PREDEFINED_NAMESPACES = set(["quantized", "quantized_decomposed"])
             # if the namespace is predefined, we should use define a library fragment
             # instead of a new library
             torch_library_macro = (
                 "TORCH_LIBRARY_FRAGMENT"
-                if namespace in PREDEFINED_NAMESPACES
+                if namespace in FRAGMENT_NAMESPACES
                 else "TORCH_LIBRARY"
             )
             schema_registrations += f"""

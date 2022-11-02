@@ -375,6 +375,7 @@ TORCH_API bool kernel_1();
         """
         self.assertEqual("\n".join(declaration), target)
 
+
 # Test for native_function_generation
 class TestNativeFunctionGeneratrion(unittest.TestCase):
     def setUp(self) -> None:
