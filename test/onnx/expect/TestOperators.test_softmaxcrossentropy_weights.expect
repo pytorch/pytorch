@@ -25,7 +25,7 @@ graph {
     dims: 5
     data_type: 1
     name: "weight"
-    raw_data: "\312J\373=K\255\317\274\220u\211?w\322\020@3\343j\277"
+    raw_data: "\334\204b?x\017\034\277C\300T?\246\205\346\275\227W\315\275"
   }
   input {
     name: "input"
