@@ -3919,7 +3919,10 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
     # Logging logic
     is_channels_last = input.is_contiguous(memory_format=torch.channels_last)
     is_image_or_mask = input.ndim == 4 and input.shape[1] < 4
-    log_string = f"torch.nn.functional.interpolate_dtype={input.dtype}_mode={mode}_antialias={antialias}_channelslast={is_channels_last}_imageormask={is_image_or_mask}"
+    log_string = (
+            f"torch.nn.functional.interpolate_dtype={input.dtype}_mode={mode}_antialias={antialias}_"
+            f"channelslast={is_channels_last}_imageormask={is_image_or_mask}"
+    )
     torch._C._log_api_usage_once(log_string)
 
     if input.dim() == 3 and mode == "nearest":
