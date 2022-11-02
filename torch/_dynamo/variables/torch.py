@@ -374,21 +374,26 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         if (
-            any([isinstance(x, DynamicShapeVariable) for x in args])
-            and self.value == math.sqrt
+            all([isinstance(x, DynamicShapeVariable) for x in args])
         ):
-            from torch.fx.experimental.symbolic_shapes import sym_sqrt
+            if self.value == math.sqrt:
+                from torch.fx.experimental.symbolic_shapes import sym_sqrt
+                fn_ = sym_sqrt
+            else:
+                fn_ = self.value
 
-            return TensorVariable.create(
+            out = TensorVariable.create(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    sym_sqrt,
+                    fn_,
                     *proxy_args_kwargs(args, kwargs),
                     current_tx=tx,
                 ),
                 **options,
             )
+            assert isinstance(out, DynamicShapeVariable)
+            return out
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.

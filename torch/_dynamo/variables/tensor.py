@@ -336,7 +336,7 @@ class TensorVariable(VariableTracker):
             return UserDefinedObjectVariable(example_value)
         elif isinstance(example_value, (torch.SymInt, torch.SymFloat)):
             proxy.node.meta["example_value"] = example_value
-            return cls(proxy, **options)
+            return DynamicShapeVariable(proxy, example_value, **options)
         else:
             raise AssertionError(
                 "torch.* op returned non-Tensor "

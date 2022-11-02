@@ -10,6 +10,9 @@ from typing import Dict, List
 import numpy as np
 
 import torch
+from torch._prims_common import (
+    Number,
+)
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
