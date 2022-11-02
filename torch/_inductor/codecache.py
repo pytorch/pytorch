@@ -152,6 +152,9 @@ class _SupportedVecIsa(enum.Enum):
     AVX2 = 2
     INVALID = -1
 
+    def __bool__(self):
+        return self != _SupportedVecIsa.INVALID
+
     @staticmethod
     def isa_str(supported_isa: enum.Enum):
         if supported_isa == _SupportedVecIsa.AVX512:
@@ -217,7 +220,7 @@ def supported_vector_isa():
 
 def cpp_compile_command(input, output, include_pytorch=False):
     valid_isa = supported_vector_isa()
-    if include_pytorch or (valid_isa != _SupportedVecIsa.INVALID):
+    if include_pytorch or valid_isa:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
