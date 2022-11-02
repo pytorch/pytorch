@@ -1925,30 +1925,30 @@ Tensor _matmul_impl(
   } else {
     // dim_tensor1 >= 3 || dim_tensor2 >= 3
     // We track m1 vs m2 separately even though they must match for nicer error messages
-    const int64_t n = dim_tensor1 > 1 ? tensor1.sizes().cend()[-2] : 1LL;
-    const int64_t m1 = tensor1.sizes().back();
-    const IntArrayRef batch_tensor1(tensor1.sizes().data(),
+    const SymInt n = dim_tensor1 > 1 ? tensor1.sym_sizes().cend()[-2] : 1LL;
+    const auto m1 = tensor1.sym_sizes().back();
+    const SymIntArrayRef batch_tensor1(tensor1.sym_sizes().data(),
                                     std::max<int64_t>(dim_tensor1 - 2, 0LL));
-    const int64_t m2 = dim_tensor2 > 1 ? tensor2.sizes().cend()[-2] : tensor2.sizes().back();
-    const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
-    const IntArrayRef batch_tensor2(tensor2.sizes().data(),
+    const SymInt m2 = dim_tensor2 > 1 ? tensor2.sym_sizes().cend()[-2] : tensor2.sym_sizes().back();
+    const SymInt p = dim_tensor2 > 1 ? tensor2.sym_sizes().back() : 1LL;
+    const SymIntArrayRef batch_tensor2(tensor2.sym_sizes().data(),
                                     std::max<int64_t>(dim_tensor2 - 2, 0LL));
-    auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
+    auto output_shape = infer_size_symdimvector(batch_tensor1, batch_tensor2);
 
-    const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
+    const auto tensor1_expand_size = [&output_shape, n, m1]{ SymDimVector ret(output_shape);
                                                              ret.append({n, m1});
                                                              return ret; }();
-    const auto tensor2_expand_size = [&output_shape, m2, p]{ DimVector ret(output_shape);
+    const auto tensor2_expand_size = [&output_shape, m2, p]{ SymDimVector ret(output_shape);
                                                              ret.append({m2, p});
                                                              return ret; }();
 
-    const int64_t expand_batch_product = c10::multiply_integers(output_shape);
+    const auto expand_batch_product = c10::multiply_integers(output_shape);
 
     // flatten expanded batches
-    const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
-                                         .reshape({expand_batch_product, n, m1});
-    const auto tensor2_expanded = tensor2.expand(tensor2_expand_size)
-                                         .reshape({expand_batch_product, m2, p});
+    const auto tensor1_expanded = tensor1.expand_symint(tensor1_expand_size)
+                                         .reshape_symint({expand_batch_product, n, m1});
+    const auto tensor2_expanded = tensor2.expand_symint(tensor2_expand_size)
+                                         .reshape_symint({expand_batch_product, m2, p});
     if (dim_tensor1 > 1) {
       output_shape.push_back(n);
     }
@@ -1957,10 +1957,10 @@ Tensor _matmul_impl(
     }
 
     if (!has_out) {
-      return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+      return at::_unsafe_view_symint(tensor1_expanded.bmm(tensor2_expanded), output_shape);
     } else {
-      at::native::resize_output(out, output_shape);
-      auto reshaped_out = out.reshape({expand_batch_product, n, p});
+      at::native::resize_output_symint(out, output_shape);
+      auto reshaped_out = out.reshape_symint({expand_batch_product, n, p});
       at::bmm_out(reshaped_out, tensor1_expanded, tensor2_expanded);
       if (!reshaped_out.is_alias_of(out)) {
         out.copy_(reshaped_out.view_as(out));
