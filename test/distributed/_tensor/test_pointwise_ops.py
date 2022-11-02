@@ -1,4 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
+
 from typing import Sequence, Any, Dict, Callable, Optional
 from unittest import skip
 
@@ -129,7 +131,7 @@ class DistElementwiseOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(
             *input_size,
-            device=self.device_type,  # type: ignore
+            device=self.device_type,
             requires_grad=True,
         )
 

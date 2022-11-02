@@ -11,10 +11,13 @@ from typing import (
     Sequence,
     cast,
 )
-
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 import functools
 import operator
+
+import torch
+from torch import Tensor
+
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.dispatch import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import (
@@ -211,7 +214,7 @@ def normalize_sizes(sizes: Union[Shape, Tuple[Shape]]) -> Shape:
     if isinstance(sizes[0], int):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
-        return cast(Shape, sizes[0])
+        return cast(Shape, sizes[0])  # type: ignore[redundant-cast]
     else:
         raise RuntimeError("Size must be int... or tuple")
 
@@ -439,9 +442,6 @@ class Op:
     shape_argnum: Optional[int] = None
 
 
-import torch
-from torch import Tensor
-
 ops: Dict[Callable[..., torch.Tensor], Op] = {
     torch.atleast_1d: Op(dim_map=lambda x: dim_pad_left(x.ndim, 1)),
     torch.atleast_2d: Op(dim_map=lambda x: dim_pad_left(x.ndim, 2)),
@@ -659,11 +659,12 @@ def register_prop_rule_map(
 
             # We only need the local shape to lower he call into the local op
             args = op_schema.args_schema
-            if spec.shape_argnum is not None:
+            shape_argnum = spec.shape_argnum
+            if shape_argnum is not None:
                 op_schema.args_schema = (
-                    args[: spec.shape_argnum]
+                    args[:shape_argnum]
                     + (tuple(local_out_shape),)
-                    + args[cast(int, spec.shape_argnum) + 1 :]
+                    + args[shape_argnum + 1 :]
                 )
 
             return OutputSharding(output_spec=output_dtensor_spec)

@@ -1,10 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
+
 import torch
 from torch.testing._internal.common_utils import run_tests
 
 from torch.distributed._tensor import distribute_tensor
 from torch.distributed._tensor.placement_types import Shard, Replicate
-from torch.testing._internal.common_dtensor import (  # type: ignore
+from torch.testing._internal.common_dtensor import (
     DTensorTestBase,
     with_comms,
     skip_unless_torch_gpu,

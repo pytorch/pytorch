@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+
 from dataclasses import dataclass
 from typing import Optional, List, Sequence, Tuple, cast
 
@@ -154,7 +155,12 @@ class Shard(Placement):
         # wrap with comm tensor
         scattered_list = [CommTensor(t) for t in scattered_list]
         output = torch.empty_like(scattered_list[my_coordinate])
-        mesh.reduce_scatter(CommTensor(output), scattered_list, op=reduce_op, mesh_dim=mesh_dim)  # type: ignore
+        mesh.reduce_scatter(
+            CommTensor(output),
+            scattered_list,  # pyre-ignore[6]
+            op=reduce_op,
+            mesh_dim=mesh_dim,
+        )
         if pad_idx != 0 and my_coordinate >= pad_idx:
             output = self._unpad_tensor(output)
         return output
@@ -196,16 +202,16 @@ class Shard(Placement):
                 )
             )
 
-        mesh.all_gather(gathered_list, CommTensor(local_tensor.contiguous()), mesh_dim=mesh_dim)  # type: ignore
+        mesh.all_gather(gathered_list, CommTensor(local_tensor.contiguous()), mesh_dim=mesh_dim)  # type: ignore[arg-type]
         # unpad the tensor if the input tensor was padded
         if pad_idx != 0:
             gathered_list = [
-                self._unpad_tensor(gathered_tensor)  # type: ignore
+                self._unpad_tensor(gathered_tensor)  # type: ignore[misc]
                 if i >= pad_idx
                 else gathered_tensor
                 for i, gathered_tensor in enumerate(gathered_list)
             ]
-        return torch.cat(gathered_list, dim=self.dim)  # type: ignore
+        return torch.cat(gathered_list, dim=self.dim)  # type: ignore[arg-type]
 
 
 @dataclass
@@ -223,7 +229,7 @@ class _Partial(Placement):
     #
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
-    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.RedOpType.SUM  # type: ignore
+    reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.RedOpType.SUM  # type: ignore[attr-defined]
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -234,7 +240,7 @@ class _Partial(Placement):
             tensor.clone(memory_format=torch.contiguous_format)
         )
         mesh.all_reduce(
-            cloned_local, c10d.ReduceOp(self.reduce_op), mesh_dim=mesh_dim  # type: ignore
+            cloned_local, c10d.ReduceOp(self.reduce_op), mesh_dim=mesh_dim  # type: ignore[call-arg]
         )
         return cloned_local
 
@@ -248,7 +254,7 @@ class _Partial(Placement):
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
         return shard_spec._reduce_shard_tensor(
-            tensor, mesh, c10d.ReduceOp(self.reduce_op), mesh_dim  # type: ignore
+            tensor, mesh, c10d.ReduceOp(self.reduce_op), mesh_dim  # type: ignore[call-arg]
         )
 
 
