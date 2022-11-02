@@ -3130,16 +3130,13 @@ def normalize_devices(fx_g):
     return fx_g
 
 class TestFunctionalize(TestCase):
-    def _check_functionalize_correctness(self, f, inpt, *, skip_vmap=False):
+    def _check_functionalize_correctness(self, f, inpt):
         inpt1 = inpt.clone()
         inpt2 = inpt.clone()
         inpt3 = inpt.clone()
 
         expected_outputs = f(inpt1)
-        if skip_vmap:
-            actual_outputs = functionalize(f)(inpt2)
-        else:
-            actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
+        actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
         # Right now the flavor of functionalize that also removes view ops
         # isn't being used with vmap
         # That's because {view}_copy ops don't have batching rules yet
@@ -3209,8 +3206,7 @@ class TestFunctionalize(TestCase):
             z2, z3 = z1.split(2)
             z2.add_(tmp)
             return x
-        # See Note [Fix vmap slice_scatter]
-        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device), skip_vmap=True)
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
 
     # Ensure functionalize works with List[Optional[Tensor]] arguments.
     # See the fix / discussion at https://github.com/pytorch/pytorch/pull/76085
