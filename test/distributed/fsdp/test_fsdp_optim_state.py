@@ -6,6 +6,7 @@ from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 import torch
+import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
@@ -1381,6 +1382,51 @@ class TestFSDPOptimState(FSDPTest):
                     nonwrapped_model,
                     optim_input=nonwrapped_optim_input,
                 )
+
+    @skip_if_lt_x_gpu(2)
+    def test_adam_full_osd_without_first_param_state(self):
+        """
+        Tests saving and loading a full optim state dict for Adam optimizer
+        (i.e. any optimizer with a "step" key) when the first parameter does
+        not have optimizer state (e.g. unused or frozen).
+        """
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin1 = nn.Linear(5, 5)
+                self.lin2 = nn.Linear(5, 5)
+                self.relu = nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Do not use `lin1`, which is the first `FlatParameter`
+                return self.relu(self.lin2(x))
+
+        model = Model().cuda()
+        model.lin1 = FSDP(model.lin1)
+        model.lin2 = FSDP(model.lin2)
+        fsdp_model = FSDP(model)
+        optim = torch.optim.Adam(
+            fsdp_model.parameters(), lr=1e-2
+        )  # or any optimizer with "step"
+
+        # Run an iteration to construct optimizer state
+        device = torch.device("cuda")
+        inp = torch.randn((2, 5), device=device)
+        loss = fsdp_model(inp).sum()
+        loss.backward()
+        optim.step()
+
+        # Check save and load
+        full_osd = FSDP.full_optim_state_dict(fsdp_model, optim, rank0_only=False)
+        sharded_osd = FSDP.shard_full_optim_state_dict(full_osd, fsdp_model)
+        optim.load_state_dict(sharded_osd)
+
+        # Run an iteration as a sanity check
+        inp = torch.randn((2, 5), device=device)
+        loss = fsdp_model(inp).sum()
+        loss.backward()
+        optim.step()
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
