@@ -6,7 +6,7 @@ import os
 from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch._subclasses.meta_utils import MetaConverter
+from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
@@ -66,6 +66,9 @@ class TestMetaConverter(TestCase):
         self.assertNotEqual(m1._version, vc)
         self.assertEqual(m2._version, m1._version)
 
+    def assertMetadataMatches(self, m1, m2):
+        assert_metadata_eq(self.assertEqual, m1, m2)
+
     def test_view_of_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
         y = x.neg()
@@ -74,9 +77,14 @@ class TestMetaConverter(TestCase):
         to_meta = MetaConverter()
         m1 = to_meta(z1)
         m2 = to_meta(z2)
-        self.assertEqual(m1.shape, z1.shape)
+
+        # check the test is actually testing what it claims
         self.assertTrue(m1._is_view())
         self.assertFalse(m1._base.is_leaf)
+
+        self.assertIsNot(m1, m2)
+        self.assertMetadataMatches(m1, z1)
+        self.assertMetadataMatches(m2, z2)
         self.assertSameVersionCounter(m1, m2)
 
     def test_view_of_leaf(self):
@@ -86,34 +94,132 @@ class TestMetaConverter(TestCase):
         to_meta = MetaConverter()
         m1 = to_meta(z1)
         m2 = to_meta(z2)
-        self.assertEqual(m1.shape, z1.shape)
+
+        # check the test is actually testing what it claims
         self.assertTrue(m1._is_view())
         self.assertTrue(m1._base.is_leaf)
+
+        self.assertIsNot(m1, m2)
+        self.assertMetadataMatches(m1, z1)
+        self.assertMetadataMatches(m2, z2)
         self.assertSameVersionCounter(m1, m2)
+
+    def test_view_of_view_of_leaf(self):
+        x = torch.randn(8)
+        y = x.view(2, 4)
+        y.requires_grad = True
+        z = y.view(2, 2, 2)
+
+        to_meta = MetaConverter()
+        mx = to_meta(x)
+        mz = to_meta(z)
+
+        self.assertFalse(z.is_leaf)
+
+        self.assertMetadataMatches(mx, x)
+        self.assertMetadataMatches(mz, z)
 
     def test_leaf(self):
         x = torch.randn(4, requires_grad=True)
         to_meta = MetaConverter()
         m = to_meta(x)
-        self.assertEqual(m.shape, x.shape)
+
+        # check the test is actually testing what it claims
         self.assertTrue(m.is_leaf)
         self.assertTrue(m.requires_grad)
+
+        self.assertMetadataMatches(m, x)
 
     def test_non_leaf(self):
         x = torch.randn(4, requires_grad=True)
         y = x.neg()
         to_meta = MetaConverter()
         m = to_meta(y)
-        self.assertEqual(m.shape, y.shape)
+
+        # check the test is actually testing what it claims
         self.assertFalse(m.is_leaf)
         self.assertTrue(m.requires_grad)
+
+        self.assertMetadataMatches(m, y)
 
     def test_requires_grad_false(self):
         x = torch.randn(4, requires_grad=False)
         to_meta = MetaConverter()
         m = to_meta(x)
-        self.assertEqual(m.shape, x.shape)
+
+        # check the test is actually testing what it claims
         self.assertFalse(m.requires_grad)
+
+        self.assertMetadataMatches(m, x)
+
+    def test_channels_last(self):
+        x = torch.empty(2, 3, 4, 5, memory_format=torch.channels_last)
+        to_meta = MetaConverter()
+        m = to_meta(x)
+
+        # check the test is actually testing what it claims
+        self.assertTrue(m.is_leaf)
+
+        self.assertMetadataMatches(m, x)
+
+    def test_channels_last_leaf(self):
+        x = torch.empty(2, 3, 4, 5, memory_format=torch.channels_last, requires_grad=True)
+        to_meta = MetaConverter()
+        m = to_meta(x)
+
+        # check the test is actually testing what it claims
+        self.assertTrue(m.requires_grad)
+        self.assertTrue(m.is_leaf)
+
+        self.assertMetadataMatches(m, x)
+
+    def test_channels_last_non_leaf(self):
+        x = torch.empty(2, 3, 4, 5, memory_format=torch.channels_last, requires_grad=True)
+        y = x + 2
+
+        # sanity
+        self.assertEqual(x.stride(), y.stride())
+        self.assertFalse(y.is_leaf)
+
+        to_meta = MetaConverter()
+        m = to_meta(y)
+
+        # check the test is actually testing what it claims
+        self.assertTrue(m.requires_grad)
+        self.assertFalse(m.is_leaf)
+
+        self.assertMetadataMatches(m, y)
+
+        # Check that we can autograd with m as input without erroring;
+        # see https://github.com/pytorch/pytorch/issues/87956
+        loss = m.sum()
+        torch.autograd.grad(loss, m)
+
+    def test_empty_strided_non_dense_leaf(self):
+        x = torch.empty_strided((2, 2), (4, 2), requires_grad=True)
+
+        to_meta = MetaConverter()
+        m = to_meta(x)
+
+        # check the test is actually testing what it claims
+        self.assertTrue(m.requires_grad)
+        self.assertTrue(m.is_leaf)
+
+        self.assertMetadataMatches(m, x)
+
+    def test_non_leaf_torture(self):
+        x = torch.empty(20, requires_grad=True)
+        with torch.no_grad():
+            x.set_(x.storage(), 10, (2,), (2,))
+
+        to_meta = MetaConverter()
+        m = to_meta(x)
+
+        # check the test is actually testing what it claims
+        self.assertTrue(m.requires_grad)
+        self.assertTrue(m.is_leaf)
+
+        self.assertMetadataMatches(m, x)
 
     # NB: complex stuff is not actually exercised right now because
     # we have a blanket exclusion for complex conversion
@@ -122,41 +228,30 @@ class TestMetaConverter(TestCase):
         x = torch.randn(4, dtype=torch.complex64)
         y = torch.view_as_real(x)
         m = MetaConverter()(y)
-        self.assertEqual(m.shape, y.shape)
-        self.assertEqual(m.stride(), y.stride())
-        self.assertEqual(m.dtype, y.dtype)
+        self.assertMetadataMatches(m, y)
 
     def test_complex_noncontiguous_bug(self):
         x = torch.randn((2, 2, 4, 9), dtype=torch.complex32)[:, 0, :, :]
         m = MetaConverter()(x)
-        self.assertEqual(m.shape, x.shape)
-        self.assertEqual(m.stride(), x.stride())
-        self.assertEqual(m.dtype, x.dtype)
+        self.assertMetadataMatches(m, x)
 
     def test_view_as_complex(self):
         x = torch.randn((4, 2), dtype=torch.float32)
         y = torch.view_as_complex(x)
         m = MetaConverter()(y)
-        self.assertEqual(m.shape, y.shape)
-        self.assertEqual(m.stride(), y.stride())
-        self.assertEqual(m.dtype, y.dtype)
+        self.assertMetadataMatches(m, y)
 
     def test_view_dtype(self):
         x = torch.randn(4, dtype=torch.float32)
         y = x.view(dtype=torch.int32)
         m = MetaConverter()(y)
-        self.assertEqual(m.shape, y.shape)
-        self.assertEqual(m.stride(), y.stride())
-        self.assertEqual(m.dtype, y.dtype)
+        self.assertMetadataMatches(m, y)
 
     def test_imag(self):
         x = torch.randn(4, dtype=torch.complex64)
         y = x.imag
         m = MetaConverter()(y)
-        self.assertEqual(m.shape, y.shape)
-        self.assertEqual(m.dtype, y.dtype)
-        self.assertEqual(m.stride(), y.stride())
-        self.assertEqual(m.storage_offset(), y.storage_offset())
+        self.assertMetadataMatches(m, y)
 
     def test_weakref(self):
         x = torch.randn(4, 4, 4)
@@ -203,8 +298,6 @@ CHECK_STRIDES_SKIPS = {
     aten._linalg_svd.default,
     aten._scaled_dot_product_attention_forward.default,
     aten.add.Tensor,
-    aten.addmm.default,
-    aten.angle.default,
     aten.atan2.default,
     aten.binary_cross_entropy.default,
     aten.bitwise_and.Tensor,
@@ -219,7 +312,6 @@ CHECK_STRIDES_SKIPS = {
     aten.div.Tensor_mode,
     aten.div.Tensor,
     aten.eq.Tensor,
-    aten.flip.default,
     aten.floor_divide.default,
     aten.fmax.default,
     aten.fmin.default,
@@ -231,9 +323,10 @@ CHECK_STRIDES_SKIPS = {
     aten.hypot.default,
     aten.igamma.default,
     aten.igammac.default,
-    aten.index_copy.default,
     aten.lcm.default,
     aten.le.Tensor,
+    aten.lerp.Scalar,
+    aten.lerp.Tensor,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
@@ -248,7 +341,6 @@ CHECK_STRIDES_SKIPS = {
     aten.pow.Tensor_Tensor,
     aten.prelu.default,
     aten.remainder.Tensor,
-    aten.rot90.default,
     aten.rsub.Tensor,
     aten.special_xlog1py.default,
     aten.special_zeta.default,
@@ -257,15 +349,7 @@ CHECK_STRIDES_SKIPS = {
     aten.xlogy.Tensor,
 
     # channel_last and channel_last_3d related failures
-    aten.constant_pad_nd.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.constant_pad_nd.default,
     aten.convolution.default,
-    aten.convolution.default,
-    aten._adaptive_avg_pool2d.default,
-    aten.upsample_bilinear2d.vec,
-    aten.constant_pad_nd.default,
-    aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
     # we should still fix them, leaving them here for tracking.
@@ -746,7 +830,12 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
-        if torch.jit.is_tracing() or isinstance(func, torch.ScriptMethod):
+        if (
+            torch.jit.is_tracing() or isinstance(func, torch.ScriptMethod) or
+            # meta converter doesn't work correctly when no_dispatch() is on, so
+            # skip running the crossref test in this case
+            torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python)
+        ):
             return func(*args, **kwargs)
 
         if self.dtype in meta_function_skips.get(func, set()):
@@ -1173,7 +1262,7 @@ class TestMeta(TestCase):
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, inps[0].shape)
 
-    def test_fill_alias_relationship(self):
+    def test_fill__alias_relationship(self):
         inps = torch.rand(2**52, device='meta')
         r = torch.ops.aten.fill_(inps, 1.0)
         # aten.fill_ returns an aliase
@@ -1182,6 +1271,70 @@ class TestMeta(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
+
+    def test_meta__fused_moving_avg_obs_fq_helper(self, device):
+        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
+        to_meta = MetaConverter()
+
+        x = torch.randn(5, 5, device=device)
+        running_min_op = torch.tensor(float("inf"), device=device)
+        running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.01
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        mod = FusedMovingAvgObsFakeQuantize()
+        torch.ao.quantization.enable_fake_quant(mod)
+        torch.ao.quantization.enable_observer(mod)
+        mod.to(device)
+
+        meta_x = to_meta(x)
+
+        args = [
+            x,
+            mod.observer_enabled,
+            mod.fake_quant_enabled,
+            running_min_op,
+            running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+        ]
+
+        meta_args = args.copy()
+        meta_args[0] = meta_x
+
+        kwargss = [
+            {},
+            {"per_row_fake_quant": False, "symmetric_quant": False},
+            {"per_row_fake_quant": False, "symmetric_quant": True},
+        ]
+
+        for kwargs in kwargss:
+            ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
+            meta_out = aten._fused_moving_avg_obs_fq_helper.default(*meta_args, **kwargs)
+
+            self.assertEqual(ref_out[0].size(), meta_out[0].size())
+            self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
+            self.assertEqual(ref_out[1].size(), meta_out[1].size())
+            self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
+
+    # opinfo test is using aten.fill_, it's not testing aten.fill
+    @onlyCUDA
+    def test_fill_stride(self):
+        to_meta = MetaConverter()
+        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
+
+        for args in get_strided_args(sample_args):
+            meta_args = to_meta(args)
+            ref_out = torch.ops.aten.fill(*args)
+            meta_out = torch.ops.aten.fill(*meta_args)
+            self.assertEqual(ref_out.size(), meta_out.size())
+            self.assertEqual(ref_out.stride(), meta_out.stride())
+
 
     def test_map_location_deserialize(self):
         import io
