@@ -392,7 +392,6 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
-            assert isinstance(out, DynamicShapeVariable)
             return out
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
