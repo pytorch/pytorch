@@ -40,8 +40,8 @@ DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
 # https://github.com/pytorch/pytorch/issues/80551
 @dataclass(frozen=True)
 class nvFuserTensorTemplate:
-    size: tuple
-    stride: tuple
+    symbolic_shape: tuple
+    contiguity: tuple
     dtype: DataType
     is_cpu: bool
 
@@ -51,12 +51,29 @@ class nvFuserScalarTemplate:
     dtype: DataType
 
 
+@lru_cache(maxsize=2048)
+def compute_symbolic_shape(shape):
+    """Computes the symbolic shape of a tensor.
+    nvFuser specializes on size-1 dimensions as broadcasted dimensions.
+    -1 is used to represent any size."""
+    return tuple(1 if s == 1 else -1 for s in shape)
+
+
+@lru_cache(maxsize=2048)
+def compute_contiguity(shape, strides):
+    """Computes the contiguity information to simplify internal indexing.
+    Contiguous dimensions are represented by True, strided dimensions
+    are represented by False.
+    """
+    return torch._C._nvfuser.compute_contiguity(shape, strides)
+
+
 def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
             return nvFuserTensorTemplate(
-                arg.size(),
-                arg.stride(),
+                compute_symbolic_shape(arg.size()),
+                compute_contiguity(arg.size(), arg.stride()),
                 getnvFuserDtype(arg.dtype),
                 arg.is_cpu,  # type: ignore[attr-defined]
             )
@@ -163,7 +180,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
 
         def templates_to_nvfuser_inputs(arg):
             if isinstance(arg, nvFuserTensorTemplate):
-                x = fd.define_tensor(arg.size, arg.stride, arg.dtype, arg.is_cpu)
+                x = fd.define_tensor(
+                    arg.symbolic_shape, arg.contiguity, arg.dtype, arg.is_cpu
+                )
                 return x
             elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)

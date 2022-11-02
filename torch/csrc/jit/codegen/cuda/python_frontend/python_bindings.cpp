@@ -40,6 +40,24 @@ void initNvFuserPythonBindings(PyObject* module) {
       .value("ComplexDouble", Nvf::DataType::ComplexDouble)
       .value("Null", Nvf::DataType::Null);
 
+  nvfuser.def(
+      "compute_contiguity",
+      [](const std::vector<int64_t>& sizes,
+         const std::vector<int64_t>& strides) {
+        py::tuple contiguity(sizes.size());
+        TORCH_CHECK(
+            sizes.size() == strides.size(),
+            "compute_contiguity: Sizes and strides must have the same number of dimensions");
+        if (sizes.size() == 0) {
+          return contiguity;
+        }
+        contiguity[sizes.size() - 1] = strides.back() == 1;
+        for (int64_t i = static_cast<int64_t>(sizes.size()) - 2; i >= 0; --i) {
+          contiguity[i] = strides[i] == strides[i + 1] * sizes[i + 1];
+        }
+        return contiguity;
+      });
+
   //! Binding the FusionCache that holds a cache of Fusions
   //! This is only bound to provide an interface to get the number of fusions
   //! that are cached.
