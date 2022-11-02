@@ -317,19 +317,18 @@ class CppVecOverrides(OpOverrides):
         # auto tmp5 = tmp4 < 0 ? -1 : 1;
         vec_zero = f"decltype({x})(0)"
         vec_one = f"decltype({x})(1)"
-        vec_minus_one = f"decltype({x})(-1)"
-        blendv = f"decltype({x})::blendv({vec_one}, {vec_minus_one}, {x} < {vec_zero})"
-        blendv_var_one = V.kernel.cse.newvar()
-        code.writeline(f"auto {blendv_var_one} = {blendv};")
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {vec_zero} < {x})"
+        left = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {blendv};")
 
         # auto tmp6 = tmp4 == 0 ? 0 : tmp5;
-        blendv = (
-            f"decltype({x})::blendv({blendv_var_one}, {vec_zero}, {x} == {vec_zero})"
-        )
-        blendv_var_zero_one = V.kernel.cse.newvar()
-        code.writeline(f"auto {blendv_var_zero_one} = {blendv};")
+        blendv = f"decltype({x})::blendv({vec_zero}, {vec_one}, {x} < {vec_zero})"
+        right = V.kernel.cse.newvar()
+        code.writeline(f"auto {right} = {blendv};")
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
-        return blendv_var_zero_one
+        return result
 
 
 class CppOverrides(OpOverrides):
@@ -497,12 +496,14 @@ class CppOverrides(OpOverrides):
     def sign(x):
         code = BracesBuffer()
         # auto tmp5 = tmp4 < 0 ? -1 : 1;
-        blendv_var_one = V.kernel.cse.newvar()
-        blendv_var_zero_one = V.kernel.cse.newvar()
-        code.writeline(f"auto {blendv_var_one} = {x} < 0 ? -1 : 1;")
-        code.writeline(f"auto {blendv_var_zero_one} = {x} == 0 ? 0 : {blendv_var_one};")
+        left = V.kernel.cse.newvar()
+        right = V.kernel.cse.newvar()
+        result = V.kernel.cse.newvar()
+        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
+        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
-        return blendv_var_zero_one
+        return result
 
 
 class CppKernel(Kernel):
@@ -1136,7 +1137,7 @@ class CppScheduling:
 
     def can_vec(self, nodes):
         # TODO: Query cpu arch and vec length from aten
-        if codecache.supported_vector_isa() == codecache._SupportedVecIsa.INVALID:
+        if not codecache.supported_vector_isa():
             return False
 
         _, (group, reduction_group) = max(
