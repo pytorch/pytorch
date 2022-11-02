@@ -199,6 +199,10 @@ def _compare_ort_pytorch_outputs(
                         f"within acceptable range {acceptable_error_percentage}."
                     )
                     continue
+            if ort_out.dtype == np.uint8 or ort_out.dtype == np.int8:
+                warnings.warn("ONNX output is quantized")
+            if pt_out.dtype == np.uint8 or pt_out.dtype == np.int8:
+                warnings.warn("PyTorch output is quantized")
             raise
 
 
