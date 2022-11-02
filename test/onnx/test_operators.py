@@ -17,12 +17,11 @@ import tempfile
 # Full diff for expect files
 import unittest
 
-import pytorch_test_common
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.onnx
+
 from pytorch_test_common import (
     BATCH_SIZE,
     flatten,
@@ -32,6 +31,7 @@ from pytorch_test_common import (
 )
 from torch.autograd import Function, Variable
 from torch.nn import functional, Module
+from torch.onnx._internal import diagnostics
 from torch.onnx.symbolic_helper import (
     _get_tensor_dim_size,
     _get_tensor_sizes,
@@ -71,7 +71,11 @@ class FuncModule(Module):
         return self.f(*itertools.chain(args, self.params))
 
 
-class TestOperators(pytorch_test_common.ExportTestCase):
+class TestOperators(common_utils.TestCase):
+    def setUp(self):
+        super().setUp()
+        diagnostics.engine.clear()
+
     def assertONNX(self, f, args, params=None, **kwargs):
         if params is None:
             params = ()
