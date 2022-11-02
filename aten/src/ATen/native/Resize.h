@@ -28,8 +28,8 @@ TORCH_API bool resize_output_symint(const Tensor& output, SymIntArrayRef shape);
 // Utility for resize_output
 //  Returns a bool saying resize should happen or not and
 //  raises a warning if resizing for one or more elements
-TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
-TORCH_API bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape);
+template <typename T>
+TORCH_API bool resize_output_check(const Tensor& output, T shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 

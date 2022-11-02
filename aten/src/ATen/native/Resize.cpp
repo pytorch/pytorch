@@ -52,7 +52,8 @@ bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape) {
   return true;
 }
 
-bool resize_output(const Tensor& output, IntArrayRef shape) {
+template <typename T>
+bool resize_output(const Tensor& output, T shape) {
   if (resize_output_check(output, shape)) {
     // avoid a redispatch for cpu and cuda.
     // TODO: when resize_cuda_ is re-written to be unified with resize_,
@@ -64,25 +65,6 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
       at::native::resize_(output, shape);
     } else {
       output.resize_(shape);
-    }
-    return true;
-  } else {
-    return false;
-  }
-}
-
-bool resize_output_symint(const Tensor& output, SymIntArrayRef shape) {
-  if (resize_output_check_symint(output, shape)) {
-    // avoid a redispatch for cpu and cuda.
-    // TODO: when resize_cuda_ is re-written to be unified with resize_,
-    // we can provide the same benefit for cuda.
-    //
-    // TODO(#61485): functorch wrapped tensors should not go through the
-    // fast path. This is a hack, longer term solutions are in the issue
-    if (output.is_cpu() && !isTensorSubclassLike(output)) {
-      at::native::resize__symint(output, shape);
-    } else {
-      output.resize__symint(shape);
     }
     return true;
   } else {
