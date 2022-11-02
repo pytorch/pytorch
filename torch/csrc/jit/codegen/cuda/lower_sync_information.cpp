@@ -111,6 +111,21 @@ struct ProducerConsumerIndexingInfoCache {
   }
 
   const std::vector<IterDomain*>& getConsumerOnlyPermissiveLeafIds() {
+    // When a given ID is the factor of 1 of a split, return the other
+    // output. Return nullptr otherwise.
+    auto get_split1_other_out = [](IterDomain* id) -> IterDomain* {
+      if (id->extent()->isOneInt() && id->definition() != nullptr &&
+          id->definition()->isA<Split>()) {
+        auto split = id->definition()->as<Split>();
+        if (split->innerSplit() && split->inner() == id) {
+          return split->outer();
+        } else if (!split->innerSplit() && split->outer() == id) {
+          return split->inner();
+        }
+      }
+      return nullptr;
+    };
+
     if (!consumer_only_permissive_leaf_ids_.has_value()) {
       // consumer_only_permissive_leaf_ids_ = {};
       std::vector<IterDomain*> consumer_only_permissive_leaf_ids;
@@ -119,7 +134,7 @@ struct ProducerConsumerIndexingInfoCache {
           consumer_tv_->domain()->domain().begin(),
           consumer_tv_->domain()->domain().end(),
           std::back_inserter(consumer_only_permissive_leaf_ids),
-          [&](auto consumer_leaf_id) {
+          [&](IterDomain* consumer_leaf_id) {
             const auto& consumer_leaf_ids_shared_with_producer =
                 getConsumerLeafIDsSharedWithProducer();
             if (std::find(
@@ -130,11 +145,37 @@ struct ProducerConsumerIndexingInfoCache {
               return false;
             }
 
-            return !ca_map.areMapped(
-                ca_map.getConcreteMappedID(
-                    consumer_leaf_id, IdMappingMode::LOOP),
-                consumer_leaf_id,
-                IdMappingMode::EXACT);
+            auto loop_concrete_id = ca_map.getConcreteMappedID(
+                consumer_leaf_id, IdMappingMode::LOOP);
+
+            // If the loop concrete ID has the same info as the
+            // consumer leaf ID, indexing shouldn't be affected by the
+            // loop concrete ID
+            if (ca_map.areMapped(
+                    consumer_leaf_id,
+                    loop_concrete_id,
+                    IdMappingMode::ALMOSTEXACT)) {
+              return false;
+            }
+
+            // Note that the factor output domain of split-by-one is
+            // not mapped in the almost exact map. As long as the
+            // other domains are almost-exactly mapped, this shouldn't
+            // affect the indexing neither.
+            auto consumer_split1_other = get_split1_other_out(consumer_leaf_id);
+            auto loop_concrete_split1_other =
+                get_split1_other_out(loop_concrete_id);
+
+            if (consumer_split1_other != nullptr &&
+                loop_concrete_split1_other != nullptr &&
+                ca_map.areMapped(
+                    consumer_split1_other,
+                    loop_concrete_split1_other,
+                    IdMappingMode::ALMOSTEXACT)) {
+              return false;
+            }
+
+            return true;
           });
       consumer_only_permissive_leaf_ids_ =
           std::move(consumer_only_permissive_leaf_ids);
