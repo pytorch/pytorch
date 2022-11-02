@@ -416,8 +416,20 @@ if COLLECT_EXPECT:
     atexit.register(print_seen)
 
 expected_failure_sym_magic_methods = {
+    ('floordiv', 'SymInt', 'float'),  # Cannot convert complex to float
     ('floordiv', 'int', 'SymFloat'),  # unsupported operand type(s) for //: 'int' and 'SymFloat'
+    ('floordiv', 'SymInt', 'SymFloat'),  # Cannot convert complex to float
     ('mod', 'int', 'SymFloat'),  # unsupported operand type(s) for %: 'int' and 'SymFloat'
+    ('sym_int', 'int', 'float'),  # sym_int() takes 1 positional argument but 2 were given
+    ('sym_int', 'SymInt', 'float'),  # sym_int() takes 1 positional argument but 2 were given
+    ('sym_int', 'int', 'SymFloat'),  # sym_int() takes 1 positional argument but 2 were given
+    ('sym_int', 'SymInt', 'SymFloat'),  # sym_int() takes 1 positional argument but 2 were given
+    ('sym_int', 'int', 'int'),  # sym_int() takes 1 positional argument but 2 were given
+    ('sym_int', 'SymInt', 'int'),  # sym_int() takes 1 positional argument but 2 were given
+    ('sym_int', 'int', 'SymInt'),  # sym_int() takes 1 positional argument but 2 were given
+    ('sym_int', 'SymInt', 'SymInt'),  # sym_int() takes 1 positional argument but 2 were given
+
+
 }
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -481,10 +493,11 @@ class TestSymNumberMagicMethods(TestCase):
                     raise e
 
         # Get reference result
-        if is_unary_fn:
-            ref_out = lambda_apply(inp1)
-        else:
-            ref_out = lambda_apply(inp1, inp2)
+        with maybe_xfail(inp1, inp2):
+            if is_unary_fn:
+                ref_out = lambda_apply(inp1)
+            else:
+                ref_out = lambda_apply(inp1, inp2)
 
         # Symified first arg
         sym_inp1 = get_sym_inp(inp1)
