@@ -138,7 +138,7 @@ class _TorchDynamoContext:
                     return self.forward(*args, **kwargs)
 
                 def __repr__(self, *args, **kwargs):
-                    return self.__repr__(*args, **kwargs)
+                    return mod.__repr__(*args, **kwargs)
 
             new_mod = TorchDynamoNNModuleWrapper()
             # Save the function pointer to find the original callable while nesting
