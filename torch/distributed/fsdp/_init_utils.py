@@ -575,9 +575,8 @@ def _move_module_to_device(
                     isinstance(submodule, fsdp_file.FullyShardedDataParallel)
                     and submodule.cpu_offload.offload_params
                 ):
-                    with torch.no_grad():
-                        for handle in submodule._handles:
-                            handle.flat_param_to(torch.device("cpu"))
+                    for handle in submodule._handles:
+                        handle.flat_param_to(torch.device("cpu"))
     elif param.device == cpu_device:
         _warn_cpu_init()
 
