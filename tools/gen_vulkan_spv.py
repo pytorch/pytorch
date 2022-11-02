@@ -23,6 +23,7 @@ class ShaderInfo:
     tile_size: List[int]
     layouts: List[str]
     weight_storage_type: str = ""
+    bias_storage_type: str = ""
 
 def getName(filePath):
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
@@ -46,6 +47,15 @@ def isWeightStorageTypeLine(lineStr):
 
 def getWeightStorageType(lineStr):
     weight_storage_id = r"^ \* WEIGHT_STORAGE = ([a-zA-Z]+_\dD)"
+    matches = re.search(weight_storage_id, lineStr)
+    return matches.group(1)
+
+def isBiasStorageTypeLine(lineStr):
+    weight_storage_id = r"^ \* BIAS_STORAGE = "
+    return re.search(weight_storage_id, lineStr)
+
+def getBiasStorageType(lineStr):
+    weight_storage_id = r"^ \* BIAS_STORAGE = ([a-zA-Z]+_\dD)"
     matches = re.search(weight_storage_id, lineStr)
     return matches.group(1)
 
@@ -77,6 +87,8 @@ def getShaderInfo(srcFilePath):
                 shader_info.tile_size = findTileSizes(line)
             if isWeightStorageTypeLine(line):
                 shader_info.weight_storage_type = getWeightStorageType(line)
+            if isBiasStorageTypeLine(line):
+                shader_info.bias_storage_type = getBiasStorageType(line)
 
     return shader_info
 
@@ -203,6 +215,13 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
             h += "extern const api::StorageType {};\n".format(name_weight_storage_type)
             cpp += "const api::StorageType {} = \n".format(name_weight_storage_type)
             cpp += "  {};\n".format(storageTypeToEnum[shader_info.weight_storage_type])
+
+        # Add bias type
+        if (shader_info.bias_storage_type != ""):
+            name_bias_storage_type = name + "_bias_storage_type"
+            h += "extern const api::StorageType {};\n".format(name_bias_storage_type)
+            cpp += "const api::StorageType {} = \n".format(name_bias_storage_type)
+            cpp += "  {};\n".format(storageTypeToEnum[shader_info.bias_storage_type])
 
     cpp += nsend
     h += nsend
