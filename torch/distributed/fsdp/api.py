@@ -64,6 +64,10 @@ class BackwardPrefetch(Enum):
       reduce-scatter) and computation (next gradient computation).
       Specifically, the next all-gather is reordered to be before the current
       reduce-scatter.
+
+    .. note:: If the increase in peak memory usage from prefetching is an
+        issue, you may consider passing ``limit_all_gathers=True`` to the FSDP
+        constructor, which may help reduce peak memory usage in some cases.
     """
 
     # NOTE: For both modes, the ordering that defines "current" and "next" is
