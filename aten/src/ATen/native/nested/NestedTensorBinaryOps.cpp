@@ -20,6 +20,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(nested_dense_elementwise_stub);
+REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub);
 
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
 get_elementwise_nested_tensor_impl(
@@ -241,17 +242,6 @@ Tensor& fill_nested_(Tensor& self, const Tensor& value) {
   self_buf.fill_(value);
   return self;
 }
-
-void _nested_op_dense_esuhm_cpu(Tensor& result, const Tensor& self, const Tensor& other, const NESTED_DENSE_OP& op) {
-  // TODO: implement CPU kernel
-  TORCH_CHECK(false);
-}
-
-REGISTER_ARCH_DISPATCH(nested_dense_elementwise_stub, DEFAULT, &_nested_op_dense_esuhm_cpu);
-REGISTER_AVX512_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
-REGISTER_AVX2_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
-REGISTER_VSX_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
-REGISTER_ZVECTOR_DISPATCH(nested_dense_elementwise_stub, &_nested_op_dense_esuhm_cpu);
 
 } // namespace native
 } // namespace at

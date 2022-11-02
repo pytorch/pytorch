@@ -304,6 +304,20 @@ class TestNestedTensor(TestCase):
         self.assertEqual(str(a), expected)
         self.assertEqual(repr(a), expected)
 
+    @torch.inference_mode()
+    def test_activations(self):
+        for func in (torch.nn.functional.relu,
+                     torch.nn.functional.relu_,
+                     torch.nn.functional.gelu,
+                     torch._C._nn.gelu_,
+                     torch.tanh,
+                     torch.tanh_):
+            t = torch.tensor([-1, 0, 1], dtype=torch.float)
+            nt = torch.nested.nested_tensor([t])
+            nested_result = func(nt)
+            self.assertTrue(nested_result.is_nested)
+            self.assertEqual(func(t), nested_result.unbind()[0])
+
     def test_to_padded_tensor_on_empty_tensor(self):
 
         nt = torch.nested.nested_tensor([])
@@ -748,24 +762,6 @@ class TestNestedTensorDeviceType(TestCase):
         expected_grad = torch.nested.nested_tensor([grad_x0, torch.zeros((3, 4), device=device, dtype=dtype)])
         self.assertEqual(nt.grad, expected_grad)
 
-    @parametrize("func", [torch.nn.functional.relu,
-                          torch.nn.functional.relu_,
-                          torch.nn.functional.gelu,
-                          torch._C._nn.gelu_,
-                          torch.tanh,
-                          torch.tanh_,
-                          torch.neg])
-    def test_activations(self, device, func):
-        nt, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7), device=device, dtype=torch.float32)
-        nested_result = func(nt)
-        self.assertTrue(nested_result.is_nested)
-        for t, t_res in zip(nt.unbind(), nested_result.unbind()):
-            self.assertEqual(func(t), t_res)
-        self.assertRaisesRegex(
-            RuntimeError,
-            "NestedTensor must be contiguous to get buffer.",
-            lambda: func(nt_noncontiguous))
-
     @dtypes(*floating_types_and_half())
     def test_nested_tensor_chunk(self, device, dtype):
         # Transformer use case
@@ -915,6 +911,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "div requires offsets to match when given NestedTensors",
             lambda: nt_chunks[0] / nt_chunks[1])
+
 
     @dtypes(torch.float, torch.float16)
     @skipMeta
