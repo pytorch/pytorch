@@ -1,15 +1,16 @@
 # Owner(s): ["module: onnx"]
 
 """Test the support on onnxscript in PyTorch-ONNX converter."""
+import io
 from typing import List
 
-import io
-import torch
 import onnx
 import onnxscript
+import torch
 from onnxscript.onnx_types import FLOAT
 from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
+
 
 class TestONNXScriptExport(common_utils.TestCase):
 
@@ -24,6 +25,7 @@ class TestONNXScriptExport(common_utils.TestCase):
 
         # 1. Register Selu onnxscript function as custom Op
         custom_opset = onnxscript.values.Opset(domain="onnx-script", version=1)
+
         @onnxscript.script(custom_opset)
         def Selu(X):
             # TODO: onnx/ort doesn't support default values for now
@@ -92,7 +94,9 @@ class TestONNXScriptExport(common_utils.TestCase):
         y = torch.randn(N, C)
         model_layer_norm = torch.nn.LayerNorm(C)
         layer_norm_onnx = io.BytesIO()
-        torch.onnx.export(model_layer_norm, y, layer_norm_onnx, opset_version=self.opset_version)
+        torch.onnx.export(
+            model_layer_norm, y, layer_norm_onnx, opset_version=self.opset_version
+        )
 
         # 4. test on models
         selu_proto = onnx.load(io.BytesIO(selu_onnx.getvalue()))
