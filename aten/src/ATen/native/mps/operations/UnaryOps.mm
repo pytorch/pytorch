@@ -7,6 +7,13 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
 
+// TODO: Remove me when moved to MacOS 13
+@interface MPSGraph (VenturaOps)
+- (MPSGraphTensor *)cumulativeSumWithTensor:(MPSGraphTensor *)tensor
+                                       axis:(NSInteger)axis
+                                       name:(NSString *)name;
+@end
+
 namespace at {
 namespace native {
 namespace mps {
@@ -261,6 +268,34 @@ TORCH_IMPL_FUNC(expm1_out_mps) (const Tensor& self, const Tensor& output) {
                                                secondaryTensor:oneTensor
                                                    name: nil];
                 });
+}
+
+
+static bool mpsSupportsCumsum() {
+  id mpsCD = NSClassFromString(@"MPSGraph");
+  return [mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:axis:name:)] == YES;
+}
+
+
+TORCH_IMPL_FUNC(cumsum_out_mps)
+(const Tensor& self,
+ int64_t dim,
+ c10::optional<ScalarType> dtype,
+ const Tensor& result) {
+  TORCH_CHECK(dim >=0 && dim < self.ndimension());
+  if (!mpsSupportsCumsum()) {
+    TORCH_WARN_ONCE("torch.cumsum supported by MPS on MacOS 13+, please upgrade");
+    auto cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
+    at::_copy_from_and_resize(cpu_result, result);
+    return;
+  }
+  auto input = dtype.has_value() ? self.to(dtype.value()) : self;
+  mps::unary_op(input, result, "cumsum_out_mp" + std::to_string(dim),
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+       return [mpsGraph cumulativeSumWithTensor:inputTensor
+                                    axis:dim
+                                    name:nil];
+    });
 }
 
 } // namespace native
