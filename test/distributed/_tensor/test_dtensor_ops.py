@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-# Owner(s): ["module: distributed"]
+# Owner(s): ["oncall: distributed"]
 
 import torch
 import sys
