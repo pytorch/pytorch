@@ -65,13 +65,14 @@ TABLE = {
         "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
         "aot_nvfuser": "--training --nvfuser --backend=aot_nvfuser ",
         "inductor": "--training --inductor ",
+        "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
     },
     "inference": {
         "ts_nnc": "--speedup-ts",
         "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
         "trt": "-n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
-        "inductor": "--inductor-settings --float32 -n50 --inductor",
+        "ts_nvfuser_cudagraphs": "--backend=cudagraphs_ts",
+        "inductor": "-n50 --inductor",
     },
 }
 
@@ -85,6 +86,7 @@ DEFAULTS = {
         "aot_cudagraphs",
         "aot_nvfuser",
         "inductor",
+        "inductor_no_cudagraphs",
     ],
     "inference": ["ts_nvfuser_cudagraphs", "inductor"],
     "dtypes": [
@@ -255,6 +257,12 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.quick:
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
+
+                    if testing == "performance" and compiler in (
+                        "inductor",
+                        "inductor_no_cudagraphs",
+                    ):
+                        cmd = f"{cmd} --cold_start_latency"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
@@ -443,6 +451,8 @@ class ParsePerformanceLogs(Parser):
             df_copy = df_copy.sort_values(
                 by=list(reversed(self.compilers)), ascending=False
             )
+            if "inductor" in self.compilers:
+                df_copy = df_copy.sort_values(by="inductor", ascending=False)
             self.untouched_parsed_frames[suite][metric] = df_copy
 
             if testing == "performance":
@@ -463,6 +473,9 @@ class ParsePerformanceLogs(Parser):
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
+
+            if "inductor" in self.compilers:
+                df = df.sort_values(by="inductor", ascending=False)
             self.parsed_frames[suite][metric] = df
 
     def get_passing_entries(self, compiler, df):
@@ -815,6 +828,7 @@ class DashboardUpdater:
                 self.args.dashboard_gh_cli_path,
                 "issue",
                 "comment",
+                "--repo=https://github.com/pytorch/torchdynamo.git",
                 "681",
                 "-b",
                 comment,

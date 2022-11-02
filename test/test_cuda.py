@@ -377,6 +377,8 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
         total_memory = torch.cuda.get_device_properties(0).total_memory
@@ -2638,6 +2640,7 @@ torch.cuda.synchronize()
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "FAIL")
     def test_cublas_multiple_threads_same_device(self):
         # Note, these parameters should be very carefully tuned
         # Too small number makes it hard for the racing condition
@@ -2894,10 +2897,10 @@ torch.cuda.synchronize()
                 op, args = op_with_args[0], op_with_args[1]
                 if len(op_with_args) == 3:
                     skip_test = op_with_args[2]  # TEST_WITH_ROCM
-                should_error_from_cudnn = 'cudnn' in op and not\
-                    ('TORCH_CUDNN_V8_API_ENABLED' in os.environ and
-                     int(os.environ['TORCH_CUDNN_V8_API_ENABLED']) and
-                     torch.cuda.get_device_capability() >= (8, 0))
+                should_error_from_cudnn = 'cudnn' in op and \
+                    ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
+                     int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
+                     torch.cuda.get_device_capability() < (8, 0))
                 should_error_from_not_implemented = should_error_from_cudnn or 'prelu' in op or 'thnn' in op \
                     or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
                 if not skip_test:
@@ -3027,18 +3030,22 @@ torch.cuda.synchronize()
             def backward(ctx, grad):
                 self.assertTrue(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
-                return grad.mm(b.t()), a.t().mm(grad)
+                a_grad, b_grad = grad.mm(b.t()), a.t().mm(grad)
+                self.assertTrue(a_grad.dtype is dtype and b_grad.dtype is dtype)
+                return a_grad, b_grad
 
         mymm = MyMM.apply
 
         x = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
         y = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
 
-        with torch.cuda.amp.autocast():
-            output = mymm(x, y)
-            self.assertTrue(output.dtype is torch.float16)
-            loss = output.sum()
-        loss.backward()
+        dtypes = (torch.float16, torch.bfloat16) if TEST_BF16 else (torch.float16,)
+        for dtype in dtypes:
+            with torch.cuda.amp.autocast(dtype=dtype):
+                output = mymm(x, y)
+                self.assertTrue(output.dtype is dtype)
+                loss = output.sum()
+            loss.backward()
 
     def test_autocast_custom_cast_inputs(self):
         class MyMM(torch.autograd.Function):

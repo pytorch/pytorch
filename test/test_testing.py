@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple
+from typing import Any, Callable, Iterator, List, Tuple, Generator, Sequence
 
 import torch
 
@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and
@@ -68,7 +68,7 @@ class TestTesting(TestCase):
 
             self.longMessage = True
             extra_msg = "sentinel"
-            with self.assertRaisesRegex(AssertionError, re.escape(f"{default_msg} : {extra_msg}")):
+            with self.assertRaisesRegex(AssertionError, re.escape(f"{default_msg}\n{extra_msg}")):
                 self.assertEqual(actual, expected, msg=extra_msg)
         finally:
             self.longMessage = long_message
@@ -1818,6 +1818,27 @@ class TestImports(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
         self.assertEquals(out, "")
 
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
+    @parametrize('path', ['torch', 'functorch'])
+    def test_no_mutate_global_logging_on_import(self, path) -> None:
+        # Calling logging.basicConfig, among other things, modifies the global
+        # logging state. It is not OK to modify the global logging state on
+        # `import torch` (or other submodules we own) because users do not expect it.
+        expected = 'abcdefghijklmnopqrstuvwxyz'
+        commands = [
+            'import logging',
+            f'import {path}',
+            '_logger = logging.getLogger("torch_test_testing")',
+            'logging.root.addHandler(logging.StreamHandler())',
+            'logging.root.setLevel(logging.INFO)',
+            f'_logger.info("{expected}")'
+        ]
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "; ".join(commands)],
+            stderr=subprocess.STDOUT,
+        ).decode("utf-8")
+        self.assertEqual(out.strip(), expected)
+
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
         a, b, c, d, e = [object() for _ in range(5)]
@@ -1879,6 +1900,41 @@ class TestOpInfos(TestCase):
         self.assertIs(s2.output_process_fn_grad(None), a)
         self.assertTrue(s2.broadcasts_input)
         self.assertEqual(s2.name, "foo")
+
+
+# Tests that validate the various sample generating functions on each OpInfo.
+class TestOpInfoSampleFunctions(TestCase):
+
+    def _assert_is_generator_or_singleton(self, item, property_name):
+        if isinstance(item, Sequence):
+            msg = (
+                "{property_name} may only return lists for single items"
+                ", please use a coroutine which yields items instead")
+            self.assertTrue(len(item) <= 1, msg=msg)
+        else:
+            self.assertIsInstance(item, Generator)
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_opinfo_sample_generators(self, device, dtype, op):
+        # Test op.sample_inputs doesn't generate multiple samples when called
+        samples = op.sample_inputs(device, dtype)
+        self._assert_is_generator_or_singleton(samples, "sample_inputs_func")
+
+    @ops([op for op in op_db if op.reference_inputs_func is not None], dtypes=OpDTypes.any_one)
+    def test_opinfo_reference_generators(self, device, dtype, op):
+        # Test op.reference_inputs doesn't generate multiple samples when called
+        samples = op.reference_inputs(device, dtype)
+        self._assert_is_generator_or_singleton(samples, "reference_inputs_func")
+
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_opinfo_error_generators(self, device, op):
+        # Test op.error_inputs doesn't generate multiple inputs when called
+        samples = op.error_inputs(device)
+        self._assert_is_generator_or_singleton(samples, "error_inputs_func")
+
+
+instantiate_device_type_tests(TestOpInfoSampleFunctions, globals())
+instantiate_parametrized_tests(TestImports)
 
 
 if __name__ == '__main__':

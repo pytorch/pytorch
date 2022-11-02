@@ -93,6 +93,24 @@ TORCH_IMPL_FUNC(trunc_out_mps) (const Tensor& self, const Tensor& output) {
                   { return mps::trunc_tensor(mpsGraph, inputTensor); });
 }
 
+TORCH_IMPL_FUNC(signbit_out_mps) (const Tensor& self, const Tensor& output) {
+  mps::unary_op(self, output, "signbit_out_mps",
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+                    MPSGraphTensor* output;
+                    // signbit is not implemented for int64 type.
+                    // workaround for `Function signbitOp_i64 was not found in the library`
+                    if ([inputTensor dataType] == MPSDataTypeInt64) {
+                      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
+                      output = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                   secondaryTensor:zeroTensor
+                                                              name:nil];
+                    } else {
+                      output = [mpsGraph signbitWithTensor: inputTensor name: nil];
+                    }
+                    return mps::castMPSTensor(mpsGraph, output, ScalarType::Bool);
+                 });
+}
+
 TORCH_IMPL_FUNC(sign_out_mps) (const Tensor& self, const Tensor& output) {
   mps::unary_op(self, output, "sign_out_mps",
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -227,6 +245,20 @@ TORCH_IMPL_FUNC(frac_out_mps) (const Tensor& self, const Tensor& output) {
                                                                     name:nil];
                   return [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                secondaryTensor:truncTensor
+                                                   name: nil];
+                });
+}
+
+TORCH_IMPL_FUNC(expm1_out_mps) (const Tensor& self, const Tensor& output) {
+  mps::unary_op(self, output, "expm1_out_mps",
+                ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+                  MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
+                                                       shape:@[@1]
+                                                       dataType:inputTensor.dataType];
+                  MPSGraphTensor* ePowTensor = [mpsGraph exponentWithTensor:inputTensor
+                                                                         name:nil];
+                  return [mpsGraph subtractionWithPrimaryTensor:ePowTensor
+                                               secondaryTensor:oneTensor
                                                    name: nil];
                 });
 }

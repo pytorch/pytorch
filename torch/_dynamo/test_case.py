@@ -52,9 +52,6 @@ class TestCase(TorchTestCase):
         super().setUpClass()
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(
-            patch.object(config, "raise_on_backend_error", True)
-        )
-        cls._exit_stack.enter_context(
             patch.object(config, "raise_on_ctx_manager_usage", True)
         )
 

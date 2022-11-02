@@ -1031,8 +1031,7 @@ class MultiheadAttention(Module):
             to ignore for the purpose of attention (i.e. treat as "padding"). For unbatched `query`, shape should be :math:`(S)`.
             Binary and byte masks are supported.
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
-            the purpose of attention. For a byte mask, a non-zero value indicates that the corresponding ``key``
-            value will be ignored.
+            the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
             Default: ``True``.
         attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
@@ -1062,6 +1061,11 @@ class MultiheadAttention(Module):
             `batch_first` argument is ignored for unbatched inputs.
         """
         is_batched = query.dim() == 3
+        if key_padding_mask is not None:
+            _kpm_dtype = key_padding_mask.dtype
+            if _kpm_dtype != torch.bool and not torch.is_floating_point(key_padding_mask):
+                raise AssertionError(
+                    "only bool and floating types of key_padding_mask are supported")
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
@@ -1089,12 +1093,10 @@ class MultiheadAttention(Module):
             why_not_fast_path = "add_zero_attn was enabled"
         elif not self._qkv_same_embed_dim:
             why_not_fast_path = "_qkv_same_embed_dim was not True"
-        elif attn_mask is not None:
-            why_not_fast_path = "attn_mask was not None"
-        elif query.is_nested and key_padding_mask is not None:
-            why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
-        elif self.num_heads % 2 == 1:
-            why_not_fast_path = "num_heads is odd"
+        elif query.is_nested and (key_padding_mask is not None or attn_mask is not None):
+            why_not_fast_path = "key_padding_mask and attn_mask are not supported with NestedTensor input"
+        elif not query.is_nested and key_padding_mask is not None and attn_mask is not None:
+            why_not_fast_path = "key_padding_mask and attn_mask were both supplied"
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 

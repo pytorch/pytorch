@@ -3,16 +3,20 @@ import functools
 import getpass
 import hashlib
 import logging
+import multiprocessing
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import sysconfig
 import tempfile
 import types
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
-from time import time
+from threading import Thread
+from time import sleep, time
 from typing import Any, Dict
 
 import torch
@@ -46,8 +50,11 @@ log = logging.getLogger(__name__)
 logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else logging.INFO)
 
 
+@functools.lru_cache(None)
 def cache_dir():
-    return f"/tmp/torchinductor_{getpass.getuser()}"
+    return os.environ.get(
+        "TORCHINDUCTOR_CACHE_DIR", f"/tmp/torchinductor_{getpass.getuser()}"
+    )
 
 
 def get_lock_dir():
@@ -279,7 +286,37 @@ class AsyncCompile:
         # are forked
         cuda_properties._properties()
         assert config.compile_threads > 1
-        return ProcessPoolExecutor(config.compile_threads)
+        orig_ppid = os.getpid()
+
+        # if this process dies abnormally (e.g. segfault)
+        # it will not shut down the workers. Instead
+        # the workers will have their parent reassigned to the
+        # init process. This launches a separate thread to
+        # watch for the worker getting reassigned,
+        # and cleans it up in this case.
+        def init():
+            def run():
+                while True:
+                    sleep(1)
+                    if orig_ppid != os.getppid():
+                        os.kill(os.getpid(), signal.SIGKILL)
+
+            global _watchdog_thread
+            _watchdog_thread = Thread(target=run, daemon=True)
+            _watchdog_thread.start()
+
+        # we rely on 'fork' because we cannot control whether users
+        # have an `if __name__ == '__main__'` in their main process.
+        fork_context = multiprocessing.get_context("fork")
+        pool = ProcessPoolExecutor(
+            config.compile_threads, mp_context=fork_context, initializer=init
+        )
+        # when this pool is created in a subprocess object, the normal exit handler
+        # doesn't run, and we need to register our own handler.
+        # exitpriority has to be high, because another one of the finalizers will
+        # kill the worker thread that sends the shutdown message to the workers...
+        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        return pool
 
     @classmethod
     def warm_pool(cls):

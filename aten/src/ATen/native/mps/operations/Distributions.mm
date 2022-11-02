@@ -405,9 +405,14 @@ Tensor& multinomial_with_replacement_mps_kernel(
           MPSGraphTensor *ones = [mpsGraph constantWithScalar:1.0f
                                                         shape:@[ns_numCategories, ns_numCategories]
                                                      dataType:prob_dtype];
+          auto zeroTensor = [mpsGraph constantWithScalar: 0.0f
+                                                dataType: MPSDataTypeInt32];
+          auto minusOneTensor = [mpsGraph constantWithScalar: -1.0f
+                                                    dataType: MPSDataTypeInt32];
+
           MPSGraphTensor *upperTriangle = [mpsGraph bandPartWithTensor:ones
-                                                              numLower:0
-                                                              numUpper:-1
+                                                        numLowerTensor:zeroTensor
+                                                        numUpperTensor:minusOneTensor
                                                                   name:nil];
           MPSGraphTensor *upperProbRange = [mpsGraph matrixMultiplicationWithPrimaryTensor:normalizedProbs
                                                                            secondaryTensor:upperTriangle

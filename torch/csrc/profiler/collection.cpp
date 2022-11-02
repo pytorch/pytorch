@@ -21,6 +21,7 @@
 #include <c10/util/hash.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 
 namespace torch {
@@ -30,14 +31,18 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
-RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
-    : /*impl_=*/impl_(t.unsafeGetTensorImpl()),
-      /*data_=*/data_(t.has_storage() ? t.storage().data() : nullptr),
-      /*device_type_*/ device_type_(t.device().type()),
-      /*device_index_*/ device_index_(t.device().index()),
-      /*dtype_=*/dtype_(t.scalar_type()),
-      /*layout_=*/layout_(t.layout()),
-      /*dim_=*/dim_(t.sizes().size()){};
+RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
+    : data_{t.has_storage() ? t.storage().data() : nullptr},
+      device_type_{t.device().type()},
+      device_index_{t.device().index()},
+      dtype_{t.scalar_type()},
+      layout_{t.layout()},
+      dim_{static_cast<uint32_t>(t.sizes().size())} {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      t.sizes().size() <= std::numeric_limits<uint32_t>::max(),
+      "Cannot profile Tensors of size > uint32 max. Got dim: ",
+      t.sizes().size());
+}
 
 // ============================================================================
 // == PyTorch Ops =============================================================
@@ -71,18 +76,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
-    const auto& sizes = t.sizes();
-    const auto dim = sizes.size();
-    const auto layout = t.layout();
-    TORCH_CHECK(
-        dim <= std::numeric_limits<uint32_t>::max(),
-        "Cannot profile Tensors of size > uint32 max. Got dim: ",
-        dim);
-
     tensor_metadata_.emplace_back(t);
-
-    tensor_sizes_strides_.copy(sizes);
-    if (layout == at::kStrided) {
+    tensor_sizes_strides_.copy(t.sizes());
+    if (t.layout() == at::kStrided) {
       // Only Strided layout tensors have strides
       tensor_sizes_strides_.copy(t.strides());
     }
@@ -300,6 +296,19 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
+  // `AccumulateGrad` is an important marker for profile analysis; however the
+  // annotation relies on `c10::demangle` which is platform dependent. In
+  // particular, Windows will add a "struct " prefix.
+  const std::string accumulate_grad = "torch::autograd::AccumulateGrad";
+  const std::string windows_pattern = std::string("struct ") + accumulate_grad;
+  for (auto& event : op_events_) {
+    auto& name = event.basic_fields_.name_;
+    auto position = name.find(windows_pattern);
+    if (position != std::string::npos) {
+      name.replace(position, windows_pattern.size(), accumulate_grad);
+    }
+  }
+
   auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
 
   // TODO: CTAD will take care of template args when we move to C++17
@@ -513,7 +522,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
-static constexpr const char* indexKey = "Profiler Event Index";
+static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
@@ -813,133 +822,6 @@ trace_ptr_t addKinetoEvents(
   return trace;
 }
 
-template <typename T>
-struct PairHash {
-  size_t operator()(const std::pair<T, T>& i) {
-    return c10::get_hash(i.first, i.second);
-  }
-};
-
-void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
-  // This task is equivilent to https://leetcode.com/problems/number-of-islands/
-  // We first cluster events with a greedy index assignment, and then merge
-  // groups that overlap.
-
-  using storage_id_t = strong::type<
-      size_t,
-      struct _StorageID,
-      strong::regular,
-      strong::hashable,
-      strong::arithmetic,
-      strong::ordered>;
-
-  struct TensorStoragePair {
-    TensorImplAddress impl_;
-    storage_id_t storage_id_;
-
-    // Used to assign the result.
-    std::reference_wrapper<c10::optional<TensorID>> id_ref_;
-  };
-  std::vector<TensorStoragePair> tensors;
-
-  // Step 1) Flatten and convert storage data pointers. (Handle address reuse.)
-  // --------------------------------------------------------------------------
-  {
-    storage_id_t current_id{0};
-    ska::flat_hash_map<StorageImplData, storage_id_t> live_storage;
-    auto lookup = [&current_id, &live_storage](const StorageImplData data) {
-      auto inserted = live_storage.insert({data, current_id});
-      current_id += storage_id_t(inserted.second);
-      return inserted.first->second;
-    };
-
-    ska::flat_hash_set<storage_id_t> tensor_set;
-    for (auto& result : sorted_results) {
-      result->visit(c10::overloaded(
-          [&](ExtraFields<EventType::TorchOp>& torch_op) {
-            for (auto& m : torch_op.inputs_.tensor_metadata_) {
-              if (m.has_value() && m->impl_ && m->data_) {
-                auto id = lookup(m->data_);
-                tensor_set.insert(id);
-                tensors.emplace_back(TensorStoragePair{m->impl_, id, m->id_});
-              }
-            }
-          },
-          [&](ExtraFields<EventType::Allocation>& alloc_op) {
-            // We won't know which allocations are for Tensor storage yet.
-            // We'll filter after we see all of the op inputs.
-            tensors.emplace_back(TensorStoragePair{
-                TensorImplAddress(nullptr),
-                lookup(StorageImplData(alloc_op.ptr_)),
-                alloc_op.id_});
-
-            // Handle deallocation
-            if (alloc_op.alloc_size_ < 0) {
-              live_storage.erase(StorageImplData(alloc_op.ptr_));
-            }
-          },
-          [](const auto&) {}));
-    }
-
-    // Handle any allocation events which we cannot prove are for
-    // `StorageImpl`s.
-    tensors.erase(
-        std::remove_if(
-            tensors.begin(),
-            tensors.end(),
-            [&tensor_set](const auto& i) {
-              return tensor_set.find(i.storage_id_) == tensor_set.end();
-            }),
-        tensors.end());
-  }
-
-  // Step 2) Handle the case that the storage of a TensorImpl changed.
-  // --------------------------------------------------------------------------
-  using storage_id_pair_t = std::pair<storage_id_t, storage_id_t>;
-  ska::flat_hash_set<storage_id_pair_t, PairHash<storage_id_t>> same_group_set;
-  {
-    ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
-    for (const auto& t : tensors) {
-      // Storage allocations / frees don't have an associated TensorImpl, so
-      // we don't want all storages to merge through nullptr.
-      if (!t.impl_) {
-        continue;
-      }
-
-      const auto it = impl_map.insert({t.impl_, t.storage_id_}).first;
-
-      // The pair needs to be sorted for the coalesce step to work properly.
-      it->second < t.storage_id_
-          ? same_group_set.insert({it->second, t.storage_id_})
-          : same_group_set.insert({t.storage_id_, it->second});
-    }
-  }
-
-  // Step 3) Coalesce groups and assign final IDs.
-  // --------------------------------------------------------------------------
-  ska::flat_hash_map<storage_id_t, size_t> id_map;
-  {
-    std::vector<storage_id_pair_t> unique_pairs;
-    for (const auto& i : same_group_set) {
-      unique_pairs.push_back(i);
-    }
-    std::sort(unique_pairs.begin(), unique_pairs.end());
-
-    size_t current_id{0};
-    for (const auto& i : unique_pairs) {
-      auto inserted = id_map.insert({i.first, current_id});
-      current_id += inserted.second;
-      id_map.insert({i.second, inserted.first->second});
-    }
-  }
-
-  // Step 4) Write back to metadata
-  // --------------------------------------------------------------------------
-  for (const auto& t : tensors) {
-    t.id_ref_.get() = TensorID(id_map.at(t.storage_id_));
-  }
-}
-
 struct ResultGreater {
   bool operator()(const result_ptr_t& a, const result_ptr_t& b) const {
     return a->endTimeNS() > b->endTimeNS();
@@ -1102,7 +984,7 @@ RecordQueue::getRecords(
   });
 
   if (config_.report_input_shapes && config_.profile_memory) {
-    calculate_unique_tensor_ids(out);
+    calculateUniqueTensorIDs(out);
   }
 
   build_tree(out);

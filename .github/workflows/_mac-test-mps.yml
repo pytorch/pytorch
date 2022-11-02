@@ -41,6 +41,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install PyTorch
         env:
@@ -50,7 +51,7 @@ jobs:
         run: |
           # shellcheck disable=SC1090
           set -ex
-          ${CONDA_INSTALL} -c conda-forge expecttest numpy=1.22.3 pyyaml=6.0
+          ${CONDA_RUN} python3 -mpip install "unittest-xml-reporting<=3.2.0,>=2.0.0"
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
           ${CONDA_RUN} python3 -mpip install dist/*.whl
@@ -63,8 +64,6 @@ jobs:
           # shellcheck disable=SC1090
           set -ex
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
-          # This step currently fails if we actually run as if we're in CI.
-          unset CI
 
           ${CONDA_RUN} --cwd test python3 test_mps.py -v
           ${CONDA_RUN} --cwd test python3 test_metal.py -v

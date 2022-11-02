@@ -361,10 +361,18 @@ class _RemoteModule(nn.Module):
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
-    def register_forward_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_pre_hook(  # type: ignore[return]
+        self,
+        hook: Callable[..., None],
+        prepend: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
-    def register_forward_hook(self, hook: Callable[..., None]) -> RemovableHandle:  # type: ignore[return]
+    def register_forward_hook(  # type: ignore[return]
+        self,
+        hook: Callable[..., None],
+        prepend: bool = False,
+    ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 
     def state_dict(self, *args, **kwargs):
