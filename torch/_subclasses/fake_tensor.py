@@ -973,6 +973,7 @@ class FakeTensorMode(TorchDispatchMode):
             aten.zeros.default,
             aten.detach.default,
             aten.set_.source_Storage_storage_offset,
+            aten._reshape_copy.default,
         ]
 
     @property
