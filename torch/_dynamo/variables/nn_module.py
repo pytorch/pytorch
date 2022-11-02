@@ -540,7 +540,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-
+        module = self.value
         if name not in getattr(self.value, "__dict__", {}):
             try:
                 method = inspect.getattr_static(type(self.value), name)
@@ -577,14 +577,65 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return variables.ListIteratorVariable(
                     items, mutable_local=MutableLocal(), **options
                 )
-            else:
+            elif name == "__getitem__":
+                assert not kwargs and len(args) == 1
+                assert type(module).__getitem__ in (
+                    torch.nn.ModuleDict.__getitem__,
+                    torch.nn.ModuleList.__getitem__,
+                    torch.nn.ParameterList.__getitem__,
+                    torch.nn.Sequential.__getitem__,
+                ), typestr(module)
+                assert self.source
+
+                if isinstance(args[0], SliceVariable):
+                    # Build a TupleVariable of NNModules
+                    result = []
+                    submods = []
+
+                    # Turn the slice into the list of integers
+                    keys = list(range(len(module)))[args[0].as_python_constant()]
+                    for idx, submod in enumerate(module[args[0].as_python_constant()]):
+                        key = keys[idx]
+                        src = NNModuleSource(GetItemSource(self.source, key))
+                        result.append(
+                            tx.output.register_attr_or_module(
+                                submod,
+                                key,
+                                source=src,
+                                **options,
+                            )
+                        )
+                        submods.append(submod)
+
+                    new_module = torch.nn.Sequential(*submods)
+                    new_module_variable = tx.output.register_attr_or_module(
+                        new_module,
+                        f"{self}.__getitem__(slice)",
+                        source=NNModuleSource(
+                            GetItemSource(self.source, args[0].as_python_constant())
+                        ),
+                        **options,
+                    )
+                    return new_module_variable
+
+                key = args[0].as_python_constant()
+                submod = module[key]
+                return tx.output.register_attr_or_module(
+                    submod,
+                    key,
+                    args[0].as_python_constant(),
+                    source=NNModuleSource(GetItemSource(self.source, key)),
+                    **options,
+                )
+            # TODO(whc) i think we are catching some functions here, should we be filtering better above?
+            elif isinstance(method, classmethod):
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(method.__func__, **options),
                     [self] + args,
                     kwargs,
                 )
             # TODO(whc) do we still want to filter out some methods? what is this for?
-            # if id(method.__code__) in self._nn_module_method_ids():
-            # unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+            elif id(method.__code__) in self._nn_module_method_ids():
+                unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
         return super().call_method(tx, name, args, kwargs)
