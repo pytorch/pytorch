@@ -70,12 +70,17 @@ def code_hash(code):
     )
 
 
-def write(source_code, ext, extra=""):
+def get_code_path(source_code, ext, extra):
     basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
+    path = os.path.join(subdir, f"{basename}.{ext}")
+    return basename, subdir, path
+
+
+def write(source_code, ext, extra=""):
+    basename, subdir, path = get_code_path(source_code, ext, extra)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    path = os.path.join(subdir, f"{basename}.{ext}")
     if not os.path.exists(path):
         # use a temp file for thread safety
         fd, tmp_path = tempfile.mkstemp(dir=subdir)
@@ -143,7 +148,19 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-def cpp_compile_command(input, output, include_pytorch=False):
+def shared():
+    return "-shared"
+
+
+def pre_cpp_command():
+    return "-fPIC -Wall -std=c++14 -Wno-unused-variable"
+
+
+def post_cpp_command():
+    return "-march=native -O3 -ffast-math -fno-finite-math-only -fopenmp"
+
+
+def get_include_and_linking_paths(include_pytorch=False):
     if include_pytorch:
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
@@ -159,13 +176,19 @@ def cpp_compile_command(input, output, include_pytorch=False):
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
+    return ipaths, lpaths, libs
+
+
+def cpp_compile_command(input, output, include_pytorch=False):
+    ipaths, lpaths, libs = get_include_and_linking_paths(include_pytorch)
+
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} -shared -fPIC -Wall -std=c++14 -Wno-unused-variable
+            {cpp_compiler()} {shared()} {pre_cpp_command()}
             {ipaths} {lpaths} {libs}
-            -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp
+            {post_cpp_command()}
             -o{output} {input}
         """,
     ).strip()

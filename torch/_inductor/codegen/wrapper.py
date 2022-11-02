@@ -6,6 +6,7 @@ from itertools import count
 from typing import Any, Dict, List
 
 from .. import codecache, config, ir
+from ..codecache import cpp_compile_command, get_code_path
 from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
@@ -28,12 +29,11 @@ def buffer_reuse_key(node: ir.Buffer):
     )
 
 
-def make_buffer_reuse(old, new, del_needed, declare, ending, as_strided):
+def make_buffer_reuse(old, new, del_func, declare, ending, as_strided):
     assert old.get_dtype() == new.get_dtype()
     del_line = ""
-    if del_needed:
-        if old.get_name() not in V.graph.get_output_names():
-            del_line = f"; del {old.get_name()}"
+    if old.get_name() not in V.graph.get_output_names():
+        del_line = del_func(old.get_name())
     if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
         return f"{declare}{new.get_name()} = {old.get_name()}{del_line}{ending}"
 
@@ -164,7 +164,7 @@ class ReuseLine(MemoryPlanningLine):
             make_buffer_reuse(
                 self.node,
                 self.reused_as,
-                del_needed=True,
+                del_func=lambda name: f"; del {name}",
                 declare="",
                 ending="",
                 as_strided="as_strided",
@@ -185,7 +185,7 @@ class CppReuseLine(ReuseLine):
             make_buffer_reuse(
                 self.node,
                 self.reused_as,
-                del_needed=False,
+                del_func=lambda name: f"; {name}.reset()",
                 declare="auto ",
                 ending=";",
                 as_strided="at::as_strided",
@@ -570,6 +570,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(CppAllocateLine(buffer))
 
     def write_del_line(self, name):
+        self.writeline(f"{name}.reset();")
         return
 
     def write_free_if_not_reused_line(self, buffer):
@@ -584,18 +585,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def get_kernel_path(self, code):
-        import os
-
-        from ..codecache import cache_dir, code_hash, cpp_compile_command
-
-        # TODO: this duplicates with CodeCache logic
         ext = "so"
         extra = cpp_compile_command("i", "o")
         # \n is required to match with the CodeCache behavior
         source_code = "\n" + code.getvalue()
-        basename = code_hash(source_code + extra)
-        subdir = os.path.join(cache_dir(), basename[1:3])
-        kernel_path = os.path.join(subdir, f"{basename}.{ext}")
+        _, _, kernel_path = get_code_path(source_code, ext, extra)
         return kernel_path
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
@@ -621,13 +615,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
             result.writeline("return; }''' )")
 
     def generate_end(self, result):
+        shared = codecache.shared()
+        pre_cpp_command = codecache.pre_cpp_command()
+        post_cpp_command = codecache.post_cpp_command()
+        ipaths, lpaths, libs = codecache.get_include_and_linking_paths()
+
+        extra_cflags = f"{pre_cpp_command} {post_cpp_command}"
+        extra_ldflags = f"{shared} {lpaths} {libs}"
+        extra_include_paths = f"{ipaths}"
+
         result.splice(
             f"""
             module = load_inline(
                 name='inline_extension',
                 cpp_sources=[wrapper],
                 functions=['call_{self._call_func_id}'],
-                extra_cflags=['-DCPU_CAPABILITY_AVX2 -march=native -O3 -ffast-math -fno-finite-math-only -fopenmp'])
+                extra_cflags=['{extra_cflags}'],
+                extra_ldflags=['{extra_ldflags}'],
+                extra_include_paths=['{extra_include_paths}'])
             """
         )
         # Wrap the func to support setting result._boxed_call = True
