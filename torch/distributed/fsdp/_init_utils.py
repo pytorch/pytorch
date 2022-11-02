@@ -21,7 +21,7 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
-    _get_param_to_unflat_param_names,
+    _get_param_to_fqns,
     _is_fsdp_flattened,
     _State,
     clean_tensor_name,
@@ -400,7 +400,7 @@ def _get_ignored_params(
         p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
     )
     # Conservatively include all shared parameters' names
-    param_to_unflat_param_names = _get_param_to_unflat_param_names(
+    param_to_unflat_param_names = _get_param_to_fqns(
         root_module,
         dedup_shared_params=False,
     )
