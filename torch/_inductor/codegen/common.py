@@ -431,7 +431,9 @@ class CSE:
             self.store_cache,
         )
 
-    def generate(self, buffer: IndentedBuffer, expr: str, is_scalar_expr : bool, write=True):
+    def generate(
+        self, buffer: IndentedBuffer, expr: str, is_scalar_expr: bool, write=True
+    ):
         assert isinstance(expr, str), expr
         if expr.startswith(self.name_prefix) and re.match(r"^[a-z0-9_]+$", expr):
             return expr
@@ -443,7 +445,7 @@ class CSE:
                 buffer.writeline(f"{self.prefix}{var} = {expr}{self.suffix}")
         return self.cache[expr]
 
-    def is_scalar(self, var : str):
+    def is_scalar(self, var: str):
         return var.startswith(self.scalar_name_prefix)
 
     def is_output_scalar(self, args):
@@ -453,7 +455,7 @@ class CSE:
         # which will not affect whether the output is a scalar
         return all(type(arg) != str or self.is_scalar(arg) for arg in args)
 
-    def newvar(self, is_scalar : bool) -> str:
+    def newvar(self, is_scalar: bool) -> str:
         prefix = self.scalar_name_prefix if is_scalar else self.name_prefix
         return f"{prefix}{next(self.iter_buffer_ids)}"
 
@@ -540,7 +542,7 @@ class Kernel(CodeGen):
             def __getattr__(name):
                 def inner(*args, **kwargs):
                     scalar_output = self.cse.is_output_scalar(args)
-                    expr =  getattr(parent_handler, name)(*args, **kwargs)
+                    expr = getattr(parent_handler, name)(*args, **kwargs)
                     return self.cse.generate(self.compute, expr, scalar_output)
 
                 return inner

@@ -776,7 +776,9 @@ class TritonKernel(Kernel):
         prior = self._load_mask
         if prior:
             # Masks are never scalar
-            mask = self.cse.generate(self.compute, f"{mask} & {prior}", is_scalar_expr=False)
+            mask = self.cse.generate(
+                self.compute, f"{mask} & {prior}", is_scalar_expr=False
+            )
 
         self._load_mask = mask
         with self.swap_buffers(self.compute, self.compute):

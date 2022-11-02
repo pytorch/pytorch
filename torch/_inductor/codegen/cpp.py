@@ -358,8 +358,10 @@ class CppKernel(Kernel):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
         # Not trackign whether results of reductions are scalar
         tmpvar = self.cse.generate(
-            self.loads, f"reduction {name} {cexpr(index)}",
-            is_scalar_expr=False, write=False
+            self.loads,
+            f"reduction {name} {cexpr(index)}",
+            is_scalar_expr=False,
+            write=False,
         )
         index = self.rename_indexing(index)
         self.reduction_vars[tmpvar] = reduction_type
