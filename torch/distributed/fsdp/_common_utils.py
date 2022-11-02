@@ -2,11 +2,13 @@
 This file includes private common utilities for FSDP.
 """
 
+import traceback
 from enum import auto, Enum
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, no_type_check, Union
 
 import torch
 import torch.distributed.fsdp.flat_param as flat_param_file
+import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
@@ -14,6 +16,17 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
+
+
+class FSDPState:
+    """
+    This encompasses all FSDP state.
+    """
+
+
+# We leverage Python's dynamic attribute definition to unify the state
+# management for the wrapper and non-wrapper approaches.
+_State = Union[nn.Module, FSDPState]
 
 
 class TrainingState(Enum):
@@ -36,6 +49,20 @@ class HandleTrainingState(Enum):
     BACKWARD_PRE = auto()
     BACKWARD_POST = auto()
     SUMMON_FULL_PARAMS = auto()
+
+
+def _is_composable(state: _State):
+    # TODO: This is a temporary hack for differentiate between code paths.
+    return not isinstance(state, nn.Module)
+
+
+@no_type_check
+def _all_handles(state: _State):
+    return (
+        state._handles
+        if _is_composable(state)
+        else state._fsdp_handles(state)  # `FullyShardedDataParallel`
+    )
 
 
 def clean_tensor_name(tensor_name: str) -> str:
@@ -141,3 +168,25 @@ def _apply_to_modules(
 
     f(root_module, "", *args, **kwargs)
     return return_fn(*args, **kwargs)
+
+
+@no_type_check
+def _assert_in_training_states(
+    state: _State,
+    training_states: List[TrainingState],
+) -> None:
+    """Asserts that FSDP is in the states ``_training_states``."""
+    # Raise a `ValueError` instead of using `assert` to ensure that these
+    # logical assertions run even if `assert`s are disabled
+    if state.training_state not in training_states:
+        msg = (
+            f"expected to be in states {training_states} but current state is "
+            f"{state.training_state}"
+        )
+        # Print the error on rank 0 in case this is called in the backward pass
+        if state.rank == 0:
+            if isinstance(state, nn.Module):
+                print(f"Asserting FSDP instance is: {state}")
+            print(f"ERROR: {msg}")
+            traceback.print_stack()
+        raise ValueError(msg)
