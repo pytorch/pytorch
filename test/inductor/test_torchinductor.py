@@ -4184,7 +4184,7 @@ if HAS_CPU:
         # other platforms support, we just need to add the ISA info to the supported_vector_isa
         # and include proper aten vectorization head file.
         @unittest.skipIf(
-            not codecache.supported_vector_isa(), "Does not support vectorization"
+            not codecache.get_cpu_proc_info(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_vec_kernel_cpu_only(self):
