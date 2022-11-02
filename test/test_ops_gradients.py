@@ -1,6 +1,6 @@
 # Owner(s): ["module: unknown"]
 
-from functools import partial, wraps
+from functools import partial
 import torch
 
 from torch.testing._internal.common_utils import TestGradients, run_tests
