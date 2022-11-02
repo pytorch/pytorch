@@ -85,6 +85,7 @@ Features described in this documentation are classified by release status:
    profiler
    nn.init
    onnx
+   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks
