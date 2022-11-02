@@ -47,7 +47,6 @@ class ConcaterIterDataPipe(IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
             raise TypeError("Expected all inputs to be `IterDataPipe`")
         self.datapipes = datapipes  # type: ignore[assignment]
-        self.length = None
 
     def __iter__(self) -> Iterator:
         for dp in self.datapipes:
@@ -55,15 +54,10 @@ class ConcaterIterDataPipe(IterDataPipe):
                 yield data
 
     def __len__(self) -> int:
-        if self.length is not None:
-            if self.length == -1:
-                raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-            return self.length
         if all(isinstance(dp, Sized) for dp in self.datapipes):
-            self.length = sum(len(dp) for dp in self.datapipes)
+            return sum(len(dp) for dp in self.datapipes)
         else:
-            self.length = -1
-        return len(self)
+            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
 
 @functional_datapipe('fork')
