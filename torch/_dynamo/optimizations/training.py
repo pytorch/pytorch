@@ -322,7 +322,7 @@ def prims_executor(gm, inputs, *, executor, num_fixed=0, cudagraphs=False):
     with TorchRefsNvfuserCapabilityMode():
         prim_gm = make_fx(gm)(*inputs)
 
-    # Then we return a callable that executes the "prim_gm" graph
+    # Then we create a callable that executes the "prim_gm" graph
     run = make_boxed_func(partial(execute, prim_gm, executor=executor))
 
     if _has_incompatible_cudagraph_ops(prim_gm) or not cudagraphs:

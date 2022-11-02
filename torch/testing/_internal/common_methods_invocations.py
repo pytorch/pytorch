@@ -10406,21 +10406,11 @@ op_db: List[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided_scatter,
            skips=(
-               DecorateInfo(unittest.skip('Works only for CPU complex64'), 'TestMathBits', 'test_conj_view'),
-               DecorateInfo(unittest.skip('Works for float64, fails for everything else'), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip('Works for int64, fails for everything else'), 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
-               DecorateInfo(unittest.skip('Only fails for LAZY, passes on everything else'), 'TestCompositeCompliance', 'test_backward'),  # noqa: B950
-               DecorateInfo(unittest.skip('Passes on complex64 and float32 only'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),
-               # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
-               DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),
-               DecorateInfo(
-                   unittest.skip("Some stride values write multiple values to the same location e.g. (1,1,1,1)"),
-                   'TestCommon', 'test_compare_cpu'),)),
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),)),
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
            ref=reference_native_layer_norm,
@@ -10673,6 +10663,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.complex32: tol(atol=1e-5, rtol=5e-3)}),
                    "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
+               DecorateInfo(
+                   toleranceOverride({torch.float: tol(atol=1.5e-5, rtol=1.5e-5), }),
+                   'TestCommon', 'test_numpy_ref_mps'),
            ),
            skips=(
                # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
@@ -10741,8 +10734,12 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv_transpose3d',
            aten_name='conv_transpose3d',
            aliases=('conv_transpose3d',),
-           dtypes=floating_types_and(torch.int64),
-           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
+           # `ref` for this function is backward of
+           # corresponding `conv*d`
+           ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose3d),
+           dtypes=floating_and_complex_types_and(torch.int64),
+           dtypesIfCUDA=floating_and_complex_types_and(
+               torch.float16, torch.chalf, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10752,24 +10749,45 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06),
+                                     torch.complex64: tol(atol=1.3e-04, rtol=1.3e-05)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=2e-04, rtol=2e-04), }),
                    'TestCompositeCompliance', 'test_operator', device_type='cuda'),
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
+                   toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06),
+                                     torch.complex64: tol(atol=1.3e-04, rtol=1.3e-05)}),
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
-                   active_if=TEST_CUDNN)],
+                   active_if=TEST_CUDNN),
+               DecorateInfo(
+                   toleranceOverride({torch.complex32: tol(atol=5e-2, rtol=5e-2)}),
+                   "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
+               DecorateInfo(
+                   toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
+                   "TestMathBits", "test_conj_view", device_type='cuda'),
+               DecorateInfo(
+                   toleranceOverride({torch.chalf: tol(atol=9e-2, rtol=9e-2), }),
+                   'TestCommon', 'test_complex_half_reference_testing')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip("Skipped! 75363"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               # RuntimeError: "slow_conv3d_cpu_grad_input" not implemented for 'Long'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.int64,)),
+               # Reference: https://github.com/pytorch/pytorch/issues/86356
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.double, torch.cdouble)),
+               DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+               # RuntimeError: UNSUPPORTED DTYPE: complex
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.complex64, torch.complex128)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
@@ -16453,6 +16471,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.asinh",
         torch_opinfo_name="asinh",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.lerp",
+        torch_opinfo_name="lerp",
         supports_nvfuser=False,
     ),
     PythonRefInfo(

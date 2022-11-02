@@ -2906,8 +2906,10 @@ Tensor as_strided_scatter_backward(
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  auto result = grad_.new_empty_strided_symint(
-      input_geometry.sym_sizes(), input_geometry.sym_strides());
+  auto result =
+      grad_.new_zeros_symint(input_geometry.sym_sizes())
+          .as_strided_symint(
+              input_geometry.sym_sizes(), input_geometry.sym_strides());
   auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;
