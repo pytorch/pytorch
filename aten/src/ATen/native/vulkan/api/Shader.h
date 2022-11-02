@@ -78,6 +78,7 @@ bool operator==(const ShaderSource& _1, const ShaderSource& _2);
 struct ShaderInfo final {
   ShaderSource shader_src;
   c10::SmallVector<uint32_t, 4> tile_size;
+  StorageType bias_storage_type{StorageType::UNKNOWN};
   StorageType weight_storage_type{StorageType::UNKNOWN};
 
   explicit ShaderInfo() = default;
@@ -88,6 +89,7 @@ struct ShaderInfo final {
       const uint32_t,
       const std::vector<VkDescriptorType>&,
       const std::vector<uint32_t>& tile_size,
+      const StorageType bias_storage_type,
       const StorageType weight_storage_type);
 };
 

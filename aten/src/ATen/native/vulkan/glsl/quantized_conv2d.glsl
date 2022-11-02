@@ -5,6 +5,7 @@
 /*
  * TILE_SIZE = (1, 1, 1)
  * WEIGHT_STORAGE = TEXTURE_3D
+ * BIAS_STORAGE = TEXTURE_3D
  */
 
 layout(std430) buffer;
