@@ -29,6 +29,10 @@ else:
     DataType = None
 
 import os
+dump_nvtx = False
+if os.getenv('PYTORCH_NVFUSER_DUMP_NVTX'):
+    dump_nvtx = True
+
 
 DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     {
@@ -249,17 +253,21 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
             arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
         )
 
-        if os.getenv('PYTORCH_NVFUSER_DUMP_NVTX'): torch.cuda.nvtx.range_push("fusion: {0}, graph: {1}".format(fusion.id(),
+        if dump_nvtx:
+            torch.cuda.nvtx.range_push("fusion: {0}, graph: {1}".format(
+                fusion.id(),
                 str([{
                     'op': n.op,
                     'name': n.name,
-                    'args': n.args
+                    'args': n.args,
+                    'kwargs': n.kwargs
                 } for n in gm.graph.nodes])))
         result = tree_unflatten(
             fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
         )
-        if os.getenv('PYTORCH_NVFUSER_DUMP_NVTX'): torch.cuda.nvtx.range_pop()
+        if dump_nvtx:
+            torch.cuda.nvtx.range_pop()
         return result
     else:
         warn(
@@ -432,7 +440,7 @@ def maybe_partition_graph(
 
 class NVTXInterpreter(torch.fx.Interpreter):
     def run_node(self, n):
-        torch.cuda.nvtx.range_push("name: {0}, args: {1}, op: {2}, meta: {3}".format(n.name, n.args, n.op, n.meta))
+        torch.cuda.nvtx.range_push("name: {0}, args: {1}, op: {2}, kwargs: {3}".format(n.name, n.args, n.op, n.kwargs))
         result = super().run_node(n)
         torch.cuda.nvtx.range_pop()
         return result
@@ -456,7 +464,7 @@ def nvfuser_execute_partitioned(gm: GraphModule, *args, executor_parameters=None
         use_python_fusion_cache=use_python_fusion_cache,
     )
     if is_partitioned:
-        if os.getenv('PYTORCH_NVFUSER_DUMP_NVTX'):
+        if dump_nvtx:
             return NVTXInterpreter(gm).run(*args)
         else:
             return gm(*args)
