@@ -142,13 +142,13 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
     ),
     value_(view_value)
 {
+  set_constructor_metadata();
   // Copy the original tensor's ViewMeta vector and push the current one.
   if (base->view_metas_.size() > 0) {
       view_metas_ = base->view_metas_;  // copy
   }
   view_metas_.push_back(meta);
   storage_ = base->storage_; // alias this tensor's storage with the base tensor's
-  set_constructor_metadata();
 }
 
 functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_storage_impl() const {
@@ -340,38 +340,30 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
 }
 
 at::IntArrayRef FunctionalTensorWrapper::sizes_custom() const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sizes();
 }
 at::IntArrayRef FunctionalTensorWrapper::strides_custom() const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->strides();
 }
 int64_t FunctionalTensorWrapper::dim_custom() const {
   return value_.unsafeGetTensorImpl()->dim();
 }
 int64_t FunctionalTensorWrapper::numel_custom() const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->numel();
 }
 bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->is_contiguous();
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_sizes();
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_strides();
 }
 c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_size(d);
 }
 c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
-  //const_cast<FunctionalTensorWrapper*>(this)->sync_();
   return value_.unsafeGetTensorImpl()->sym_storage_offset();
 }
 
