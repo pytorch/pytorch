@@ -1575,6 +1575,23 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
+Tensor reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+  if (self.is_sparse()) {
+    TORCH_CHECK(0, "reshape is not implemented for sparse tensors");
+  }
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+
+  if (self.is_mkldnn()) {
+    TORCH_CHECK(0, "reshape_copy not implemented for mkldnn tesnors");
+  }
+
+  if (self.is_contiguous()) {
+    return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
+  } else {
+    return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  }
+}
+
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
 // minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
