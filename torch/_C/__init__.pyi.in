@@ -169,7 +169,7 @@ class Future(object):
 
 def _jit_set_num_profiled_runs(num: _size) -> _size: ...
 
-# Defined in torch/csrc/jit/passes/xnnpack_rewrite.h
+# Defined in torch/csrc/jit/passes/mobile_optimizer_type.h
 class MobileOptimizerType:
     ...
 
@@ -178,6 +178,7 @@ INSERT_FOLD_PREPACK_OPS: MobileOptimizerType
 REMOVE_DROPOUT: MobileOptimizerType
 FUSE_ADD_RELU: MobileOptimizerType
 HOIST_CONV_PACKED_PARAMS: MobileOptimizerType
+VULKAN_AUTOMATIC_GPU_TRANSFER: MobileOptimizerType
 
 def fork(*args: Any, **kwargs: Any) -> Future: ...
 def wait(fut: Future) -> Any: ...
@@ -215,6 +216,7 @@ def _clone_module_with_class(module: 'torch.jit.ScriptModule',
                              ignored_methods: List[AnyStr],
                              ignored_attributes: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_vulkan_optimize_for_mobile(module: 'torch.jit.ScriptModule',
+                                         optimization_blocklist: Set[MobileOptimizerType],
                                          preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
 def _jit_pass_metal_optimize_for_mobile(module: 'torch.jit.ScriptModule',
                                          preserved_methods: List[AnyStr]) -> 'torch.jit.ScriptModule': ...
