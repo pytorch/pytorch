@@ -2746,6 +2746,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
             gm = torch.fx.symbolic_trace(optimized)
 
+    def test_pretty_print(self):
+        def f(x):
+            x + x
+
+        optimized_func = torch._dynamo.optimize("eager")(f)
+        self.assertIsInstance(str(optimized_func), str)
+
+        mod = Module1()
+        optimized_module = torch._dynamo.optimize("eager")(mod)
+        self.assertIsInstance(str(optimized_module), str)
+
 
 class CustomFunc(torch.autograd.Function):
     @staticmethod
