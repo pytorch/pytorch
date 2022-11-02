@@ -40,3 +40,8 @@
           type promotion and boardcasting ops.
           Canonical aten ops is also effectively the opset produced by torchdynamo.export(aten_graph=True),
           and thus can be used as an opset for export purpose.
+- tag: fragment
+  desc: |
+          This tag indicates we are extending an existing namespace with new operators so the operator will
+          be registered in a fragment library, as long as one operator has the fragment tag, all operators
+          under the same namespace will be registered in the same fragment library
