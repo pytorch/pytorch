@@ -901,7 +901,9 @@ TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
     # other libraries take up about 11% of space per process
-    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
+    # + leave some additional buffer e.g., for runtime compilation
+    # or allocations outside of the caching allocator
+    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .15, 2))
 
 
 def skipIfCrossRef(fn):

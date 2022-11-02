@@ -104,10 +104,14 @@ def _init_buffer_state(
     module: nn.Module,
 ) -> _State:
     state._buffer_names = _get_buffer_names(module)
-    # Save a mapping from fully prefixed buffer name to its original dtype
-    # since when buffer mixed precision is enabled, buffers are restored to
-    # their original dtype for model checkpointing
+    # Save a mapping from clean fully-qualified buffer name (starting from
+    # `module`) to its original dtype for restoring that dtype during model
+    # checkpointing when buffer mixed precision is enabled. The names should
+    # be clean since the casting happens in a `summon_full_params()` context.
     _buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+    for buffer_name, buffer in module.named_buffers():
+        buffer_name = clean_tensor_name(buffer_name)
+        _buffer_name_to_orig_dtype[buffer_name] = buffer.dtype
     state._buffer_name_to_orig_dtype = _buffer_name_to_orig_dtype
     return state
 
@@ -331,6 +335,27 @@ def _init_param_handle_from_params(
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
+
+
+@no_type_check
+def _init_streams(
+    state: _State,
+) -> _State:
+    """
+    Initializes CUDA streams for overlapping communication, computation, and
+    data transfers. The streams should be shared across FSDP instances.
+    """
+    assert state._is_root
+    assert torch.cuda.is_available()
+    # Stream for unshard logic, including allocating the all-gather destination
+    # tensors and the all-gathers themselves.
+    state._streams["unshard"] = torch.cuda.Stream()
+    # Stream for overlapping gradient reduction with the backward pass gradient
+    # computation.
+    state._streams["post_backward"] = torch.cuda.Stream()
+    # Stream for pre-unshard logic, namely allocations and writes for CPU
+    # offloading (H2D copy) and mixed precision (low precision cast).
+    state._streams["pre_unshard"] = torch.cuda.Stream()
 
 
 def _get_ignored_modules(
