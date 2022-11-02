@@ -494,7 +494,7 @@ class ShapeEnv(object):
         # this also ensures that all symbols are > 1
         if val in self.val_to_var:
             return self.val_to_var[val]
-        sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True, nonzero=True)
+        sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
         self.var_to_val[sympy_expr] = sympy.Integer(val)
         self.val_to_var[val] = sympy_expr
         return sympy_expr
@@ -549,7 +549,6 @@ class ShapeEnv(object):
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
         new_expr = sympy.expand(new_expr.xreplace(floor_div_replace))
-
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -564,6 +563,14 @@ class ShapeEnv(object):
         new_divisible = set()
         for k in self.divisible:
             res = self.replace(k)
+            if len(res.free_symbols) > 0:
+                new_divisible.add(k)
+
+        self.divisible = new_divisible
+
+    @_lru_cache
+    def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
+        expr = self.replace(expr)
         if expr.has(FloorDiv):
             self._update_divisible()
             div_replacements = {}
@@ -573,15 +580,6 @@ class ShapeEnv(object):
                     div_replacements[atom] = base / divisor
             expr = expr.xreplace(div_replacements)
             expr = sympy.expand(expr)
-
-            if len(res.free_symbols) > 0:
-                new_divisible.add(k)
-
-        self.divisible = new_divisible
-
-    @_lru_cache
-    def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
-        expr = self.replace(expr)
         return expr
 
     @lru_cache(256)
