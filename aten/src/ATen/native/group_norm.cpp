@@ -183,7 +183,7 @@ Tensor group_norm(
 
   const Tensor kEmpty;
   auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() ?
+  const auto& X = input.device().is_cpu() || input.device().is_xpu() ?
       input.contiguous(memory_format) : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
