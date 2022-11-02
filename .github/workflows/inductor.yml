@@ -1,8 +1,6 @@
 name: inductor
 
 on:
-  schedule:
-    - cron: 45 0,4,8,12,16,20 * * *
   push:
     tags:
       - ciflow/inductor/*
