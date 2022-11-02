@@ -1,8 +1,7 @@
 import torch
-from torch.fx._symbolic_trace import Tracer
-from torch.fx.node import Target, Node, Argument
+from torch.fx._symbolic_trace import Tracer, Scope
 from torch.nn.intrinsic import _FusedModule
-from typing import List, Callable, Tuple, Any, Dict, Optional
+from typing import List, Callable
 
 __all__ = [
     "QuantizationTracer",
@@ -33,4 +32,3 @@ class QuantizationTracer(Tracer):
             or type(m) in self.skipped_module_classes
             or isinstance(m, _FusedModule)
         )
-
