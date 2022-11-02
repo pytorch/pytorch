@@ -4352,6 +4352,30 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     }
   }
 
+  static auto var_dim_schema =
+      getOperatorForLiteral(
+          "aten::var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
+          ->schema();
+  static auto std_dim_schema =
+      getOperatorForLiteral(
+          "aten::std.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor")
+          ->schema();
+  if (node->matches(var_dim_schema) || node->matches(std_dim_schema)) {
+    switch (offset) {
+      case 1:
+        profileIntList(pr, node, offset);
+        return true;
+      case 2:
+        profileBool(pr, node, offset);
+        return true;
+      case 3:
+        profileBool(pr, node, offset);
+        return true;
+      default:
+        return false;
+    }
+  }
+
   return false;
 }
 

@@ -383,6 +383,27 @@ class TestCudaFuser(JitTestCase):
                         self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
                         self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
 
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_variance_profiling(self):
+        with nvfuser_singleton_fusion(True):
+            for op in [torch.var, torch.std]:
+                for dtype in [torch.float16, torch.float32, torch.double]:
+                    for axis in [-2, -1, 2, 1]:
+                        for unbiased in [False, True]:
+                            for keepdim in [False, True]:
+                                def t(x: torch.Tensor, dim: List[int], unbiased: bool, keepdim: bool):
+                                    o = torch.mul(x, 2.0)
+                                    o = op(o, dim=dim, unbiased=unbiased, keepdim=keepdim)
+                                    return o
+
+                                x = torch.randn(8, 4, 16, dtype=dtype, device="cuda")
+                                t_jit = torch.jit.script(t)
+                                self._run_helper(t_jit, t, x, [axis], unbiased, keepdim, check_stride=False, check_runs=5)
+
+
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
