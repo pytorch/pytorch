@@ -7882,6 +7882,8 @@ op_db: List[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat]),
+                       DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestSparseUnaryUfuncs",
+                                    "test_inplace", dtypes=(torch.cdouble, torch.cfloat, torch.chalf)),
                        # Reference: https://github.com/pytorch/pytorch/issues/49224
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
@@ -7893,6 +7895,7 @@ op_db: List[OpInfo] = [
                    ),
                    supports_fwgrad_bwgrad=True,
                    assert_autodiffed=True,
+                   supports_sparse=True,
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
@@ -8795,6 +8798,11 @@ op_db: List[OpInfo] = [
                    supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   supports_sparse=True,
+                   supports_sparse_csr=True,
+                   supports_sparse_csc=True,
+                   supports_sparse_bsr=True,
+                   supports_sparse_bsc=True,
                    ),
     UnaryUfuncInfo('conj',
                    ref=np.conj,
@@ -11650,18 +11658,10 @@ op_db: List[OpInfo] = [
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
         skips=(
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-            # This test fails on trunk CUDA 10.2 tests, can be removed when we stop 10.2 support
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_symbolic_dispatch_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
-                         'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
