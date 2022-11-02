@@ -1,7 +1,6 @@
 import contextlib
 import dataclasses
 import functools
-import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -11,7 +10,7 @@ import torch
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config
-from ..codecache import cache_dir, code_hash, cpp_compile_command
+
 from ..utils import sympy_product, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
@@ -614,13 +613,6 @@ class KernelGroup:
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
 
-    def generate_kernel_calling_code(
-        self, wrapper, kernel_name, call_args, code=None, arg_types=None
-    ):
-        wrapper.writeline(
-            "{}({})".format(kernel_name, ", ".join(call_args)),
-        )
-
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
         if self.count == 0:
@@ -647,47 +639,15 @@ class KernelGroup:
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
         wrapper.define_kernel(kernel_name, codecache_str)
-
+        wrapper.load_kernel(kernel_name, code, arg_types)
         # generate the code to call this
-        self.generate_kernel_calling_code(
-            wrapper, kernel_name, call_args, code, arg_types
-        )
+        wrapper.generate_kernel_call(kernel_name, call_args)
 
 
 class CppWrapperKernelGroup(KernelGroup):
     def __init__(self):
         super().__init__()
         self.args = CppWrapperKernelArgs()
-
-    def get_kernel_path(self, code):
-        # TODO: this duplicates with CodeCache logic
-        ext = "so"
-        extra = cpp_compile_command("i", "o")
-        # \n is required to match with the CodeCache behavior
-        source_code = "\n" + code.getvalue()
-        basename = code_hash(source_code + extra)
-        subdir = os.path.join(cache_dir(), basename[1:3])
-        kernel_path = os.path.join(subdir, f"{basename}.{ext}")
-        return kernel_path
-
-    def generate_kernel_calling_code(
-        self, wrapper, kernel_name, call_args, code, arg_types
-    ):
-        kernel_path = self.get_kernel_path(code)
-
-        wrapper.writeline(
-            f'auto {kernel_name}_lib = dlopen("{kernel_path}", RTLD_NOW);'
-        )
-        wrapper.writeline(f"assert({kernel_name}_lib != nullptr);")
-        wrapper.writeline(f"void (*{kernel_name})({arg_types});")
-        wrapper.writeline(
-            f'*(void **) (&{kernel_name}) = dlsym({kernel_name}_lib, "kernel");'
-        )
-
-        # generate the code to call this
-        wrapper.writeline(
-            "{}({});".format(kernel_name, ", ".join(call_args)),
-        )
 
 
 class WorkSharing:

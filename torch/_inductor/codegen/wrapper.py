@@ -484,6 +484,17 @@ class WrapperCodeGen(CodeGen):
     def define_kernel(self, name: str, kernel: str):
         self.header.splice(f"\n\n{name} = {kernel}")
 
+    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
+        return
+
+    def wrap_kernel_call(self, name, call_args):
+        return "{}({})".format(name, ", ".join(call_args))
+
+    def generate_kernel_call(self, name, call_args):
+        self.writeline(
+            self.wrap_kernel_call(name, call_args),
+        )
+
     def call_kernel(self, name: str, kernel: Kernel):
         tmp = IndentedBuffer()
         kernel.call_kernel(self, tmp, name)
@@ -571,6 +582,32 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return DeferredLine(
             name, f"auto {name} = {layout.view.codegen_reference()};  // alias"
         )
+
+    def get_kernel_path(self, code):
+        import os
+
+        from ..codecache import cache_dir, code_hash, cpp_compile_command
+
+        # TODO: this duplicates with CodeCache logic
+        ext = "so"
+        extra = cpp_compile_command("i", "o")
+        # \n is required to match with the CodeCache behavior
+        source_code = "\n" + code.getvalue()
+        basename = code_hash(source_code + extra)
+        subdir = os.path.join(cache_dir(), basename[1:3])
+        kernel_path = os.path.join(subdir, f"{basename}.{ext}")
+        return kernel_path
+
+    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
+        kernel_path = self.get_kernel_path(kernel)
+
+        self.writeline(f'auto {name}_lib = dlopen("{kernel_path}", RTLD_NOW);')
+        self.writeline(f"assert({name}_lib != nullptr);")
+        self.writeline(f"void (*{name})({arg_types});")
+        self.writeline(f'*(void **) (&{name}) = dlsym({name}_lib, "kernel");')
+
+    def wrap_kernel_call(self, name, call_args):
+        return "{}({});".format(name, ", ".join(call_args))
 
     def generate_return(self, result, output_refs):
         if output_refs:
