@@ -217,6 +217,11 @@ class TestGenSchemaRegistration(unittest.TestCase):
             loc=torchgen.model.Location(__file__, 1),
             valid_tags=set(),
         )
+        self.fragment_custom_native_function, _ = torchgen.model.NativeFunction.from_yaml(
+            {"func": "custom::func() -> bool"},
+            loc=torchgen.model.Location(__file__, 1),
+            valid_tags=set("fragment"),
+        )
 
     def test_default_namespace_schema_registration_code_valid(self) -> None:
         native_functions = [DEFAULT_NATIVE_FUNCTION]
@@ -227,6 +232,20 @@ class TestGenSchemaRegistration(unittest.TestCase):
         self.assertEqual(registrations, ['m.def("func() -> bool", {});\n'])
 
     def test_custom_namespace_schema_registration_code_valid(self) -> None:
+        _, registrations = get_native_function_schema_registrations(
+            native_functions=[self.custom_native_function],
+            schema_selector=self.selector,
+        )
+        self.assertEqual(
+            registrations,
+            """
+TORCH_LIBRARY(custom, m) {
+  m.def("func() -> bool", {});
+
+};""",
+        )
+
+    def test_fragment_custom_namespace_schema_registration_code_valid(self) -> None:
         _, registrations = get_native_function_schema_registrations(
             native_functions=[self.custom_native_function],
             schema_selector=self.selector,
@@ -252,7 +271,7 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
         self.assertEqual(
             custom_registrations,
             """
-TORCH_LIBRARY_FRAGMENT(custom, m) {
+TORCH_LIBRARY(custom, m) {
   m.def("func() -> bool", {});
 
 };""",
@@ -279,11 +298,11 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
         self.assertEqual(
             custom_registrations,
             """
-TORCH_LIBRARY_FRAGMENT(custom, m) {
+TORCH_LIBRARY(custom, m) {
   m.def("func() -> bool", {});
 
 };
-TORCH_LIBRARY_FRAGMENT(custom2, m) {
+TORCH_LIBRARY(custom2, m) {
   m.def("func() -> bool", {});
 
 };""",
