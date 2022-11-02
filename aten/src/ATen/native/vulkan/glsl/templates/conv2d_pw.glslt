@@ -1,10 +1,7 @@
-#version 450 core
-#define PRECISION $precision
-#define FORMAT $format
-
 /*
- * TILE_SIZE = (2, 2, 1)
- * WEIGHT_STORAGE = TEXTURE_3D
+ * TILE_SIZE = ($TILE_SIZE_X, $TILE_SIZE_Y, 1)
+ * WEIGHT_STORAGE = TEXTURE_2D
+ * WEIGHT_STORAGE_LAYOUT = OC4,IC4,4ic,4oc
  */
 
 layout(std430) buffer;
@@ -54,17 +51,19 @@ layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 void main() {
   const ivec3 gpos = ivec3(gl_GlobalInvocationID);
 
-  // Determine the output positions that will be written to.
+  // Output position for TILE_SIZE_X, TILE_SIZE_Y = 2, 2
   // +--------+--------+
   // | pos[0] | pos[1] |
   // +--------+--------+
   // | pos[2] | pos[3] |
   // +--------+--------+
-  ivec3 pos[4];
-  pos[0] = ivec3(gpos.x * 2, gpos.y * 2, gpos.z);
-  pos[1] = ivec3(gpos.x * 2 + 1, gpos.y * 2, gpos.z);
-  pos[2] = ivec3(gpos.x * 2, gpos.y * 2 + 1, gpos.z);
-  pos[3] = ivec3(gpos.x * 2 + 1, gpos.y * 2 + 1, gpos.z);
+  ivec3 pos[$TILE_SIZE_X * $TILE_SIZE_Y];
+  for (int y = 0, i = 0; y < $TILE_SIZE_Y; ++y) {
+    for (int x = 0; x < $TILE_SIZE_X; ++x) {
+      pos[i] = ivec3(gpos.x * $TILE_SIZE_X + x, gpos.y * $TILE_SIZE_Y + y, gpos.z);
+      i++;
+    }
+  }
 
   // If the top left position is out of bounds, then this invocation will have
   // no work to do.
@@ -75,14 +74,14 @@ void main() {
   // Compute the index of the input texture that needs to be loaded for each
   // output position. Note that negative indices can be produced indicating that
   // the top-left element is in a region added by padding.
-  ivec2 ipos[4];
-  for (int i = 0; i < 4; ++i) {
+  ivec2 ipos[$TILE_SIZE_X * $TILE_SIZE_Y];
+  for (int i = 0; i < $TILE_SIZE_X * $TILE_SIZE_Y; ++i) {
     ipos[i] = pos[i].xy * uBlock.stride - uBlock.padding;
   }
 
-  vec4 sum[4];
+  vec4 sum[$TILE_SIZE_X * $TILE_SIZE_Y];
   sum[0] = texelFetch(uBias, ivec2(gpos.z, 0), 0);
-  for (int i = 1; i < 4; ++i) {
+  for (int i = 1; i < $TILE_SIZE_X * $TILE_SIZE_Y; ++i) {
     sum[i] = sum[0];
   }
 
@@ -92,13 +91,18 @@ void main() {
     // During prepacking, the weight tensor has been permuted so that the
     // channel (IC) dim is along the x axis, and the batch (OC) dim is along
     // the z axis.
+    vec4 in_tex[$TILE_SIZE_X * $TILE_SIZE_Y];
     const vec4 ktex_0 = texelFetch(uKernel, ivec2(z + 0, gpos.z), 0);
     const vec4 ktex_1 = texelFetch(uKernel, ivec2(z + 1, gpos.z), 0);
     const vec4 ktex_2 = texelFetch(uKernel, ivec2(z + 2, gpos.z), 0);
     const vec4 ktex_3 = texelFetch(uKernel, ivec2(z + 3, gpos.z), 0);
 
-    for (int i = 0; i < 4; ++i) {
-      const vec4 in_tex = texelFetch(uInput, ivec3(ipos[i], z4), 0);
+    for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+      in_tex[i] = texelFetch(uInput, ivec3(ipos[i], z4), 0);
+    }
+
+    for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
+      // For 2x2 tile size algorithm works as follows.
       // To explain the calculations below, the contents one in_tex and the
       // group of 4 texels loaded from uKernel are shown:
       //
@@ -131,15 +135,14 @@ void main() {
       //
       //  which is what is expressed in the following calculations. This is done
       //  for each output position.
-
-      sum[i] = fma(in_tex.xxxx, ktex_0, sum[i]);
-      sum[i] = fma(in_tex.yyyy, ktex_1, sum[i]);
-      sum[i] = fma(in_tex.zzzz, ktex_2, sum[i]);
-      sum[i] = fma(in_tex.wwww, ktex_3, sum[i]);
+      sum[i] = fma(in_tex[i].xxxx, ktex_0, sum[i]);
+      sum[i] = fma(in_tex[i].yyyy, ktex_1, sum[i]);
+      sum[i] = fma(in_tex[i].zzzz, ktex_2, sum[i]);
+      sum[i] = fma(in_tex[i].wwww, ktex_3, sum[i]);
     }
   }
 
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i < $TILE_SIZE_Y * $TILE_SIZE_X; ++i) {
     if (all(lessThan(pos[i], uBlock.out_extents.xyz))) {
       imageStore(
           uOutput,
