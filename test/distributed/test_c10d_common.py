@@ -1674,15 +1674,15 @@ class ReduceOpTest(TestCase):
             c10d.ReduceOp.SUM, c10d.ReduceOp.AVG, c10d.ReduceOp.PRODUCT, c10d.ReduceOp.MIN, c10d.ReduceOp.MAX,
             c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR,
         ):
-            copy.copy(reduce_op)
-            copy.deepcopy(reduce_op)
-            copy.copy(c10d.ReduceOp(reduce_op))
-            copy.deepcopy(c10d.ReduceOp(reduce_op))
+            self.assertEqual(copy.copy(reduce_op), reduce_op)
+            self.assertEqual(copy.deepcopy(reduce_op), reduce_op)
+            self.assertEqual(copy.copy(c10d.ReduceOp(reduce_op)), reduce_op)
+            self.assertEqual(copy.deepcopy(c10d.ReduceOp(reduce_op)), reduce_op)
 
         for scale in ([torch.tensor(1.0)], 2.0):
             reduce_op = dist._make_nccl_premul_sum(scale)
-            copy.copy(reduce_op)
-            copy.deepcopy(reduce_op)
+            self.assertEqual(copy.copy(reduce_op), reduce_op)
+            self.assertEqual(copy.deepcopy(reduce_op), reduce_op)
 
     def test_reduceop_pickle(self):
         for reduce_op in (
