@@ -406,7 +406,9 @@ def print_seen():
     out = []
     for key, reason in seen_failed:
         # Make sure the generated line is lint clean
-        out.append(f"    {key},  # {reason}"[:120])
+        msg = f"    {key},  # {reason}"
+        msg = msg[:msg.find("\n")]
+        out.append(msg[:120])
 
     print("expected_failure_sym_magic_methods = {")
     print("\n".join(out))
@@ -416,10 +418,15 @@ if COLLECT_EXPECT:
     atexit.register(print_seen)
 
 expected_failure_sym_magic_methods = {
-    ('floordiv', 'SymInt', 'float'),  # Cannot convert complex to float
-    ('floordiv', 'int', 'SymFloat'),  # unsupported operand type(s) for //: 'int' and 'SymFloat'
-    ('floordiv', 'SymInt', 'SymFloat'),  # Cannot convert complex to float
-    ('mod', 'int', 'SymFloat'),  # unsupported operand type(s) for %: 'int' and 'SymFloat'
+    ('floordiv', 'SymFloat', 'float'),  # Cannot convert complex to floa
+    ('floordiv', 'float', 'SymFloat'),  # Cannot convert complex to floa
+    ('floordiv', 'SymFloat', 'SymFloat'),  # Cannot convert complex to floa
+    ('floordiv', 'SymFloat', 'int'),  # Scalars are not close!
+    ('floordiv', 'float', 'SymInt'),  # Scalars are not close!
+    ('floordiv', 'SymFloat', 'SymInt'),  # Scalars are not close!
+    ('floordiv', 'SymInt', 'float'),  # Cannot convert complex to floa
+    ('floordiv', 'int', 'SymFloat'),  # Cannot convert complex to floa
+    ('floordiv', 'SymInt', 'SymFloat'),  # Cannot convert complex to floa
 }
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -441,12 +448,12 @@ class TestSymNumberMagicMethods(TestCase):
                 def context():
                     try:
                         yield
-                    except TypeError as e:
+                    except (TypeError, AssertionError) as e:
                         seen_failed.append((key, str(e)))
                 return context()
 
             if key in expected_failure_sym_magic_methods:
-                return self.assertRaises(TypeError)
+                return self.assertRaises((TypeError, AssertionError))
             else:
                 return contextlib.nullcontext()
 
@@ -517,7 +524,7 @@ class TestSymNumberMagicMethods(TestCase):
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])
     def test_method(self, fn, first_type, second_type):
-        if first_type == "float" and fn not in symbolic_shapes.float_magic_methods:
+        if first_type == "float" and fn in symbolic_shapes.magic_methods_not_on_float:
             self.skipTest(f"{fn} is not a float magic method")
 
         is_unary_fn = fn in symbolic_shapes.unary_magic_methods
