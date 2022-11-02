@@ -63,13 +63,13 @@ vTensor::vTensor(
     : view_(std::make_shared<vTensorStorage>(
           context,
           sizes,
-          StorageType::TEXTURE_3D,
+          api::StorageType::TEXTURE_3D,
           options)) {}
 
 vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
-    const StorageType storage_type,
+    const api::StorageType storage_type,
     const TensorOptions& options)
     : view_(std::make_shared<vTensorStorage>(
           context,
@@ -86,7 +86,7 @@ vTensor::vTensor(
     : view_(std::make_shared<vTensorStorage>(
           context,
           sizes,
-          StorageType::TEXTURE_3D,
+          api::StorageType::TEXTURE_3D,
           options,
           q_scale,
           q_zero_point)) {}
@@ -94,7 +94,7 @@ vTensor::vTensor(
 vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
-    const StorageType storage_type,
+    const api::StorageType storage_type,
     const TensorOptions& options,
     double q_scale,
     int64_t q_zero_point)
@@ -130,7 +130,7 @@ api::VulkanImage& vTensor::image(
 api::VulkanImage allocate_image(
     api::Context* const context_ptr,
     api::utils::uvec3& extents,
-    StorageType storage_type,
+    api::StorageType storage_type,
     const VkFormat image_format) {
   api::Adapter* adapter_ptr = context_ptr->adapter_ptr();
 
@@ -145,14 +145,17 @@ api::VulkanImage allocate_image(
   VkImageViewType image_view_type = VK_IMAGE_VIEW_TYPE_3D;
 
   switch (storage_type) {
-    case StorageType::TEXTURE_3D:
+    case api::StorageType::TEXTURE_3D:
       image_type = VK_IMAGE_TYPE_3D;
       image_view_type = VK_IMAGE_VIEW_TYPE_3D;
       break;
-    case StorageType::TEXTURE_2D:
+    case api::StorageType::TEXTURE_2D:
       image_type = VK_IMAGE_TYPE_2D;
       image_view_type = VK_IMAGE_VIEW_TYPE_2D;
       break;
+    case api::StorageType::BUFFER:
+    case api::StorageType::UNKNOWN:
+      TORCH_CHECK(false, "Requested storage type must be a texture type.");
   }
 
   VkSampler sampler = adapter_ptr->sampler_cache().retrieve(sampler_props);
@@ -170,7 +173,7 @@ api::VulkanImage allocate_image(
 vTensorStorage::vTensorStorage(
     api::Context* const context,
     const IntArrayRef sizes,
-    const StorageType storage_type,
+    const api::StorageType storage_type,
     const TensorOptions& options)
     : context_(context),
       extents_(image_extents(sizes)),
@@ -190,7 +193,7 @@ vTensorStorage::vTensorStorage(
 vTensorStorage::vTensorStorage(
     api::Context* const context,
     const IntArrayRef sizes,
-    const StorageType storage_type,
+    const api::StorageType storage_type,
     const TensorOptions& options,
     double q_scale_in,
     int64_t q_zero_point_in)

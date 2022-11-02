@@ -26,11 +26,6 @@ struct LastAccess {
       : stage{stage_flags}, access{access_flags} {}
 };
 
-enum class StorageType {
-  TEXTURE_3D,
-  TEXTURE_2D,
-};
-
 class vTensorStorage final {
  public:
   // Do not allow empty vTensorStorage construction
@@ -39,12 +34,12 @@ class vTensorStorage final {
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
-      const StorageType storage_type,
+      const api::StorageType storage_type,
       const TensorOptions& options);
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
-      const StorageType storage_type,
+      const api::StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -73,7 +68,7 @@ class vTensorStorage final {
   int64_t q_zero_point{0u};
 
   // Image Texture
-  StorageType storage_type_;
+  api::StorageType storage_type_;
   mutable api::VulkanImage image_;
 
   // Last Access - used to insert memory barriers
@@ -108,7 +103,7 @@ class vTensor final {
   vTensor(
       api::Context* context,
       IntArrayRef sizes,
-      const StorageType storage_type,
+      const api::StorageType storage_type,
       const TensorOptions& options);
 
   vTensor(
@@ -121,7 +116,7 @@ class vTensor final {
   vTensor(
       api::Context* const context,
       const IntArrayRef sizes,
-      const StorageType storage_type,
+      const api::StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -151,7 +146,7 @@ class vTensor final {
    Texture Access
   */
 
-  inline StorageType storage_type() const {
+  inline api::StorageType storage_type() const {
     return view_->storage_type_;
   }
 
