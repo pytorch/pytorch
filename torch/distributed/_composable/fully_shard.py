@@ -26,7 +26,7 @@ from torch.distributed.fsdp.api import (
 )
 
 
-def fully_sharded_data_parallel(
+def fully_shard(
     module: nn.Module,
     process_group: Optional[dist.ProcessGroup] = None,
     sharding_strategy: Optional[ShardingStrategy] = None,

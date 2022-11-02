@@ -8,9 +8,9 @@ from typing import Any, Tuple
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-from torch.distributed.fsdp._fsdp import fully_sharded_data_parallel
 from torch.distributed.fsdp._runtime_utils import _root_pre_forward
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -89,7 +89,7 @@ class TestFSDPInitialization(FSDPTest):
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
-        fsdp_state = fully_sharded_data_parallel(
+        fsdp_state = fully_shard(
             composable_module,
             auto_wrap_policy=Model.auto_wrap_policy(),
         )
@@ -136,7 +136,7 @@ class TestFSDPInitialization(FSDPTest):
         composable_module = Model(device=cpu_device)
         for param in composable_module.parameters():
             assert param.device == cpu_device
-        fully_sharded_data_parallel(
+        fully_shard(
             composable_module,
             auto_wrap_policy=Model.auto_wrap_policy(),
             device_id=self.rank,
@@ -160,7 +160,7 @@ class TestFSDPInitialization(FSDPTest):
             auto_wrap_policy=Model.auto_wrap_policy(),
             use_orig_params=True,
         )
-        fully_sharded_data_parallel(
+        fully_shard(
             composable_module,
             auto_wrap_policy=Model.auto_wrap_policy(),
             sync_module_states=True,
@@ -201,7 +201,7 @@ class TestFSDPInitialization(FSDPTest):
             param_init_fn=_param_init_fn,
             use_orig_params=True,
         )
-        fully_sharded_data_parallel(
+        fully_shard(
             composable_module,
             auto_wrap_policy=Model.auto_wrap_policy(),
             param_init_fn=_param_init_fn,
@@ -231,7 +231,7 @@ class TestFSDPRuntime(FSDPTest):
             use_orig_params=True,
         )
         composable_module = copy.deepcopy(local_model)
-        fsdp_state = fully_sharded_data_parallel(
+        fsdp_state = fully_shard(
             composable_module,
             auto_wrap_policy=Model.auto_wrap_policy(),
         )
