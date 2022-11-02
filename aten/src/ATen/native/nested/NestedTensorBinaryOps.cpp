@@ -95,6 +95,23 @@ Tensor NestedTensor_elementwise_Tensor(
       self_impl->get_storage_offsets()
     );
   }
+  // special case when other is dense
+  if (self.is_nested() && !other.is_nested()) {
+    // check for the [B, *, D], [B, 1, D] esuhm case
+    auto self_ptr = get_nested_tensor_impl(self);
+    if (self_ptr->dim() == 3 &&
+        other.dim() == 3 &&
+        self_ptr->size(0) == other.size(0) &&
+        other.size(1) == 1 &&
+        self_ptr->opt_size(2).has_value() &&
+        self_ptr->opt_size(2).value() == other.size(2) &&
+        self.is_cuda() &&
+        other.is_cuda()) {
+      return at::_nested_add_dense_esuhm(self, other);
+    }
+    TORCH_CHECK(false, "Expected both self and other to be nested, but got a nested self and non-nested other.");
+  }
+
   NestedTensorImpl* self_impl = nullptr;
   NestedTensorImpl* other_impl = nullptr;
   std::tie(self_impl, other_impl) =
