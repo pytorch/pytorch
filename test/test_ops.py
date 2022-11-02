@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     clone_input_helper,
     IS_CI,
+    set_default_dtype,
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
@@ -162,16 +163,12 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_numpy_ref(self, device, dtype, op):
-        try:
-            # Sets the default dtype to NumPy's default dtype of double
-            cur_default = torch.get_default_dtype()
-            torch.set_default_dtype(torch.double)
+        # Sets the default dtype to NumPy's default dtype of double
+        with set_default_dtype(torch.double):
             for sample_input in op.reference_inputs(device, dtype):
                 self.compare_with_reference(
                     op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
                 )
-        finally:
-            torch.set_default_dtype(cur_default)
 
     # Tests that the cpu and gpu results are consistent
     @onlyCUDA
