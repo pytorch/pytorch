@@ -2,6 +2,11 @@
 #define PRECISION $precision
 #define FORMAT $format
 
+/*
+ * TILE_SIZE = (2, 2, 1)
+ * WEIGHT_STORAGE = TEXTURE_3D
+ */
+
 layout(std430) buffer;
 
 /*
