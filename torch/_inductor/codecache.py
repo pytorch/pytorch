@@ -1,4 +1,5 @@
 import base64
+import enum
 import functools
 import getpass
 import hashlib
@@ -146,38 +147,83 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-@functools.lru_cache(1)
-def valid_vec_isa():
-    # TODO: Add ARM Vec here.
-    # Tuple(isa, number of float element)
-    vec_isa_info = [("avx512", 16), ("avx2", 8)]
+class _SupportedVecIsa(enum.Enum):
+    AVX512 = 1
+    AVX2 = 2
+    INVALID = -1
 
-    # TODO: Add windows support
+    @staticmethod
+    def isa_str(supported_isa: enum.Enum):
+        if supported_isa == _SupportedVecIsa.AVX512:
+            return "avx512"
+        elif supported_isa == _SupportedVecIsa.AVX2:
+            return "avx2"
+        else:
+            return ""
+
+    @staticmethod
+    def vec_macro(supported_isa: enum.Enum):
+        if supported_isa == _SupportedVecIsa.AVX512:
+            return "CPU_CAPABILITY_AVX512"
+        elif supported_isa == _SupportedVecIsa.AVX2:
+            return "CPU_CAPABILITY_AVX2"
+        else:
+            return ""
+
+
+# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
+# might have too much redundant content that is useless for ISA check. Hence,
+# we only cache some key isa information.
+@functools.lru_cache(1)
+def get_cpu_proc_info():
     if sys.platform != "linux":
         return ""
 
-    if config.cpp.simdlen is None or config.cpp.simdlen <= 1:
-        return ""
-
+    isa_info = ""
     with open("/proc/cpuinfo") as _cpu_info:
-        cpu_info_content = _cpu_info.read()
-        for isa, elt_num in vec_isa_info:
-            if isa in cpu_info_content and config.cpp.simdlen == elt_num:
-                return isa
+        _cpu_info_content = _cpu_info.read()
+        if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX512) in _cpu_info_content:
+            isa_info += _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX512)
 
-        return ""
+        if _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX2) in _cpu_info_content:
+            isa_info += _SupportedVecIsa.isa_str(_SupportedVecIsa.AVX2)
+
+        return isa_info
+
+
+def supported_vector_isa():
+    # TODO: Add ARM Vec here.
+    # Dict(k: isa, v: number of float element)
+    vec_isa_info = {
+        _SupportedVecIsa.AVX512: 16,
+        _SupportedVecIsa.AVX2: 8,
+    }
+
+    # TODO: Add windows support
+    if sys.platform != "linux":
+        return _SupportedVecIsa.INVALID
+
+    if config.cpp.simdlen is None or config.cpp.simdlen <= 1:
+        return _SupportedVecIsa.INVALID
+
+    cpu_info_content = get_cpu_proc_info()
+    for isa in vec_isa_info.keys():
+        isa_str = _SupportedVecIsa.isa_str(isa)
+        if isa_str in cpu_info_content and config.cpp.simdlen == vec_isa_info[isa]:
+            return isa
+
+    return _SupportedVecIsa.INVALID
 
 
 def cpp_compile_command(input, output, include_pytorch=False):
-    if include_pytorch or valid_vec_isa():
+    valid_isa = supported_vector_isa()
+    if include_pytorch or (valid_isa != _SupportedVecIsa.INVALID):
         ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
         lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
         libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
-        macros = ""
-        if valid_vec_isa() == "avx512":
-            macros = " " + "-DCPU_CAPABILITY_AVX512"
-        elif valid_vec_isa() == "avx2":
-            macros = " " + "-DCPU_CAPABILITY_AVX2"
+        macros = _SupportedVecIsa.vec_macro(valid_isa)
+        if macros:
+            macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.

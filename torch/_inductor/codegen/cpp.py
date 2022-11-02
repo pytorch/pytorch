@@ -710,7 +710,7 @@ class CppVecKernelChecker(CppVecKernel):
 
         # Used to recorde the graph wrapper code as the wrapper_code status could be
         # changed during graph run.
-        self._org_wrapper_code = None
+        self._orig_wrapper_code = None
 
         self.simd_vec = True
         self.fast_vec_list = []
@@ -756,9 +756,9 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._org_wrapper_code is not None
+        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._org_wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -768,7 +768,7 @@ class CppVecKernelChecker(CppVecKernel):
         # impact the code generation. Hence, we record the graph wapper code
         # and replace it with a dummy warpper_code and then restore to the
         # original one as long as the checker is finished.
-        self._org_wrapper_code = V.graph.wrapper_code
+        self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
 
         class VecCheckerProxy:
@@ -929,7 +929,7 @@ class CppScheduling:
 
     def can_vec(self, nodes):
         # TODO: Query cpu arch and vec length from aten
-        if not codecache.valid_vec_isa():
+        if not codecache.supported_vector_isa():
             return False
 
         _, (group, reduction_group) = max(
