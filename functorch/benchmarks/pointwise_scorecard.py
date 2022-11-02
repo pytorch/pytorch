@@ -195,13 +195,13 @@ for shape, operator in itertools.product(shapes, operators):
         if shape == medium_transpose:
             raise RuntimeError("pointwise_operator hangs on medium_transpose")
         pw_op = pointwise_operator(operator)
-        torch.testing.assert_allclose(operator(*args), pw_op(*args))
+        torch.testing.assert_close(operator(*args), pw_op(*args))
     except Exception:
         print(f"pointwise_operator failed on {operator.__name__}, {shape.__name__}")
         nope.add((operator, shape))
 
     ts_op = torch.jit.script(operator)
-    torch.testing.assert_allclose(operator(*args), ts_op(*args))
+    torch.testing.assert_close(operator(*args), ts_op(*args))
 
 
 print("fuser,device,operator,shape,time")

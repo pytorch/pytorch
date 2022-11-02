@@ -57,7 +57,7 @@ class Interpreter:
             gm = torch.fx.symbolic_trace(fn)
             input = torch.randn(3, 4)
             result = NegSigmSwapInterpreter(gm).run(input)
-            torch.testing.assert_allclose(result, torch.neg(input).sigmoid())
+            torch.testing.assert_close(result, torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The module to be executed
@@ -395,7 +395,7 @@ class Transformer(Interpreter):
 
             transformed : torch.nn.Module = NegSigmSwapXformer(gm).transform()
             input = torch.randn(3, 4)
-            torch.testing.assert_allclose(transformed(input), torch.neg(input).sigmoid())
+            torch.testing.assert_close(transformed(input), torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The ``Module`` to be transformed.

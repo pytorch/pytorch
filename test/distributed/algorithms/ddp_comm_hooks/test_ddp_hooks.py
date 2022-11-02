@@ -124,7 +124,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # Register hook case, get the hook grads.
         hook_grads = self._get_grads(process_group, DDPCommHookType.ALLREDUCE)
 
-        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
+        torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -141,7 +141,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # Register hook case, get the hook grads.
         hook_grads = self._get_grads(process_group, DDPCommHookType.FP16_COMPRESS)
 
-        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+        torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -158,7 +158,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # Register hook case, get the hook grads.
         hook_grads = self._get_grads(process_group, DDPCommHookType.QUANTIZE_PER_TENSOR)
 
-        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+        torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -177,7 +177,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
             process_group, DDPCommHookType.QUANTIZE_PER_CHANNEL
         )
 
-        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
+        torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
 
     @requires_nccl()
@@ -198,7 +198,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         hook_grads.div_(self.world_size)
         dist.all_reduce(hook_grads, group=process_group)
 
-        torch.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
+        torch.testing.assert_close(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

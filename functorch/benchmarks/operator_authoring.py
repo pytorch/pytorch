@@ -77,7 +77,7 @@ def test(make_args, nnc=nnc_add, aten=torch.add):
         assert result_nnc.dtype == result_aten.dtype
         assert result_nnc.size() == result_aten.size()
         assert result_nnc.stride() == result_aten.stride()
-        torch.testing.assert_allclose(result_aten, result_nnc)
+        torch.testing.assert_close(result_aten, result_nnc)
         return (lambda: nnc(*args), lambda: aten(*args))
 
     return benchmark_loop(setup)
@@ -90,7 +90,7 @@ def test_inplace(make_args, nnc=nnc_add, aten=torch.add):
         result_nnc = torch.clone(a)
         nnc(result_nnc, b, out=result_nnc)
         aten(result_aten, b, out=result_aten)
-        torch.testing.assert_allclose(result_aten, result_nnc)
+        torch.testing.assert_close(result_aten, result_nnc)
         return (lambda: nnc(a, b, out=a), lambda: aten(a, b, out=a))
 
     return benchmark_loop(inplace_setup)
@@ -103,7 +103,7 @@ def test_out(make_args, out, nnc=nnc_add, aten=torch.add):
         result_nnc = out(n)
         aten(*args, out=result_aten)
         nnc(*args, out=result_nnc)
-        torch.testing.assert_allclose(result_aten, result_nnc)
+        torch.testing.assert_close(result_aten, result_nnc)
         result = out(n)
         return (lambda: nnc(*args, out=result), lambda: aten(*args, out=result))
 
@@ -118,7 +118,7 @@ def test_backwards(make_args, nnc=nnc_add, aten=torch.add):
         correct = grad_var.grad.clone()
         grad_var.grad.zero_()
         nnc(*args).sum().backward()
-        torch.testing.assert_allclose(correct, grad_var.grad)
+        torch.testing.assert_close(correct, grad_var.grad)
         return (
             lambda: nnc(*args).sum().backward(),
             lambda: aten(*args).sum().backward(),

@@ -7,6 +7,7 @@ from typing import Callable, List, Tuple
 import numpy
 
 import torch
+from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import TEST_SCIPY
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
@@ -14,7 +15,6 @@ from torch.testing._internal.opinfo.core import (
     OpInfo,
     SampleInput,
 )
-from torch.testing._legacy import floating_types_and
 
 if TEST_SCIPY:
     import scipy.signal

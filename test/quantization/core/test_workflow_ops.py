@@ -1083,7 +1083,7 @@ class TestFusedObsFakeQuant(TestCase):
 
             self.assertEqual(in_running_min_ref, in_running_min_op)
             self.assertEqual(in_running_max_ref, in_running_max_op)
-            torch.testing.assert_allclose(out, x_in)
+            torch.testing.assert_close(out, x_in)
 
         # Test empty input works
         x = torch.empty(0, 5, device=device)
@@ -1176,7 +1176,7 @@ class TestFusedObsFakeQuant(TestCase):
                     x_in = x
                 self.assertEqual(in_running_min_ref, in_running_min_op)
                 self.assertEqual(in_running_max_ref, in_running_max_op)
-                torch.testing.assert_allclose(out, x_in)
+                torch.testing.assert_close(out, x_in)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),)
     @settings(deadline=None)
@@ -1218,7 +1218,7 @@ class TestFusedObsFakeQuant(TestCase):
             False,
         )
         # verify the output matches
-        torch.testing.assert_allclose(out, x_fake_quant)
+        torch.testing.assert_close(out, x_fake_quant)
 
         # verify the gradient matches expectation of fake_quant op
         dout = torch.rand_like(x, dtype=torch.float).to(device)
@@ -1264,7 +1264,7 @@ class TestFusedObsFakeQuant(TestCase):
             False,
         )
         # verify the output matches
-        torch.testing.assert_allclose(out, x)
+        torch.testing.assert_close(out, x)
 
         # verify the gradient matches expectation of fake_quant op
         dout = torch.rand_like(x, dtype=torch.float).to(device)

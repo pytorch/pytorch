@@ -28,7 +28,7 @@ class TestLiteScriptModule(TestCase):
         buffer.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer)  # Error here
         mobile_module_result = mobile_module(sample_input).a
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
@@ -91,7 +91,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
@@ -117,7 +117,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
@@ -136,7 +136,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result,
             mobile_module_result
         )
@@ -166,7 +166,7 @@ class TestLiteScriptModule(TestCase):
         buffer_mobile.seek(0)
         mobile_module = _load_for_lite_interpreter(buffer_mobile)
         mobile_module_result = mobile_module(sample_input)
-        torch.testing.assert_allclose(
+        torch.testing.assert_close(
             script_module_result.baz.di,
             mobile_module_result.baz.di
         )
