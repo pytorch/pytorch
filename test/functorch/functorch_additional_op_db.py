@@ -4,8 +4,7 @@ import unittest
 
 import torch
 
-from torch.testing import \
-    (floating_types, floating_types_and, all_types_and_complex_and)
+from torch.testing._internal.common_dtype import floating_types, floating_types_and, all_types_and_complex_and
 from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.common_methods_invocations import OpInfo, SampleInput, DecorateInfo
 
