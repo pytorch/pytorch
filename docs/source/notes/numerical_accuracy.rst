@@ -71,7 +71,7 @@ special values.
 
 A similar issue happens with extremal values. Some `linalg` functions are not defined for all inputs.
 For example, :func:`torch.linalg.solve` is only defined when the input matrix `A` is invertible.
-Now, as is the case in most of PyTorch (see :ref:`Extremal Values<Extremal values>`), if `solve` is
+Now, as is the case in most of PyTorch (see `Extremal Values`_), if `solve` is
 run on a matrix that's almost non-invertible (for example, a matrix that a has a very small
 singular value), then the algorithm implemented in `solve` may return a matrix that's far from the correct result.
 These matrices are said to be `ill-conditioned <https://nhigham.com/2020/03/19/what-is-a-condition-number/>`_.
