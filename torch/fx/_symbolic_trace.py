@@ -45,6 +45,61 @@ def is_fx_tracing():
     return _is_fx_tracing_flag
 
 
+class Scope(object):
+    """ Scope object that records the module path and the module type
+    of a module. Scope is used to track the information of the module
+    that contains a Node in a Graph of GraphModule. For example::
+
+        class Sub(torch.nn.Module):
+            def forward(self, x):
+                # This will be a call_method Node in GraphModule,
+                # scope for this would be (module_path="sub", module_type=Sub)
+                return x.transpose(1, 2)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                self.sub = Sub()
+
+            def forward(self, x):
+                # This will be a call_method Node as well,
+                # scope for this would be (module_path="", None)
+                x = x.transpose(1, 2)
+                x = self.sub(x)
+                return x
+
+    """
+
+    def __init__(self, module_path: str, module_type: Any):
+        super().__init__()
+        self.module_path = module_path
+        self.module_type = module_type
+
+
+class ScopeContextManager(object):
+    """ A context manager to track the Scope of Node during symbolic tracing.
+    When entering a forward function of a Module, we'll update the scope information of
+    the current module, and when we exit, we'll restore the previous scope information.
+    """
+
+    def __init__(
+        self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
+    ):
+        super().__init__()
+        self.prev_module_type = scope.module_type
+        self.prev_module_path = scope.module_path
+        self.scope = scope
+        self.scope.module_path = current_module_path
+        self.scope.module_type = type(current_module)
+
+    def __enter__(self):
+        return
+
+    def __exit__(self, *args):
+        self.scope.module_path = self.prev_module_path
+        self.scope.module_type = self.prev_module_type
+        return
+
+
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
     """
@@ -250,8 +305,10 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
-        self.module_call_stack: List[str] = []
         self.root_module_name: str = ""
+        ## Maps the containing module's name to the operator name
+        self.scope = Scope("", None)
+        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
@@ -346,20 +403,6 @@ class Tracer(TracerBase):
         return super().create_arg(a)
 
     @compatibility(is_backward_compatible=True)
-    def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...],
-                     kwargs: Dict[str, Any],
-                     name: Optional[str] = None,
-                     type_expr : Optional[Any] = None,
-                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
-
-        mod = self.module_call_stack[-1] if self.module_call_stack else ""
-
-        return super().create_proxy(kind, target, args, kwargs, name,
-                                    type_expr=type_expr,
-                                    proxy_factory_fn=proxy_factory_fn,
-                                    parent_module=mod)
-
-    @compatibility(is_backward_compatible=True)
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
         """
         A method to specify whether a given ``nn.Module`` is a "leaf" module.
@@ -446,13 +489,29 @@ class Tracer(TracerBase):
             value was returned from the ``Module`` invocation.
         """
         module_qualified_name = self.path_of_module(m)
-        self.module_call_stack.append(module_qualified_name)
-        if not self.is_leaf_module(m, module_qualified_name):
-            ret_val = forward(*args, **kwargs)
-        else:
-            ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
-        self.module_call_stack.pop()
+        with ScopeContextManager(self.scope, m, module_qualified_name):
+            if not self.is_leaf_module(m, module_qualified_name):
+                ret_val = forward(*args, **kwargs)
+            else:
+                ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
         return ret_val
+
+    def create_node(
+        self,
+        kind: str,
+        target: Target,
+        args: Tuple[Argument, ...],
+        kwargs: Dict[str, Argument],
+        name: Optional[str] = None,
+        type_expr: Optional[Any] = None
+    ) -> Node:
+        node = super().create_node(kind, target, args, kwargs, name, type_expr)
+        self.node_name_to_scope[node.name] = (
+            self.scope.module_path,
+            self.scope.module_type,
+        )
+        node.meta['nn_module_stack'] = {self.scope.module_path : self.scope.module_type}
+        return node
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):

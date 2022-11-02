@@ -778,8 +778,7 @@ class Graph:
                     args: Optional[Tuple['Argument', ...]] = None,
                     kwargs: Optional[Dict[str, 'Argument']] = None,
                     name: Optional[str] = None,
-                    type_expr: Optional[Any] = None,
-                    parent_module: Optional[str] = "") -> Node:
+                    type_expr: Optional[Any] = None) -> Node:
         """
         Create a ``Node`` and add it to the ``Graph`` at the current insert-point.
         Note that the current insert-point can be set via :meth:`Graph.inserting_before`
@@ -811,8 +810,6 @@ class Graph:
         assert isinstance(args, tuple), "args must be a tuple"
         assert isinstance(kwargs, dict), "kwargs must be a dict"
 
-        if parent_module and name:
-            name = parent_module + "." + name
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)

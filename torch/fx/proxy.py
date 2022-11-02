@@ -32,8 +32,7 @@ class TracerBase:
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
-                    type_expr : Optional[Any] = None,
-                    parent_module: Optional[str] = "") -> Node:
+                    type_expr : Optional[Any] = None) -> Node:
         """
         Inserts a graph node given target, args, kwargs, and name.
 
@@ -44,8 +43,7 @@ class TracerBase:
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
-        return self.graph.create_node(kind, target, args, kwargs, name,
-                                      type_expr, parent_module=parent_module)
+        return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
 
     @compatibility(is_backward_compatible=True)
     def proxy(self, node: Node) -> 'Proxy':
@@ -54,8 +52,7 @@ class TracerBase:
     @compatibility(is_backward_compatible=True)
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None,
-                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None,
-                     parent_module: Optional[str] = ""):
+                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -71,8 +68,7 @@ class TracerBase:
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
 
-        node = self.create_node(kind, target, args_, kwargs_, name, type_expr,
-                                parent_module=parent_module)
+        node = self.create_node(kind, target, args_, kwargs_, name, type_expr)
 
         if not proxy_factory_fn:
             proxy = self.proxy(node)
