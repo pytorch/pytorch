@@ -199,7 +199,7 @@ def mem_efficient_fusion_kwargs(use_decomps):
 
 
 class AotMemEfficientFusion(AotAutogradStrategy):
-    """Use Min cut rematerilization and NVFuser with AOT Autograd"""
+    """Use Min cut rematerilization and TorchScript+nvFuser with AOT Autograd"""
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=True)
@@ -207,7 +207,7 @@ class AotMemEfficientFusion(AotAutogradStrategy):
 
 
 class AotMemEfficientFusionNoDecomps(AotAutogradStrategy):
-    """Use Min cut rematerilization and NVFuser with AOT Autograd"""
+    """Use Min cut rematerilization and TorchScript+nvFuser with AOT Autograd"""
 
     def candidate(self):
         kwargs = mem_efficient_fusion_kwargs(use_decomps=False)
@@ -243,7 +243,7 @@ aot_inductor_debug = AotInductorDebug.compile_fn
 
 
 class AOTMemEfficientFusionWithContext:
-    """Pass nvfuser context to TorchDynamo"""
+    """Pass TorchScript+nvFuser context to TorchDynamo"""
 
     def __init__(self, use_decomps=True):
         self.backend_ctx_ctor = lambda: torch.jit.fuser("fuser2")
@@ -261,6 +261,8 @@ aot_mem_efficient_fusion_no_decomp = AOTMemEfficientFusionWithContext(False)
 
 
 def prims_executor(gm, inputs, *, executor):
+    from functorch.compile import make_boxed_func
+
     # This function is called once per forward/backward pass of a graph in AOT
     # Autograd. We use it to set up the nvFuser-specific FX graph and return
     # execute function.
@@ -274,7 +276,7 @@ def prims_executor(gm, inputs, *, executor):
         prim_gm = make_fx(gm)(*inputs)
 
     # Then we return a callable that executes the "prim_gm" graph
-    return partial(execute, prim_gm, executor=executor)
+    return make_boxed_func(partial(execute, prim_gm, executor=executor))
 
 
 def nvprims_fw_bw_partition_fn(joint_module, joint_inputs):
@@ -472,7 +474,7 @@ def raw_aot_autograd_cudagraphs(model, inputs):
 
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
-        return disable(bw_compiler(*args, **kwargs))  # type: ignore[operator]
+        return disable(disable(bw_compiler)(*args, **kwargs))  # type: ignore[operator]
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
@@ -514,17 +516,16 @@ def create_aot_backends():
     # This is useful for debugging. Can be removed later.
     BACKENDS["nvprims_aten"] = aot_nvprims_aten
 
-    # aot_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
-    # It uses min cut rematerialization algorithm, and uses nvfuser as the
-    # compiler backend. This is the most optimized setting with nvfuser for
-    # training.
-    BACKENDS["aot_nvfuser"] = aot_mem_efficient_fusion
+    # aot_ts_nvfuser uses the memory efficient fusion algorithm from AOT Autograd.
+    # It uses min cut rematerialization algorithm, uses nvFuser as the
+    # compiler backend, and TorchScript as the frontend.
+    BACKENDS["aot_ts_nvfuser"] = aot_mem_efficient_fusion
 
-    # Similar to aot_nvfuser, but disables the decompositions. Decompositions
+    # Similar to aot_ts_nvfuser, but disables the decompositions. Decompositions
     # can cause accuracy deviations. This setting allows us to compare accuracy
     # without worrying about the impact of decomposisitons. More details at
     # https://github.com/pytorch/torchdynamo/issues/611
-    BACKENDS["aot_nvfuser_nodecomps"] = aot_mem_efficient_fusion_no_decomp
+    BACKENDS["aot_ts_nvfuser_nodecomps"] = aot_mem_efficient_fusion_no_decomp
 
     # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
     # for debugging and can serve as a perf baseline.
