@@ -1739,17 +1739,22 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 
 @_beartype.beartype
 def _should_aten_fallback(
-    name: str,
-    opset_version: int,
-    operator_export_type: _C_onnx.OperatorExportTypes,
+    name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
 ):
+    # For BUILD_CAFFE2=0 builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
+    #   an aten::ATen operator is created regardless of symbolics existence
+    # For BUILD_CAFFE2=1, the same applies only if there is no symbolic available
+
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
     is_aten_fallback_export = (
         operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
     )
-    return is_onnx_aten_export or (
-        not is_exportable_aten_op and is_aten_fallback_export
+    is_caffe2_build = _C_onnx._CAFFE2_ATEN_FALLBACK
+
+    return name.startswith("aten::") and (
+        ((is_onnx_aten_export or is_aten_fallback_export) and not is_caffe2_build)
+        or (not is_exportable_aten_op and is_aten_fallback_export)
     )
 
 
@@ -1844,6 +1849,21 @@ def _run_symbolic_function(
         env=env,
     )
 
+    # Direct ATen export requested
+    if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
+        attrs = {
+            k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
+            for k in node.attributeNames()
+        }
+        outputs = node.outputsSize()
+        attrs["outputs"] = outputs
+        return graph_context.at(
+            op_name,
+            *inputs,
+            overload_name=_get_aten_op_overload_name(node),
+            **attrs,
+        )
+
     try:
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
         if symbolic_helper.is_caffe2_aten_fallback() and opset_version == 9:
@@ -1861,6 +1881,7 @@ def _run_symbolic_function(
         if symbolic_function_group is not None:
             symbolic_fn = symbolic_function_group.get(opset_version)
             if symbolic_fn is not None:
+                # TODO Wrap almost identical attrs assignment or comment the difference.
                 attrs = {
                     k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
                 }
@@ -1873,18 +1894,6 @@ def _run_symbolic_function(
         if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
             return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
-
-        if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
-            # Direct ATen export requested
-            outputs = node.outputsSize()
-            attrs["outputs"] = outputs
-            # `overload_name` is set for non-Caffe2 builds only
-            return graph_context.at(
-                op_name,
-                *inputs,
-                overload_name=_get_aten_op_overload_name(node),
-                **attrs,
-            )
 
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,
