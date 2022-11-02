@@ -1586,7 +1586,9 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
+            ),
         ),
     ),
     OpInfo(
@@ -1607,7 +1609,9 @@ op_db: List[OpInfo] = [
         skips=(
             # [NEW] Skips specifically for sample inputs at zero
             # norm's vjp/jvp are not well-conditioned near zero
-            DecorateInfo(unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestBwdGradients", "test_fn_gradgrad"
+            ),
             DecorateInfo(
                 unittest.expectedFailure, "TestFwdGradients", "test_fn_fwgrad_bwgrad"
             ),

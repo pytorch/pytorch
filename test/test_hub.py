@@ -8,7 +8,7 @@ import warnings
 
 import torch
 import torch.hub as hub
-from torch.testing._internal.common_utils import retry, IS_SANDCASTLE, TestCase, skipIfSlowGradcheckEnv
+from torch.testing._internal.common_utils import retry, IS_SANDCASTLE, TestCase
 
 
 def sum_of_state_dict(state_dict):
@@ -22,7 +22,6 @@ SUM_OF_HUB_EXAMPLE = 431080
 TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/releases/download/0.1/mnist_init_ones'
 
 
-@skipIfSlowGradcheckEnv
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
 
