@@ -6640,6 +6640,25 @@ for shape in [(1,), ()]:
                 gc.collect()
                 self.assertIsNone(ref_())
 
+    def test_full_backward_hook_double_backward(self):
+        x = torch.rand(1, requires_grad=True)
+        y = torch.rand_like(x)
+
+        func = torch.nn.MSELoss()
+        counter = [0]
+
+        def hook(module, grad_input, grad_output):
+            counter[0] += 1
+
+        func.register_full_backward_hook(hook)
+
+        f = func(x, y)
+
+        (gradx_f,) = torch.autograd.grad(f, x, create_graph=True)
+        self.assertEqual(counter[0], 1)
+        _ = torch.autograd.grad(gradx_f, x)
+        # We should not error, and counter should not be incremented
+        self.assertEqual(counter[0], 1)
 
     def test_input_buffer_accum(self):
         leaf = torch.rand(2, 2, requires_grad=True)
