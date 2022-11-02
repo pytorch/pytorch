@@ -71,8 +71,8 @@ TABLE = {
         "ts_nnc": "--speedup-ts",
         "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
         "trt": "-n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--inductor-settings --float32 -n50 --backend=cudagraphs_ts",
-        "inductor": "--inductor-settings --float32 -n50 --inductor",
+        "ts_nvfuser_cudagraphs": "--backend=cudagraphs_ts",
+        "inductor": "-n50 --inductor",
     },
 }
 
