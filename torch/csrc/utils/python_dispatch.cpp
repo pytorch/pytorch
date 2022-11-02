@@ -147,7 +147,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
         for (const auto& nv : ivalue.toListRef()) {
           auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
           if (interpreter &&
-              nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
+              nv.unsafeToTensorImpl()->key_set().has(
+                  at::DispatchKey::Python)) {
             (*interpreter)
                 ->python_op_registration_trampoline(op, dispatch_key_, stack);
             return;
