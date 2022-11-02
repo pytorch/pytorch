@@ -8608,6 +8608,8 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # https://github.com/pytorch/pytorch/issues/70904
+                        DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
@@ -8620,6 +8622,8 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # https://github.com/pytorch/pytorch/issues/70904
+                        DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
                     )),
     OpInfo('combinations',
            op=torch.combinations,
@@ -11654,18 +11658,10 @@ op_db: List[OpInfo] = [
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
         skips=(
             # This is only failing on Linux Bionic 3.10 Cuda 11.6
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes',
+                         device_type='cuda', active_if=_get_torch_cuda_version() >= (11, 6)),
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-            # This test fails on trunk CUDA 10.2 tests, can be removed when we stop 10.2 support
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_symbolic_dispatch_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
-                         'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
@@ -13874,6 +13870,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'char',
@@ -13887,6 +13884,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'double',
@@ -13939,6 +13937,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'long',
@@ -13951,6 +13950,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'short',
@@ -13963,6 +13963,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # RuntimeError: attribute lookup is not defined on builtin
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
         )),
     UnaryUfuncInfo(
         'cdouble',
@@ -17144,6 +17145,19 @@ python_ref_db = [
         "_refs.bitwise_left_shift",
         torch_opinfo_name="bitwise_left_shift",
         supports_nvfuser=False,
+        skips=(
+            # https://github.com/pytorch/pytorch/issues/70904
+            DecorateInfo(unittest.skip("Some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.bitwise_right_shift",
+        torch_opinfo_name="bitwise_right_shift",
+        supports_nvfuser=False,
+        skips=(
+            # # https://github.com/pytorch/pytorch/issues/70904
+            DecorateInfo(unittest.skip("Skipped some inputs produce undefined outputs"), 'TestCommon', 'test_compare_cpu'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_or",
@@ -17563,6 +17577,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.char",
@@ -17572,6 +17589,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.double",
@@ -17608,6 +17628,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.long",
@@ -17617,6 +17640,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.short",
@@ -17626,6 +17652,9 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/86558
         validate_view_consistency=False,
         supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip('Overflow when downcasting signed type is undefined'), 'TestCommon', 'test_compare_cpu'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs._conversions.chalf",
