@@ -350,7 +350,6 @@ CHECK_STRIDES_SKIPS = {
 
     # channel_last and channel_last_3d related failures
     aten.convolution.default,
-    aten.upsample_bilinear2d.vec,
 
     # following ops fails if include_storage_offset = True, but these are a bit edge casey
     # we should still fix them, leaving them here for tracking.
