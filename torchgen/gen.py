@@ -1623,8 +1623,6 @@ def get_native_function_schema_registrations(
     schema_selector: SelectiveBuilder,
 ) -> Tuple[List[str], str]:
     ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
-    # a map from namespace to whether we should use TORCH_LIBRARY or TORCH_LIBRARY_FRAGMENT
-    predefined_namespaces = set(["quantized", "quantized_decomposed"])
     for native_function in native_functions:
         ns_native_functions[native_function.namespace].append(native_function)
     schema_registrations = ""
@@ -1642,11 +1640,12 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
+            PREDEFINED_NAMESPACES = set(["quantized", "quantized_decomposed"])
             # if the namespace is predefined, we should use define a library fragment
             # instead of a new library
             torch_library_macro = (
                 "TORCH_LIBRARY_FRAGMENT"
-                if namespace in predefined_namespaces
+                if namespace in PREDEFINED_NAMESPACES
                 else "TORCH_LIBRARY"
             )
             schema_registrations += f"""
