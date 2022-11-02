@@ -148,6 +148,10 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    _module_to_handles: Dict[
+        nn.Module, List[FlatParamHandle]
+    ] = collections.defaultdict(list)
+    state._module_to_handles = _module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -161,6 +165,8 @@ def _init_core_state(
 def _init_runtime_state(
     state: _State,
 ) -> _State:
+    _root_pre_forward_handles: List[RemovableHandle] = []
+    state._root_pre_forward_handles = _root_pre_forward_handles
     _pre_forward_handles: List[RemovableHandle] = []
     state._pre_forward_handles = _pre_forward_handles
     _post_forward_handles: List[RemovableHandle] = []
@@ -332,6 +338,8 @@ def _init_param_handle_from_params(
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
+    for module in handle.flat_param._modules:
+        state._module_to_handles[module].append(handle)
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
