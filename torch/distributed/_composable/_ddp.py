@@ -439,7 +439,7 @@ class DistributedDataParallel(Module, Joinable):
         of ``DistributedDataParallel`` will register the additional gradient
         reduction functions on all the parameters of the model itself at the
         time of construction. If you change the model's parameters afterwards,
-        gradient redunction functions no longer match the correct set of
+        gradient reduction functions no longer match the correct set of
         parameters.
 
     .. warning::
@@ -515,7 +515,7 @@ class DistributedDataParallel(Module, Joinable):
                      3) Activation checkpointing when model has unused parameters.
                      4) There are model parameters that are outside of forward function.
                      5) Potentially improve performance when there are unused parameters,
-                     as DDP will not search graph in each iteraton to detect unused
+                     as DDP will not search graph in each iteration to detect unused
                      parameters when static_graph is set to be ``True``.
                      To check whether you can set static_graph to be ``True``, one way is to
                      check ddp logging data at the end of your previous model training,
