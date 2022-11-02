@@ -303,7 +303,8 @@ class TestForeach(TestCase):
         self._pointwise_test(dtype, op, ref, inputs, is_fastpath and disable_fastpath,
                              is_inplace=False, values=values, custom_values_err=custom_values_err)
         self._pointwise_test(
-            dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True, values=values, custom_values_err=custom_values_err)
+            dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath,
+            is_inplace=True, values=values, custom_values_err=custom_values_err)
 
     @skipMeta
     @ops(foreach_pointwise_op_db)
