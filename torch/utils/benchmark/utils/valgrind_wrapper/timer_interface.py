@@ -209,7 +209,7 @@ class CallgrindStats(object):
     def counts(self, *, denoise: bool = False) -> int:
         """Returns the total number of instructions executed.
 
-        See `FunctionCounts.denoise()` for an explation of the `denoise` arg.
+        See `FunctionCounts.denoise()` for an explanation of the `denoise` arg.
         """
         stats = self.stmt_exclusive_stats
         return (stats.denoise() if denoise else stats).sum()

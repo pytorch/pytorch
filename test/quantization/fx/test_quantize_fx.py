@@ -5252,6 +5252,8 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_mapping = get_default_qconfig_mapping("fbgemm")
         example_inputs = (torch.randn(1, 5),)
         m = prepare_fx(m, qconfig_mapping, example_inputs)
+        m_ref = copy.deepcopy(m)
+        m_ref = convert_to_reference_fx(m_ref)
         m = _convert_to_reference_decomposed_fx(m)
         expected_occurrence = {
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
@@ -5261,7 +5263,37 @@ class TestQuantizeFx(QuantizationTestCase):
             m,
             expected_node_occurrence=expected_occurrence)
         # make sure it runs
-        m(*example_inputs)
+        res_ref = m_ref(*example_inputs)
+        res = m(*example_inputs)
+        self.assertEqual(res, res_ref)
+
+    def test_change_backend_config_for_fixed_qparam_ops(self):
+        """ Making sure we can skip validation of qconfigs for fixedqparam ops based
+        on BackendConfig
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x: torch.Tensor):
+                x = self.tanh(x)
+                return x
+
+        model = M().eval()
+        # we set a global default_qconfig, which will be ignored since the backend
+        # we defined doesn't support anything
+        # this is to make sure we don't validate the qconfig when BackendConfig does not
+        # have fixed qparam op related configurations
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        backend_config = BackendConfig()
+        # make sure this runs
+        model = prepare_fx(
+            model,
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 2, 3, 4),),
+            backend_config=backend_config
+        )
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
