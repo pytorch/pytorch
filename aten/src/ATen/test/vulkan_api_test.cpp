@@ -2946,6 +2946,44 @@ TEST_F(VulkanAPITest, view_invalid_inputs) {
   }, ::std::runtime_error);
 }
 
+TEST_F(VulkanAPITest, cat_dim0_invalidinputs_exceptions) {
+  // Arrange: Vulkan cat inputs must have matching sizes except concatenated dimension
+  {
+    const auto in_cpu1 = at::rand({3, 5, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat expects 4 dimensional inputs
+  {
+    const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat not implemented for batch dimension!
+  {
+    const auto in_cpu1 = at::rand({221, 3, 9, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({112, 3, 9, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({331, 3, 9, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+    }, ::c10::Error);
+  }
+}
+
 #if !defined(__APPLE__)
 TEST_F(VulkanAPITest, DISABLED_cat_dim1_samefeature_success) {
   // Arrange
@@ -3174,6 +3212,25 @@ TEST_F(VulkanAPITest, cat_dim2_diffheight_success) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, cat_dim2_negdim_success) {
+  // Arrange
+  const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, -2);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, -2);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, cat_dim2_singledepth_success) {
   // Arrange: batch x channel (1x1) = single depth texture
   const auto in_cpu1 = at::rand({1, 1, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -3231,6 +3288,44 @@ TEST_F(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1);
     }, ::c10::Error);
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
+    }, ::c10::Error);
+  }
+}
+
+TEST_F(VulkanAPITest, cat_dim3_invalidinputs_exceptions) {
+  // Arrange: Vulkan cat inputs must have matching sizes except concatenated dimension
+  {
+    const auto in_cpu1 = at::rand({3, 5, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat expects 4 dimensional inputs
+  {
+    const auto in_cpu1 = at::rand({3, 9, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({9, 112, 193}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 331, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
+    EXPECT_THROW({
+      const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
+    }, ::c10::Error);
+  }
+
+  // Arrange: Vulkan cat not implemented for width dimension!
+  {
+    const auto in_cpu1 = at::rand({3, 9, 193, 221}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu2 = at::rand({3, 9, 193, 112}, at::device(at::kCPU).dtype(at::kFloat));
+    const auto in_cpu3 = at::rand({3, 9, 193, 331}, at::device(at::kCPU).dtype(at::kFloat));
+
+    // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
     }, ::c10::Error);

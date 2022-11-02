@@ -85,6 +85,7 @@ __all__ = [
     "isnan",
     "isreal",
     "i0",
+    "lerp",
     "lgamma",
     "log",
     "log1p",
@@ -1156,7 +1157,7 @@ def _floor_divide_integer(a: Tensor, b: Tensor) -> Tensor:
 
     # Convert truncation to flooring:
     offset = (torch.signbit(a) != torch.signbit(b)).logical_and(torch.fmod(a, b) != 0)
-    return prims.div(a, b) - prims.convert_element_type(offset, a.dtype)
+    return prims.div(a, b) - _maybe_convert_to_dtype(offset, a.dtype)
 
 
 def _floor_divide_float(a: Tensor, b: Tensor) -> Tensor:
@@ -1356,6 +1357,8 @@ def isclose(
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
     dtype = a.dtype
+    # promoting to int32 to maintain 100% consistency with C++ and to
+    # prevent overflow in case of int8 and int16
     promote_to_int = dtype in (torch.int8, torch.int16)
     if promote_to_int:
         a = prims.convert_element_type(a, torch.int32)
@@ -1951,7 +1954,6 @@ def _reduction(
     dtype: Optional[torch.dtype] = None,  # should be specified for ops that support it
     out: Optional[Tensor] = None,
     output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
-    exact_dtype: bool = False,
 ) -> TensorLikeType:  # it is usually SAME, but I want
     # ref writers to actually think about what to put here
     assert isinstance(a, TensorLike)
@@ -1998,7 +2000,7 @@ def _reduction(
                 "Expected the dtype of reduction result and out to match"
             )
         out = _maybe_resize_out(out, result.shape)
-        return _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
 
     if result.dtype != result_dtype and result_dtype is not None:
         result = prims.convert_element_type(result, result_dtype)
@@ -2171,7 +2173,6 @@ def amin(
         out=out,
         has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
-        exact_dtype=True,
     )
 
 
@@ -2196,7 +2197,6 @@ def amax(
         out=out,
         has_identity=False,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
-        exact_dtype=True,
     )
 
 
@@ -2862,10 +2862,10 @@ def native_layer_norm(
     elif weight is not None and bias is not None:
         out = out * weight + bias
 
-    out = prims.convert_element_type(out, input.dtype)
+    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
     if input.device.type == "cpu":
-        mean = prims.convert_element_type(mean, input.dtype)
-        rstd = prims.convert_element_type(rstd, input.dtype)
+        mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
+        rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
 
 
@@ -3160,7 +3160,7 @@ def rot90(
     elif k == 3:
         return torch.transpose(torch.flip(a, (dims[0],)), dims[0], dims[1])
     else:
-        return clone(a)
+        return clone(a, memory_format=torch.contiguous_format)
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
@@ -3247,7 +3247,9 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
 @register_decomposition(torch.ops.aten.index_copy)
 @out_wrapper()
 def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
-    return x.clone().index_copy_(dim, index, tensor)
+    return x.clone(memory_format=torch.contiguous_format).index_copy_(
+        dim, index, tensor
+    )
 
 
 @register_decomposition(torch.ops.aten.index_copy_)
@@ -4080,6 +4082,36 @@ def arange(
     )
 
 
+@register_decomposition(torch.ops.aten.lerp)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("start", "end", "weight"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+    check(
+        start.dtype == end.dtype,
+        lambda: f"expected dtype {start.dtype} for `end` but got dtype {end.dtype}",
+    )
+    if isinstance(weight, Number):
+        weight = start.new_full((), weight)  # type: ignore[arg-type]
+    else:
+        check(
+            start.dtype == weight.dtype,
+            lambda: f"expected dtype {start.dtype} for `weight` but got dtype {weight.dtype}",  # type: ignore[union-attr]
+        )
+    assert isinstance(weight, Tensor)  # mypy
+    # We implement it this way for numerical stability. We assume (in the stability optimisation)
+    # that 0 <= weight <= 1. We take the abs to deal with comples numbers
+    # We want to do operations near zero, which is where floating points are most precise
+    # If weight.abs() >= 0.5:
+    #    return (1 - weight) * (start - end) + end
+    mask = weight.abs() >= 0.5
+    coeff = torch.where(mask, weight - 1, weight)
+    base = torch.where(mask, end, start)
+    return coeff * (end - start) + base
+
+
 @register_decomposition(torch.ops.aten.linspace)
 @out_wrapper()
 def linspace(
@@ -4291,17 +4323,14 @@ def movedim(
     if type(destination) is int:
         destination = (destination,)
 
-    # Convert to list to produce a compatible error message with core PyTorch,
+    # Converts to list to produce a compatible error message with core PyTorch,
     # which prints sequences in square brackets.
-    def _format_seq(seq):
-        return list(seq)
-
     utils.check(
         len(source) == len(destination),  # type: ignore[arg-type]
         lambda: (
-            "movedim: Invalid source or destination dims: source "
-            f"({_format_seq(source)} dims) should contain the same number of dims as "
-            f"destination ({_format_seq(destination)} dims)"
+            "movedim: Invalid source or destination dims: source "  # type: ignore[arg-type]
+            f"({list(source)} dims) should contain the same number of dims as "
+            f"destination ({list(destination)} dims)"
         ),
     )
 
@@ -4312,13 +4341,14 @@ def movedim(
     sss = set(ss)
     dss = set(ds)
 
+    # See above on why this converts to list in error messages.
     utils.check(
         len(ss) == len(sss),
-        lambda: f"movedim: repeated dim in `source` ({_format_seq(source)})",
+        lambda: f"movedim: repeated dim in `source` ({list(source)})",  # type: ignore[arg-type]
     )
     utils.check(
         len(ds) == len(dss),
-        lambda: f"movedim: repeated dim in `destination` ({_format_seq(destination)})",
+        lambda: f"movedim: repeated dim in `destination` ({list(destination)})",  # type: ignore[arg-type]
     )
 
     m = dict(zip(ds, ss))

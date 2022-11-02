@@ -130,7 +130,7 @@ def wrap_convert_context(fn):
 @TorchPatcher.suppress_torch_distributed_warnings
 def has_tensor_in_frame(frame):
     """Check if the frame has torch.* related bits"""
-    # Check if the function was decorated using torchdynamo.optimize
+    # Check if the function was decorated using torch._dynamo.optimize
     if frame.f_code in always_optimize_code_objects:
         return True
 

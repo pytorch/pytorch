@@ -234,7 +234,7 @@ class TestFX(JitTestCase):
         new_instance.__init__(gm3, gm3.graph)
 
         x = torch.randn(5, 3)
-        torch.testing.assert_allclose(new_instance(x), torch.relu(x))
+        torch.testing.assert_close(new_instance(x), torch.relu(x))
 
     def test_custom_import(self):
         graph = torch.fx.Graph()
@@ -809,7 +809,7 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(ec)
 
         x = torch.randn(bs, d_hid)
-        torch.testing.assert_allclose(ec(x), traced(x))
+        torch.testing.assert_close(ec(x), traced(x))
 
 
     def test_node_tagging(self):
@@ -1126,7 +1126,7 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(foo)
         x = (torch.randn(5, 3),)
-        torch.testing.assert_allclose(traced(x), x[0])
+        torch.testing.assert_close(traced(x), x[0])
 
         bio = io.BytesIO()
 
@@ -1136,7 +1136,7 @@ class TestFX(JitTestCase):
 
         loaded = torch.load(bio)
 
-        torch.testing.assert_allclose(loaded(x), x[0])
+        torch.testing.assert_close(loaded(x), x[0])
 
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
@@ -1806,7 +1806,7 @@ class TestFX(JitTestCase):
         interp = Interpreter(gm)
         x = torch.randn(5, 3)
         out = interp.run(x)
-        torch.testing.assert_allclose(out, x + 3.14159)
+        torch.testing.assert_close(out, x + 3.14159)
 
     def test_interpreter_not_enough_args(self):
         class Model(torch.nn.Module):
@@ -2315,8 +2315,8 @@ class TestFX(JitTestCase):
         traced1.recompile()
 
         x = torch.randn(15, 15)
-        torch.testing.assert_allclose(traced1(x), torch.relu(x))
-        torch.testing.assert_allclose(copied(x), torch.neg(x))
+        torch.testing.assert_close(traced1(x), torch.relu(x))
+        torch.testing.assert_close(copied(x), torch.neg(x))
 
     def test_direct_param_use(self):
         class TransposeTest(torch.nn.Module):
@@ -2699,7 +2699,7 @@ class TestFX(JitTestCase):
         replica = gm._replicate_for_data_parallel()
         out_replica = replica(x)
 
-        torch.testing.assert_allclose(out_replica, out)
+        torch.testing.assert_close(out_replica, out)
 
     def test_ast_rewriter_rewrites_assert(self):
         class M(torch.nn.Module):
@@ -2791,7 +2791,7 @@ class TestFX(JitTestCase):
 
     def test_profiler_ranges_side_effect(self):
         g = torch.fx.Graph()
-        handle = g.call_function(torch.ops.profiler._record_function_enter, ('test_range',))
+        handle = g.call_function(torch.ops.profiler._record_function_enter_new, ('test_range',))
         g.call_function(torch.ops.profiler._record_function_exit, (handle,))
         g.output(None)
 
@@ -2801,7 +2801,7 @@ class TestFX(JitTestCase):
                 found_targets.setdefault(node.target)
         self.assertEqual(
             list(found_targets.keys()),
-            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+            [torch.ops.profiler._record_function_enter_new, torch.ops.profiler._record_function_exit]
         )
 
         g.eliminate_dead_code()
@@ -2811,7 +2811,7 @@ class TestFX(JitTestCase):
                 found_targets.setdefault(node.target)
         self.assertEqual(
             list(found_targets.keys()),
-            [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit]
+            [torch.ops.profiler._record_function_enter_new, torch.ops.profiler._record_function_exit]
         )
 
     def test_ast_rewriter_wrapped_via_decorator(self):
@@ -3045,7 +3045,7 @@ class TestFX(JitTestCase):
         traced_graph = MyCustomTracer().trace(model)
         gm2 = torch.fx.GraphModule(model, traced_graph)
         gm2.delete_all_unused_submodules()
-        torch.testing.assert_allclose(gm2(inputs), model(inputs))
+        torch.testing.assert_close(gm2(inputs), model(inputs))
 
     def test_fx_stateless(self):
         class MockModule(torch.nn.Module):
