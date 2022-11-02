@@ -94,7 +94,7 @@ jobs:
         with:
           python-version: 3.8
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Setup miniconda (arm64, py3.9)
         if: ${{ runner.arch == 'ARM64' }}
@@ -102,7 +102,7 @@ jobs:
         with:
           python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Start monitoring script
         id: monitor-script

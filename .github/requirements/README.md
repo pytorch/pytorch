@@ -18,5 +18,5 @@ The list of support files are as follows:
   * conda-env-macOS-X64. This is use by MacOS (x86-64) build and test
     jobs to setup the conda environment
 * Pip:
-  * pip-requirements-macOS. This is used by MacOS build and test jobs to
+  * pip-requirements-macOS.txt. This is used by MacOS build and test jobs to
     setup the pip environment

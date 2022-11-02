@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install PyTorch
         env:
