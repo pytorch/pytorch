@@ -1151,7 +1151,9 @@ def compute_argument_yaml(
         "type": cpp.argument_type(a, binds="__placeholder__", symint=False).cpp_type(),
     }
     if a.default is not None:
-        arg["default"] = pythonify_default(cpp.default_expr(a.default, a.type))
+        arg["default"] = pythonify_default(
+            cpp.default_expr(a.default, a.type, symint=False)
+        )
     if a.name in kwarg_only_set:
         arg["kwarg_only"] = True
     if a.name in out_arg_set:

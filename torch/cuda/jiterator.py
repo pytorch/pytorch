@@ -98,7 +98,7 @@ def _create_jit_fn(code_string: str, **kwargs) -> Callable:
         # invoke jitted function like a regular python function
         result = jitted_fn(a, b, alpha=3.14)
 
-    code_string also allows mulitple function definitions, and the last function will be treated as the entry function.
+    code_string also allows multiple function definitions, and the last function will be treated as the entry function.
 
     Example::
 
