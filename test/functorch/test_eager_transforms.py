@@ -3013,7 +3013,11 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
 
-    @parametrize("dropout_layer", [nn.Dropout, nn.AlphaDropout, nn.FeatureAlphaDropout])
+    @parametrize("dropout_layer", [
+        subtest(nn.Dropout, 'Dropout'),
+        subtest(nn.AlphaDropout, 'AlphaDropout'),
+        subtest(nn.FeatureAlphaDropout, 'FeatureAlphaDropout'),
+    ])
     def test_find_learning_rate_ensembling(self, device, dropout_layer):
         # This example mimics what a user might do when trying to find the optimal learning rate. They would
         # want to run a bunch of models with the same behavior (including the same dropout!) and have them
@@ -3126,13 +3130,16 @@ def normalize_devices(fx_g):
     return fx_g
 
 class TestFunctionalize(TestCase):
-    def _check_functionalize_correctness(self, f, inpt):
+    def _check_functionalize_correctness(self, f, inpt, *, skip_vmap=False):
         inpt1 = inpt.clone()
         inpt2 = inpt.clone()
         inpt3 = inpt.clone()
 
         expected_outputs = f(inpt1)
-        actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
+        if skip_vmap:
+            actual_outputs = functionalize(f)(inpt2)
+        else:
+            actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
         # Right now the flavor of functionalize that also removes view ops
         # isn't being used with vmap
         # That's because {view}_copy ops don't have batching rules yet
@@ -3202,7 +3209,8 @@ class TestFunctionalize(TestCase):
             z2, z3 = z1.split(2)
             z2.add_(tmp)
             return x
-        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+        # See Note [Fix vmap slice_scatter]
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device), skip_vmap=True)
 
     # Ensure functionalize works with List[Optional[Tensor]] arguments.
     # See the fix / discussion at https://github.com/pytorch/pytorch/pull/76085
@@ -3243,6 +3251,7 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
         self.assertEqual(out1, out2)
         self.assertEqual(inpt1, inpt2)
 
+    @unittest.skipIf(IS_FBCODE, 'fails in fbcode')
     def test_vmap_functionalize_jvp(self, device):
 
         def f(x: torch.Tensor) -> torch.Tensor:
@@ -3431,6 +3440,7 @@ def forward(self, a_1, b_1) -> torch.Tensor:
     return index
     """)
 
+    @unittest.skipIf(IS_FBCODE, 'fails in fbcode')
     def test_functionalize_optional_tensorlist2(self, device):
 
         def f(a, b) -> torch.Tensor:
