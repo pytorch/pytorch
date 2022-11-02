@@ -86,13 +86,12 @@ static void accumulate(
     } else {
       buffer[pos] = var + old_var;
     }
+  } else if (
+      old_var.is_contiguous() && old_var.use_count() == 1 &&
+      old_var.storage().use_count() == 1) {
+    buffer[pos] = old_var.add_(var);
   } else {
-    if (var.is_sparse() && !old_var.is_sparse() && old_var.is_contiguous() &&
-        old_var.use_count() == 1 && old_var.storage().use_count() == 1) {
-      buffer[pos] = old_var.add_(var);
-    } else {
-      buffer[pos] = old_var + var;
-    }
+    buffer[pos] = old_var + var;
   }
 }
 
