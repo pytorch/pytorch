@@ -58,17 +58,5 @@ Tensor NestedTensor_tanh(const Tensor& self) {
   return map_nt(self, at::tanh);
 }
 
-Tensor& NestedTensor_neg_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
-  check_numel_equals_buffer_size(self_ptr);
-  auto buffer = self_ptr->get_buffer();
-  at::neg_(buffer);
-  return self;
-}
-
-Tensor NestedTensor_neg(const Tensor& self) {
-  return map_nt(self, at::neg);
-}
-
 } // namespace native
 } // namespace at
