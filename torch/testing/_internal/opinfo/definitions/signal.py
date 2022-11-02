@@ -368,5 +368,12 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, beta=12.0),
         reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
         error_inputs_func=error_inputs_kaiser_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now pending aten::i0 support"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
     ),
 ]
