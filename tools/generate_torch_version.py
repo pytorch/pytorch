@@ -27,9 +27,9 @@ def get_tag(pytorch_root: Union[str, Path]) -> str:
     try:
         tag = (
             subprocess.run(
-                ["git", "describe", "--tags", "--exact"], 
+                ["git", "describe", "--tags", "--exact"],
                 cwd=pytorch_root,
-                capture_output=True
+                capture_output=True,
             )
             .decode("ascii")
             .strip()
