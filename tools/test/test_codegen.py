@@ -221,9 +221,9 @@ class TestGenSchemaRegistration(unittest.TestCase):
             self.fragment_custom_native_function,
             _,
         ) = torchgen.model.NativeFunction.from_yaml(
-            {"func": "custom::func2() -> bool", "tags": set("fragment")},
+            {"func": "quantized_decomposed::func() -> bool"},
             loc=torchgen.model.Location(__file__, 1),
-            valid_tags=set("fragment"),
+            valid_tags=set(),
         )
 
     def test_default_namespace_schema_registration_code_valid(self) -> None:
@@ -259,31 +259,8 @@ TORCH_LIBRARY(custom, m) {
         self.assertEqual(
             registrations,
             """
-TORCH_LIBRARY_FRAGMENT(custom, m) {
-  m.def("func2() -> bool", {});
-
-};""",
-        )
-
-    def test_fragment_custom_namespace_multi_ops_schema_registration_code_valid(
-        self,
-    ) -> None:
-        """This is to test as long as one op has the tag fragment, we'll register
-        all the ops through fragment macro
-        """
-        _, registrations = get_native_function_schema_registrations(
-            native_functions=[
-                self.custom_native_function,
-                self.fragment_custom_native_function,
-            ],
-            schema_selector=self.selector,
-        )
-        self.assertEqual(
-            registrations,
-            """
-TORCH_LIBRARY_FRAGMENT(custom, m) {
+TORCH_LIBRARY_FRAGMENT(quantized_decomposed, m) {
   m.def("func() -> bool", {});
-  m.def("func2() -> bool", {});
 
 };""",
         )
@@ -397,21 +374,6 @@ TORCH_API bool kernel_1();
 } // namespace at
         """
         self.assertEqual("\n".join(declaration), target)
-
-    def test_parse_fragment_tag(self) -> None:
-        yaml_entry = """
-- func: op(Tensor self) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: op
-  tag:
-    fragment
-        """
-        es = yaml.load(yaml_entry, Loader=LineLoader)
-        self.one_return_func, _ = NativeFunction.from_yaml(
-            es[0], loc=Location(__file__, 1), valid_tags=set("fragment")
-        )
-        self.assertTrue("fragment" in self.one_return_func.tags)
-
 
 # Test for native_function_generation
 class TestNativeFunctionGeneratrion(unittest.TestCase):

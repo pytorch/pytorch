@@ -1624,12 +1624,9 @@ def get_native_function_schema_registrations(
 ) -> Tuple[List[str], str]:
     ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
     # a map from namespace to whether we should use TORCH_LIBRARY or TORCH_LIBRARY_FRAGMENT
-    ns_to_is_fragment: Dict[str, bool] = defaultdict(bool)
+    predefined_namespaces = set(["quantized", "quantized_decomposed"])
     for native_function in native_functions:
         ns_native_functions[native_function.namespace].append(native_function)
-        ns_to_is_fragment[native_function.namespace] |= (
-            "fragment" in native_function.tags
-        )
     schema_registrations = ""
     aten_schema_registrations = []
     custom_namespace = None
@@ -1645,9 +1642,11 @@ def get_native_function_schema_registrations(
         else:
             custom_namespace = namespace
             tab = "\t"
+            # if the namespace is predefined, we should use define a library fragment
+            # instead of a new library
             torch_library_macro = (
                 "TORCH_LIBRARY_FRAGMENT"
-                if ns_to_is_fragment[namespace]
+                if namespace in predefined_namespaces
                 else "TORCH_LIBRARY"
             )
             schema_registrations += f"""
