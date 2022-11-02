@@ -26,8 +26,10 @@ from torch.testing._internal.opinfo.core import (
     sample_inputs_reduction,
     SampleInput,
 )
-from torch.testing._internal.opinfo.utils import reference_reduction_numpy
-
+from torch.testing._internal.opinfo.utils import (
+    reference_reduction_numpy,
+    numpy_prod_with_int64
+)
 
 # Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(
@@ -434,7 +436,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.prod",
-        ref=reference_reduction_numpy(np.prod),
+        ref=numpy_prod_with_int64(),
         method_variant=None,
         identity=1,
         nan_policy="propagate",

@@ -258,3 +258,14 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         return result
 
     return wrapper
+
+def numpy_prod_with_int64(): 
+    g = reference_reduction_numpy(np.prod)
+
+    @wraps(g)
+    def wrapper(x: np.ndarray, *args, **kwargs):
+        if x.dtype == np.int8 or x.dtype == np.int16 or x.dtype == np.int32:
+            kwargs["dtype"] = np.int64
+        return g(x, *args, **kwargs)
+
+    return wrapper
