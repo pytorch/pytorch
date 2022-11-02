@@ -10,6 +10,7 @@ from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import (  # noqa: F401
+    _constants,
     _patch_torch,
     _type_utils,
     errors,
@@ -58,7 +59,6 @@ __all__ = [
 ]
 
 
-_INT64_MAX = 9223372036854775807
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=10)
 
 
@@ -346,7 +346,7 @@ def _slice(
         if (
             len(starts) == 1
             and starts[0] == 0
-            and ends[0] == _INT64_MAX
+            and ends[0] == _constants.INT64_MAX
             and (steps is None or (len(steps) == 1 and steps[0] == 1))
         ):
             return input
@@ -389,10 +389,14 @@ def slice(g: jit_utils.GraphContext, self, *args):
         if is_start_none:
             start = g.op("Constant", value_t=torch.tensor(0))
         if is_end_none:
-            end = g.op("Constant", value_t=torch.tensor(_INT64_MAX))
+            end = g.op("Constant", value_t=torch.tensor(_constants.INT64_MAX))
     else:
         start = [0 if is_start_none else symbolic_helper._parse_arg(start, "i")]
-        end = [_INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")]
+        end = [
+            _constants.INT64_MAX
+            if is_end_none
+            else symbolic_helper._parse_arg(end, "i")
+        ]
         dim = [symbolic_helper._parse_arg(dim, "i")]
         dynamic_slice = False
     return symbolic_helper._slice_helper(
@@ -415,7 +419,7 @@ def flip(g: jit_utils.GraphContext, input, dims):
         input,
         axes=dims,
         starts=[-1] * len(dims),
-        ends=[-_INT64_MAX] * len(dims),
+        ends=[-_constants.INT64_MAX] * len(dims),
         steps=[-1] * len(dims),
     )
 
