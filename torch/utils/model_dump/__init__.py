@@ -134,7 +134,10 @@ def hierarchical_pickle(data):
             }
         if typename == "torch._utils._rebuild_tensor_v2":
             assert data.state is None
-            storage, offset, size, stride, requires_grad, hooks = data.args
+            if len(data.args) == 6:
+                storage, offset, size, stride, requires_grad, hooks = data.args
+            else:
+                storage, offset, size, stride, requires_grad, hooks, math_bits = data.args
             storage_info = get_storage_info(storage)
             return {"__tensor_v2__": [storage_info, offset, size, stride, requires_grad]}
         if typename == "torch._utils._rebuild_qtensor":
