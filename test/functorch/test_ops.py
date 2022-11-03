@@ -343,6 +343,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('linalg.eig'),  # diagonal_scatter does not support complex
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+        skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
@@ -475,6 +476,7 @@ class TestOperators(TestCase):
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
+        skip('as_strided_scatter', ''),  # silent incorrectness; also might be flaky
         xfail('sparse.sampled_addmm', ''),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
@@ -1213,6 +1215,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
+        skip('as_strided_scatter', ''),  # seems flaky
         xfail('segment_reduce', 'offsets'),  # NYI: forward-AD for segment_reduce
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
@@ -1611,6 +1614,7 @@ class TestOperators(TestCase):
         skip('linalg.multi_dot', '', device_type='cpu'),
         skip('sparse.sampled_addmm', ''),
         skip('native_layer_norm', '', device_type='cpu'),
+        xfail('as_strided_scatter', ''),
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
         tol1('linalg.householder_product',

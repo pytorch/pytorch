@@ -54,6 +54,18 @@ inline uint64_t PerfProfiler::CalcDelta(uint64_t start, uint64_t end) const {
   return end - start;
 }
 
+inline void PerfProfiler::StartCounting() const {
+  for (auto& e : events_) {
+    e.Enable();
+  }
+}
+
+inline void PerfProfiler::StopCounting() const {
+  for (auto& e : events_) {
+    e.Disable();
+  }
+}
+
 } // namespace linux_perf
 } // namespace impl
 } // namespace profiler
