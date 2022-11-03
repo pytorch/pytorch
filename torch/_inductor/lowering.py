@@ -948,6 +948,10 @@ def register_onednn_fusion_ops():
                 ir.LinearUnary.create(x, w, b, attr, scalars, algorithm)
             )
 
+        @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
+        def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
+            return TensorBox.create(ir.LinearBinary.create(x, y, w, b, attr))
+
     else:
         pass
 
