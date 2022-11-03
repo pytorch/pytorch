@@ -4,7 +4,7 @@ from enum import IntEnum
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
-from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
+from typing import Any, Callable, DefaultDict, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 __all__ = [
     "BatcherIterDataPipe",
@@ -36,7 +36,7 @@ class ShardingFilterIterDataPipe(IterDataPipe):
     def __init__(self, source_datapipe: IterDataPipe, sharding_group_filter=None):
         self.source_datapipe = source_datapipe
         self.sharding_group_filter = sharding_group_filter
-        self.groups = {}
+        self.groups: Dict[int, Tuple[int, int]] = {}
         self.num_of_instances = 1
         self.instance_id = 0
         self._update_num_of_instances()
