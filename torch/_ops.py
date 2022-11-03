@@ -103,7 +103,7 @@ def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
         # The dispatch key itself will implicitly route to backend fallback.
         # This is probably not great for the pure Python implementation.
         return k
-    raise RuntimeError("could not find kernel")
+    raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
 pyop_namespace = {}
