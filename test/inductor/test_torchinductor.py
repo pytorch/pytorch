@@ -3466,6 +3466,18 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_as_strided_scatter(self):
+        def fn(a, b):
+            return aten.as_strided_scatter(
+                a * 8 + 10,
+                b * 2 - 4,
+                size=(a.shape[0], a.shape[1] // 2),
+                stride=(a.shape[1], 2),
+                storage_offset=0,
+            )
+
+        self.common(fn, [torch.randn(10, 1024), torch.randn(10, 512)])
+
     def test_select_scatter(self):
         def fn(x, a, b):
             return (
