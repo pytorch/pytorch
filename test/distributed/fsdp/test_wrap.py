@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from enum import auto, Enum
+from typing import Callable, Union
 
 import torch
 import torch.nn as nn
@@ -18,7 +19,9 @@ from torch.distributed.fsdp.wrap import (
     _or_policy,
     _wrap_batchnorm_individually,
     always_wrap_policy,
+    AutoWrapPolicy,
     enable_wrap,
+    ModuleWrapPolicy,
     size_based_auto_wrap_policy,
     transformer_auto_wrap_policy,
     wrap,
@@ -373,6 +376,19 @@ class TestAutoWrap(TestCase):
             transformer_auto_wrap_policy,
             transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
         )
+        self._test_transformer_wrapping(auto_wrap_policy)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
+    def test_module_wrap_policy(self):
+        """Tests the ``ModuleWrapPolicy``."""
+        auto_wrap_policy = ModuleWrapPolicy(
+            {TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        self._test_transformer_wrapping(auto_wrap_policy)
+
+    def _test_transformer_wrapping(
+        self, auto_wrap_policy: Union[Callable, AutoWrapPolicy]
+    ):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,

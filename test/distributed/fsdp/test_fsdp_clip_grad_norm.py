@@ -12,7 +12,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -102,12 +102,11 @@ class TestClipGradNorm(FSDPTest):
         )
         ddp_model = DDP(local_model, device_ids=[self.rank])
         fsdp_kwargs = {
-            "auto_wrap_policy": functools.partial(
-                transformer_auto_wrap_policy,
-                transformer_layer_cls={
+            "auto_wrap_policy": ModuleWrapPolicy(
+                {
                     TransformerEncoderLayer,
                     TransformerDecoderLayer,
-                },
+                }
             ),
             "cpu_offload": CPUOffload(offload_params=offload_params),
             "use_orig_params": use_orig_params,

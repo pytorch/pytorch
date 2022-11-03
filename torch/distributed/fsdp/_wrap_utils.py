@@ -13,6 +13,7 @@ from torch.distributed.fsdp.wrap import (
     _or_policy,
     _recursive_wrap,
     _wrap_batchnorm_individually,
+    AutoWrapPolicy,
 )
 
 
@@ -74,7 +75,7 @@ def _auto_wrap(
 
 def _get_submodule_to_states(
     root_module: nn.Module,
-    auto_wrap_policy: Callable,
+    auto_wrap_policy: AutoWrapPolicy,
     ignored_modules: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
 ) -> Dict[nn.Module, SubmoduleState]:
@@ -99,7 +100,7 @@ def _get_submodule_to_states(
     wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules)
     _recursive_wrap(
         root_module,
-        auto_wrap_policy=auto_wrap_policy,
+        auto_wrap_policy=auto_wrap_policy.auto_wrap_policy,
         wrapper_cls=wrapper_cls,
         ignored_modules=ignored_modules,
         ignored_params=ignored_params,

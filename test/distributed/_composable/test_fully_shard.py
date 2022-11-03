@@ -12,7 +12,7 @@ from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._runtime_utils import _root_pre_forward
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -63,9 +63,7 @@ class Model(nn.Module):
 
     @staticmethod
     def auto_wrap_policy():
-        return functools.partial(
-            transformer_auto_wrap_policy, transformer_layer_cls={SubModel}
-        )
+        return ModuleWrapPolicy({SubModel})
 
     def get_input(self, device=torch.device) -> Tuple[Any, ...]:
         return (torch.randn((8, 5), device=device),)
