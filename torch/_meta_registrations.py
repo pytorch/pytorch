@@ -120,6 +120,16 @@ def meta_max(self):
     return self.new_empty(())
 
 
+@register_meta(aten.max.dim)
+def meta_max_dim(self, dim, keepdim=False):
+    dim = utils.reduction_dims(self.shape, (dim,))
+    output_shape = _compute_reduction_shape(self, dim, keepdim)
+    return (
+        self.new_empty(output_shape),
+        self.new_empty(output_shape, dtype=torch.long),
+    )
+
+
 @register_meta([aten.min.default])
 def meta_min(self):
     return self.new_empty(())
@@ -655,7 +665,13 @@ def meta_adaptive_avg_pool2d(self, output_size):
         self.ndim == 3 or self.ndim == 4,
         lambda: f"Expected 3D or 4D tensor, but got {self.shape}",
     )
-    return self.new_empty(self.shape[:-2] + tuple(output_size))
+    output_shape = self.shape[:-2] + tuple(output_size)
+    memory_format = utils.suggest_memory_format(self)
+    # need to set memory_format to preserve the memory format of the input
+    # channel last input should have channel last output
+    return torch.empty(
+        output_shape, dtype=self.dtype, device=self.device, memory_format=memory_format
+    )
 
 
 @register_meta(aten._adaptive_avg_pool3d.default)
@@ -1088,6 +1104,11 @@ def meta_zero_(self):
     return self
 
 
+@register_meta(aten.zero.default)
+def meta_zero(self):
+    return self.new_empty(self.shape)
+
+
 @register_meta([aten.fill_.Tensor, aten.fill_.Scalar])
 def meta_fill_(self, val):
     return self
@@ -1095,7 +1116,7 @@ def meta_fill_(self, val):
 
 @register_meta([aten.fill.Tensor, aten.fill.Scalar])
 def meta_fill(self, val):
-    return self.new_empty(self.shape)
+    return torch.empty_like(self)
 
 
 @register_meta(aten.relu_.default)

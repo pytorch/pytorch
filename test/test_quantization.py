@@ -52,7 +52,6 @@ except ImportError:
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQStatic  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerPTQDynamic  # noqa: F401
 from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerOps  # noqa: F401
-from quantization.eager.test_quantize_eager_ptq import TestQuantizeEagerONNXExport  # noqa: F401
 # 2. Eager mode quantization aware training
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # noqa: F401
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
