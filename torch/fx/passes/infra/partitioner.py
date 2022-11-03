@@ -88,7 +88,7 @@ class CapabilityBasedPartitioner:
                     # dependencies after the fusion
                     for p_node in partitions_by_id[assignment[node]].nodes:
                         for user_node in p_node.users:
-                            if dfs_find_cycle(user_node):
+                            if user_node not in partitions_by_id[assignment[node]].nodes and dfs_find_cycle(user_node):
                                 return True
                 else:
                     for user_node in node.users:
