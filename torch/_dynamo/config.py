@@ -88,7 +88,7 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 replay_record_enabled = False
 
 # Rewrite assert statement in python with torch._assert
-rewrite_assert_with_torch_assert = False
+rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
