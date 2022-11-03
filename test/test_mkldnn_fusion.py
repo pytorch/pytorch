@@ -271,8 +271,8 @@ class TestMkldnnFusion(JitTestCase):
         for pointwise_name, pointwise_fn in self._binary_list().items():
             for dim in [2, 3]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
-                options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
-                for bias, dilation, groups, memory_format in options:
+                options = itertools.product([False, True], [True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
+                for fuse_relu, bias, dilation, groups, memory_format in options:
                     oC = 32 * groups
                     iC = 3 * groups
                     x_shape = (1, iC) + input_shapes[dim]
@@ -282,10 +282,14 @@ class TestMkldnnFusion(JitTestCase):
                     other = torch.randn_like(mod.conv(x))
                     with torch.no_grad():
                         ref = mod(x, other)
+                        unary_attr = None
+                        if fuse_relu:
+                            ref.relu_()
+                            unary_attr = "relu"
                         attr = pointwise_name
                         fused = torch.ops.mkldnn._convolution_pointwise(
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
-                            mod.conv.groups, attr
+                            mod.conv.groups, attr, None, unary_attr, [], None
                         )
                     self.assertEqual(ref, fused)
 
@@ -315,17 +319,14 @@ class TestMkldnnFusion(JitTestCase):
                 mod = mod.to(memory_format=memory_format).eval()
                 with torch.no_grad():
                     ref = mod(x)
+                    unary_attr = None
                     if has_relu:
                         ref.relu_()
-                        fused = torch.ops.mkldnn._convolution_add_relu_(
-                            mod.conv1(x), x, mod.conv2.weight, mod.conv2.bias, mod.conv2.padding, mod.conv2.stride,
-                            mod.conv2.dilation, mod.conv2.groups
-                        )
-                    else:
-                        fused = torch.ops.mkldnn._convolution_add_(
-                            mod.conv1(x), x, mod.conv2.weight, mod.conv2.bias, mod.conv2.padding, mod.conv2.stride,
-                            mod.conv2.dilation, mod.conv2.groups
-                        )
+                        unary_attr = "relu"
+                    fused = torch.ops.mkldnn._convolution_pointwise_(
+                        x, mod.conv1(x), mod.conv2.weight, mod.conv2.bias, mod.conv2.padding, mod.conv2.stride,
+                        mod.conv2.dilation, mod.conv2.groups, "add", None, unary_attr, [], None
+                    )
                 self.assertEqual(ref, fused)
 
     def test_linear_binary_fusion_ops(self):

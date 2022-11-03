@@ -927,11 +927,27 @@ def register_onednn_fusion_ops():
             stride,
             dilation,
             groups,
-            attr,
+            binary_attr,
+            binary_alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         ):
             return TensorBox.create(
                 ir.ConvolutionBinary.create(
-                    x, other, weight, bias, padding, stride, dilation, groups, attr
+                    x,
+                    other,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    binary_attr,
+                    binary_alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithm,
                 )
             )
 

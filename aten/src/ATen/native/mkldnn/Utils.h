@@ -41,6 +41,8 @@ using AttrFunction = std::function<ideep::attr_t(
 
 const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map();
 
+const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
+
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()

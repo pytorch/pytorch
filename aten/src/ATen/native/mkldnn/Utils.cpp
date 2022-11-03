@@ -140,6 +140,13 @@ const std::map<c10::string_view, AttrFunction>& fx_fusion_attr_map() {
   return fusion_attr_map;
 };
 
+const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map() {
+  static const std::map<c10::string_view, ideep::algorithm> fusion_attr_map{
+      {"relu", {ideep::algorithm::eltwise_relu}},
+  };
+  return fusion_attr_map;
+};
+
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map() {
   static const std::map<c10::string_view, ideep::algorithm> fusion_attr_map{
       {"add", {ideep::algorithm::binary_add}},
