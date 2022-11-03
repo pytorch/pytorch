@@ -30,9 +30,10 @@ def pretty_print_buckets(buckets: List[Bucket]):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     for idx, bucket in enumerate(reversed(buckets)):
-        rows.append((idx, bucket.size, bucket.params[0]))
-        for param in bucket.params[1:]:
-            rows.append((None, None, param))
+        if len(bucket.params) > 0:
+            rows.append((idx, bucket.size, bucket.params[0]))
+            for param in bucket.params[1:]:
+                rows.append((None, None, param))
     try:
         from tabulate import tabulate
 
