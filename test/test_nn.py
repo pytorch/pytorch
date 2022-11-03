@@ -4907,7 +4907,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 n, k = k, n
             Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
             eps = 10 * n * torch.finfo(X.dtype).eps
-            torch.testing.assert_allclose(X.mH @ X, Id, atol=eps, rtol=0.)
+            torch.testing.assert_close(X.mH @ X, Id, atol=eps, rtol=0.)
 
 
         def assert_weight_allclose_Q(weight, W):
@@ -4920,7 +4920,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
             if wide_matrix:
                 Q = Q.mT
-            torch.testing.assert_allclose(Q, weight, atol=1e-5, rtol=0.)
+            torch.testing.assert_close(Q, weight, atol=1e-5, rtol=0.)
 
 
         for shape, dtype, use_linear in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
@@ -4979,7 +4979,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     w_new = w_new.mT
                 if can_initialize:
                     m.weight = w_new
-                    torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)
+                    torch.testing.assert_close(w_new, m.weight, atol=1e-5, rtol=0.)
                 else:
                     msg = "assign to the matrix exponential or the Cayley parametrization"
                     with self.assertRaisesRegex(NotImplementedError, msg):
