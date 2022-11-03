@@ -382,6 +382,11 @@ class ReductionHint(Enum):
     DEFAULT = 3
 
 
+class TileHint(Enum):
+    SQUARE = 0
+    DEFAULT = 1
+
+
 @dataclasses.dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
