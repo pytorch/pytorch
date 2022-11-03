@@ -1111,7 +1111,14 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     out = alpha * torch.mm(mat1, mat2)
     if beta == 0:
         return out
-    return beta * self + out
+
+    # The output of aten.addmm is contiguous, we need to match this behavior in the decomposition.
+    # The original implementation 'beta * self + out' would return a strided tensor if `self` is strided.
+    # We thus use `out`, the output of torch.mm, which is always contiguous, as the first argument for addition.
+    # This is relying on TensorIterator's behavior that it takes higher precedence on the stride of first input.
+    # Alternative, we can write `(beta * self + out).contiguous()`, but it introduces another copy in some cases.
+    # This implementation is not ideal, and we should revisit this when we have a better solution.
+    return out + beta * self
 
 
 # This computes the mean and variance along the specifized normalization dims,
@@ -1444,46 +1451,6 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
             self * aten.log(other),
         ),
     )
-
-
-@register_decomposition(aten.var.correction)
-@reduction_complex_to_real
-def var_correction(
-    x: Tensor,
-    dim: Optional[List[int]],
-    correction: Optional[int] = None,
-    keepdim: bool = False,
-):
-    dims: List[int] = [] if dim is None else dim
-
-    if x.is_complex():
-        # For complex, calculate variance of real and imaginary components
-        # separately then add to get overall variance.
-        real_in = x.real
-        var_real = torch.var(real_in, dims, correction=correction, keepdim=keepdim)
-        imag_in = x.imag
-        var_imag = torch.var(imag_in, dims, correction=correction, keepdim=keepdim)
-        return var_real + var_imag
-
-    if correction is None:
-        correction = 1
-
-    if len(dims) == 0:
-        n = prod(x.shape)  # type: ignore[arg-type]
-    else:
-        n = 1
-        for d in dims:
-            n *= x.shape[d]
-
-    mean = torch.mean(x, dims, True)
-    sub = x - mean
-    sq = sub * sub
-    sum = torch.sum(sq, dims, keepdim)
-
-    if correction:
-        n = n - correction
-
-    return sum / n
 
 
 @register_decomposition(aten.std.correction)
@@ -1919,6 +1886,11 @@ def upsample_bilinear2d_vec(
     q1 = torch.mul(v1, xscale1) + torch.mul(v2, xscale2)
     q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
     result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
+
+    # convert output to correct memory format, if necessary
+    input_memory_format = utils.suggest_memory_format(input)
+    result = result.contiguous(memory_format=input_memory_format)
+
     return result
 
 
