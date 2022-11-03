@@ -12,8 +12,13 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
-#include <ATen/ops/permute.h>
 #include <limits>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/permute.h>
+#endif
 
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>

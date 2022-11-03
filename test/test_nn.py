@@ -740,32 +740,33 @@ class TestNN(NNTestCase):
                 self.assertFalse(output2.requires_grad)
                 self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
-    def test_conv2d_channels_last_empty_input(self):
-        # channels_last2d
-        input = torch.randn((0, 4, 20, 20))
-        conv = torch.nn.Conv2d(4, 4, 3, 1)
-        out = conv(input)
-        conv_cl = torch.nn.Conv2d(4, 4, 3, 1).to(memory_format=torch.channels_last)
-        out_cl = conv_cl(input)
-        self.assertEqual(out, out_cl)
-        input_cl = input.to(memory_format=torch.channels_last)
-        out_cl2 = conv(input_cl)
-        self.assertEqual(out_cl, out_cl2)
-        out_cl3 = conv_cl(input_cl)
-        self.assertEqual(out_cl, out_cl3)
+    def test_conv_empty_input(self):
+        def help(input, conv, memory_format=None):
+            ref_out = conv(input)
+            conv_cl = conv.to(memory_format=memory_format)
+            out_cl = conv_cl(input)
+            self.assertEqual(ref_out, out_cl)
+            input_cl = input.to(memory_format=memory_format)
+            out_cl2 = conv(input_cl)
+            self.assertEqual(out_cl, out_cl2)
+            out_cl3 = conv_cl(input_cl)
+            self.assertEqual(out_cl, out_cl3)
 
-        # channels_last3d
-        input = torch.randn((0, 4, 20, 20, 20))
-        conv = torch.nn.Conv3d(4, 4, 3, 1)
-        out = conv(input)
-        conv_cl = torch.nn.Conv3d(4, 4, 3, 1).to(memory_format=torch.channels_last_3d)
-        out_cl = conv_cl(input)
-        self.assertEqual(out, out_cl)
-        input_cl = input.to(memory_format=torch.channels_last_3d)
-        out_cl2 = conv(input_cl)
-        self.assertEqual(out_cl, out_cl2)
-        out_cl3 = conv_cl(input_cl)
-        self.assertEqual(out_cl, out_cl3)
+        # channels_last case
+        input2d = torch.randn((0, 4, 20, 20))
+        conv2d = torch.nn.Conv2d(4, 4, 3, 1)
+        help(input2d, conv2d, torch.channels_last)
+        # channels_last_3d case
+        input3d = torch.randn((0, 4, 20, 20, 20))
+        conv3d = torch.nn.Conv3d(4, 4, 3, 1)
+        help(input3d, conv3d, torch.channels_last_3d)
+        # non-contiguous case
+        weight = torch.rand(4, 8, 3, 3)[:, ::2, :, :]
+        bias = torch.rand(4)
+        out = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
+        weight = weight.contiguous()
+        out_ref = F.conv2d(input2d, weight, bias, (1, 1), 0, (1, 1), 1)
+        self.assertEqual(out_ref, out)
 
     def test_parameters_and_named_parameters(self):
         def names(named_parameters):
