@@ -5942,6 +5942,7 @@ class ModuleTest(TestBase):
             kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
         self.precision = kwargs.get('precision', 2e-4)
         self.check_forward_only = kwargs.get('check_forward_only', False)
+        self.skip_inductor_reason = kwargs.get('skip_inductor_reason', None)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -5990,6 +5991,8 @@ class ModuleTest(TestBase):
         return noncontig
 
     def test_noncontig(self, test_case, module, input):
+        if self.skip_inductor_reason:
+            raise unittest.SkipTest(self.skip_inductor_reason)
         # check no scalars, can't make non-contig
         if isinstance(input, torch.Tensor) and input.dim() == 0:
             return
@@ -6029,6 +6032,9 @@ class ModuleTest(TestBase):
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
             raise unittest.SkipTest('Excluded from CUDA tests')
+
+        if self.skip_inductor_reason:
+            raise unittest.SkipTest(self.skip_inductor_reason)
 
         cpu_input = self._get_input()
         type_map = {torch.double: torch.float}
@@ -6169,6 +6175,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                                                check_fwd_over_rev=self.supports_fwgrad_bwgrad))
 
     def _do_test(self, test_case, module, input):
+        if self.skip_inductor_reason:
+            raise unittest.SkipTest(self.skip_inductor_reason)
         num_threads = torch.get_num_threads()
         torch.set_num_threads(1)
         input_tuple = input if isinstance(input, tuple) else (input,)

@@ -7408,7 +7408,8 @@ add_test(NewModuleTest(
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax',
     with_tf32=True,
-    tf32_precision=0.005))
+    tf32_precision=0.005,
+    skip_inductor_reason="out= ops aren't supported in TorchInductor"))
 
 
 # The following are helpers for TestNN.test_affine_*
