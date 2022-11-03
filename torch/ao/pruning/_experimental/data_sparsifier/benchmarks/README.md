@@ -5,7 +5,7 @@ The objective of this exercise is to use the data sparsifier to prune the embedd
 
 1. **Disk usage savings**: Savings in model size after pruning.
 2. **Model Quality**: How and by how much does performance deteriorate after pruning the embedding bags?
-3. **Model forward time**: Can we speed up the model forward time by utilizing the sparsity? Specificially, can we introduce torch.sparse interim to reduce number of computations.
+3. **Model forward time**: Can we speed up the model forward time by utilizing the sparsity? Specifically, can we introduce torch.sparse interim to reduce number of computations.
 
 ## Scope
 The [DataNormSparsifier](https://github.com/pytorch/pytorch/blob/master/torch/ao/sparsity/_experimental/data_sparsifier/data_norm_sparsifier.py) is used to sparsify the embeddings of the DLRM model. The model is sparsified for all the combinations of -
