@@ -194,6 +194,12 @@ class FakeTensorTest(TestCase):
             y1 = torch.randperm(5, device="cpu")
             prims.utils.compare_tensor_meta(y, y1)
 
+    def test_print_in_fake_mode(self):
+        x = torch.zeros(2)
+        # does not fail
+        with FakeTensorMode():
+            out = str(x)
+        assert "FakeTensor" not in out
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):

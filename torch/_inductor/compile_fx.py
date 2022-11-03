@@ -84,7 +84,7 @@ def _step_logger():
 
 
 @DebugContext.wrap
-@dynamo_utils.disable_current_modes()
+@torch.utils._python_dispatch._disable_current_modes()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
