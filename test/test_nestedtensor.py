@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    subtest,
 )
 
 # Tests are ported from pytorch/nestedtensor.
@@ -748,13 +749,13 @@ class TestNestedTensorDeviceType(TestCase):
         expected_grad = torch.nested.nested_tensor([grad_x0, torch.zeros((3, 4), device=device, dtype=dtype)])
         self.assertEqual(nt.grad, expected_grad)
 
-    @parametrize("func", [torch.nn.functional.relu,
-                          torch.nn.functional.relu_,
-                          torch.nn.functional.gelu,
-                          torch._C._nn.gelu_,
-                          torch.tanh,
-                          torch.tanh_,
-                          torch.neg])
+    @parametrize("func", [subtest(torch.nn.functional.relu, name='relu'),
+                          subtest(torch.nn.functional.relu_, name='relu_'),
+                          subtest(torch.nn.functional.gelu, name='gelu'),
+                          subtest(torch._C._nn.gelu_, name='gelu_'),
+                          subtest(torch.tanh, name='tanh'),
+                          subtest(torch.tanh_, name='tanh_'),
+                          subtest(torch.neg, name='neg')])
     def test_activations(self, device, func):
         nt, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7), device=device, dtype=torch.float32)
         nested_result = func(nt)
