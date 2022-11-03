@@ -9,24 +9,26 @@ import weakref
 from typing import Callable
 
 import torch
-from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+from torch.fx.graph_module import (
+    _forward_from_src as original_forward_from_src,
+)
 
 from . import config, exc
 from .allowed_functions import is_allowed
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
 from .eval_frame import (
-    always_optimize_code_objects,
-    skip_code,
     TorchPatcher,
     WrapperBackend,
+    always_optimize_code_objects,
+    skip_code,
 )
 from .exc import (
     BackendCompilerFailed,
     InternalTorchDynamoError,
     TorchRuntimeError,
-    unimplemented,
     Unsupported,
+    unimplemented,
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .replay_record import ExecutionRecord
@@ -213,6 +215,8 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
                     stack_above_dynamo + list(reversed(exc.real_stack))
                 )
             )
+            msg += "\n"
+            msg += "=" * 10
 
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
@@ -222,14 +226,21 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
 
 def augment_exc_message(exc, msg="\n"):
-    if hasattr(exc, "real_stack") and len(exc.real_stack) > 0 and not config.verbose:
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list([exc.real_stack[-1]]))}"
+    if (
+        hasattr(exc, "real_stack")
+        and len(exc.real_stack) > 0
+        and not (config.verbose and config.suppress_errors)
+    ):
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(reversed(exc.real_stack)))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  {config.dynamo_import}.replay('{exc.record_filename}').\n"
 
-    msg += f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+    if not config.verbose:
+        msg += (
+            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
+        )
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
@@ -246,7 +257,6 @@ def augment_exc_message(exc, msg="\n"):
             "    torchdynamo.config.suppress_errors = True\n"
         )
 
-    msg += "=" * 10
     old_msg = "" if len(exc.args) == 0 else exc.args[0]
     new_msg = old_msg + msg
     exc.args = (new_msg,) + exc.args[1:]
