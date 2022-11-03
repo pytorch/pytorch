@@ -59,7 +59,7 @@ def reference_inputs_window(op_info, device, dtype, requires_grad, *args, **kwar
 
 
 def reference_inputs_exponential_window(
-        op_info, device, dtype, requires_grad, **kwargs
+    op_info, device, dtype, requires_grad, **kwargs
 ):
     yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
 
@@ -193,12 +193,12 @@ def reference_signal_window(fn: Callable):
     """
 
     def _fn(
-            *args,
-            dtype=numpy.float64,
-            device=None,
-            layout=torch.strided,
-            requires_grad=False,
-            **kwargs,
+        *args,
+        dtype=numpy.float64,
+        device=None,
+        layout=torch.strided,
+        requires_grad=False,
+        **kwargs,
     ):
         r"""The unused arguments are defined to disregard those values"""
         return fn(*args, **kwargs).astype(dtype)
@@ -207,13 +207,13 @@ def reference_signal_window(fn: Callable):
 
 
 def make_signal_windows_opinfo(
-        name: str,
-        ref: Callable,
-        sample_inputs_func: Callable,
-        reference_inputs_func: Callable,
-        error_inputs_func: Callable,
-        *,
-        skips: Tuple[DecorateInfo, ...] = (),
+    name: str,
+    ref: Callable,
+    sample_inputs_func: Callable,
+    reference_inputs_func: Callable,
+    error_inputs_func: Callable,
+    *,
+    skips: Tuple[DecorateInfo, ...] = (),
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
@@ -277,7 +277,6 @@ def make_signal_windows_opinfo(
 
 
 op_db: List[OpInfo] = [
-
     make_signal_windows_opinfo(
         name="signal.windows.hamming",
         ref=reference_signal_window(scipy.signal.windows.hamming)
@@ -420,7 +419,7 @@ op_db: List[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
-            )
+            ),
         ),
     ),
     make_signal_windows_opinfo(
@@ -471,8 +470,8 @@ op_db: List[OpInfo] = [
                 unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
                 "TestCommon",
                 "test_numpy_ref_mps",
-            )
-        )
+            ),
+        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.exponential",
@@ -516,7 +515,8 @@ op_db: List[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
                 dtypes=[torch.float16],
-                device_type="cpu"),
+                device_type="cpu",
+            ),
             DecorateInfo(
                 unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
                 "TestCommon",
@@ -566,7 +566,8 @@ op_db: List[OpInfo] = [
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
                 dtypes=[torch.float16],
-                device_type="cpu"),
+                device_type="cpu",
+            ),
             DecorateInfo(
                 unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
                 "TestCommon",
@@ -583,6 +584,41 @@ op_db: List[OpInfo] = [
         reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
         error_inputs_func=error_inputs_kaiser_window,
         skips=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
             DecorateInfo(
                 unittest.skip("Unsupported on MPS for now pending aten::i0 support"),
                 "TestCommon",

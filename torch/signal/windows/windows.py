@@ -315,17 +315,23 @@ def gaussian(
 @_add_docstr(
     r"""
 Computes the Kaiser window.
+
 The Kaiser window is defined as follows:
+
 .. math::
     out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
 where ``I_0`` is the zeroth order modified Bessel function of the first kind (see :func:`torch.special.i0`), and
 ``N = M - 1 if sym else M``.
+
 ``M`` is the window length.
     """,
     r"""
+
 {normalization}
+
 Args:
     {M}
+
 Keyword args:
     beta (float, optional): shape parameter for the window. Must be non-negative. Default: 12.0
     {sym}
@@ -333,7 +339,9 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+
 Examples::
+
     >>> # Generate a symmetric gaussian window with a standard deviation of 1.0.
     >>> torch.signal.windows.kaiser(5)
     tensor([4.0065e-05, 2.1875e-03, 4.3937e-02, 3.2465e-01, 8.8250e-01, 8.8250e-01, 3.2465e-01, 4.3937e-02, 2.1875e-03, 4.0065e-05])
