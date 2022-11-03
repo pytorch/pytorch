@@ -162,7 +162,7 @@ def main() -> None:
 
     if args.event_name == "schedule":
         for config in filtered_test_matrix.get("include", []):
-            config["leak-check"] = "leak-check"
+            config["mem_leak_check"] = "mem_leak_check"
 
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))

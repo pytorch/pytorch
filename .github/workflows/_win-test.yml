@@ -124,7 +124,7 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           PR_BODY: ${{ github.event.pull_request.body }}
           TORCH_CUDA_ARCH_LIST: "7.0"
-          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.leak-check && '1' || '0'}}
+          PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0'}}
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
