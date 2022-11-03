@@ -2668,14 +2668,18 @@ class TestSharding(TestCase):
         self.assertEqual(sorted(all_items), sorted(items))
 
     def test_sharding_groups(self):
-        sharding_pipes = []
-        dp = NumbersDataset(size=90)
-        dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.DISTRIBUTED)
-        sharding_pipes.append(dp)
-        dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.MULTIPROCESSING)
-        sharding_pipes.append(dp)
-        dp = dp.sharding_filter(sharding_group_filter=300)
-        sharding_pipes.append(dp)
+        def construct_sharded_pipe():
+            sharding_pipes = []
+            dp = NumbersDataset(size=90)
+            dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.DISTRIBUTED)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=SHARDING_PRIORITIES.MULTIPROCESSING)
+            sharding_pipes.append(dp)
+            dp = dp.sharding_filter(sharding_group_filter=300)
+            sharding_pipes.append(dp)
+            return dp, sharding_pipes
+
+        dp, sharding_pipes = construct_sharded_pipe()
 
         for pipe in sharding_pipes:
             pipe.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DISTRIBUTED)
@@ -2687,9 +2691,15 @@ class TestSharding(TestCase):
         self.assertEquals(expected, actual)
         self.assertEquals(3, len(dp))
 
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
+        with self.assertRaises(Exception):
+            dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
+
+        dp, _ = construct_sharded_pipe()
+        dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
-            dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
 
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))

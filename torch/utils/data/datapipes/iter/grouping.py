@@ -10,6 +10,7 @@ __all__ = [
     "BatcherIterDataPipe",
     "GrouperIterDataPipe",
     "ShardingFilterIterDataPipe",
+    "SHARDING_PRIORITIES",
     "UnBatcherIterDataPipe",
 ]
 
@@ -45,6 +46,8 @@ class ShardingFilterIterDataPipe(IterDataPipe):
         return True
 
     def apply_sharding(self, num_of_instances, instance_id, sharding_group=SHARDING_PRIORITIES.DEFAULT):
+        if instance_id >= num_of_instances:
+            raise ValueError(f"instance_id({instance_id}) should be smaller than num_of_instances({num_of_instances})")
         if sharding_group == SHARDING_PRIORITIES.DEFAULT:
             if len(self.groups) and SHARDING_PRIORITIES.DEFAULT not in self.groups:
                 raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')
@@ -57,11 +60,8 @@ class ShardingFilterIterDataPipe(IterDataPipe):
     def _update_num_of_instances(self):
         sorted_sharding_groups = []
         for key in sorted(self.groups.keys()):
-            if self.sharding_group_filter is None:
+            if self.sharding_group_filter is None or key == self.sharding_group_filter:
                 sorted_sharding_groups.append(self.groups[key])
-            else:
-                if key == self.sharding_group_filter:
-                    sorted_sharding_groups.append(self.groups[key])
 
         sorted_sharding_groups.reverse()
 
