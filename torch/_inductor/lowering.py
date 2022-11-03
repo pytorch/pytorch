@@ -3,7 +3,7 @@ import itertools
 import logging
 import operator
 from collections.abc import Iterable
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import sympy
 
@@ -1984,20 +1984,20 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
+def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]
     batch = x.get_size()[:-n]
     i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
 
-    if scale_factors:
-        assert not output_size
-        o_sizes = [int(i * s) for i, s in zip(i_sizes, scale_factors)]
-    else:
-        o_sizes = output_size
+    assert len(scales_x) == n
+    o_sizes = output_size
 
     scales = [i / o for i, o in zip(i_sizes, o_sizes)]
+    for i, scale in enumerate(scales):
+        if scale:
+            scales[i] = scale
 
     def scale(x, scale):
         x = ops.index_expr(x, torch.float32)
@@ -2018,9 +2018,27 @@ def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
     )
 
 
-register_lowering(aten.upsample_nearest1d)(functools.partial(upsample_nearestnd, n=1))
-register_lowering(aten.upsample_nearest2d)(functools.partial(upsample_nearestnd, n=2))
-register_lowering(aten.upsample_nearest3d)(functools.partial(upsample_nearestnd, n=3))
+@register_lowering(aten.upsample_nearest1d.default)
+def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
+    return upsample_nearestnd(x, output_size, (scales,), n=1)
+
+
+@register_lowering(aten.upsample_nearest2d.default)
+def upsample_nearest2d(
+    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+):
+    return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
+
+
+@register_lowering(aten.upsample_nearest3d.default)
+def upsample_nearest3d(
+    x,
+    output_size,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+):
+    return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
 @register_lowering(aten.upsample_bicubic2d.default)

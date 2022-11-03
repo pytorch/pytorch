@@ -11,6 +11,8 @@ from caffe2.python import core, workspace
 from hypothesis import given, settings
 from scipy.stats import norm
 
+from ._utils import assert_allclose
+
 
 def generate_rois(roi_counts, im_dims):
     assert len(roi_counts) == len(im_dims)
@@ -172,7 +174,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             legacy_plus_one=True,
         )
 
-        torch.testing.assert_allclose(box_out, a)
+        assert_allclose(box_out, a)
 
     @given(
         roi_counts=st.lists(st.integers(0, 5), min_size=1, max_size=10),
@@ -268,7 +270,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
 
         for o, o_ref in zip(outputs, output_refs):
-            torch.testing.assert_allclose(o, o_ref)
+            assert_allclose(o, o_ref)
 
     @given(
         dim_1=st.integers(min_value=10, max_value=10),
@@ -314,7 +316,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             mask=mask,
         )
 
-        torch.testing.assert_allclose(output, a)
+        assert_allclose(output, a)
 
         # Testing return_presence_mask = True
         output, presence_mask = sparse_to_dense_mask_ref(return_presence_mask=True)
@@ -330,8 +332,8 @@ class TorchIntegration(hu.HypothesisTestCase):
             return_presence_mask=True,
         )
 
-        torch.testing.assert_allclose(output, a)
-        torch.testing.assert_allclose(presence_mask, b)
+        assert_allclose(output, a)
+        assert_allclose(presence_mask, b)
 
     @given(
         A=st.integers(min_value=4, max_value=4),
@@ -382,8 +384,8 @@ class TorchIntegration(hu.HypothesisTestCase):
             1.0,
             legacy_plus_one=True,
         )
-        torch.testing.assert_allclose(rois, a)
-        torch.testing.assert_allclose(rois_probs, b)
+        assert_allclose(rois, a)
+        assert_allclose(rois_probs, b)
 
     @given(
         bsz=st.integers(1, 5),
@@ -461,9 +463,9 @@ class TorchIntegration(hu.HypothesisTestCase):
         a, b, c = torch.ops._caffe2.InferenceLSTM(
             lstm_in, num_layers, has_biases, batch_first, is_bidirectional
         )
-        torch.testing.assert_allclose(output, a)
-        torch.testing.assert_allclose(hidden, b)
-        torch.testing.assert_allclose(cell, c)
+        assert_allclose(output, a)
+        assert_allclose(hidden, b)
+        assert_allclose(cell, c)
 
     # Test case is using workspace.has_cuda_support and not workspace.has_gpu_support
     # to exclude it from HIP because tensor interop doesn't work for HIP tensors yet
@@ -517,8 +519,8 @@ class TorchIntegration(hu.HypothesisTestCase):
             1.0,
             legacy_plus_one=True,
         )
-        torch.testing.assert_allclose(rois, a.cpu())
-        torch.testing.assert_allclose(rois_probs, b.cpu())
+        assert_allclose(rois, a.cpu())
+        assert_allclose(rois_probs, b.cpu())
 
     @given(
         N=st.integers(min_value=1, max_value=2),
@@ -567,7 +569,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             sampling_ratio=0,
             aligned=False,
         )
-        torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
+        assert_allclose(roi_feature_ref, roi_feature.cpu())
 
     def test_roi_align_cpu(self):
         self._test_roi_align(device="cpu")
@@ -624,7 +626,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             sampling_ratio=0,
             aligned=False,
         )
-        torch.testing.assert_allclose(roi_feature_ref, roi_feature.cpu())
+        assert_allclose(roi_feature_ref, roi_feature.cpu())
 
     def test_roi_align_rotated_cpu(self):
         self._test_roi_align_rotated(device="cpu")
@@ -674,9 +676,9 @@ class TorchIntegration(hu.HypothesisTestCase):
         rois_idx_restore_int32 = fpn_outputs[-1]
 
         # [rois] + fpn_outputs should be equal to all_outputs
-        torch.testing.assert_allclose(rois, all_outputs[0])
+        assert_allclose(rois, all_outputs[0])
         for x, y in zip(fpn_outputs, all_outputs[1:]):
-            torch.testing.assert_allclose(x, y)
+            assert_allclose(x, y)
 
     @given(X=hu.tensor(), fast_gelu=st.booleans())
     def _test_gelu_op(self, X, fast_gelu, device):
@@ -688,7 +690,7 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         rtol = 1e-3 if fast_gelu else 1e-4
         atol = 1e-5
-        torch.testing.assert_allclose(
+        assert_allclose(
             expected_output, actual_output.cpu(), rtol=rtol, atol=atol
         )
 
@@ -719,7 +721,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.tensor(data), torch.tensor(lengths, dtype=torch.int32)
         )
 
-        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+        assert_allclose(expected_output, actual_output.cpu())
 
     def _test_lengths_sum_op(self, device):
         self._test_lengths_op("LengthsSum", torch.ops._caffe2.LengthsSum, device)
@@ -775,7 +777,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             height_scale=1.5,
         )
 
-        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+        assert_allclose(expected_output, actual_output.cpu())
 
     def test_resize_nearest_op_cpu(self):
         return self._test_resize_nearest_op("cpu")
@@ -838,16 +840,16 @@ class TorchIntegration(hu.HypothesisTestCase):
             binary_input,
         )
 
-        torch.testing.assert_allclose(torch.tensor(expected_output), actual_output)
+        assert_allclose(torch.tensor(expected_output), actual_output)
 
     def test_alias_with_name_is_in_place(self):
         device = "cuda" if workspace.has_cuda_support else "cpu"
         x = torch.tensor([3., 42.]).to(device=device)
         y = torch.ops._caffe2.AliasWithName(x, "new_name")
         x[1] = 6
-        torch.testing.assert_allclose(x, torch.tensor([3., 6.]).to(device=device))
+        assert_allclose(x, torch.tensor([3., 6.]).to(device=device))
         # y should also change because y is alias of x
-        torch.testing.assert_allclose(y, torch.tensor([3., 6.]).to(device=device))
+        assert_allclose(y, torch.tensor([3., 6.]).to(device=device))
 
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
     def test_copy_between_cpu_and_gpu(self):
@@ -855,9 +857,9 @@ class TorchIntegration(hu.HypothesisTestCase):
         x_gpu_ref = x_cpu_ref.to("cuda")
 
         x_gpu = torch.ops._caffe2.CopyCPUToGPU(x_cpu_ref)
-        torch.testing.assert_allclose(x_gpu, x_gpu_ref)
+        assert_allclose(x_gpu, x_gpu_ref)
         x_cpu = torch.ops._caffe2.CopyGPUToCPU(x_gpu)
-        torch.testing.assert_allclose(x_cpu, x_cpu_ref)
+        assert_allclose(x_cpu, x_cpu_ref)
 
     def test_index_hash_op(self):
         data = np.random.randint(low=0, high=1000, size=(4, 4, 4))
@@ -873,7 +875,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.tensor(data), seed=0, modulo=100
         )
 
-        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+        assert_allclose(expected_output, actual_output.cpu())
 
     def test_bucketize_op(self):
         data = np.random.rand(8, 10).astype(np.float32) * 1000
@@ -889,7 +891,7 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         expected_output = _bucketize_ref(data)
         actual_output = torch.ops._caffe2.Bucketize(torch.tensor(data), boundaries)
-        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+        assert_allclose(expected_output, actual_output.cpu())
 
     @given(X=hu.tensor(), eps=st.floats(min_value=1e-4, max_value=1e-2))
     def test_logit(self, X, eps):
@@ -901,7 +903,7 @@ class TorchIntegration(hu.HypothesisTestCase):
 
         expected_output = ref(X, eps)
         actual_output = torch.ops._caffe2.Logit(torch.tensor(X), eps)
-        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+        assert_allclose(expected_output, actual_output.cpu())
 
     def test_percentile(self):
         original_values = np.array([[3.0, 5.0, 3], [5.0, 1.0, 6.0]]).astype(np.float32)
@@ -926,7 +928,7 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.tensor(value_to_pct),
             torch.tensor(lengths),
         )
-        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+        assert_allclose(expected_output, actual_output.cpu())
 
     def test_batch_bucket_one_hot_op(self):
         data = np.array([[2, 3], [4, 1], [2, 5]]).astype(np.float32)
@@ -947,7 +949,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         actual_output = torch.ops._caffe2.BatchBucketOneHot(
             torch.tensor(data), torch.tensor(lengths), torch.tensor(boundaries)
         )
-        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+        assert_allclose(expected_output, actual_output.cpu())
 
     def test_gather_ranges_to_dense_op(self):
         data = np.array([1, 2, 3, 4, 5, 6, 7, 8])
@@ -1033,8 +1035,8 @@ class TorchIntegration(hu.HypothesisTestCase):
                 torch.tensor(values[1]),
             ]
         )
-        torch.testing.assert_allclose(expected_merged_lengths, output_merged_lengths)
-        torch.testing.assert_allclose(expected_merged_values, output_merged_values)
+        assert_allclose(expected_merged_lengths, output_merged_lengths)
+        assert_allclose(expected_merged_values, output_merged_values)
 
     def test_learning_rate(self):
         base_lr = 0.05
@@ -1097,7 +1099,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         packed_tensor, _ = torch.ops._caffe2.PackSegments(lengths, s)
         self.assertEqual(packed_tensor.numpy().shape, (2, 2, 3, 3))
         unpacked_tensor = torch.ops._caffe2.UnpackSegments(lengths, packed_tensor)
-        torch.testing.assert_allclose(s, unpacked_tensor)
+        assert_allclose(s, unpacked_tensor)
 
 
 if __name__ == "__main__":
