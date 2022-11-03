@@ -16,27 +16,6 @@ __all__ = [
     "NodePattern",
     "Pattern",
     "MatchAllNode",
-    "check_node",
-    "get_combined_dict",
-    "is_per_tensor",
-    "is_per_channel",
-    "getattr_from_fqn",
-    "get_qparam_dict",
-    "get_swapped_custom_module_class",
-    "_activation_dtype",
-    "_weight_dtype",
-    "_activation_is_statically_quantized",
-    "_activation_is_dynamically_quantized",
-    "_activation_is_int8_quantized",
-    "_activation_is_int32_quantized",
-    "_weight_is_quantized",
-    "_weight_is_statically_quantized",
-    "_op_is_int8_dynamically_quantized",
-    "_get_qconfig_dtypes",
-    "_get_quant_type",
-    "_check_min_max_valid",
-    "_calculate_qmin_qmax",
-    "has_no_children_ignoring_parametrizations",
     "get_fqn_to_example_inputs",
 ]
 
@@ -140,27 +119,38 @@ _method_list = {
     'view',
 }
 
-def get_combined_dict(default_dict, additional_dict):
+def _get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
     d.update(additional_dict)
     return d
 
-def is_per_tensor(qscheme):
+def _is_per_tensor(qscheme):
     return qscheme == torch.per_tensor_affine or \
         qscheme == torch.per_tensor_symmetric
 
-def is_per_channel(qscheme):
+def _is_per_channel(qscheme):
     return qscheme in [torch.per_channel_affine,
                        torch.per_channel_affine_float_qparams,
                        torch.per_channel_symmetric]
 
-def getattr_from_fqn(obj: Any, fqn: str) -> Any:
+def _getattr_from_fqn(obj: Any, fqn: str) -> Any:
     """
     Given an obj and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
     """
     return functools.reduce(getattr, fqn.split("."), obj)
 
-def get_qparam_dict(observer_or_fake_quant):
+def _to_underlying_dtype(qdtype):
+    DTYPE_MAPPING = {
+        torch.quint8: torch.uint8,
+        torch.qint8: torch.int8,
+        torch.qint32: torch.int32,
+        torch.quint4x2: torch.uint8,
+        torch.quint2x4: torch.uint8,
+    }
+    assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + qdtype
+    return DTYPE_MAPPING[qdtype]
+
+def _get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
@@ -168,9 +158,9 @@ def get_qparam_dict(observer_or_fake_quant):
     if not qscheme:
         return qparams
 
-    if is_per_tensor(qscheme):
+    if _is_per_tensor(qscheme):
         qscheme = torch.per_tensor_affine
-    elif is_per_channel(qscheme):
+    elif _is_per_channel(qscheme):
         # change symmetric to affine since we do not have symmetric
         # quantized Tensor
         if qscheme == torch.per_channel_symmetric:
@@ -189,7 +179,7 @@ def get_qparam_dict(observer_or_fake_quant):
     return qparams
 
 
-def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
+def _get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
     """ Get the observed/quantized custom module class that we need
     to swap `custom_module` to
     Input:
@@ -336,7 +326,7 @@ def _check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
 
 
 def _calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: bool, dtype: torch.dtype,
-                        reduce_range: bool) -> Tuple[int, int]:
+                         reduce_range: bool) -> Tuple[int, int]:
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
@@ -398,7 +388,7 @@ def _parent_name(target):
     else:
         return r[0], r[1]
 
-def has_no_children_ignoring_parametrizations(module):
+def _has_no_children_ignoring_parametrizations(module):
     """
     Checks if module._modules is empty or
     if module is a parametrization, checks that module._modules only has

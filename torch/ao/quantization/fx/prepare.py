@@ -26,7 +26,6 @@ from ..qconfig import (
     QConfigAny,
 )
 from ..qconfig_mapping import (
-    _FIXED_QPARAMS_OP_TO_OBSERVER,
     QConfigMapping,
 )
 from ..qconfig_mapping_utils import (
@@ -90,7 +89,7 @@ from torch.ao.quantization.quantize import (
 
 from ..utils import (
     _get_qconfig_dtypes,
-    get_swapped_custom_module_class,
+    _get_swapped_custom_module_class,
     _activation_is_statically_quantized,
     _activation_is_int8_quantized,
 )
@@ -99,6 +98,7 @@ from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
+    get_fixed_qparams_op_to_overwrite_output_observer,
 )
 from ..backend_config import (
     BackendConfig,
@@ -1110,7 +1110,7 @@ def swap_custom_module_to_observed(
     custom_module = modules[node.target]  # type: ignore[index]
     custom_module_class_mapping = prepare_custom_config.float_to_observed_mapping
     observed_custom_module_class = \
-        get_swapped_custom_module_class(
+        _get_swapped_custom_module_class(
             custom_module, custom_module_class_mapping, qconfig)
     observed_custom_module = \
         observed_custom_module_class.from_float(custom_module)
@@ -1392,7 +1392,10 @@ def insert_observers_for_model(
 
     return results_node
 
-def _validate_fixed_qparams_qconfigs(model: GraphModule, node_name_to_qconfig: Dict[str, QConfigAny]):
+def _validate_fixed_qparams_qconfigs(
+        model: GraphModule,
+        node_name_to_qconfig: Dict[str, QConfigAny],
+        backend_config: BackendConfig):
     """
     Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
     """
@@ -1402,6 +1405,8 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, node_name_to_qconfig: D
         float16_static_qconfig.activation,
     ]
     named_modules = dict(model.named_modules(remove_duplicate=False))
+    fixed_qparams_op_to_overwrite_output_observer = \
+        get_fixed_qparams_op_to_overwrite_output_observer(backend_config)
     for node in model.graph.nodes:
         if node.op == "call_function":
             module_type_or_function_or_method = node.target
@@ -1410,13 +1415,14 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, node_name_to_qconfig: D
         else:
             module_type_or_function_or_method = None
 
-        if module_type_or_function_or_method in _FIXED_QPARAMS_OP_TO_OBSERVER:
+        if module_type_or_function_or_method in fixed_qparams_op_to_overwrite_output_observer:
             bad_observer = True
             qconfig = node_name_to_qconfig.get(node.name, None)
             if qconfig is None:
                 bad_observer = False
             else:
-                for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[module_type_or_function_or_method]]:
+                for observer_ctr in allowed_observer_ctrs + [
+                        fixed_qparams_op_to_overwrite_output_observer[module_type_or_function_or_method]]:
                     if _obs_or_fq_ctr_equals(
                             qconfig.activation,
                             FixedQParamsFakeQuantize.with_args(observer=observer_ctr)) or \
@@ -1603,7 +1609,7 @@ def prepare(
     equalization_node_name_to_qconfig = generate_node_name_to_qconfig(
         model, modules, model.graph, _equalization_config, node_name_to_scope)
     node_name_to_qconfig = generate_node_name_to_qconfig(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
-    _validate_fixed_qparams_qconfigs(model, node_name_to_qconfig)
+    _validate_fixed_qparams_qconfigs(model, node_name_to_qconfig, backend_config)
 
     # match the patterns that will get quantized
     standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())

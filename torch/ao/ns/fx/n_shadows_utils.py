@@ -19,7 +19,7 @@ from torch.ao.ns.fx.graph_passes import _maybe_get_fqn
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.qconfig import QConfigAny
-from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.utils import _getattr_from_fqn
 from torch.ao.quantization.fx.match_utils import MatchResult
 
 import collections
@@ -453,7 +453,7 @@ def create_submodule_from_subgraph(
 
         # copy the node
         if cur_node_orig.op == 'call_module':
-            orig_mod = getattr_from_fqn(model, cur_node_orig.target)  # type: ignore[arg-type]
+            orig_mod = _getattr_from_fqn(model, cur_node_orig.target)  # type: ignore[arg-type]
             orig_mod_copy = copy.deepcopy(orig_mod)
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)

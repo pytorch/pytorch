@@ -25,7 +25,7 @@ from torch.ao.quantization.fake_quantize import (
     default_fixed_qparams_range_0to1_fake_quant,
     default_fixed_qparams_range_neg1to1_fake_quant,
 )
-from torch.ao.quantization.utils import get_combined_dict
+from torch.ao.quantization.utils import _get_combined_dict
 from torch.nn.utils.parametrize import type_before_parametrizations
 
 __all__ = [
@@ -242,7 +242,7 @@ def get_static_quant_module_class(
     """
     if additional_static_quant_mapping is None:
         additional_static_quant_mapping = {}
-    all_mappings = get_combined_dict(
+    all_mappings = _get_combined_dict(
         DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS if is_reference
         else DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
@@ -259,7 +259,7 @@ def get_dynamic_quant_module_class(
     """
     if additional_dynamic_quant_mapping is None:
         additional_dynamic_quant_mapping = {}
-    all_mappings = get_combined_dict(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS, additional_dynamic_quant_mapping)
+    all_mappings = _get_combined_dict(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS, additional_dynamic_quant_mapping)
     dynamic_quant_module_class = all_mappings.get(float_module_class, None)
     assert dynamic_quant_module_class is not None, \
         "Floating point module class {}".format(str(float_module_class)) + \

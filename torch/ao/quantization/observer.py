@@ -13,7 +13,7 @@ from typing import Any, List, Tuple, Optional, Dict
 import torch
 import torch.nn as nn
 from torch.ao.quantization.utils import (
-    _check_min_max_valid, _calculate_qmin_qmax, is_per_tensor, is_per_channel)
+    _check_min_max_valid, _calculate_qmin_qmax, _is_per_tensor, _is_per_channel)
 
 __all__ = [
     "default_affine_fixed_qparams_observer",
@@ -451,7 +451,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if not is_per_tensor(qscheme):
+        if not _is_per_tensor(qscheme):
             raise NotImplementedError(
                 "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
@@ -569,7 +569,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
-        if not is_per_tensor(qscheme):
+        if not _is_per_tensor(qscheme):
             raise NotImplementedError(
                 "MovingAverageMinMaxObserver's qscheme only support \
                     torch.per_tensor_symmetric and torch.per_tensor_affine."
@@ -644,7 +644,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if not is_per_channel(qscheme):
+        if not _is_per_channel(qscheme):
             raise NotImplementedError(
                 "PerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
@@ -836,7 +836,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
-        if not is_per_channel(qscheme):
+        if not _is_per_channel(qscheme):
             raise NotImplementedError(
                 "MovingAveragePerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
@@ -922,7 +922,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if not is_per_tensor(qscheme):
+        if not _is_per_tensor(qscheme):
             raise NotImplementedError(
                 "HistogramObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."

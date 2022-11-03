@@ -6,7 +6,7 @@ from torch.ao.quantization.backend_config import (
 )
 from torch.ao.quantization.utils import (
     _activation_dtype,
-    get_combined_dict,
+    _get_combined_dict,
     Pattern,
     NodePattern,
     QuantizerCls,
@@ -124,7 +124,7 @@ def get_native_quant_patterns(additional_quant_patterns: Dict[Pattern, Quantizer
     """
     patterns = get_default_quant_patterns()
     if additional_quant_patterns is not None:
-        patterns = get_combined_dict(patterns, additional_quant_patterns)
+        patterns = _get_combined_dict(patterns, additional_quant_patterns)
     # TODO: currently we just extend the quantize handlers generated from
     # `get_native_backend_config`
     # in the future we can just assign backend_config when everything is defined

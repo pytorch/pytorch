@@ -7,7 +7,7 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.utils import _getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
     get_base_name_to_sets_of_related_ops,
@@ -113,7 +113,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # relevant is an observer on a graph input, which was added because
             # it is necessary for the next node.
             if cur_end_node.op == 'call_module' and cur_start_node is cur_end_node:
-                maybe_obs = getattr_from_fqn(self.gm, cur_end_node.target)  # type: ignore[arg-type]
+                maybe_obs = _getattr_from_fqn(self.gm, cur_end_node.target)  # type: ignore[arg-type]
                 if isinstance(maybe_obs, (ObserverBase, FakeQuantizeBase)):
                     continue
 
@@ -142,7 +142,7 @@ class _NSGraphMatchableSubgraphsIterator:
             return not (node.target in self.non_matchable_functions)
         elif node.op == 'call_module':
             assert isinstance(node.target, str)
-            target_mod = getattr_from_fqn(self.gm, node.target)
+            target_mod = _getattr_from_fqn(self.gm, node.target)
             return not \
                 any(isinstance(target_mod, t)  # type: ignore[arg-type]
                     for t in self.non_matchable_modules)
@@ -221,9 +221,9 @@ def _get_subgraph_relationship_type(
             "Matching call_module patterns where base_op_node != start_node is not supported yet"
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node_a.target, str)
-        mod_a = getattr_from_fqn(gm_a, node_a.target)
+        mod_a = _getattr_from_fqn(gm_a, node_a.target)
         assert isinstance(node_b.target, str)
-        mod_b = getattr_from_fqn(gm_b, node_b.target)
+        mod_b = _getattr_from_fqn(gm_b, node_b.target)
 
         key = (type(mod_a), type(mod_b))
 
@@ -296,7 +296,7 @@ def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[NSNodeTargetT
         return node.target
     elif node.op == 'call_module':
         assert isinstance(node.target, str)
-        mod = getattr_from_fqn(gm, node.target)
+        mod = _getattr_from_fqn(gm, node.target)
         return type(mod)
     return None
 

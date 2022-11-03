@@ -6,20 +6,19 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import always_wrap_policy as always_wrap
-from torch.distributed.fsdp.wrap import wrap, enable_wrap
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy as always_wrap,
+    enable_wrap,
+    wrap,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-    parametrize,
     instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
     sandcastle_skip_if,
-)
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 _TORCHDISTX_AVAIL = True
@@ -47,16 +46,19 @@ def _reset_params_if_meta(is_meta, model):
     if is_meta:
         model.reset_parameters()
 
+
 class MyLinear(nn.Linear):
     """
     Linear layer with deterministic reset_parameters for testing.
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def reset_parameters(self, *args, **kwargs):
         with torch.no_grad():
             self.weight.fill_(1)
+
 
 class MyModel(nn.Module):
     def __init__(self, device):
@@ -90,6 +92,7 @@ class NestedModel(nn.Module):
             if not isinstance(m, FSDP):
                 m.reset_parameters()
 
+
 def _init_with_reset_params(module):
     """
     to_empty + reset_parameters() init function example for modules
@@ -100,6 +103,7 @@ def _init_with_reset_params(module):
         module.to_empty(device=torch.cuda.current_device())
     with torch.no_grad():
         module.reset_parameters()
+
 
 def _init_with_torchdistX(module):
     """
@@ -112,6 +116,7 @@ def _init_with_torchdistX(module):
         return not isinstance(k, FSDP)
 
     deferred_init.materialize_module(module, check_fn=check_fn)
+
 
 class TestFSDPWithMetaDevice(FSDPTest):
     @property
@@ -148,7 +153,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
         regular_opt = torch.optim.SGD(fsdp_regular.parameters(), lr=1e-3)
 
         self._compare_fsdp(fsdp_meta, fsdp_regular)
-        inp = torch.randn(10, 2, device='cuda')
+        inp = torch.randn(10, 2, device="cuda")
         fsdp_meta(inp).sum().backward()
         fsdp_regular(inp).sum().backward()
         meta_opt.step()
@@ -176,6 +181,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
     def test_simple_model_with_meta_device_reset_params(self):
         def meta_module_fn():
             return MyModel(device="meta")
+
         self._test_simple_model_with_meta_device(
             meta_module_fn, _init_with_reset_params
         )
@@ -184,11 +190,13 @@ class TestFSDPWithMetaDevice(FSDPTest):
     def test_simple_model_with_meta_device_default_init(self):
         def meta_module_fn():
             return MyModel(device="meta")
+
         self._test_simple_model_with_meta_device(meta_module_fn)
 
     @skip_if_lt_x_gpu(2)
     @sandcastle_skip_if(
-        not _TORCHDISTX_AVAIL, "Test requires torchdistX: https://github.com/pytorch/torchdistX"
+        not _TORCHDISTX_AVAIL,
+        "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
     def test_simple_model_with_torchdistX_default_init(self):
         def meta_module_fn():
@@ -198,15 +206,20 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @sandcastle_skip_if(
-        not _TORCHDISTX_AVAIL, "Test requires torchdistX: https://github.com/pytorch/torchdistX"
+        not _TORCHDISTX_AVAIL,
+        "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
     def test_simple_model_with_torchdistX_init_fn(self):
         def meta_module_fn():
             return deferred_init.deferred_init(MyModel, device="cuda")
 
-        self._test_simple_model_with_meta_device(meta_module_fn, init_fn=_init_with_torchdistX)
+        self._test_simple_model_with_meta_device(
+            meta_module_fn, init_fn=_init_with_torchdistX
+        )
 
-    def _test_nested_model_with_meta_device(self, auto_wrap, meta_module_fn, init_fn=None):
+    def _test_nested_model_with_meta_device(
+        self, auto_wrap, meta_module_fn, init_fn=None
+    ):
         if auto_wrap:
             module = meta_module_fn()
             is_meta = next(module.parameters()).is_meta
@@ -225,7 +238,8 @@ class TestFSDPWithMetaDevice(FSDPTest):
             regular_opt = torch.optim.SGD(fsdp_regular.parameters(), lr=1e-3)
         else:
             with enable_wrap(
-                wrapper_cls=FSDP, param_init_fn=init_fn,
+                wrapper_cls=FSDP,
+                param_init_fn=init_fn,
             ):
                 module = meta_module_fn()
                 is_meta = next(module.parameters()).is_meta
@@ -246,7 +260,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
         # Compare it before training
         self._compare_fsdp(fsdp_meta, fsdp_regular)
-        inp = torch.randn(10, 2, device='cuda')
+        inp = torch.randn(10, 2, device="cuda")
         fsdp_meta(inp).sum().backward()
         fsdp_regular(inp).sum().backward()
         meta_opt.step()
@@ -260,7 +274,9 @@ class TestFSDPWithMetaDevice(FSDPTest):
             return NestedModel(device="meta")
 
         self._test_nested_model_with_meta_device(
-            auto_wrap=auto_wrap, meta_module_fn=meta_module_fn, init_fn=_init_with_reset_params
+            auto_wrap=auto_wrap,
+            meta_module_fn=meta_module_fn,
+            init_fn=_init_with_reset_params,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -270,12 +286,14 @@ class TestFSDPWithMetaDevice(FSDPTest):
             return NestedModel(device="meta")
 
         self._test_nested_model_with_meta_device(
-            auto_wrap=auto_wrap, meta_module_fn=meta_module_fn,
+            auto_wrap=auto_wrap,
+            meta_module_fn=meta_module_fn,
         )
 
     @skip_if_lt_x_gpu(2)
     @sandcastle_skip_if(
-        not _TORCHDISTX_AVAIL, "Test requires torchdistX: https://github.com/pytorch/torchdistX"
+        not _TORCHDISTX_AVAIL,
+        "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_torchdistX_default_init(self, auto_wrap):
@@ -288,7 +306,8 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @sandcastle_skip_if(
-        not _TORCHDISTX_AVAIL, "Test requires torchdistX: https://github.com/pytorch/torchdistX"
+        not _TORCHDISTX_AVAIL,
+        "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_torchdistX_init_fn(self, auto_wrap):
@@ -296,7 +315,9 @@ class TestFSDPWithMetaDevice(FSDPTest):
             return deferred_init.deferred_init(NestedModel, device="cuda")
 
         self._test_nested_model_with_meta_device(
-            auto_wrap=auto_wrap, meta_module_fn=meta_module_fn, init_fn=_init_with_torchdistX,
+            auto_wrap=auto_wrap,
+            meta_module_fn=meta_module_fn,
+            init_fn=_init_with_torchdistX,
         )
 
     def _test_bad_arg(self, meta_module_fn):
@@ -306,7 +327,8 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @sandcastle_skip_if(
-        not _TORCHDISTX_AVAIL, "Test requires torchdistX: https://github.com/pytorch/torchdistX"
+        not _TORCHDISTX_AVAIL,
+        "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
     def test_bad_arg_torchdistx(self):
         def meta_module_fn():

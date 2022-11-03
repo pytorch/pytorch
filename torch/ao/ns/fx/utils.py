@@ -16,7 +16,7 @@ from torch.ao.quantization import (
     FakeQuantizeBase
 )
 from torch.ao.quantization.observer import _is_activation_post_process
-from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.utils import _getattr_from_fqn
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -75,7 +75,7 @@ def get_node_first_input_and_output_type(
     elif node.op == "call_module":
         assert node.op == "call_module"
         assert isinstance(node.target, str)
-        mod = getattr_from_fqn(gm, node.target)
+        mod = _getattr_from_fqn(gm, node.target)
         is_known_fp32_or_int8_input_module = any(
             isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
         )
@@ -180,8 +180,8 @@ def get_node_input_qparams(
         zp_node = get_normalized_nth_input(node, gm, zp_arg_idx)
         assert isinstance(scale_node, Node) and isinstance(scale_node.target, str)
         assert isinstance(zp_node, Node) and isinstance(zp_node.target, str)
-        scale_obj = getattr_from_fqn(gm, scale_node.target)
-        zp_obj = getattr_from_fqn(gm, zp_node.target)
+        scale_obj = _getattr_from_fqn(gm, scale_node.target)
+        zp_obj = _getattr_from_fqn(gm, zp_node.target)
         return (scale_obj, zp_obj)
 
     if prev_node.op == "call_function":
@@ -200,7 +200,7 @@ def get_node_input_qparams(
 
         # get type of the module
         assert isinstance(prev_node.target, str)
-        module_obj = getattr_from_fqn(gm, prev_node.target)
+        module_obj = _getattr_from_fqn(gm, prev_node.target)
         if isinstance(
             module_obj,
             (
@@ -255,14 +255,14 @@ def return_first_non_observer_node(
     graph: (node_non_obs -> obs0 -> fq0), node = fq0 : returns node_non_obs
     """
     if node.op == "call_module":
-        node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
+        node_obj = _getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if _is_activation_post_process(node_obj):
             assert len(node.args) == 1
             assert isinstance(node.args[0], Node)
             node = node.args[0]
             # code duplication intended, not worth refactoring
             assert isinstance(node.target, str)
-            node_obj = getattr_from_fqn(gm, node.target)
+            node_obj = _getattr_from_fqn(gm, node.target)
             if _is_activation_post_process(node_obj):
                 assert len(node.args) == 1
                 assert isinstance(node.args[0], Node)
@@ -288,7 +288,7 @@ def get_number_of_non_param_args(
     Returns 2, because both x and hid are non-param args.
     """
     if node.op == "call_module":
-        node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
+        node_obj = _getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if isinstance(node_obj, nn.LSTM):
             return 2
 
@@ -333,7 +333,7 @@ def get_target_type_str(node: Node, gm: GraphModule) -> str:
         target_type = torch.typename(node.target)
     elif node.op == "call_module":
         assert isinstance(node.target, str)
-        target_mod = getattr_from_fqn(gm, node.target)
+        target_mod = _getattr_from_fqn(gm, node.target)
         target_type = torch.typename(target_mod)
     return target_type
 

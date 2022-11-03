@@ -5,7 +5,7 @@ from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 
 from .utils import (
     get_node_first_input_and_output_type,
-    getattr_from_fqn,
+    _getattr_from_fqn,
     NodeInputOrOutputType,
     return_first_non_observer_node,
     get_number_of_non_param_args,
@@ -37,7 +37,7 @@ def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
         node_to_use_for_fqn = node
         if node.op == 'call_module':
             assert isinstance(node.target, str)
-            module = getattr_from_fqn(gm, node.target)
+            module = _getattr_from_fqn(gm, node.target)
             if _is_activation_post_process(module):
                 node_to_use_for_fqn = get_normalized_nth_input(node, gm, 0)
         fqn = gm._node_name_to_scope[node_to_use_for_fqn.name][0]  # type: ignore[index]
@@ -330,7 +330,7 @@ def _copy_node_from_a_to_c(
     if node_a.op == 'get_attr':
         node_a_copy_name = \
             get_new_attr_name_with_prefix(node_a.name + '_shadow_copy_')(gm_b)
-        node_a_obj = getattr_from_fqn(gm_a, node_a.target)  # type: ignore[arg-type]
+        node_a_obj = _getattr_from_fqn(gm_a, node_a.target)  # type: ignore[arg-type]
         if torch.is_tensor(node_a_obj):
             node_a_obj = node_a_obj.detach()
         setattr(gm_b, node_a_copy_name, node_a_obj)
@@ -604,7 +604,7 @@ def _insert_copy_of_node_a_after_input_node_c(
             get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         # fetch the corresponding module from gm_a
         assert isinstance(node_a.target, str)
-        mod_a = getattr_from_fqn(gm_a, node_a.target)
+        mod_a = _getattr_from_fqn(gm_a, node_a.target)
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
             node_a.op, new_mod_copy_name, new_args,
