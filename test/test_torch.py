@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps)
+    skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -2959,10 +2959,9 @@ else:
                     dest = make_tensor(size, device=device, dtype=dtype, noncontiguous=dest_noncontig)
                     src_size = size[:dim] + (num_src,) + size[dim + 1:]
                     src = make_tensor(src_size, device=device, dtype=dtype, noncontiguous=src_noncontig)
-                    idx = torch.randint(num_dest, (num_src,), dtype=idx_dtype, device=device)
-                    if index_noncontig:
-                        # noncontiguous_like fails with RuntimeError: XLA tensors do not have storage
-                        idx = torch.testing.make_non_contiguous(idx)
+                    idx = torch.testing.make_tensor(
+                        num_src, low=0, high=num_dest, dtype=idx_dtype, device=device, noncontiguous=index_noncontig
+                    )
                     expected = dest.clone()
                     dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
                     # fill rows in idx with reduction inits if include_self=False
@@ -5588,10 +5587,10 @@ class TestTorch(TestCase):
                             dest = make_tensor(dest.shape, device=device, dtype=dest.dtype, noncontiguous=True)
                         src = torch.randn(num_copy, *other_sizes, device=device)
                         if not src_contig:
-                            src = torch.testing.make_non_contiguous(src)
+                            src = noncontiguous_like(src)
                         idx = torch.randperm(num_dest, dtype=dtype, device=device).narrow(0, 0, num_copy)
                         if not index_contig:
-                            idx = torch.testing.make_non_contiguous(idx)
+                            idx = noncontiguous_like(idx)
                         # index_add_ without alpha argument
                         dest2 = dest.clone()
                         dest.index_add_(0, idx, src)
@@ -5673,36 +5672,6 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
-
-    def test_pytorch_library_disabled_env(self):
-        import subprocess
-        env = os.environ.copy()
-        env['PYTORCH_DISABLE_LIBRARY'] = '1'
-        try:
-            subprocess.check_output([sys.executable, '-c', 'import torch'], env=env)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError("Could not 'import torch' with PYTORCH_DISABLE_LIBRARY=0") from e
-
-    # Test that warnings generated from C++ are translated to the correct type
-    def test_warn_types(self):
-        test_cases = [
-            # function, warning type, message
-            (torch._C._warn, UserWarning, r"Test message for TORCH_WARN"),
-            (torch._C._warn_deprecation, DeprecationWarning, r"Test message for TORCH_WARN_DEPRECATION"),
-        ]
-
-        for fn, warning_type, message in test_cases:
-            with warnings.catch_warnings(record=True) as w:
-                warnings.resetwarnings()
-                warnings.filterwarnings('always', category=warning_type)
-                fn()
-
-                self.assertEqual(len(w), 1, msg=f'{warning_type} not raised')
-                warning = w[0].message
-                self.assertTrue(isinstance(warning, warning_type), msg=f'{warning_type} not raised')
-                self.assertTrue(re.search(
-                    message,
-                    str(warning)))
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)

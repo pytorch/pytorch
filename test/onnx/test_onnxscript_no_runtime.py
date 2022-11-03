@@ -106,3 +106,57 @@ class TestONNXScriptExport(common_utils.TestCase):
         self.assertEqual(len(layer_norm_proto.functions), 1)
         self.assertEqual(selu_proto.functions[0].name, "Selu")
         self.assertEqual(layer_norm_proto.functions[0].name, "layer_norm")
+
+    def test_loop_registration(self):
+        class NestedLoopsModel(torch.jit.ScriptModule):
+            def __init__(self):
+                super().__init__()
+                self.selu = torch.nn.SELU()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = x
+                for i in range(x.size(3)):
+                    if i == 0:
+                        y = self.selu(x)
+                    else:
+                        y += i
+                return y
+
+        model = NestedLoopsModel()
+        inputs = torch.zeros(1, 2, 3, 4)
+
+        from onnxscript.onnx_opset import opset15 as op
+
+        custom_opset = onnxscript.values.Opset(domain="onnx-script", version=2)
+
+        @onnxscript.script(custom_opset)
+        def Selu(X):
+            alpha = 1.6732632423543772848170429916717
+            gamma = 1.0507009873554804934193349852946
+            alphaX = op.CastLike(alpha, X)
+            gammaX = op.CastLike(gamma, X)
+            neg = gammaX * (alphaX * op.Exp(X) - alphaX)
+            pos = gammaX * X
+            zero = op.CastLike(0, X)
+            return op.Where(X <= zero, neg, pos)
+
+        def custom_selu(g, X):
+            # domain of the Op should be aligned with onnx-script
+            # setType API is required for custom Op to support
+            # torchscript shape type inference
+            print("custom_selu is used!")
+            return g.onnxscript_op(Selu, X).setType(X.type())
+
+        torch.onnx.register_custom_op_symbolic(
+            symbolic_name="aten::selu",
+            symbolic_fn=custom_selu,
+            opset_version=15,
+        )
+
+        saved_model = io.BytesIO()
+        torch.onnx.export(
+            torch.jit.script(model), inputs, f=saved_model, opset_version=15
+        )
+        loop_selu_proto = onnx.load(io.BytesIO(saved_model.getvalue()))
+        self.assertEqual(len(loop_selu_proto.functions), 1)
