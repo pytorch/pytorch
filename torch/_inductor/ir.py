@@ -3258,50 +3258,28 @@ def _prepare_convolution_fusion_create(
     padding = tuple(padding_)
     dilation = tuple(dilation_)
     assert isinstance(groups, int)
+    with FakeTensorMode():
+        output, *_ = cls.process_kernel(
+            torch.ops.aten.convolution,
+            x,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            [0, 0],
+            groups,
+        )
 
+    output_size = output.shape
     weight_shape = [
         sympy.Integer(V.graph.sizevars.guard_static_shape(s)) for s in weight.get_size()
     ]
-
-    out_channels, in_channels1, *kernel_size = weight_shape
-    in_channels1 = in_channels1 * groups
-    assert len(x.get_size()) == 2 + len(kernel_size)
-    batch, in_channels2, *input_size = x.get_size()
-    output_size = [batch]
-    V.graph.sizevars.guard_equals(in_channels1, in_channels2)
-
-    output_size.append(out_channels)
-    assert (
-        len(stride)
-        == len(padding)
-        == len(dilation)
-        == len(kernel_size)
-        == len(input_size)
+    _, _, *kernel_size = weight.get_size()
+    output_layout_str = (
+        "torch.contiguous_format" if output.is_contiguous() else "torch.channels_last"
     )
-    for i in range(len(stride)):
-        output_size.append(
-            IndexingDiv(
-                input_size[i]
-                + 2 * padding[i]
-                - dilation[i] * (kernel_size[i] - 1)
-                - 1
-                + stride[i],
-                stride[i],
-            )
-        )
-        output_size[-1] = sympy.Integer(
-            V.graph.sizevars.guard_static_shape(output_size[-1])
-        )
-
-    output_layout_str = "torch.contiguous_format"
-    # If x or weight have one channels_last(2d or 3d) format, it will call channels_last path,
-    # which align with aten.convolutuion path(cpu only support 2d case now).
-    # TODO: after cpu 3d convolution support channels_last path, the size check can be removed.
-    if len(x.get_size()) == 4 and (
-        x.get_layout().is_channels_last_stride_ordered()
-        or weight.get_layout().is_channels_last_stride_ordered()
-    ):
-        output_layout_str = "torch.channels_last"
 
     if output_layout_str == "torch.channels_last":
         stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
