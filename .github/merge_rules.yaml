@@ -6,7 +6,6 @@
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
-  - test/jit/test_export_modes.py
   - test/onnx/**
   - tools/onnx/**
   - torch/_C/__init__.pyi.in
@@ -36,6 +35,7 @@
   - csarofeen
   - ngimel
   - jjsjann123
+  - kevinstephano
   - ptrblck
   mandatory_checks_name:
   - EasyCLA
