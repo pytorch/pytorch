@@ -289,13 +289,9 @@ class FullyShardedDataParallel(nn.Module):
             off between memory saving and communication overhead. ``FULL_SHARD``
             will be chosen if sharding_strategy is not specified.
         cpu_offload (Optional[CPUOffload]):
-            CPU offloading config. Currently, only parameter and gradient CPU
-            offload is supported. It can be enabled via passing in
-            ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
-            currently implicitly enables gradient offloading to CPU in order for
-            params and grads to be on same device to work with optimizer. This
-            API is subject to change. Default is ``None`` in which case there
-            will be no offloading.
+            This configures CPU offloading. If this is set to ``None``, then
+            no CPU offloading happens. See :class:`CPUOffload` for details.
+            (Default: ``None``)
         auto_wrap_policy (Optional[Callable[[nn.Module, bool, int], bool]]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
