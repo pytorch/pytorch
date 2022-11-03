@@ -39,7 +39,7 @@ from .c10d_error_logger import _get_or_create_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 __all__ = [
-    'Backend', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
+    'Backend', 'BackendConfig', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
     'all_gather_multigpu', 'all_gather_object', 'all_reduce',
     'all_reduce_coalesced', 'all_reduce_multigpu', 'all_to_all',
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',

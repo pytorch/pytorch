@@ -266,7 +266,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
-  static c10::intrusive_ptr<ProcessGroup> createProcessGroupUCC(
+  static c10::intrusive_ptr<Backend> createProcessGroupUCC(
       const c10::intrusive_ptr<::c10d::Store>& store,
       int rank,
       int size,

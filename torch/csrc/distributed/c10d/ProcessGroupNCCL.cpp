@@ -694,7 +694,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   if (uccLib_ != nullptr) {
     LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
-    typedef c10::intrusive_ptr<ProcessGroup> fn(
+    typedef c10::intrusive_ptr<Backend> fn(
         const c10::intrusive_ptr<Store>& store, int rank, int size);
     auto createProcessGroupUCC =
         reinterpret_cast<fn*>(uccLib_->sym("createProcessGroupUCC"));

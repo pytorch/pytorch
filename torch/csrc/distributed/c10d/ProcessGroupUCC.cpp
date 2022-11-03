@@ -1581,7 +1581,7 @@ uint64_t ProcessGroupUCC::getSequenceNumberForGroup() {
   return seq_;
 }
 
-c10::intrusive_ptr<ProcessGroup> ProcessGroupUCC::createProcessGroupUCC(
+c10::intrusive_ptr<Backend> ProcessGroupUCC::createProcessGroupUCC(
     const c10::intrusive_ptr<::c10d::Store>& store,
     int rank,
     int size,
