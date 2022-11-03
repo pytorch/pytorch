@@ -5,7 +5,6 @@ import time
 
 import sympy
 from sympy import Integer
-from torch.hub import tqdm
 
 import torch
 import torch.fx
