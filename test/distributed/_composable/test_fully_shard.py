@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-import functools
 import sys
 from typing import Any, Tuple
 

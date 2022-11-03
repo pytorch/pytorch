@@ -6,7 +6,6 @@
 import contextlib
 import functools
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type
 
 import torch.nn as nn

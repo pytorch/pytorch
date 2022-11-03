@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import itertools
 import sys
 from typing import Union

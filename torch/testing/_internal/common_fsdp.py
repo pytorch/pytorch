@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import itertools
 import sys
 from abc import ABC, abstractmethod
@@ -21,11 +20,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import (
-    always_wrap_policy,
-    ModuleWrapPolicy,
-    wrap,
-)
+from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS

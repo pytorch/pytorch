@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import functools
 import random
 import sys
 import unittest

@@ -1,7 +1,7 @@
 import collections
 import functools
 import warnings
-from typing import Any, Callable, Deque, Dict, List, NamedTuple, Set, Tuple
+from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
 import torch.nn as nn
