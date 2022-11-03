@@ -841,7 +841,9 @@ class TritonKernel(Kernel):
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype), src_dtype)
+        default = triton_constant(
+            ir.Reduction.default_value(reduction_type, src_dtype), src_dtype
+        )
         masks = [f"{tree.prefix}mask" for tree in self.range_trees]
         if self._load_mask:
             masks.append(self._load_mask)
