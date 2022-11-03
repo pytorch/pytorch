@@ -1078,7 +1078,7 @@ Arguments:
                           const std::chrono::milliseconds& timeout) {
                 auto options =
                     c10::make_intrusive<::c10d::ProcessGroup::Options>(
-                        "undefined", timeout);
+                        "NOT DEFINED", timeout);
                 return c10::make_intrusive<::c10d::ProcessGroup>(
                     store, rank, size, options);
               }),
@@ -1673,7 +1673,7 @@ Example::
 #ifdef USE_C10D_MPI
   auto processGroupMPI =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupMPI>(
-          module, "ProcessGroupMPI", processGroup);
+          module, "ProcessGroupMPI", backend);
 
   // Define static create function instead of a constructor, because
   // this function may return null. This happens if this process is not
@@ -1689,7 +1689,7 @@ Example::
 #ifdef USE_C10D_UCC
   auto processGroupUCC =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupUCC>(
-          module, "ProcessGroupUCC", processGroup)
+          module, "ProcessGroupUCC", backend)
           .def(
               py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,

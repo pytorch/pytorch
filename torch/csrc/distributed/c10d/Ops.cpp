@@ -60,12 +60,13 @@ c10::intrusive_ptr<Work> reduce_(
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
 allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
+    at::TensorList input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
+  auto input_tensors_vec = input_tensors.vec();
   auto work = process_group->allgather(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-      const_cast<std::vector<at::Tensor>&>(input_tensors),
+      input_tensors_vec,
       AllgatherOptions{std::chrono::milliseconds(timeout)});
 
   // Copy output tensors (not storage) so that this can be used in a functional
@@ -253,7 +254,7 @@ c10::intrusive_ptr<Work> allreduce(
 c10::intrusive_ptr<Work> allgather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
+    at::TensorList input_tensors,
     const AllgatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allgather_", "")
@@ -261,9 +262,10 @@ c10::intrusive_ptr<Work> allgather(
                            std::vector<std::vector<at::Tensor>>,
                            c10::intrusive_ptr<Work>>(
                            const std::vector<std::vector<at::Tensor>>&,
-                           const std::vector<at::Tensor>&,
+                           at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t)>();
+
   return std::get<1>(op.call(
       output_tensors, input_tensors, process_group, opts.timeout.count()));
 }
@@ -386,6 +388,7 @@ c10::intrusive_ptr<Work> barrier(
   at::Tensor tensor = at::empty({0}, at::TensorOptions().device(at::kCPU));
   // if opts.device_ids or backend is nccl are specified then use cuda
   // implementation
+  // TODO: getBackendName() is always "NOT DEFINED"
   if (opts.device_ids.size() > 0 || process_group->getBackendName() == "nccl") {
     // set cuda tensor
     tensor = at::empty(

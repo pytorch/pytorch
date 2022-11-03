@@ -903,7 +903,6 @@ def _new_process_group_helper(
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
 
-    backend = Backend(backend)
     prefix_store = PrefixStore(f"{group_name}/", store)
     pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, timeout=timeout)
 
@@ -928,8 +927,8 @@ def _new_process_group_helper(
                     " MPI is only included if you build PyTorch from"
                     " source on a host that has MPI installed."
                 )
-            pg = ProcessGroupMPI.create(global_ranks_in_group)
-            if not pg:
+            backend_pg = ProcessGroupMPI.create(global_ranks_in_group)
+            if not backend_pg:
                 return GroupMember.NON_GROUP_MEMBER
 
         if backend == Backend.GLOO:
@@ -966,7 +965,7 @@ def _new_process_group_helper(
             extended_api = backend_plugin.extended_api
 
             if not extended_api:
-                pg = creator_fn(prefix_store, group_rank, group_size, timeout)
+                backend_pg = creator_fn(prefix_store, group_rank, group_size, timeout)
             else:
                 dist_backend_opts = _DistributedBackendOptions()
                 dist_backend_opts.store = prefix_store
@@ -976,7 +975,7 @@ def _new_process_group_helper(
                 dist_backend_opts.group_id = group_name
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
 
-                pg = creator_fn(dist_backend_opts, pg_options)
+                backend_pg = creator_fn(dist_backend_opts, pg_options)
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
         if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC]:
@@ -1008,7 +1007,6 @@ def _new_process_group_helper(
         pg._set_backend(torch.device(device), backend_pg)
 
     # update global state
-    print(pg)
     _pg_map[pg] = (backend, store)
     _pg_names[pg] = group_name
     _pg_backend_map[pg] = str(backend_config)

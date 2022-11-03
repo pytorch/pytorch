@@ -165,14 +165,15 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cuda_(
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
 allgather_cpu_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
+    at::TensorList input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
+  auto input_tensors_vec = input_tensors.vec();
   auto work =
       process_group->getBackend(c10::DeviceType::CPU)
           ->allgather(
               const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-              const_cast<std::vector<at::Tensor>&>(input_tensors),
+              input_tensors_vec,
               AllgatherOptions{std::chrono::milliseconds(timeout)});
 
   // Copy output tensors (not storage) so that this can be used in a functional
@@ -185,14 +186,15 @@ allgather_cpu_(
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
 allgather_cuda_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const std::vector<at::Tensor>& input_tensors,
+    at::TensorList input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
+  auto input_tensors_vec = input_tensors.vec();
   auto work =
       process_group->getBackend(c10::DeviceType::CUDA)
           ->allgather(
               const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
-              const_cast<std::vector<at::Tensor>&>(input_tensors),
+              input_tensors_vec,
               AllgatherOptions{std::chrono::milliseconds(timeout)});
 
   // Copy output tensors (not storage) so that this can be used in a functional
