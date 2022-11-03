@@ -25,6 +25,8 @@ from ..fuser_method_mappings import (
 )
 from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
+__all__ = []
+
 # TODO: rename to be more explict, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
     "_ConvMetadata",
@@ -557,10 +559,3 @@ def _get_embedding_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendP
                 .set_reference_quantized_module(ref_embedding_op)
                 ._set_input_output_observed(False))  # This is temporary, and will be removed soon
     return embedding_op_configs
-
-__all__ = [
-    "_get_binary_op_configs",
-    "_get_linear_configs",
-    "_get_conv_configs",
-    "_get_share_qparams_op_configs",
-]
