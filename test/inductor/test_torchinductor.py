@@ -711,7 +711,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 17, 8, 9),))
 
-    @cpp_wrapper
     def test_reduction1(self):
         def fn(a):
             return (a.sum(), a.max(), a.min(), a.argmax(), a.argmin())
