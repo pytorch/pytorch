@@ -19,6 +19,8 @@
 #include <ATen/ops/atanh_native.h>
 #include <ATen/ops/ceil.h>
 #include <ATen/ops/ceil_native.h>
+#include <ATen/ops/deg2rad.h>
+#include <ATen/ops/deg2rad_native.h>
 #include <ATen/ops/erf.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/erfinv.h>
@@ -167,6 +169,7 @@ COALESCED_UNARY_UFUNC(asinh);
 COALESCED_UNARY_UFUNC(atan);
 COALESCED_UNARY_UFUNC(atanh);
 COALESCED_UNARY_UFUNC(ceil);
+COALESCED_UNARY_UFUNC(deg2rad);
 COALESCED_UNARY_UFUNC(erf);
 COALESCED_UNARY_UFUNC(erfinv);
 COALESCED_UNARY_UFUNC(expm1);
