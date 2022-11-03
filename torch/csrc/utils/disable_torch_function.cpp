@@ -11,8 +11,7 @@ PyObject* disabled_torch_function = nullptr;
 PyObject* disabled_torch_dispatch = nullptr;
 
 bool torch_function_enabled() {
-  return !at::impl::PythonTorchFunctionTLS::is_disable_subclass() &&
-      !at::impl::PythonTorchFunctionTLS::is_disable_all();
+  return at::impl::PythonTorchFunctionTLS::get_disabled_state() == at::impl::TorchFunctionDisabledState::ENABLED;
 }
 
 PyObject* disabled_torch_function_impl() {
@@ -35,20 +34,22 @@ void set_disabled_torch_dispatch_impl(PyObject* value) {
 typedef struct {
   PyObject_HEAD
       /* Type-specific fields go here. */
-      bool old_state;
+      at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunctionSubclass;
 
 PyObject* DisableTorchFunctionSubclass__enter(
     PyObject* self,
     PyObject* unused) {
-  ((DisableTorchFunctionSubclass*)self)->old_state =
-      at::impl::PythonTorchFunctionTLS::is_disable_subclass();
-  at::impl::PythonTorchFunctionTLS::set_disable_subclass(true);
+  const auto old_state = at::impl::PythonTorchFunctionTLS::get_disabled_state();
+  ((DisableTorchFunctionSubclass*)self)->old_state = old_state;
+  if (old_state == at::impl::TorchFunctionDisabledState::ENABLED) {
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
+  }
   Py_RETURN_NONE;
 }
 
 PyObject* DisableTorchFunctionSubclass__exit(PyObject* self, PyObject* unused) {
-  at::impl::PythonTorchFunctionTLS::set_disable_subclass(
+  at::impl::PythonTorchFunctionTLS::set_disabled_state(
       ((DisableTorchFunctionSubclass*)self)->old_state);
   Py_RETURN_NONE;
 }
@@ -119,18 +120,18 @@ PyObject* THPModule_DisableTorchFunctionSubclassType() {
 typedef struct {
   PyObject_HEAD
       /* Type-specific fields go here. */
-      bool old_state;
+      at::impl::TorchFunctionDisabledState old_state;
 } DisableTorchFunction;
 
 PyObject* DisableTorchFunction__enter(PyObject* self, PyObject* unused) {
   ((DisableTorchFunctionSubclass*)self)->old_state =
-      at::impl::PythonTorchFunctionTLS::is_disable_all();
-  at::impl::PythonTorchFunctionTLS::set_disable_all(true);
+      at::impl::PythonTorchFunctionTLS::get_disabled_state();
+  at::impl::PythonTorchFunctionTLS::set_disabled_state(at::impl::TorchFunctionDisabledState::ALL_DISABLED);
   Py_RETURN_NONE;
 }
 
 PyObject* DisableTorchFunction__exit(PyObject* self, PyObject* unused) {
-  at::impl::PythonTorchFunctionTLS::set_disable_all(
+  at::impl::PythonTorchFunctionTLS::set_disabled_state(
       ((DisableTorchFunctionSubclass*)self)->old_state);
   Py_RETURN_NONE;
 }
@@ -212,11 +213,13 @@ PyObject* THPModule_disable_torch_function(PyObject* self, PyObject* a) {
   // These are all C-API calls so no exceptions will be raised
   // and therefore no need for RAII approach to storing
   // the old value.
-  bool old_value = at::impl::PythonTorchFunctionTLS::is_disable_subclass();
-  at::impl::PythonTorchFunctionTLS::set_disable_subclass(true);
+  auto old_value = at::impl::PythonTorchFunctionTLS::get_disabled_state();
+  if (old_value == at::impl::TorchFunctionDisabledState::ENABLED) {
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED);
+  }
   // kwargs can safely be nullptr here.
   PyObject* result = PyObject_Call(func, py_args.ptr(), kwargs);
-  at::impl::PythonTorchFunctionTLS::set_disable_subclass(old_value);
+  at::impl::PythonTorchFunctionTLS::set_disabled_state(old_value);
   return result;
   END_HANDLE_TH_ERRORS
 }

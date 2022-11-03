@@ -1,5 +1,6 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <c10/core/TensorImpl.h>
+#include <iostream>
 
 namespace at {
 namespace impl {
@@ -26,20 +27,12 @@ int64_t PythonTorchFunctionTLS::stack_len() {
   return pythonTorchFunctionState.stack_.size();
 }
 
-void PythonTorchFunctionTLS::set_disable_subclass(bool disable_subclass) {
-  pythonTorchFunctionState.disable_subclass_ = disable_subclass;
+void PythonTorchFunctionTLS::set_disabled_state(TorchFunctionDisabledState disabled_state) {
+  pythonTorchFunctionState.disabled_state_ = disabled_state;
 }
 
-void PythonTorchFunctionTLS::set_disable_all(bool disable_all) {
-  pythonTorchFunctionState.disable_all_ = disable_all;
-}
-
-bool PythonTorchFunctionTLS::is_disable_subclass() {
-  return pythonTorchFunctionState.disable_subclass_;
-}
-
-bool PythonTorchFunctionTLS::is_disable_all() {
-  return pythonTorchFunctionState.disable_all_;
+TorchFunctionDisabledState PythonTorchFunctionTLS::get_disabled_state() {
+  return pythonTorchFunctionState.disabled_state_;
 }
 
 void PythonTorchFunctionTLS::set_state(const PythonTorchFunctionTLS& state) {
@@ -51,7 +44,8 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
 }
 
 bool torch_function_mode_enabled() {
-  return !PythonTorchFunctionTLS::is_disable_all() && PythonTorchFunctionTLS::stack_len() > 0;
+  return PythonTorchFunctionTLS::get_disabled_state() != TorchFunctionDisabledState::ALL_DISABLED &&
+         PythonTorchFunctionTLS::stack_len() > 0;
 }
 
 } // namespace impl
