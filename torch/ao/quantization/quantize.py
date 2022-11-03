@@ -32,7 +32,6 @@ from torch.ao.quantization.observer import _is_activation_post_process
 __all__ = [
     "get_default_custom_config_dict",
     "propagate_qconfig_",
-    "add_observer_",
     "add_quant_dequant",
     "prepare",
     "quantize",
@@ -142,7 +141,7 @@ def _register_activation_post_process_hook(module, pre_hook=False):
         module._forward_hooks.move_to_end(handle.id, last=False)
 
 
-def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
+def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -168,7 +167,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
     if device is None:
         devices = _get_unique_devices_(module)
         assert len(devices) <= 1, (
-            "add_observer_ only works with cpu or single-device CUDA modules, "
+            "_add_observer_ only works with cpu or single-device CUDA modules, "
             "but got devices {}".format(devices)
         )
         device = next(iter(devices)) if len(devices) > 0 else None
@@ -220,7 +219,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             if custom_module_class_mapping[type_before_parametrizations(child)] not in no_observer_set():
                 insert_activation_post_process(observed_child)
         else:
-            add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
+            _add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
@@ -305,7 +304,7 @@ def prepare(model, inplace=False, allow_list=None,
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
 
-    add_observer_(
+    _add_observer_(
         model, qconfig_propagation_list, observer_non_leaf_module_list,
         custom_module_class_mapping=custom_module_class_mapping)
     return model
