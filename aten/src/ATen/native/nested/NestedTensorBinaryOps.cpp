@@ -1,4 +1,5 @@
 #include <ATen/native/nested/NestedTensorMath.h>
+#include  <ATen/native/nested/NestedTensorBinaryOps.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -17,6 +18,9 @@
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(nested_dense_elementwise_stub);
+REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub);
 
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
 get_elementwise_nested_tensor_impl(
@@ -95,6 +99,38 @@ Tensor NestedTensor_elementwise_Tensor(
       self_impl->get_storage_offsets()
     );
   }
+  // special case when other is dense
+  if (self.is_nested() && !other.is_nested()) {
+    // check for the [B, *, D], [B, 1, D] esuhm case
+    // TODO: this if statement is ugly and hopefully we will remove this in the near future
+    auto self_ptr = get_nested_tensor_impl(self);
+    if (self_ptr->dim() == 3 &&
+        other.dim() == 3 &&
+        self_ptr->size(0) == other.size(0) &&
+        other.size(1) == 1 &&
+        self_ptr->opt_size(2).has_value() &&
+        self_ptr->opt_size(2).value() == other.size(2) &&
+        self.is_cuda() &&
+        other.is_cuda()) {
+      if (!nested_tensor_impl_is_contiguous(self_ptr)) {
+        self_ptr = get_nested_tensor_impl(self.contiguous());
+      }
+      const auto self_buffer = self_ptr->get_buffer();
+      const auto self_sizes = self_ptr->get_nested_size_tensor();
+      auto result_buffer = at::empty_like(self_buffer);
+      auto result = wrap_buffer(result_buffer, self_sizes);
+      if (op_name == "add") {
+        nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::ADD);
+      } else if (op_name == "mul") {
+        nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::MUL);
+      } else {
+        TORCH_CHECK(false, "Unsupported nested dense elementwise op");
+      }
+      return result;
+    }
+    TORCH_CHECK(false, "Expected both self and other to be nested, but got a nested self and non-nested other.");
+  }
+
   NestedTensorImpl* self_impl = nullptr;
   NestedTensorImpl* other_impl = nullptr;
   std::tie(self_impl, other_impl) =
