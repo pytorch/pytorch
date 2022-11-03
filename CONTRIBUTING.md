@@ -1285,11 +1285,11 @@ For PRs, however, it's a bit more complicated. Consider this commit graph, where
 commit `B`:
 
 ```
-       o---o---B (refs/pull/42/head)
+       o---o---B (pr-commit)
       /         \
-     /           C (refs/pull/42/merge)
+     /           C (merged-commit)
     /           /
----o---o---o---A (refs/heads/master)
+---o---o---o---A (master)
 ```
 
 There are two possible choices for which commit to use:
