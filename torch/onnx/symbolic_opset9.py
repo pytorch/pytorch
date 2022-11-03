@@ -285,7 +285,6 @@ __all__ = [
 ]
 
 
-_INT64_MAX = 9223372036854775807
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=9)
 
 
@@ -707,7 +706,7 @@ def sign(g: jit_utils.GraphContext, self):
 @_beartype.beartype
 def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
     assert len(starts) == len(ends)
-    if len(starts) == 1 and starts[0] == 0 and ends[0] == _INT64_MAX:
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == _constants.INT64_MAX:
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
@@ -1130,7 +1129,7 @@ def select(g: jit_utils.GraphContext, self, dim, index):
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
         if index == -1:
-            end_index = _INT64_MAX
+            end_index = _constants.INT64_MAX
         else:
             end_index = index + 1
         slice_node = symbolic_helper._slice_helper(
@@ -3814,7 +3813,11 @@ def slice(g: jit_utils.GraphContext, self, *args):
                 )
         else:
             start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
-            end = _INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
+            end = (
+                _constants.INT64_MAX
+                if is_end_none
+                else symbolic_helper._parse_arg(end, "i")
+            )
             dim = symbolic_helper._parse_arg(dim, "i")
             return symbolic_helper._slice_helper(
                 g, self, axes=[dim], starts=[start], ends=[end]
@@ -3830,7 +3833,11 @@ def slice(g: jit_utils.GraphContext, self, *args):
             end.type(), _C.NoneType
         )
         start = 0 if is_start_none else symbolic_helper._parse_arg(start, "i")
-        end = _INT64_MAX if is_end_none else symbolic_helper._parse_arg(end, "i")
+        end = (
+            _constants.INT64_MAX
+            if is_end_none
+            else symbolic_helper._parse_arg(end, "i")
+        )
         return symbolic_helper._slice_helper(
             g, self, axes=[dim], starts=[start], ends=[end]
         )
