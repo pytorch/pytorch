@@ -1018,7 +1018,7 @@ class DistributedDataParallel(Module, Joinable):
 
     # note, this ctxmgr function is marked 'skip' in torchdynamo, so dynamo only kicks in
     # for the 'module_to_run' underneath
-    # see torchdynamo/eval_frame.py TorchPatcher.patch for more details
+    # see torch._dynamo/eval_frame.py TorchPatcher.patch for more details
     @contextmanager
     def _inside_ddp_forward(self):
         DistributedDataParallel._active_ddp_module = self

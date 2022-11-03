@@ -180,6 +180,10 @@ class vkRunner final : public Runner<T> {
   virtual c10::IValue run(
       T& module,
       const std::vector<c10::IValue>& inputs) override {
+    if (!module.attr("requires_backend_transfers", at::IValue(true)).toBool()) {
+      // No need to transfer input/output backends
+      return module.forward(inputs);
+    }
 
     if (inputs_.size() == 0) {
       // Upload the input tensor(s) to GPU memory.
