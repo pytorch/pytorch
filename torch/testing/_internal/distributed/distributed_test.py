@@ -5324,6 +5324,54 @@ class DistributedTest:
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
         @skip_if_no_gpu
+        def test_DistributedDataParallel_SyncBatchNorm_Channels_Last_3D(self):
+            group, group_id, rank = self._init_global_test()
+            num_processes = dist.get_world_size()
+            local_bs = 2
+            bs_offset = int(rank * 2)
+            global_bs = int(num_processes * 2)
+
+            model = ONLY_SBN_NET
+            model_gpu = copy.deepcopy(model).cuda(rank)
+            model_DDP = nn.parallel.DistributedDataParallel(
+                model_gpu, device_ids=[rank]
+            )
+
+            memory_format = torch.channels_last_3d
+            input_gpu = (
+                torch.randn(global_bs, 2, 4, 4, 4, dtype=torch.float)
+                .cuda(rank)
+                .to(memory_format=memory_format)
+            )
+            target_gpu = (
+                torch.randn(global_bs, 2, 4, 4, 4, dtype=torch.float)
+                .cuda(rank)
+                .to(memory_format=memory_format)
+            )
+            loss = nn.MSELoss()
+
+            # check two model parameters over 5 iterations
+            self._test_DDP_niter(
+                model_gpu,
+                model_DDP,
+                input_gpu,
+                target_gpu,
+                loss,
+                local_bs,
+                rank,
+                global_bs,
+                True,
+                bs_offset,
+                dist.get_world_size(),
+                memory_format=memory_format,
+            )
+            self._barrier()
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
+        @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Channels_Last(self):
             group, group_id, rank = self._init_global_test()
             num_processes = dist.get_world_size()

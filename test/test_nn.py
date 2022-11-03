@@ -10269,16 +10269,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         #   fwd: torch.batch_norm_stats, torch.batch_norm_gather_stats_with_counts, torch.batch_norm_elemt
         #   bwd: torch.batch_norm_backward_reduce, torch.batch_norm_backward_elemt
 
-        def _batch_norm_stats(data):
+        def _batch_norm_stats(data, memory_format, mean_axes):
             mean1, _ = torch.batch_norm_stats(data, 1e-5)
-            mean2, _ = torch.batch_norm_stats(data.to(memory_format=torch.channels_last), 1e-5)
-            mean_ref = torch.mean(data, (0, 2, 3), keepdim=False)
+            mean2, _ = torch.batch_norm_stats(data.to(memory_format=memory_format), 1e-5)
+            mean_ref = torch.mean(data, mean_axes, keepdim=False)
 
             self.assertEqual(mean_ref, mean1)
             self.assertEqual(mean_ref, mean2)
 
-        data = torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda')
-        _batch_norm_stats(data)
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
+        _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
 
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
