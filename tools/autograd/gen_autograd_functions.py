@@ -291,7 +291,7 @@ PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
     auto si = prop[i];
     if (si.is_symbolic()) {
-      auto py_symint = py::cast(si.toSymIntNodeImpl()).release().ptr();
+      auto py_symint = py::cast(si).release().ptr();
       PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
     } else {
        PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.as_int_unchecked()));
@@ -313,7 +313,7 @@ return PyLong_FromUnsignedLong((int64_t) prop);
 """
 
 GETTER_BODY_SYMINT = """\
-return prop.is_symbolic() ? py::cast(prop.toSymIntNodeImpl()).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
+return prop.is_symbolic() ? py::cast(prop).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
 """
 
 GETTER_BODY_DOUBLE = """\
