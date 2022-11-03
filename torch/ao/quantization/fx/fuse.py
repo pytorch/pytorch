@@ -8,7 +8,7 @@ from .graph_module import (
     FusedGraphModule
 )
 from .match_utils import (
-    is_match,
+    _is_match,
     MatchAllNode,
 )
 from .pattern_utils import (
@@ -152,7 +152,7 @@ def _find_matches(
         if node.name not in match_map:
             for pattern, value in patterns.items():
                 matched_node_pattern: List[Node] = []
-                if is_match(modules, node, pattern):
+                if _is_match(modules, node, pattern):
                     apply_match(pattern, node, (node, pattern, value(node)), matched_node_pattern, node_to_subpattern)
                     break
 

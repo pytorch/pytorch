@@ -64,7 +64,7 @@ from .pattern_utils import (
 
 from .match_utils import (
     _MatchResultWithQConfig,
-    find_matches,
+    _find_matches,
 )
 
 from ..utils import _parent_name
@@ -1292,7 +1292,7 @@ def insert_observers_for_model(
 
                     # TODO: this only works for sequential fusion right now, extend it
                     # it to automatically detect all input nodes based on the pattern
-                    # need to change find_matches function to return this information
+                    # need to change _find_matches function to return this information
                     root_node = _default_root_node_getter(matched_node_pattern)
                     is_input_node_of_the_pattern = node is root_node
                     if is_input_node_of_the_pattern:
@@ -1605,7 +1605,7 @@ def prepare(
     # }
     modules = dict(model.named_modules(remove_duplicate=False))
 
-    # fill node_name_to_qconfig, a map from node name to qconfig, used in find_matches
+    # fill node_name_to_qconfig, a map from node name to qconfig, used in _find_matches
     equalization_node_name_to_qconfig = generate_node_name_to_qconfig(
         model, modules, model.graph, _equalization_config, node_name_to_scope)
     node_name_to_qconfig = generate_node_name_to_qconfig(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
@@ -1616,7 +1616,7 @@ def prepare(
     standalone_module_classes = list(prepare_custom_config.standalone_module_classes.keys())
 
     custom_module_classes = get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
-    matches_without_qconfig = find_matches(
+    matches_without_qconfig = _find_matches(
         model.graph, modules, pattern_to_quantize_handler, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
 

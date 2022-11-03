@@ -21,15 +21,11 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
 
 
-# TODO: revisit this list. Many helper methods shouldn't be public
-__all__ = [
-    "is_match",
-    "find_matches",
-]
+__all__ = []
 
 # TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
 # would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
-MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
+_MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
 
 _MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                                 QConfigAny]
@@ -38,7 +34,7 @@ _MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHan
 # need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.
 # decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
 # we'll start from the last node of the graph and traverse back.
-def is_match(modules, node, pattern, max_uses=sys.maxsize):
+def _is_match(modules, node, pattern, max_uses=sys.maxsize):
     """ Matches a node in fx against a pattern
     """
     if isinstance(pattern, tuple):
@@ -79,16 +75,16 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if len(arg_matches) != len(node.args):
         return False
 
-    return all(is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
+    return all(_is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
 
-def find_matches(
+def _find_matches(
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
         patterns: Dict[Pattern, QuantizeHandler],
         root_node_getter_mapping: Dict[Pattern, Callable],
         standalone_module_names: List[str] = None,
         standalone_module_classes: List[Type] = None,
-        custom_module_classes: List[Any] = None) -> Dict[str, MatchResult]:
+        custom_module_classes: List[Any] = None) -> Dict[str, _MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and
     outputs the information needed to quantize them in future steps.
@@ -120,7 +116,7 @@ def find_matches(
     if standalone_module_names is None:
         standalone_module_names = []
 
-    match_map: Dict[str, MatchResult] = {}
+    match_map: Dict[str, _MatchResult] = {}
     all_matched : Set[str] = set()
 
     def _recursive_record_node_in_match_map(
@@ -172,7 +168,7 @@ def find_matches(
         if node.name not in match_map and node.name not in all_matched:
             for pattern, quantize_handler_cls in patterns.items():
                 root_node_getter = root_node_getter_mapping.get(pattern, None)
-                if is_match(modules, node, pattern) and node.name not in match_map:
+                if _is_match(modules, node, pattern) and node.name not in match_map:
                     matched_node_pattern: List[Node] = []
                     record_match(
                         pattern,

@@ -20,7 +20,7 @@ from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.utils import _getattr_from_fqn
-from torch.ao.quantization.fx.match_utils import MatchResult
+from torch.ao.quantization.fx.match_utils import _MatchResult
 
 import collections
 import copy
@@ -100,7 +100,7 @@ class OutputProp:
         return None
 
 def _get_dedup_subgraphs(
-    matches: Dict[str, MatchResult]
+    matches: Dict[str, _MatchResult]
 ) -> Dict[str, List[Node]]:
     # the original matches variable is unique by node, make it unique by subgraph
     # instead
@@ -110,7 +110,7 @@ def _get_dedup_subgraphs(
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
     # TODO(future PR): try reversed(list(matches.items()))
-    matches_items_reversed: List[Tuple[str, MatchResult]] = []
+    matches_items_reversed: List[Tuple[str, _MatchResult]] = []
     for name, cur_match in matches.items():
         matches_items_reversed.insert(0, (name, cur_match))
 
@@ -162,7 +162,7 @@ def _get_dedup_subgraphs(
             assert len(cur_match[1]) == 2
             # either (a, b), or ((a, b), c) or (c, (a, b))
             # cannot make any assumptions on order, not clear what the
-            # find_matches function is doing to populate this
+            # _find_matches function is doing to populate this
             # TODO(future PR): make this code less confusing,  see discussion
             # in https://github.com/pytorch/pytorch/pull/80521/files#r975918836
 

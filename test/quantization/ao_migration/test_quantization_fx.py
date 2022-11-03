@@ -125,10 +125,10 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
 
     def test_function_import_fx_match_utils(self):
         function_list = [
-            'MatchResult',
+            '_MatchResult',
             'MatchAllNode',
-            'is_match',
-            'find_matches'
+            '_is_match',
+            '_find_matches'
         ]
         self._test_function_import('fx.match_utils', function_list)
 
