@@ -35,7 +35,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     first_sample,
     parametrize,
-    skipIfSlowGradcheckEnv,
     skipIfTorchInductor,
     slowTest,
 )
@@ -109,7 +108,6 @@ aten = torch.ops.aten
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
-@skipIfSlowGradcheckEnv
 class TestCommon(TestCase):
     exact_dtype = True
 
@@ -185,7 +183,7 @@ class TestCommon(TestCase):
                 return arg.to(device='cpu')
             return arg
 
-        samples = op.sample_inputs(device, dtype)
+        samples = op.reference_inputs(device, dtype)
 
         for sample in samples:
             cpu_sample = sample.transform(to_cpu)
@@ -1389,7 +1387,6 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
 
-@skipIfSlowGradcheckEnv
 class TestMathBits(TestCase):
     # Tests that
     # 1. The operator's output for physically conjugated/negated tensors and conjugate/negative view tensors
@@ -1599,7 +1596,6 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
 # ouput tensor properties
-@skipIfSlowGradcheckEnv
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1612,7 +1608,6 @@ class TestTagsMode(TorchDispatchMode):
         return rs
 
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
-@skipIfSlowGradcheckEnv
 class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
@@ -1632,7 +1627,6 @@ class TestTags(TestCase):
                 check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
-@skipIfSlowGradcheckEnv
 class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs._conversions"]
@@ -1674,7 +1668,6 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
-        '_refs.var',
         '_refs.rsub',
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
@@ -1915,7 +1908,6 @@ fake_autocast_backward_xfails = {
     skip('pinverse'),
 }
 
-@skipIfSlowGradcheckEnv
 class TestFakeTensor(TestCase):
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
