@@ -12,6 +12,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/repeat_interleave.h>
 #include <ATen/ops/repeat_interleave_native.h>
+#include <ATen/ops/tensor.h>
 #endif
 
 template <typename index_t>
@@ -102,8 +103,7 @@ Tensor repeat_interleave(
     int64_t repeats,
     c10::optional<int64_t> dim,
     c10::optional<int64_t> output_size) {
-  at::Tensor repeats_ =
-      at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
+  at::Tensor repeats_ = at::tensor(repeats, self.options().dtype(at::kLong));
   return at::native::repeat_interleave(self, repeats_, dim, output_size);
 }
 
