@@ -427,23 +427,20 @@ def _trunc_divide(g: jit_utils.GraphContext, self, other):
 
     # Matching PyTorch's behavior:
     # - if self is fp the output's type is self's type
-    # - if self is not fp and other is fp, the output is of type "Float"
+    # - if self is not fp and other is fp, the output is of type JitScalarType.FLOAT
     # - self is not fp and other is not fp, the output's type is self's output type
     # - the output type defaults to Float
-    scalar_type = self.type().scalarType()
-
-    if scalar_type is not None:
-        if (
-            not symbolic_helper._is_fp(self)
-            and other.type().scalarType() is not None
-            and symbolic_helper._is_fp(other)
-        ):
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    )
+    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
+        if not symbolic_helper._is_fp(self) and symbolic_helper._is_fp(other):
             out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         else:
             out = g.op(
                 "Cast",
                 out,
-                to_i=_type_utils.JitScalarType.from_name(scalar_type).onnx_type(),
+                to_i=scalar_type.onnx_type(),
             )
     else:
         out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
@@ -576,28 +573,26 @@ def matmul(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
 @_beartype.beartype
 def addmm(g: jit_utils.GraphContext, self, mat1, mat2, beta, alpha):
-    dtype = None
-    self_dtype = symbolic_helper._try_get_scalar_type(self)
-    mat1_dtype = symbolic_helper._try_get_scalar_type(mat1)
-    mat2_dtype = symbolic_helper._try_get_scalar_type(mat2)
-    if self_dtype is not None:
-        dtype = self_dtype
-    elif mat1_dtype is not None:
-        dtype = mat1_dtype
-    elif mat2_dtype is not None:
-        dtype = mat2_dtype
+    scalar_type = None
+    self_scalar_type = symbolic_helper._try_get_scalar_type(self)
+    mat1_scalar_type = symbolic_helper._try_get_scalar_type(mat1)
+    mat2_scalar_type = symbolic_helper._try_get_scalar_type(mat2)
+    if self_scalar_type is not None:
+        scalar_type = self_scalar_type
+    elif mat1_scalar_type is not None:
+        scalar_type = mat1_scalar_type
+    elif mat2_scalar_type is not None:
+        scalar_type = mat2_scalar_type
 
     mat1_rank = symbolic_helper._get_tensor_rank(mat1)
     mat2_rank = symbolic_helper._get_tensor_rank(mat2)
 
-    def is_not_none_and(v, u):
+    def is_not_none_nor(v, u):
         return v is not None and v != u
 
-    if dtype is not None and (
-        is_not_none_and(mat1_rank, 2) or is_not_none_and(mat2_rank, 2)
+    if scalar_type is not None and (
+        is_not_none_nor(mat1_rank, 2) or is_not_none_nor(mat2_rank, 2)
     ):
-        scalar_type = _type_utils.JitScalarType.from_name(dtype)
-
         res1 = g.op("MatMul", mat1, mat2)
         res2 = self
 
@@ -719,11 +714,16 @@ def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
 
 @_beartype.beartype
 def _maybe_cast_reduce_op_input(g: jit_utils.GraphContext, self):
-    dtype = self.type().scalarType()
-    # This check only covers traced modules where dtype is present
-    if dtype is not None:
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.UNDEFINED
+    )
+    if scalar_type != _type_utils.JitScalarType.UNDEFINED:
+        # This check only covers traced modules where dtype is present
         # pytorch reduce-ops cast all other integral types to int64
-        if not symbolic_helper._is_fp(self) and not (dtype == "Long"):
+        if (
+            not symbolic_helper._is_fp(self)
+            and scalar_type != _type_utils.JitScalarType.INT64
+        ):
             self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.INT64)
     return self
 
@@ -1261,16 +1261,16 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
         *args (tuple): operands to the operator.
         **kwargs (dict): attributes to the operator along with "opset_before" (optional, None by default)
             indicating the smallest opset version to trigger such casting behavior and "target_float_t"
-            (optional, "Float" by default) indicating the data type of internal operator.
+            (optional, torch.onnx.JitScalarType.FLOAT by default) indicating the data type of internal operator.
 
     Returns:
         Optional[torch._C.Value, Tuple[torch._C.Value, ...]]: output(s) of the operator.
     """
     opset_before = kwargs.pop("opset_before", None)
-    target_float_t = kwargs.pop("target_float_t", "Float")
+    target_float_t = kwargs.pop("target_float_t", _type_utils.JitScalarType.FLOAT)
 
     inputs = list(args)
-    dtype_0 = inputs[0].type().scalarType()
+    dtype_0 = _type_utils.JitScalarType.from_value(inputs[0])
 
     require_cast = not symbolic_helper._is_fp(inputs[0]) and (
         opset_before is None or GLOBALS.export_onnx_opset_version < opset_before
@@ -1278,9 +1278,10 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
-            if input.isCompleteTensor() and input.type().scalarType() != dtype_0:
+            input_scalar_type = _type_utils.JitScalarType.from_value(input)
+            if input.isCompleteTensor() and input_scalar_type != dtype_0:
                 raise errors.SymbolicValueError(
-                    f"Inputs of {op_name} must have same dtype. Got {dtype_0} and {input.type().scalarType()}",
+                    f"Inputs of {op_name} must have same dtype. Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
                     input,
                 )
         for i, input in enumerate(inputs):
@@ -1288,17 +1289,13 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
                 inputs[i] = g.op(
                     "Cast",
                     input,
-                    to_i=_type_utils.JitScalarType.from_name(
-                        target_float_t
-                    ).onnx_type(),
+                    to_i=target_float_t.onnx_type(),
                 )
 
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:
-        self = g.op(
-            "Cast", self, to_i=_type_utils.JitScalarType.from_name(dtype_0).onnx_type()
-        )
+        self = g.op("Cast", self, to_i=dtype_0.onnx_type())
 
     return self
 
@@ -2122,12 +2119,7 @@ def gt(g: jit_utils.GraphContext, input, other):
 
 @_beartype.beartype
 def _gt_impl(g: jit_utils.GraphContext, input, other):
-    if (
-        input.type().scalarType() is not None
-        and symbolic_helper._is_bool(input)
-        and other.type().scalarType() is not None
-        and symbolic_helper._is_bool(other)
-    ):
+    if symbolic_helper._is_bool(input) and symbolic_helper._is_bool(other):
         input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
         other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("Greater", input, other)
@@ -2142,12 +2134,7 @@ def lt(g: jit_utils.GraphContext, input, other):
 
 @_beartype.beartype
 def _lt_impl(g: jit_utils.GraphContext, input, other):
-    if (
-        input.type().scalarType() is not None
-        and symbolic_helper._is_bool(input)
-        and other.type().scalarType() is not None
-        and symbolic_helper._is_bool(other)
-    ):
+    if symbolic_helper._is_bool(input) and symbolic_helper._is_bool(other):
         input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
         other = g.op("Cast", other, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("Less", input, other)
@@ -2249,13 +2236,15 @@ def logical_xor(g: jit_utils.GraphContext, input, other):
 def __rshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
-    if other.type().scalarType() != self.type().scalarType():
+    self_scalar_type = _type_utils.JitScalarType.from_value(self)
+    if (
+        _type_utils.JitScalarType.from_value(other, _type_utils.JitScalarType.UNDEFINED)
+        != self_scalar_type
+    ):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
-                self.type().scalarType()
-            ).onnx_type(),
+            to_i=self_scalar_type.onnx_type(),
         )
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
@@ -2266,7 +2255,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
+        to_i=self_scalar_type.onnx_type(),
     )
     rshift = g.op("Div", self, two_pow)
     return rshift
@@ -2277,13 +2266,15 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
 def __lshift_(g: jit_utils.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
-    if other.type().scalarType() != self.type().scalarType():
+    self_scalar_type = _type_utils.JitScalarType.from_value(self)
+    if (
+        _type_utils.JitScalarType.from_value(other, _type_utils.JitScalarType.UNDEFINED)
+        != self_scalar_type
+    ):
         other = g.op(
             "Cast",
             other,
-            to_i=_type_utils.JitScalarType.from_name(
-                self.type().scalarType()
-            ).onnx_type(),
+            to_i=self_scalar_type.onnx_type(),
         )
 
     two = g.op("Constant", value_t=torch.tensor(2, dtype=torch.float32))
@@ -2294,7 +2285,7 @@ def __lshift_(g: jit_utils.GraphContext, self, other):
     two_pow = g.op(
         "Cast",
         two_pow,
-        to_i=_type_utils.JitScalarType.from_name(self.type().scalarType()).onnx_type(),
+        to_i=self_scalar_type.onnx_type(),
     )
     lshift = g.op("Mul", self, two_pow)
     return lshift
@@ -2353,7 +2344,13 @@ def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
 def _log_softmax(g: jit_utils.GraphContext, input, dim, half_to_float):
-    if half_to_float and input.type().scalarType() == "Half":
+    if (
+        half_to_float
+        and _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.UNDEFINED
+        )
+        == _type_utils.JitScalarType.HALF
+    ):
         input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return log_softmax(g, input, dim)
 
@@ -2776,9 +2773,7 @@ def instance_norm(
             )
         weight_value = torch.tensor(
             [1.0] * channel_size,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or symbolic_helper._is_none(bias):
@@ -2789,9 +2784,7 @@ def instance_norm(
             )
         bias_value = torch.tensor(
             [0.0] * channel_size,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         )
         bias = g.op("Constant", value_t=bias_value)
     if (
@@ -3031,7 +3024,7 @@ def type_as(g: jit_utils.GraphContext, self, other):
         return g.op(
             "Cast",
             self,
-            to_i=_type_utils.JitScalarType.from_name(other_dtype).onnx_type(),
+            to_i=other_dtype.onnx_type(),
         )
 
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -3121,17 +3114,15 @@ def log10(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::pow")
 @_beartype.beartype
 def pow(g: jit_utils.GraphContext, self, exponent):
-    f_dtype = self_dtype = self.type().scalarType()
+    f_dtype = _type_utils.JitScalarType.from_value(self)
     if not symbolic_helper._is_fp(self):
-        f_dtype = "Float"
-        self = g.op(
-            "Cast", self, to_i=_type_utils.JitScalarType.from_name(f_dtype).onnx_type()
-        )
+        f_dtype = _type_utils.JitScalarType.FLOAT
+        self = g.op("Cast", self, to_i=f_dtype.onnx_type())
     if not symbolic_helper._is_fp(exponent):
         exponent = g.op(
             "Cast",
             exponent,
-            to_i=_type_utils.JitScalarType.from_name(f_dtype).onnx_type(),
+            to_i=f_dtype.onnx_type(),
         )
     pow = g.op("Pow", self, exponent)
     return pow
@@ -3169,10 +3160,8 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
             g, "Clip", self, min_f=symbolic_helper._parse_arg(min, "f"), opset_before=12
         )
     else:
-        dtype = self.type().scalarType()
-        min = g.op(
-            "Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
-        )
+        dtype = _type_utils.JitScalarType.from_value(self)
+        min = g.op("Cast", min, to_i=dtype.onnx_type())
         return _op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
@@ -3185,10 +3174,8 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
             g, "Clip", self, max_f=symbolic_helper._parse_arg(max, "f"), opset_before=12
         )
     else:
-        dtype = self.type().scalarType()
-        max = g.op(
-            "Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
-        )
+        dtype = _type_utils.JitScalarType.from_value(self)
+        max = g.op("Cast", max, to_i=dtype.onnx_type())
         return _op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
@@ -3530,7 +3517,6 @@ def new_empty(
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = _type_utils.JitScalarType.from_name(dtype)
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -3552,19 +3538,19 @@ def tensor(
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
-            scalar_name = symbolic_helper._unpack_list(data)[0].type().scalarType()
-            dtype = _type_utils.JitScalarType.from_name(scalar_name)
+            dtype = _type_utils.JitScalarType.from_value(
+                symbolic_helper._unpack_list(data)[0]
+            )
         input_list = list()
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = symbolic_helper._reshape_helper(g, t, shape_reference)
-            t = g.op("Cast", t, to_i=_type_utils.JitScalarType(dtype).onnx_type())
+            t = g.op("Cast", t, to_i=dtype.onnx_type())
             input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
     else:
         if dtype is None:
-            scalar_name = data.type().scalarType()
-            dtype = _type_utils.JitScalarType.from_name(scalar_name)
+            dtype = _type_utils.JitScalarType.from_value(data)
         if symbolic_helper._is_list(data) and (
             symbolic_helper._is_tensor_list(data)
             or symbolic_helper._is_scalar_list(data)
@@ -3629,7 +3615,7 @@ def new_zeros(
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
-        dtype = _type_utils.JitScalarType.from_name(self_dtype)
+        dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -3683,7 +3669,6 @@ def new_ones(
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = _type_utils.JitScalarType.from_name(dtype)
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -3759,7 +3744,6 @@ def new_full(
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
-        dtype = _type_utils.JitScalarType.from_name(dtype)
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
 
@@ -3895,11 +3879,9 @@ def tanhshrink(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "f")
 @_beartype.beartype
 def hardshrink(g: jit_utils.GraphContext, self, lambd):
-    dtype = self.type().scalarType()
-    if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
-    else:
-        scalar_type = _type_utils.JitScalarType.from_name(dtype)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.FLOAT
+    )
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
@@ -3920,11 +3902,9 @@ def hardshrink(g: jit_utils.GraphContext, self, lambd):
 @symbolic_helper.parse_args("v", "f")
 @_beartype.beartype
 def softshrink(g: jit_utils.GraphContext, self, lambd):
-    dtype = self.type().scalarType()
-    if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
-    else:
-        scalar_type = _type_utils.JitScalarType.from_name(dtype)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.FLOAT
+    )
     lambd_op = g.op(
         "Constant",
         value_t=torch.tensor(lambd, dtype=scalar_type.dtype()),
@@ -4078,11 +4058,11 @@ def to(g: jit_utils.GraphContext, self, *args):
 
         if symbolic_helper._is_value(dtype) or isinstance(dtype, torch.Tensor):
             # aten::to(Tensor, Tensor, bool, bool, memory_format)
-            dtype = args[0].type().scalarType()
+            dtype = _type_utils.JitScalarType.from_value(args[0])
             return g.op(
                 "Cast",
                 self,
-                to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
+                to_i=dtype.onnx_type(),
             )
         else:
             # aten::to(Tensor, ScalarType, bool, bool, memory_format)
@@ -4820,7 +4800,12 @@ def _pack_padded_sequence(g: jit_utils.GraphContext, input, lengths, batch_first
     # We know it's a TensorType so this check is now safe.
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
-    if lengths.type().scalarType() != "Int":
+    if (
+        _type_utils.JitScalarType.from_value(
+            lengths, _type_utils.JitScalarType.UNDEFINED
+        )
+        != _type_utils.JitScalarType.INT
+    ):
         lengths = g.op("Cast", lengths, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
@@ -4960,22 +4945,23 @@ def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
             "Bernoulli", "generator is not supported for bernoulli", input
         )
 
-    dtype = symbolic_helper._try_get_scalar_type(input)
-    if dtype is None:
+    dtype = _type_utils.JitScalarType.from_value(
+        input, _type_utils.JitScalarType.UNDEFINED
+    )
+    if dtype == _type_utils.JitScalarType.UNDEFINED:
         return symbolic_helper._unimplemented(
             "Bernoulli", "input dtype not accessible", input
         )
+
     p = g.op(
         "RandomUniformLike",
         input,
         high_f=1.0,
         low_f=0.0,
-        dtype_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
+        dtype_i=dtype.onnx_type(),
     )
     output = g.op("Less", p, input)
-    return g.op(
-        "Cast", output, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
-    )
+    return g.op("Cast", output, to_i=dtype.onnx_type())
 
 
 @_onnx_symbolic("aten::log_sigmoid")
@@ -5110,21 +5096,18 @@ def argmin(
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
 def scatter(g: jit_utils.GraphContext, self, dim, index, src):
-    src_type = src.type().scalarType()
+    src_type = _type_utils.JitScalarType.from_value(
+        src, _type_utils.JitScalarType.UNDEFINED
+    )
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
         return g.op("Scatter", self, index, src, axis_i=dim)
     else:
         # Check if scalar "src" has same type as self (PyTorch allows different
         # type for scalar src (but not when src is tensor)). If not, insert Cast node.
-        if self.type().scalarType() != src_type:
-            src = g.op(
-                "Cast",
-                src,
-                to_i=_type_utils.JitScalarType.from_name(
-                    self.type().scalarType()
-                ).onnx_type(),
-            )
+        self_scalar_type = _type_utils.JitScalarType.from_value(self)
+        if self_scalar_type != src_type:
+            src = g.op("Cast", src, to_i=self_scalar_type.onnx_type())
         return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
 
@@ -5132,12 +5115,11 @@ def scatter(g: jit_utils.GraphContext, self, dim, index, src):
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
 def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
-    scalar_name = symbolic_helper._try_get_scalar_type(self)
-    if scalar_name is None:
+    scalar_type = symbolic_helper._try_get_scalar_type(self)
+    if scalar_type is None:
         return symbolic_helper._unimplemented(
             "scatter_add", "input dtype not accessible", self
         )
-    scalar_type = _type_utils.JitScalarType.from_name(scalar_name)
     sizes = symbolic_helper._get_tensor_sizes(self, allow_nonstatic=False)
     if sizes:
         to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=scalar_type.dtype()))
@@ -5184,7 +5166,14 @@ def __isnot_(g: jit_utils.GraphContext, self, other):
 def one_hot(g: jit_utils.GraphContext, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     # onnxruntime supports limited type combinations for OneHot.
-    if num_classes.type().scalarType() in {"Byte", "Char", "Int", "Short"}:
+    if _type_utils.JitScalarType.from_value(
+        num_classes, _type_utils.JitScalarType.UNDEFINED
+    ) in {
+        _type_utils.JitScalarType.UINT8,
+        _type_utils.JitScalarType.INT8,
+        _type_utils.JitScalarType.INT,
+        _type_utils.JitScalarType.INT16,
+    }:
         num_classes = g.op("Cast", num_classes, to_i=_C_onnx.TensorProtoDataType.INT64)
     return g.op("OneHot", self, num_classes, values, axis_i=-1)
 
@@ -5197,13 +5186,13 @@ def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
         return symbolic_helper._unimplemented("gather", "sparse_grad == True", self)
     # NOTE: This workaround is needed since GatherElement is only supported
     #       since opset 11, and Gather in ONNX is not the same as torch.gather.
-    dtype = self.type().scalarType()
+    scalar_type = _type_utils.JitScalarType.from_value(self)
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
     index = g.op(
         "Cast",
         g.op("OneHot", index, depth, values, axis_i=dim),
-        to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type(),
+        to_i=scalar_type.onnx_type(),
     )
     mul = g.op("Mul", symbolic_helper._unsqueeze_helper(g, self, [dim + 1]), index)
     return symbolic_helper._reducesum_helper(g, mul, axes_i=[dim], keepdims_i=0)
@@ -5413,7 +5402,11 @@ def index(g: jit_utils.GraphContext, self, index):
     @_beartype.beartype
     def try_mask_to_index(index):
         if not symbolic_helper._is_none(index) and (
-            index.type().scalarType() == "Byte" or symbolic_helper._is_bool(index)
+            _type_utils.JitScalarType.from_value(
+                index, _type_utils.JitScalarType.UNDEFINED
+            )
+            == _type_utils.JitScalarType.UINT8
+            or symbolic_helper._is_bool(index)
         ):
             if g.opset < 9:
                 raise errors.SymbolicValueError(
@@ -5750,19 +5743,17 @@ def multinomial(
 @_onnx_symbolic("aten::baddbmm")
 @_beartype.beartype
 def baddbmm(g: jit_utils.GraphContext, self, batch1, batch2, beta, alpha):
-    dtype = self.type().scalarType()
+    scalar_type = _type_utils.JitScalarType.from_value(self)
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(
         g,
         batch_mul,
-        g.op(
-            "Cast", alpha, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()
-        ),
+        g.op("Cast", alpha, to_i=scalar_type.onnx_type()),
     )
     mul_b = mul(
         g,
         self,
-        g.op("Cast", beta, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type()),
+        g.op("Cast", beta, to_i=scalar_type.onnx_type()),
     )
     return add(g, mul_a, mul_b)
 
@@ -5874,18 +5865,14 @@ def group_norm(
         "Constant",
         value_t=torch.tensor(
             [1.0] * num_groups,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         ),
     )
     bias_ = g.op(
         "Constant",
         value_t=torch.tensor(
             [0.0] * num_groups,
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            dtype=_type_utils.JitScalarType.from_value(input).dtype(),
         ),
     )
 
@@ -5896,18 +5883,12 @@ def group_norm(
 
     if weight is None or weight.node().mustBeNone():
         weight_value = torch.tensor(
-            [1.0],
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            [1.0], dtype=_type_utils.JitScalarType.from_value(input).dtype()
         )
         weight = g.op("Constant", value_t=weight_value)
     if bias is None or bias.node().mustBeNone():
         bias_value = torch.tensor(
-            [0.0],
-            dtype=_type_utils.JitScalarType.from_name(
-                input.type().scalarType()
-            ).dtype(),
+            [0.0], dtype=_type_utils.JitScalarType.from_value(input).dtype()
         )
         bias = g.op("Constant", value_t=bias_value)
 
@@ -6200,13 +6181,10 @@ def movedim(g: jit_utils.GraphContext, self, source, destination):
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
 def fill(g: jit_utils.GraphContext, self, value):
-    dtype = self.type().scalarType()
-    if dtype is None:
-        dtype = _type_utils.JitScalarType.FLOAT
-    else:
-        dtype = _type_utils.JitScalarType.from_name(dtype)
-
-    return full_like(g, self, value, dtype)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        self, _type_utils.JitScalarType.FLOAT
+    )
+    return full_like(g, self, value, scalar_type)
 
 
 @_onnx_symbolic("aten::index_add")
@@ -6498,10 +6476,9 @@ def prim_unchecked_cast(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("prim::dtype")
 @_beartype.beartype
 def prim_dtype(g: jit_utils.GraphContext, self):
-    scalar_name = symbolic_helper._try_get_scalar_type(self)
-    if scalar_name is None:
-        scalar_name = "Float"
-    scalar_type = _type_utils.JitScalarType.from_name(scalar_name)
+    scalar_type = symbolic_helper._try_get_scalar_type(self)
+    if scalar_type is None:
+        scalar_type = _type_utils.JitScalarType.FLOAT
     # This node records a torch dtype as int
     return g.op("Constant", value_t=torch.tensor(scalar_type))
 
