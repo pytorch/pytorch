@@ -78,6 +78,43 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 torch._inductor.config.triton.autotune = False  # too slow
 
 
+# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
+# avx512vl, and avx512dq at least. So we will skip the test case if one processor
+# is not meet the requirement.
+@functools.lru_cache(maxsize=None)
+def has_bf16_support():
+    import sys
+
+    if sys.platform != "linux":
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
+
+
+unary_list = [
+    torch.nn.ReLU(),
+    torch.nn.Sigmoid(),
+    torch.nn.Tanh(),
+    torch.nn.Hardswish(),
+    torch.nn.LeakyReLU(0.1, inplace=False),
+    torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
+    torch.nn.GELU(approximate="none"),
+    torch.nn.GELU(approximate="tanh"),
+]
+
+
+binary_list = [
+    lambda x, y: torch.add(x, y),  # call_function
+    lambda x, y: torch.add(y, x),  # call_function
+    lambda x, y: x.add(y),  # call_method
+    lambda x, y: x.add_(y),  # call_method
+    lambda x, y: torch.sub(x, y),  # call_function
+    lambda x, y: x.sub(y),  # call_method
+    lambda x, y: x.sub_(y),  # call_method
+]
+
+
 def requires_decomp(fn):
     """Decorator to disable test if a decomp is missing"""
 
@@ -192,6 +229,7 @@ def check_model(
     ref_inputs = example_inputs
     ref_kwargs = kwargs
     has_lowp_args = False
+    original_lowp_dtype = torch.half
 
     if reference_in_float:
         # check_lowp is ignored here, it's kept just to be able to call `common` with extra arg
@@ -205,9 +243,15 @@ def check_model(
             else:
                 return x
 
+        def get_original_lowp_dtype(example_inputs):
+            dtypes = [x.dtype for x in example_inputs if isinstance(x, torch.Tensor)]
+            dtype_set = set(dtypes)
+            return dtype_set.pop() if len(dtype_set) == 1 else torch.half
+
         ref_inputs = list(map(upcast_fn, example_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args:
+            original_lowp_dtype = get_original_lowp_dtype(example_inputs)
             if hasattr(model, "to"):
                 model = model.to(torch.float)
 
@@ -217,7 +261,7 @@ def check_model(
     # downcast the model back if needed
     if reference_in_float and has_lowp_args:
         if hasattr(model, "to"):
-            model = model.to(torch.half)
+            model = model.to(original_lowp_dtype)
 
     torch._inductor.metrics.reset()
 
@@ -1294,22 +1338,9 @@ class CommonTemplate:
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d unary test")
     def test_conv2d_unary(self):
-        def _unary_list():
-            unary_list = [
-                torch.nn.ReLU(),
-                torch.nn.Sigmoid(),
-                torch.nn.Tanh(),
-                torch.nn.Hardswish(),
-                torch.nn.LeakyReLU(0.1, inplace=False),
-                torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False),
-                torch.nn.GELU(approximate="none"),
-                torch.nn.GELU(approximate="tanh"),
-            ]
-            return unary_list
-
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
-            _unary_list(),
+            unary_list,
             [True, False],
             [1, 3],
             [1, 2],
@@ -1354,18 +1385,6 @@ class CommonTemplate:
     # see https://github.com/pytorch/pytorch/issues/87745.
     @unittest.skipIf(HAS_CUDA, "only support cpu conv2d binary test")
     def test_conv2d_binary(self):
-        def _binary_list():
-            binary_list = [
-                lambda x, y: torch.add(x, y),  # call_function
-                lambda x, y: torch.add(y, x),  # call_function
-                lambda x, y: x.add(y),  # call_method
-                lambda x, y: x.add_(y),  # call_method
-                lambda x, y: torch.sub(x, y),  # call_function
-                lambda x, y: x.sub(y),  # call_method
-                lambda x, y: x.sub_(y),  # call_method
-            ]
-            return binary_list
-
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -1405,7 +1424,7 @@ class CommonTemplate:
 
         test_memory_format = [torch.contiguous_format, torch.channels_last]
         options = itertools.product(
-            _binary_list(),
+            binary_list,
             [True, False],
             [1, 3],
             [1, 2],
@@ -1437,6 +1456,24 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+
+    def test_linear_unary(self):
+        options = itertools.product(unary_list, [[2, 3, 10], [2, 10]], [True, False])
+        dtype = torch.bfloat16
+        if has_bf16_support():
+            for eltwise_fn, input_shape, bias in options:
+                mod = torch.nn.Sequential(
+                    torch.nn.Linear(input_shape[-1], 30, bias=bias), eltwise_fn
+                ).eval()
+
+                # only fuse for linear when the dtype is bf16
+                mod = mod.to(dtype)
+                v = torch.randn(input_shape).to(dtype)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_gather1(self):
         def fn(a, b):

@@ -3442,6 +3442,56 @@ class ConvolutionBinary(ExternKernelAlloc):
         self.freeze_layout_with_stride_order(self.layout.preferred_stride_order)
 
 
+class LinearUnary(ExternKernelAlloc):
+    kernel = "torch.ops.mkldnn._linear_pointwise"
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        kernel="torch.ops.mkldnn._linear_pointwise",
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.kernel = kernel
+
+    def codegen(self, wrapper):
+        wrapper.writeline(
+            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        )
+
+    @classmethod
+    def create(cls, x, w, b, attr, scalars, algorithm):
+        kernel = "torch.ops.mkldnn._linear_pointwise"
+        x = cls.require_stride1(cls.realize_input(x))
+        w = cls.require_stride1(cls.realize_input(w))
+
+        *m, ic = x.get_size()
+        oc, ic = w.get_size()
+
+        inputs = [x, w]
+        constant_args = [attr, scalars, algorithm]
+        if b is not None:
+            b = cls.require_stride1(cls.realize_input(b))
+            inputs.append(b)
+        else:
+            constant_args.insert(0, b)
+
+        return LinearUnary(
+            layout=FlexibleLayout(
+                device=x.get_device(),
+                dtype=x.get_dtype(),
+                size=list(m) + [oc],
+            ),
+            inputs=inputs,
+            constant_args=constant_args,
+            kernel=kernel,
+        )
+
+    def apply_constraint(self):
+        pass
+
+
 @dataclasses.dataclass
 class MutableBox(IRNode):
     """
