@@ -229,7 +229,7 @@ def augment_exc_message(exc, msg="\n"):
         and len(exc.real_stack) > 0
         and not (config.verbose and config.suppress_errors)
     ):
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(reversed(exc.real_stack)))}"
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(exc.real_stack)))[0:2])}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
