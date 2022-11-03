@@ -3,7 +3,7 @@
 import io
 import os
 import zipfile
-from typing import Mapping, Union
+from typing import List, Mapping, Set, Union
 
 import torch
 import torch.jit._trace
@@ -66,7 +66,6 @@ def _add_onnxscript_fn(
     custom_opsets: Mapping[str, int],
 ) -> bytes:
     """Insert model-included custom onnx-script function into ModelProto"""
-
     # TODO(titaiwang): remove this when onnx becomes dependency
     try:
         import onnx
@@ -84,16 +83,45 @@ def _add_onnxscript_fn(
     # function_proto into model_proto
     # TODO(titaiwang): Currently, onnxscript doesn't support ONNXFunction
     # calling other ONNXFunction scenario, neither does it here
-    onnx_function_list = list()
-    included_node_func = set()
-    for node in model_proto.graph.node:
+    onnx_function_list = list()  # type: ignore[var-annotated]
+    included_node_func = set()  # type: Set[str]
+    _find_onnxscript_op_recursively(
+        model_proto.graph, included_node_func, custom_opsets, onnx_function_list
+    )
+
+    if onnx_function_list:
+        model_proto.functions.extend(onnx_function_list)
+        model_bytes = model_proto.SerializeToString()
+    return model_bytes
+
+
+@_beartype.beartype
+def _find_onnxscript_op_recursively(
+    graph_proto,
+    included_node_func: Set[str],
+    custom_opsets: Mapping[str, int],
+    onnx_function_list: List,
+):
+    """Recursively iterate ModelProto to find ONNXFunction op."""
+    for node in graph_proto.node:
         node_kind = node.domain + "::" + node.op_type
+        # For control flow node: IF/Loop which has inner graph_proto
+        for attr in node.attribute:
+            if attr.g is not None:
+                (
+                    onnx_function_list,
+                    included_node_func,
+                ) = _find_onnxscript_op_recursively(
+                    attr.g, included_node_func, custom_opsets, onnx_function_list
+                )
         if (
-            jit_utils.is_custom_domain(node.domain)
+            node.domain
+            and jit_utils.is_custom_domain(node.domain)
             and node_kind not in included_node_func
         ):
             specified_version = custom_opsets.get(node.domain, 1)
             onnx_function_group = registration.registry.get_function_group(node_kind)
+            # Only the custom Op with ONNX function should be found in registry
             if onnx_function_group is not None:
                 onnx_fn = onnx_function_group.get(specified_version)
                 if onnx_fn is not None:
@@ -102,15 +130,11 @@ def _add_onnxscript_fn(
                     onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
                     included_node_func.add(node_kind)
                     continue
-
-            raise errors.UnsupportedOperatorError(
-                node_kind,
-                specified_version,
-                onnx_function_group.get_min_supported()
-                if onnx_function_group
-                else None,
-            )
-    if onnx_function_list:
-        model_proto.functions.extend(onnx_function_list)
-        model_bytes = model_proto.SerializeToString()
-    return model_bytes
+                raise errors.UnsupportedOperatorError(
+                    node_kind,
+                    specified_version,
+                    onnx_function_group.get_min_supported()
+                    if onnx_function_group
+                    else None,
+                )
+    return onnx_function_list, included_node_func
