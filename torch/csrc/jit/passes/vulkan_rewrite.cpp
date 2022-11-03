@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -80,6 +81,51 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   transpose_rewriter.RegisterRewritePattern(
       conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
   transpose_rewriter.runOnGraph(graph);
+}
+
+void transferInputOutputBackends(std::shared_ptr<Graph>& graph) {
+  // Move inputs to Vulkan backend
+  for (Value* input : graph->inputs()) {
+    NamedValue named_input = NamedValue("", input);
+    if (named_input.type()->kind() == TypeKind::TensorType) {
+      // find the insertion point
+      WithInsertPoint ip(input->uses()[0].user->prev());
+      Value* replaced_input = graph->insert(
+          Symbol::fromQualString("aten::to"), {named_input, "vulkan"});
+      // replace the input
+      input->replaceAllUsesAfterNodeWith(
+          replaced_input->node(), replaced_input);
+    }
+  }
+
+  // Move outputs to CPU backend
+  at::ArrayRef<Value*>&& outputs = graph->outputs();
+  for (size_t i = 0; i < outputs.size(); i++) {
+    Value* output = outputs[i];
+    NamedValue named_output = NamedValue("", output);
+    if (named_output.type()->kind() == TypeKind::TensorType) {
+      // find the insertion point
+      WithInsertPoint ip(output->node()->next());
+      Value* replaced_output = graph->insert(
+          Symbol::fromQualString("aten::to"), {named_output, "cpu"});
+      // replace the output
+      graph->block()->replaceOutput(i, replaced_output);
+    }
+  }
+
+  SubgraphRewriter rewriter;
+  rewriter.runOnGraph(graph);
+}
+
+void transferInputOutputBackends(script::Module& module) {
+  std::shared_ptr<Graph> graph = module.get_methods()[0].graph();
+  transferInputOutputBackends(graph);
+}
+
+void eliminateDeadCode(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    EliminateDeadCode(method.graph());
+  }
 }
 
 void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
@@ -269,18 +315,26 @@ void vulkanRunCanonicalOptimizations(script::Module& module) {
 
 script::Module vulkanOptimizeForMobile(
     const script::Module& m,
+    const std::set<MobileOptimizerType>& optimization_blocklist,
     const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
   cloned_module = FoldConvBatchNorm(cloned_module);
   vulkanInsertPrePackedOps(cloned_module);
   cloned_module = freeze_module(cloned_module, preserved_methods);
+  if (!optimization_blocklist.count(
+          MobileOptimizerType::VULKAN_AUTOMATIC_GPU_TRANSFER)) {
+    transferInputOutputBackends(cloned_module);
+    cloned_module.register_attribute(
+        "requires_backend_transfers", BoolType::get(), false);
+  }
   vulkanFusePrePackedConvWithClamp(cloned_module);
   vulkanFoldPrePackingOps(cloned_module);
   removeDropout(cloned_module);
   vulkanRemoveMutation(cloned_module);
   // remove duplicated constants
   vulkanRunCanonicalOptimizations(cloned_module);
+  eliminateDeadCode(cloned_module);
 
   cloned_module.register_attribute(
       "optimized_for_vulkan", BoolType::get(), true);
