@@ -21,8 +21,7 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
-    _apply_to_modules,
-    _get_param_to_unflat_param_names,
+    _get_param_to_fqns,
     _is_fsdp_flattened,
     _State,
     clean_tensor_name,
@@ -104,10 +103,14 @@ def _init_buffer_state(
     module: nn.Module,
 ) -> _State:
     state._buffer_names = _get_buffer_names(module)
-    # Save a mapping from fully prefixed buffer name to its original dtype
-    # since when buffer mixed precision is enabled, buffers are restored to
-    # their original dtype for model checkpointing
+    # Save a mapping from clean fully-qualified buffer name (starting from
+    # `module`) to its original dtype for restoring that dtype during model
+    # checkpointing when buffer mixed precision is enabled. The names should
+    # be clean since the casting happens in a `summon_full_params()` context.
     _buffer_name_to_orig_dtype: Dict[str, torch.dtype] = {}
+    for buffer_name, buffer in module.named_buffers():
+        buffer_name = clean_tensor_name(buffer_name)
+        _buffer_name_to_orig_dtype[buffer_name] = buffer.dtype
     state._buffer_name_to_orig_dtype = _buffer_name_to_orig_dtype
     return state
 
@@ -144,6 +147,10 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    _module_to_handles: Dict[
+        nn.Module, List[FlatParamHandle]
+    ] = collections.defaultdict(list)
+    state._module_to_handles = _module_to_handles
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handles`
     _handles: List[FlatParamHandle] = []
@@ -157,6 +164,8 @@ def _init_core_state(
 def _init_runtime_state(
     state: _State,
 ) -> _State:
+    _root_pre_forward_handles: List[RemovableHandle] = []
+    state._root_pre_forward_handles = _root_pre_forward_handles
     _pre_forward_handles: List[RemovableHandle] = []
     state._pre_forward_handles = _pre_forward_handles
     _post_forward_handles: List[RemovableHandle] = []
@@ -328,6 +337,8 @@ def _init_param_handle_from_params(
     assert handle not in state._handles
     state.params.append(handle.flat_param)
     state._handles.append(handle)
+    for module in handle.flat_param._modules:
+        state._module_to_handles[module].append(handle)
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
@@ -389,7 +400,7 @@ def _get_ignored_params(
         p for m in ignored_modules for p in m.parameters() if not _is_fsdp_flattened(p)
     )
     # Conservatively include all shared parameters' names
-    param_to_unflat_param_names = _get_param_to_unflat_param_names(
+    param_to_unflat_param_names = _get_param_to_fqns(
         root_module,
         dedup_shared_params=False,
     )
@@ -409,22 +420,8 @@ def _get_buffer_names(root_module: nn.Module) -> Set[str]:
     Returns the fully prefixed names of all buffers in the module hierarchy
     rooted at ``root_module`` as a class:`set`.
     """
-
-    def module_fn(module: nn.Module, prefix: str, buffer_names: Set[str]):
-        for buffer_name, _ in module.named_buffers(recurse=False):
-            # Clean module wrapper prefixes in case of nested wrapping
-            prefixed_buffer_name = clean_tensor_name(prefix + buffer_name)
-            buffer_names.add(prefixed_buffer_name)
-
-    def return_fn(buffer_names: Set[str], *args):
-        return buffer_names
-
-    buffer_names: Set[str] = set()
-    return _apply_to_modules(
-        root_module,
-        module_fn,
-        return_fn,
-        buffer_names,
+    return set(
+        clean_tensor_name(buffer_name) for buffer_name, _ in root_module.named_buffers()
     )
 
 
@@ -563,9 +560,8 @@ def _move_module_to_device(
                     isinstance(submodule, fsdp_file.FullyShardedDataParallel)
                     and submodule.cpu_offload.offload_params
                 ):
-                    with torch.no_grad():
-                        for handle in submodule._handles:
-                            handle.flat_param_to(torch.device("cpu"))
+                    for handle in submodule._handles:
+                        handle.flat_param_to(torch.device("cpu"))
     elif param.device == cpu_device:
         _warn_cpu_init()
 
