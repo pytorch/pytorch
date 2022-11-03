@@ -1,6 +1,7 @@
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Sequence, Union
+from typing import Any, Callable, Dict, Sequence
+from warnings import warn
 
 import torch
 
@@ -64,26 +65,12 @@ def torch_to_refs_map():
     for s in dir(torch.Tensor):
         if s in torch._refs.__all__:
             r[getattr(torch.Tensor, s)] = torch._refs.__dict__.get(s)
+
+    # Support conversions
+    for s in torch._refs._conversions.__all__:
+        r[getattr(torch.Tensor, s)] = torch._refs._conversions.__dict__.get(s)
+
     return r
-
-
-@functools.lru_cache(None)
-def nvfuser_decomp_table():
-    """
-    decomposition table needed for nvfuser
-    """
-    aten = torch.ops.aten
-    nvfuser_decompositions: Sequence[
-        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-    ] = {  # type: ignore[assignment]
-        # AMP calls `to` in C++, which is not handled by torch mapping
-        aten._to_copy,
-    }
-
-    from torch._decomp import get_decompositions
-
-    decomp_table = get_decompositions(nvfuser_decompositions)
-    return decomp_table
 
 
 @functools.lru_cache(None)
@@ -105,7 +92,18 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
 
     By default, this context manager will fall back on the torch.ops.prims* if the
     nvprim does not exist.
+    It's possible to skip certain prims by passing their names to the skip_ops
+    argument. skip_ops is expected to be a sequence of strings, e.g.,
+    ["prims.add.default"] In order to check the expected name of a prim, one can
+    use the `torch.overrides.resolve_name`.
+
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode(skips_ops=("prims.add.default")):
+    ...     torch.ops.prims.add.default(x, y)  # does not call torch.ops.nvprims.add.default(x, y)
     """
+
+    def __init__(self, *, skip_ops=()):
+        self.skip_ops = skip_ops
 
     def __torch_function__(
         self,
@@ -116,6 +114,12 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     ):
         if kwargs is None:
             kwargs = {}
+
+        # If the function is in the skip list, then we don't want to
+        # remap it to the nvprims.
+        if torch.overrides.resolve_name(orig_func) in self.skip_ops:
+            return orig_func(*args, **kwargs)
+
         if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
             orig_func, torch._ops.OpOverloadPacket
         ):
@@ -181,10 +185,10 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
         if func is not None:
             # If the ref exists query whether we should use it or not
-            if self.should_fallback_fn(self, func, args, kwargs):
+            if self.should_fallback_fn(self, orig_func, func, args, kwargs):
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
-            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+            with self:
                 return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
@@ -200,11 +204,44 @@ def _is_node_supported_nvfuser(node):
     )
 
 
-def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
-    with torch.overrides.enable_torch_function_mode(
-        torch_function_mode, replace=torch_function_mode.inner
-    ):
-        gm = get_isolated_graphmodule(func, args, kwargs)
+def _is_func_unsupported_nvfuser(
+    torch_function_mode, orig_func, func, args, kwargs, *, skip_ops=()
+):
+    """
+    This function traces the `func` under `torch_function_mode` and checks if
+    any of the traced nodes are not supported by nvFuser. If so, we should
+    fallback to the original function.
+
+    `skip_ops` argument is expected to be a list of strings of function names
+    that would match with `torch.overrides.resolve_name`.
+
+    Args:
+        torch_function_mode: The torch_function_mode context manager. orig_func:
+        The original function, its name will be used to check if
+                   it should be skipped.
+        func: The function to be traced. args: The args to be passed to the
+        function. kwargs: The kwargs to be passed to the function.
+    Keyword args:
+        skip_ops: A list of ops to skip when checking if the function is
+        supported.
+    """
+    # One supported case is easy to check: if the resolved name of the original
+    # function in the skip list, skip it.
+    if torch.overrides.resolve_name(orig_func) in skip_ops:
+        return True
+
+    with torch_function_mode:
+        try:
+            gm = get_isolated_graphmodule(func, args, kwargs)
+        except Exception as e:
+            warn(
+                "get_isolated_graphmodule failed on decomposition: "
+                + func.__name__
+                + " with error message: "
+                + str(e)
+            )
+            # returns unsupported when tracing fails.
+            return True
 
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
@@ -215,11 +252,82 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
 
 class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
-    def __init__(self):
+    def __init__(self, *, skip_ops=()):
+        aten_ops_to_skip = (
+            "aten._log_softmax.default",
+            "aten._log_softmax_backward_data.default",
+            "aten.expand.default",
+        )
+        self.skip_ops = tuple(skip_ops) + aten_ops_to_skip
         super().__init__(
             strict=False,
-            should_fallback_fn=_is_func_unsupported_nvfuser,
-            prims_mode_cls=NvfuserPrimsMode,
+            should_fallback_fn=functools.partial(
+                _is_func_unsupported_nvfuser,
+                skip_ops=tuple(skip_ops) + aten_ops_to_skip,
+            ),
+            prims_mode_cls=functools.partial(NvfuserPrimsMode, skip_ops=skip_ops),
+        )
+
+    # TODO: remove this once version from _decomp/decompositions.py is working
+    # with this context manager
+    # This is a workaround for AOT Autograd graphs
+    def _cudnn_batch_norm(
+        self,
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        training,
+        exponential_average_factor,
+        epsilon,
+    ):
+        a, b, c = torch.ops.nvprims.native_batch_norm(
+            input,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            training,
+            exponential_average_factor,
+            epsilon,
+        )
+        if training:
+            return (a, b, c, input.new_zeros((0,), dtype=torch.uint8))
+        return (
+            a,
+            weight.new_zeros((0,)),
+            weight.new_zeros((0,)),
+            input.new_zeros((0,), dtype=torch.uint8),
+        )
+
+    # This is a workaround for AOT Autograd graphs
+    def _cudnn_batch_norm_backward(
+        self,
+        input,
+        grad_output,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        epsilon,
+        reserveSpace,
+    ):
+        func = torch._decomp.decomposition_table[
+            torch.ops.aten.native_batch_norm_backward.default
+        ]
+        return func(
+            grad_output,
+            input,
+            weight,
+            running_mean,
+            running_var,
+            save_mean,
+            save_var,
+            True,
+            epsilon,
+            [True, True, True],
         )
 
     def _is_var_mean(self, func):
@@ -230,6 +338,30 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             )
             and "aten.var_mean" in str(func)
         )
+
+    def _is_view_or_reshape(self, func):
+        allowed_ops = {
+            "torch.Tensor.view",
+            "torch.Tensor.reshape",
+            "torch.view_copy",
+            "torch.reshape",
+            "aten.view.default",
+            "aten._unsafe_view.default",
+            "aten.view_copy.default",
+        } - set(self.skip_ops)
+        return torch.overrides.resolve_name(func) in allowed_ops
+
+    def _is_native_batch_norm(self, func):
+        return "torch.native_batch_norm" == torch.overrides.resolve_name(func) or (
+            func == torch.ops.aten.native_batch_norm.default
+            or func == torch.ops.aten.native_batch_norm
+        )
+
+    def _is_rand_like(self, func):
+        result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
+            func == torch.ops.aten.rand_like or func == torch.ops.aten.rand_like.default
+        )
+        return result
 
     def __torch_function__(
         self,
@@ -243,5 +375,45 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
+
+        if (
+            orig_func == torch.ops.aten.cudnn_batch_norm.default
+            or orig_func == torch.ops.aten.cudnn_batch_norm
+        ):
+            with self:
+                return self._cudnn_batch_norm(*args, **kwargs)
+
+        # A workaround for AOT Autograd graphs
+        # See https://github.com/pytorch/pytorch/pull/86115#issue-1394883782
+        if (
+            orig_func == torch.ops.aten.cudnn_batch_norm_backward.default
+            or orig_func == torch.ops.aten.cudnn_batch_norm_backward
+        ):
+            with self:
+                return self._cudnn_batch_norm_backward(*args, **kwargs)
+
+        if self._is_view_or_reshape(orig_func):
+            a, *shape = args
+            shape = torch._prims_common.extract_shape_from_varargs(
+                shape, validate=False
+            )  # type: ignore[assignment]
+            if len(kwargs) > 0:
+                warn("view has ignored kwargs!")
+            return torch.ops.nvprims.view(a, shape)
+
+        if orig_func == torch.ops.aten._reshape_alias.default:
+            a, shape, stride = args
+            if len(kwargs) > 0:
+                warn("view has ignored kwargs!")
+            return torch.ops.nvprims.view(a, shape)
+
+        if self._is_native_batch_norm(orig_func):
+            return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
+
+        if self._is_rand_like(orig_func):
+            if len(kwargs) > 0:
+                warn("rand_like has ignored kwargs!")
+            return torch.ops.nvprims.rand_like(*args)
+
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)

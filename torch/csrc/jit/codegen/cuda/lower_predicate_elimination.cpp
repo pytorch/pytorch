@@ -640,10 +640,11 @@ class PredicateChcker : public IterVisitor {
       // If input is not predicated, out-of-bound value may be
       // overwritten by a garbage value. However, it doesn't matter if
       // the input is also produced by another welford.
-      if (!input_def->isA<WelfordOp>() &&
+      if (!input_def->isA<WelfordOp>() && !input_def->isA<GroupedWelfordOp>() &&
           non_predicated_exprs_.find(input_def) !=
               non_predicated_exprs_.end()) {
         needs_predicate_ = true;
+        return;
       }
     }
   }
@@ -691,12 +692,8 @@ class PredicateChcker : public IterVisitor {
       } else if (
           auto input_def_grouped_rop =
               dynamic_cast<GroupedReductionOp*>(input_def)) {
-        auto input_index_as_output = std::distance(
-            input_def_grouped_rop->outputs().begin(),
-            std::find(
-                input_def_grouped_rop->outputs().begin(),
-                input_def_grouped_rop->outputs().end(),
-                input));
+        auto input_index_as_output =
+            input_def_grouped_rop->getExprIndexOfOutput(input);
         if (grouped_rop->getReductionOpType(i) !=
                 input_def_grouped_rop->getReductionOpType(
                     input_index_as_output) &&
@@ -710,6 +707,62 @@ class PredicateChcker : public IterVisitor {
           non_predicated_exprs_.end()) {
         needs_predicate_ = true;
         return;
+      }
+    }
+  }
+
+  void handle(GroupedWelfordOp* grouped_wop) final {
+    for (const auto expr_idx : c10::irange(grouped_wop->numExprs())) {
+      for (const auto val_idx : c10::irange(3)) {
+        auto init = grouped_wop->initVals().at(expr_idx).get(val_idx);
+
+        // Welford input can be a scalar. Predicate is required unless
+        // the scalar value is equal to the init value.
+        auto input = grouped_wop->inputVals().at(expr_idx).get(val_idx);
+        if (input->isScalar()) {
+          if (!input->sameAs(init)) {
+            needs_predicate_ = true;
+            return;
+          }
+          continue;
+        }
+
+        auto input_tv = dynamic_cast<TensorView*>(input);
+        TORCH_INTERNAL_ASSERT(input_tv != nullptr);
+
+        auto input_def = input->definition();
+
+        // When input_def is null, input must be an input to the fusion,
+        // so that must be allocated on global memory. Since we don't omit
+        // predication for expressions involving global memory, this
+        // should never occur.
+        TORCH_INTERNAL_ASSERT(
+            input_def != nullptr,
+            "Inconsistent input found: ",
+            input->toString());
+
+        // The input needs to be initialized to the init value to omit
+        // the predicate, so if the input has its own init value, i.e.,
+        // produced by another reduction, they must use the same init
+        // value.
+        Val* input_init = ir_utils::getReductionInitValOf(input_tv);
+        if (input_init != nullptr && !init->sameAs(input_init)) {
+          needs_predicate_ = true;
+          return;
+        }
+
+        // If input is not predicated, out-of-bound value may be
+        // overwritten by a garbage value. However, it doesn't matter if
+        // the input is also produced by another reduction op as it
+        // must be initialized and its initialized value is already
+        // found to be equal to the initil value of this op.
+        if (!input_def->isA<WelfordOp>() &&
+            !input_def->isA<GroupedWelfordOp>() &&
+            non_predicated_exprs_.find(input_def) !=
+                non_predicated_exprs_.end()) {
+          needs_predicate_ = true;
+          return;
+        }
       }
     }
   }

@@ -9,8 +9,8 @@
 
 #include <gtest/gtest.h>
 
-#include <c10d/PrefixStore.hpp>
-#include <c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
 
 constexpr int64_t kShortStoreTimeoutMillis = 100;
 constexpr int64_t kStoreCallbackTimeoutMillis = 5000;

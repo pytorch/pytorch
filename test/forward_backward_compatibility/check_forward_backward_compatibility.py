@@ -93,6 +93,9 @@ ALLOW_LIST = [
     ("aten::_linalg_inv_out_helper.out", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper_", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper", datetime.date(2022, 10, 1)),
+    ("aten::col2im_backward", datetime.date(2022, 12, 1)),
+    ("aten::im2col_backward", datetime.date(2022, 12, 1)),
+    ("aten::diag_backward", datetime.date(2022, 12, 1)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
@@ -279,11 +282,17 @@ ALLOW_LIST = [
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
     ("c10d::allreduce_", datetime.date(2022, 10, 1)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
+    ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
+    ("aten::_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     # Distributed c10d ops are all going to be updated
     ("c10d::.*", datetime.date(2022, 10, 31)),
     ("c10d::allgather_", datetime.date(2022, 10, 1)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
+    ("aten::nested_tensor", datetime.date(2022, 10, 15)),
+    ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
+    ("aten::_torch_cuda_cu_linker_symbol_op", datetime.date(2022, 11, 1)),
+
 ]
 
 ALLOW_LIST_COMPILED = [

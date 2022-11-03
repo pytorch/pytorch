@@ -40,13 +40,19 @@ struct TORCH_API ExperimentalConfig {
   ExperimentalConfig(
       std::vector<std::string> profiler_metrics = {},
       bool profiler_measure_per_kernel = false,
-      bool verbose = true);
+      bool verbose = false,
+      std::vector<std::string> performance_events = {});
   ~ExperimentalConfig() = default;
   explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
   bool profiler_measure_per_kernel;
   bool verbose;
+  /*
+   * List of performance events to be profiled.
+   * An empty list will disable performance event based profiling altogether.
+   */
+  std::vector<std::string> performance_events;
 };
 
 struct TORCH_API ProfilerConfig {

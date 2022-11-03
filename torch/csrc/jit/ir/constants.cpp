@@ -102,7 +102,7 @@ c10::optional<Value*> tryInsertConstant(
       return c10::nullopt;
     }
   } else if (val.isString()) {
-    n->s_(attr::value, val.toString()->string());
+    n->s_(attr::value, val.toStringRef());
     n->output()->setType(StringType::get());
   } else if (val.isDevice()) {
     std::stringstream ss;

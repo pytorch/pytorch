@@ -16,9 +16,11 @@ from torch.overrides import (
     get_overridable_functions,
     get_testing_overrides,
     is_tensor_method_or_property,
-    TorchFunctionMode
+    TorchFunctionMode,
+    _get_current_function_mode,
+    _get_current_function_mode_stack,
 )
-from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
+from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
 
 Tensor = torch.Tensor
@@ -635,7 +637,7 @@ def generate_tensor_like_override_tests(cls):
                         func = func.__get__(instance_gen())
                         continue
                     func_args.append(instance_gen())
-                elif t == 'TensorList':
+                elif t == 'TensorList' or t == 'ITensorListRef':
                     func_args.append([instance_gen(), instance_gen()])
                 elif t == 'c10::List<c10::optional<Tensor>>':
                     func_args.append([instance_gen(), instance_gen()])
@@ -1150,11 +1152,6 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch._sparse_csr_tensor_unsafe(1, 1, 1, (1, 1)), -1)
             self.assertEqual(torch.as_tensor([1]), -1)
 
-    def test_enable_torch_function_mode_with_tensor_subclass(self):
-        x = torch.randn(1)
-        with torch.overrides.enable_torch_function_mode(SubTensor):
-            self.assertEqual(torch.mm(x, x), -1)
-
     def test_modes_handle_first(self):
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
@@ -1178,53 +1175,8 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.mm(x, x), -1)
             self.assertEqual(bar(x), 1)
             self.assertRaisesRegex(
-                TypeError, r'SubTensor.+MyMode',
+                TypeError, r'SubTensor',
                 lambda: self.assertEqual(torch.max(x, x)))
-
-    def test_enable_torch_function_mode_trivial(self):
-        class A(TorchFunctionMode):
-            def __torch_function__(self, *args, **kwargs):
-                return -40
-        a = A()
-        with torch.overrides.enable_torch_function_mode(a):
-            with torch.overrides.enable_torch_function_mode(a):
-                self.assertEqual(bar(None), -40)
-
-    def test_enable_torch_function_mode_replace(self):
-        class A(TorchFunctionMode):
-            def __init__(self, val):
-                self.val = val
-
-            def __torch_function__(self, *args, **kwargs):
-                return self.val
-        a1 = A(-40)
-        a2 = A(-41)
-        with torch.overrides.enable_torch_function_mode(a1):
-            with torch.overrides.enable_torch_function_mode(a2, replace=a1):
-                self.assertEqual(bar(None), -41)
-
-    def test_enable_torch_function_mode_ignore_preexisting(self):
-        class A(TorchFunctionMode):
-            def __init__(self, val):
-                self.val = val
-
-            def __torch_function__(self, *args, **kwargs):
-                return self.val
-        a1 = A(-40)
-        a2 = A(-41)
-        with torch.overrides.enable_torch_function_mode(a1):
-            with torch.overrides.enable_torch_function_mode(a2, ignore_preexisting=True):
-                self.assertEqual(bar(None), -41)
-
-    def test_ctor_no_inner(self):
-        class A(TorchFunctionMode):
-            def __torch_function__(self, *args, **kwargs):
-                return torch.zeros([])
-
-        with torch.overrides.enable_torch_function_mode(A()):
-            x = torch.randn((3, 4))
-
-        self.assertEqual(x, torch.zeros([]))
 
     def test_with_mode(self):
         class ErrorA(RuntimeError):
@@ -1270,15 +1222,24 @@ class TestTorchFunctionMode(TestCase):
 
         self.assertEqual(out, ["layer2", "layer1"])
 
-    def test_error_using_same_mode(self):
-        class A(TorchFunctionMode):
-            pass
+    def test_nested_same_mode(self):
+        out = []
 
-        x = A()
-        with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-                with x:
-                    pass
+        class A(TorchFunctionMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_function__(self, func, _, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                out.append(self.msg)
+                return func(*args, **kwargs)
+
+        with A("layer1") as a:
+            with a:
+                torch.empty([])
+
+        self.assertEqual(out, ["layer1", "layer1"])
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchFunctionMode):
@@ -1287,90 +1248,47 @@ class TestTorchFunctionMode(TestCase):
                 return func(args, kwargs)
 
         x = torch.tensor(5.)
-        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+        with self.assertRaisesRegex(RuntimeError, "classmethod is not supported, please make it a plain method"):
             with A():
                 x + x
 
-    def test_error_with_ancestor(self):
+    def test_restacking_with_ancestor(self):
         class A(TorchFunctionMode):
             pass
 
-        with A() as x:
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
-            with x:
-                pass
-
-    def test_restore_errors(self):
-        class A(TorchFunctionMode):
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
-            with A().restore():
-                pass
-
-        x = A()
         with A():
-            with x:
+            with A() as x:
                 pass
 
-        with A():  # a different mode instance than the one above
-            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
-                with x.restore():
-                    pass
-
-
-    def test_restore_ancestor_mode(self):
-        class A(TorchFunctionMode):
-            pass
-
-        x = A()
-        y = A()
         with x:
-            with y:
-                pass
+            pass
 
-        z = A()
-        with y.restore():
-            with z:
-                pass
-
-        with x.restore():
-            with z.restore():
-                pass
-
-    def test_find_outermost_mode(self):
+    def test_get_cur_mode(self):
         class A(TorchFunctionMode):
-            pass
-
-        self.assertIsNone(find_outermost_mode([None, None]))
-
-        x = A()
-        y = A()
-        with x:
-            with y:
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 pass
 
-        self.assertEqual(find_outermost_mode([x, y]), y)
+        with A() as mode1:
+            self.assertEqual(_get_current_function_mode(), mode1)
 
-        z = A()
-        with y.restore():
-            with z:
+        with mode1:
+            with A() as mode2:
+                self.assertEqual(_get_current_function_mode(), mode2)
+
+
+    def test_get_mode_stack(self):
+        class A(TorchFunctionMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 pass
 
-        self.assertEqual(find_outermost_mode([z, x]), z)
-        i = A()
+        self.assertEqual(_get_current_function_mode_stack(), [])
 
-        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
-            find_outermost_mode([i, x, y, z])
+        with A() as mode1:
+            self.assertEqual(_get_current_function_mode_stack(), [mode1])
 
-        k = A()
-        with k:
-            pass
-
-        with self.assertRaisesRegex(RuntimeError, "don't come from the same scope"):
-            find_outermost_mode([k, x, y, z])
+        with mode1:
+            with A() as mode2:
+                self.assertEqual(_get_current_function_mode_stack(), [mode1, mode2])
 
     def test_all_same_mode(self):
         class A(TorchFunctionMode):
@@ -1382,31 +1300,29 @@ class TestTorchFunctionMode(TestCase):
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
 
-    def test_all_same_mode_scope(self):
+    def test_nested_modes_with_python_has_torch_function(self):
+        called = []
+
         class A(TorchFunctionMode):
-            pass
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                called.append("A")
+                kwargs = {} if kwargs is None else kwargs
+                return func(*args, **kwargs)
 
-        x = A()
-        y = A()
-        z = A()
-        with x:
-            with y:
-                pass
+        class B(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                called.append("B")
+                kwargs = {} if kwargs is None else kwargs
+                return func(*args, **kwargs)
 
-        with x.restore():
-            with z:
-                pass
+        x = torch.randn(3, 4)
+        with A():
+            with B():
+                y = bar(x)
 
-        i = A()
+        self.assertEqual(y, x)
+        self.assertEqual(called, ["B", "A"])
 
-        self.assertTrue(all_same_mode_scope([x, y], y))
-        self.assertTrue(all_same_mode_scope([x, z], z))
-        self.assertFalse(all_same_mode_scope([x, y, z], y))
-        self.assertFalse(all_same_mode_scope([x, y, z], z))
-        self.assertFalse(all_same_mode_scope([x, y, i], y))
-
-        no_ancestor = A()
-        self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
 
     def test_reentrant_mode_idiom(self):
         log = []
@@ -1417,7 +1333,7 @@ class TestTorchFunctionMode(TestCase):
                     kwargs = {}
                 log.append(func)
                 if func is torch.sub:
-                    with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+                    with self:
                         input, other = args
                         assert not kwargs
                         return torch.add(input, other, alpha=-1)

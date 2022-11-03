@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
 import weakref
-
 import torch
 
 # nvFuser imports are conditional on being compiled with CUDA
@@ -43,12 +42,20 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
-# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
+# TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
-# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
+# NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
 NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
+
+Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
+# I don't call it Integral because numbers.Integral includes bool, but IntLike
+# does not
+Dim = int
+IntLike = (int, torch.SymInt)
+FloatLike = (float, torch.SymFloat)
+IntWithoutSymInt = int
+FloatWithoutSymFloat = float
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
@@ -129,6 +136,14 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             msg = (
                 "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
                     a.stride(), b.stride(), idx
+                )
+            )
+            raise RuntimeError(msg)
+
+        if a.storage_offset() != b.storage_offset():
+            msg = (
+                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
+                    a.storage_offset(), b.storage_offset()
                 )
             )
             raise RuntimeError(msg)
@@ -426,8 +441,8 @@ def validate_idx(rank: int, idx: int):
     Assumes the index is already canonicalized.
     """
 
-    assert isinstance(idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(idx, Dim)
+    assert isinstance(rank, Dim)
 
     assert idx >= 0 and idx < rank or idx == 0
 
@@ -443,8 +458,8 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
     for the given shape.
     """
 
-    assert isinstance(ex_idx, int)
-    assert isinstance(rank, int)
+    assert isinstance(ex_idx, Dim)
+    assert isinstance(rank, Dim)
     assert ex_idx > 0 and ex_idx <= rank
 
 
@@ -493,7 +508,7 @@ def canonicalize_dims(rank: int, indices: int) -> int:
 
 
 def canonicalize_dims(rank, indices):
-    if isinstance(indices, int):
+    if isinstance(indices, Dim):
         return canonicalize_dim(rank, indices)
 
     return tuple(canonicalize_dim(rank, x) for x in indices)
@@ -632,6 +647,17 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
             return None
 
     return shape if shape is not None else scalar_shape
+
+
+# Extracts dimensions that might be passed either as a list/tuple or as varargs.
+# A typical case is Tensor.permute .
+def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
+    if dims and isinstance(dims[0], Sequence):
+        assert len(dims) == 1
+        dims = cast(Tuple[DimsSequenceType], dims)
+        return dims[0]
+    else:
+        return cast(DimsSequenceType, dims)
 
 
 def extract_shape_from_varargs(
@@ -779,15 +805,14 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
     Computes the corresponding Python type constructor for the
     given dtype.
     """
-    from torch.fx.experimental.symbolic_shapes import sym_float
+    from torch.fx.experimental.symbolic_shapes import sym_float, sym_int
 
     assert isinstance(dtype, torch.dtype)
 
     if dtype is torch.bool:
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
-        # TODO: type error here is real, replace with sym_int
-        return lambda x: int(x)  # type: ignore[arg-type]
+        return sym_int
     if dtype in _float_dtypes:
         return sym_float
     if dtype in _complex_dtypes:
@@ -938,6 +963,14 @@ def get_higher_dtype(
     raise RuntimeError("Unexpected termination!")
 
 
+def check_pin_memory(pin_memory: bool):
+    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
+
+
+def check_layout(layout: torch.layout):
+    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
+
+
 # TODO: maybe unify with can_cast_to?
 def is_weakly_lesser_type(a: type, b: type) -> bool:
     """
@@ -1080,10 +1113,10 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
-    if isinstance(x, torch.SymIntNode):
+def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+    if isinstance(x, torch.SymInt):
         return int
-    elif isinstance(x, torch.SymFloatNode):
+    elif isinstance(x, torch.SymFloat):
         return float
     else:
         return type(x)
@@ -1414,7 +1447,8 @@ def set_correction(
         correction = 1
     elif correction is None and unbiased is not None:
         correction = 0 if unbiased is False else 1
-    if not isinstance(correction, int):
+    # NB: we don't actually support symint here, but it's harmless to accept
+    if not isinstance(correction, IntLike):
         raise ValueError("correction argument should be integer")
     if correction < 0:
         raise ValueError("correction argument should be non-negative")

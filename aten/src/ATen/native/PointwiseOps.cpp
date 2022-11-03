@@ -1,12 +1,17 @@
 // Ternary and higher-order pointwise operations
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/PointwiseOps.h>
 
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/MemoryOverlap.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorMeta.h>
 
-#include <ATen/NamedTensorUtils.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/addcdiv_native.h>
+#include <ATen/ops/addcmul_native.h>
+#endif
 
 namespace at {
 namespace meta {

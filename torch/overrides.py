@@ -26,15 +26,15 @@ import collections
 import functools
 import types
 import warnings
-from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator, Tuple
+from typing import Dict, Set, List, Any, Callable, Iterable, Type, Tuple
 import contextlib
 
 import torch
 from torch._C import (
     _has_torch_function, _has_torch_function_unary,
-    _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
-
-from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
+    _has_torch_function_variadic, _add_docstr,
+    _push_on_torch_function_stack, _pop_torch_function_stack, _get_function_stack_at, _len_torch_function_stack,
+    _is_torch_function_mode_enabled)
 
 __all__ = [
     "get_ignored_functions",
@@ -160,7 +160,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
         torch.mkldnn_linear_backward_weights,
-        torch.nested_tensor,
         torch.normal,
         torch.ones,
         torch.promote_types,
@@ -278,12 +277,12 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._fix_weakref,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
+        Tensor._has_symbolic_sizes_strides.__get__,
         Tensor._conj,
         Tensor._conj_physical,
         Tensor._neg_view,
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
-        Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
     }
 
@@ -417,7 +416,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.concatenate: lambda tensors, dim=0, out=None: -1,  # alias for torch.concatenate
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
-        torch.celu: lambda input, alhpa=1., inplace=False: -1,
+        torch.celu: lambda input, alpha=1., inplace=False: -1,
         torch.chain_matmul: lambda *matrices, out=None: -1,
         torch.channel_shuffle: lambda input, groups : -1,
         torch.cholesky: lambda input, upper=False, out=None: -1,
@@ -573,7 +572,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_3d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.group_norm: lambda input, num_groups, weight=None, bias=None, eps=1e-05, cudnn_enabled=True: -1,
-        torch.gru: lambda input, hx, params, has_biases, num_layers, gropout, train, bidirectional, batch_first: -1,
+        torch.gru: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.gru_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.gt: lambda input, other, out=None: -1,
         torch.greater: lambda input, other, out=None: -1,
@@ -1510,10 +1509,10 @@ def handle_torch_function(
     types = tuple(map(type, overloaded_args))
 
     # Check for __torch_function__ mode.
-    mode = _get_torch_function_mode()
-    if mode is not None:
-        # NB: unlike on tensors, modes are instances
-        with _no_torch_function_mode():
+    if _is_torch_function_mode_enabled():
+        # if we're here, the mode must be set to a TorchFunctionStackMode
+        # this unsets it and calls directly into TorchFunctionStackMode's torch function
+        with _pop_mode_temporarily() as mode:
             result = mode.__torch_function__(public_api, types, args, kwargs)
         if result is not NotImplemented:
             return result
@@ -1541,8 +1540,8 @@ def handle_torch_function(
         "no implementation found for '{}' on types that implement "
         '__torch_function__: {}'
     ).format(func_name, [type(arg) for arg in overloaded_args])
-    if mode is not None:
-        msg += f" nor in mode {mode}"
+    if _is_torch_function_mode_enabled():
+        msg += f" nor in mode {_get_current_function_mode()}"
     raise TypeError(msg)
 
 has_torch_function = _add_docstr(
@@ -1555,7 +1554,7 @@ has_torch_function = _add_docstr(
     Arguments
     ---------
     relevant_args : iterable
-        Iterable or aguments to check for __torch_function__ methods.
+        Iterable or arguments to check for __torch_function__ methods.
     Returns
     -------
     bool
@@ -1695,7 +1694,7 @@ def resolve_name(f):
         Name of the function; if eval'ed it should give back the input
         function.
     """
-    if isinstance(f, torch._ops.OpOverload):
+    if isinstance(f, torch._ops.OpOverload) or isinstance(f, torch._ops.OpOverloadPacket):
         return str(f)
     return _get_overridable_functions()[1].get(f)
 
@@ -1766,53 +1765,7 @@ def is_tensor_like(inp):
     """
     return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
 
-
-def _wrap_torch_function(f):
-    @functools.wraps(f)
-    def wrapped(self, *args, **kwargs):
-        if isinstance(f, classmethod):
-            raise RuntimeError("TorchFunctionMode's torch_function function " +
-                               "should be a normal method not a class method")
-        inner = getattr(self, "inner", None)
-
-        with enable_torch_function_mode(inner):
-            return f(self, *args, **kwargs)
-    return wrapped
-
-
-# Implementation note: I had a choice about how much of mode stacks
-# to implement in Python versus in C++.  At time of writing, I did not care
-# too much about implementation efficiency; however, I do care about making it
-# hard for users to implement modes in the wrong way.  In the end, it turned
-# out to be possible to implement mode stacks entirely from userland, with the
-# C++ API providing only _get_torch_function_mode() and
-# _set_torch_function_mode(), so I opted to provide some unsafe C++ bindings and
-# have the bulk of the logic for managing the stack in Python, which helped
-# simplify the C++ API surface.  It would also have been valid to build in the
-# notion of mode stack directly into C++ but in this design it's substantially
-# more difficult to interact with TorchFunctionModeMeta.
-class TorchFunctionModeMeta(type):
-    """
-    Metaclass for :class:`TorchFunctionMode`; it does two things:
-
-        * Adds an implicit ``inner`` kwarg to ``__init__``, to
-          allow the modes to be chained together to form a stack.
-
-        * Reenables the inner mode, so that by default PyTorch API calls
-          will compositionally proceed to the next mode on the stack.
-
-    The default behavior for the second bullet is important, as it is easy to
-    accidentally write ``__torch_function__`` implementations that are not
-    compositional, and the wrapping here makes the obvious code do the
-    right thing (aka, this is why there is a metaclass).
-    """
-    def __new__(metacls, name, bases, dct):
-        if '__torch_function__' in dct:
-            dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
-        return super().__new__(metacls, name, bases, dct)
-
-
-class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
+class TorchFunctionMode:
     """
     A ``TorchFunctionMode`` allows you to override the meaning of all
     ``__torch_function__`` overrideable functions within a dynamic scope,
@@ -1852,24 +1805,11 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         raise NotImplementedError()
 
     def __enter__(self):
-        old = _get_torch_function_mode()
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
-        else:
-            self.inner = old
-            if old is None:
-                self.ancestors = set()
-            else:
-                self.ancestors = self.inner.ancestors.union({self.inner})
-        _set_torch_function_mode(self)
+        _push_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _set_torch_function_mode(self.inner)
-
-    @contextlib.contextmanager
-    def restore(self):
-        return _restore_mode(self, mode_info=_TorchFunctionModeInfo())
+        _pop_mode()
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -1877,68 +1817,39 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         instance = cls(*args, **kwargs)
         return instance
 
+
+def _get_current_function_mode():
+    stack_len = _len_torch_function_stack()
+    return _get_function_stack_at(stack_len - 1) if stack_len > 0 else None
+
+
+def _get_current_function_mode_stack():
+    stack_len = _len_torch_function_stack()
+    return [_get_function_stack_at(i) for i in range(stack_len)]
+
+def _push_mode(mode):
+    _push_on_torch_function_stack(mode)
+
+
+def _pop_mode():
+    old = _pop_torch_function_stack()
+    return old
+
+
+@contextlib.contextmanager
+def _pop_mode_temporarily():
+    old = _pop_mode()
+    try:
+        yield old
+    finally:
+        _push_mode(old)
+
 class BaseTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
 
-
-# This is private API as I'm not sure it's possible for users to use this
-# compositionally (easy to discard too many modes).  It is useful for
-# library code though, e.g., in handle_torch_function
-@contextlib.contextmanager
-def _no_torch_function_mode() -> Iterator[None]:
-    old = _get_torch_function_mode()
-    _set_torch_function_mode(None)
-    try:
-        yield
-    finally:
-        _set_torch_function_mode(old)
-
-
-class _TorchFunctionModeInfo(_ModeInfo):
-    def __init__(self):
-        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode)
-
-    def get_mode(self):
-        return _get_torch_function_mode()
-
-    def set_mode(self, mode):
-        return _set_torch_function_mode(mode)
-
-
-@contextlib.contextmanager
-def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) -> Iterator[None]:
-    """
-    Context manager that sets the current :class:`TorchFunctionMode`; see the
-    class for more information on what modes are.  This function is
-    non-compositional; if there is already an existing mode, it will raise an
-    error; prefer using ``with MyMode():`` if your ``__torch_function__``
-    implementation can defer to an inner mode.
-
-    This function is safe to use inside a ``__torch_function__`` mode handler,
-    as the mode is guaranteed to be disabled in this context.  You can use
-    this context manager to reinstate the mode so that calls to overridable
-    APIs recursively call back into your mode handler (this can easily cause
-    infinite loops, so use with care!)
-
-    Args:
-        mode (:class:`TorchFunctionMode`, Tensor-like class or None): the
-            mode to set as current mode.  If you pass a Tensor-like class,
-            it will be treated as a non-compositional mode with no state,
-            which is convenient if you have an existing tensor subclass
-            that you'd like to apply globally in a quick and dirty way.
-            Passing None will disable the current mode.
-        replace (:class:`TorchFunctionMode` or Tensor-like class): the
-            mode to replace.  You can use this argument to change the mode in
-            a situation where you know what the current mode is (and you are
-            intentionally overwriting it.)  If you don't know what the current
-            mode is, use ``ignore_preexisting`` instead.
-        ignore_preexisting (bool): if True, ignore any preexisting mode
-            and overwrite it with the passed mode.
-    """
-    return _enable_mode(mode, _TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
 
 class enable_reentrant_dispatch():
     def __enter__(self):
