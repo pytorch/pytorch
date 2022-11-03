@@ -320,7 +320,8 @@ The Kaiser window is defined as follows:
 
 .. math::
     out_i = I_0 \left( \beta \sqrt{1 - \left( {\frac{i - N/2}{N/2}} \right) ^2 } \right) / I_0( \beta )
-where ``I_0`` is the zeroth order modified Bessel function of the first kind (see :func:`torch.special.i0`), and
+
+where ``I_0`` is the zeroth order modified Bessel function of the first kind (see :func:`torch.special.i0`), and 
 ``N = M - 1 if sym else M``.
 
 ``M`` is the window length.
@@ -348,6 +349,7 @@ Examples::
     >>> # Generate a periodic gaussian window and standard deviation equal to 0.9.
     >>> torch.signal.windows.kaiser(5,sym=False,std=0.9)
     tensor([1.9858e-07, 5.1365e-05, 3.8659e-03, 8.4658e-02, 5.3941e-01, 1.0000e+00, 5.3941e-01, 8.4658e-02, 3.8659e-03, 5.1365e-05])
+    
 """.format(
         **window_common_args,
     ),
@@ -427,6 +429,7 @@ Examples::
     >>> # Generate a periodic Hamming window.
     >>> torch.signal.windows.hamming(10,sym=False)
     tensor([0.0800, 0.1679, 0.3979, 0.6821, 0.9121, 1.0000, 0.9121, 0.6821, 0.3979, 0.1679])
+    
 """.format(
         **window_common_args
     ),
