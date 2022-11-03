@@ -19,11 +19,10 @@ Note:
     ALLOWLIST_OP lists. See "Modify this section"
 
 """
-import contextlib
+
 import copy
 import dataclasses
 import io
-import itertools
 import unittest
 from typing import (
     AbstractSet,
@@ -119,15 +118,26 @@ class DecorateMeta:
     op_name: str
     variant_name: str
     decorator: Callable
+    opsets: Collection[Union[int, Callable[[int], bool]]]
     device_type: Optional[str]
     dtypes: Optional[Collection[torch.dtype]]
     reason: str
+
+    def contains_opset(self, opset: int) -> bool:
+        if not self.opsets:
+            # Any empty container means all opsets
+            return True
+        return any(
+            opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
+            for opset_spec in self.opsets
+        )
 
 
 def xfail(
     op_name: str,
     variant_name: str = "",
     *,
+    opsets: Collection[Union[int, Callable[[int], bool]]] = tuple(),
     device_type: Optional[str] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
     reason: str = "unspecified",
@@ -137,6 +147,7 @@ def xfail(
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.expectedFailure,
+        opsets=opsets,
         device_type=device_type,
         dtypes=dtypes,
         reason=reason,
@@ -147,6 +158,7 @@ def dont_care(
     op_name: str,
     variant_name: str = "",
     *,
+    opsets: Collection[Union[int, Callable[[int], bool]]] = tuple(),
     device_type: Optional[str] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
     reason="unspecified",
@@ -161,6 +173,7 @@ def dont_care(
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.skip(f"Don't care: {reason}"),
+        opsets=opsets,
         device_type=device_type,
         dtypes=dtypes,
         reason=reason,
@@ -171,6 +184,7 @@ def skip(
     op_name: str,
     variant_name: str = "",
     *,
+    opsets: Collection[Union[int, Callable[[int], bool]]] = tuple(),
     device_type: Optional[str] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
     reason="unspecified",
@@ -180,45 +194,26 @@ def skip(
         op_name=op_name,
         variant_name=variant_name,
         decorator=unittest.skip(f"To fix: {reason}"),
+        opsets=opsets,
         device_type=device_type,
         dtypes=dtypes,
         reason=reason,
     )
 
 
-@dataclasses.dataclass
-class XfailOpset:
-    """Expects a OpInfo test to fail on specific ONNX opsets."""
-
-    op_name: str
-    opsets: Collection[Union[int, Callable[[int], bool]]]
-    dtypes: Optional[Collection[torch.dtype]] = None
-    exception: Optional[Exception] = None
-    reason: str = "unspecified"
-
-    def _contains_opset(self, opset: int) -> bool:
-        return any(
-            opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
-            for opset_spec in self.opsets
-        )
-
-    def _contains_dtype(self, dtype: torch.dtype) -> bool:
-        return self.dtypes is None or dtype in self.dtypes
-
-    def should_fail(self, opset: int, dtype: torch.dtype) -> bool:
-        """Returns whether the test should fail for the given opset and dtype."""
-        return self._contains_opset(opset) and self._contains_dtype(dtype)
-
-
 def skip_ops(
     all_opinfos: Sequence[opinfo_core.OpInfo],
-    test_case_name: str,
+    test_class_name: str,
     base_test_name: str,
+    opset: int,
     skip_or_xfails: Iterable[DecorateMeta],
 ):
     """Decorates OpInfo tests with decorators based on the skip_or_xfails list."""
     ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in skip_or_xfails:
+        if not decorate_meta.contains_opset(opset):
+            # Skip does not apply to this opset
+            continue
         opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
         assert (
             opinfo is not None
@@ -226,7 +221,7 @@ def skip_ops(
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
-            test_case_name,
+            test_class_name,
             base_test_name,
             device_type=decorate_meta.device_type,
             dtypes=decorate_meta.dtypes,
@@ -307,6 +302,7 @@ def reason_flaky() -> str:
 # 2b. If the test is expected to fail only on certain opsets, add a new entry to
 #     EXPECTED_OPSET_FAILS.
 
+# TODO: Directly modify DecorateInfo in each OpInfo in ob_db when all ops are enabled.
 # Ops to be tested for consistency between onnx and pytorch
 ALLOWLIST_OP: AbstractSet[str] = frozenset(
     map(
@@ -326,12 +322,11 @@ ALLOWLIST_OP: AbstractSet[str] = frozenset(
 # fmt: off
 # Turn off black formatting to keep the list compact
 
-# Expected failures for onnx export. If an op is expected to fail only for certain
-# ONNX opsets, add the op to EXPECTED_OPSET_FAILS below.
+# Expected failures for onnx export.
 # The list should be sorted alphabetically by op name.
 # Q: When should I use skip vs vs dont_care vs xfail?
 # A: Use skip when we want to fix the test eventually but it doesn't fail consistently,
-#        e.g. the test is flaky. Otherwise, use xfail.
+#        e.g. the test is flaky or some tests pass. Otherwise, use xfail.
 #    Use dont_care if we don't care about the test passing, e.g. ONNX doesn't support the usage.
 #    Use xfail if a test fails now and we want to eventually fix the test.
 EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
@@ -370,6 +365,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
     ),
     xfail("floor_divide", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
     skip("floor_divide", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
+    xfail(
+        "remainder", dtypes=[torch.uint8, torch.int8, torch.int16], opsets=[opsets_before(11)],
+        reason="Sub not defined for u8, i16 before opset 14. Mod is used after 11 so we support from opset 11.",
+    ),
     skip("remainder", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Floor", ["f64"])),
     dont_care("sqrt", dtypes=BOOL_TYPES + QINT_TYPES + COMPLEX_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
     xfail("t", dtypes=COMPLEX_TYPES, reason=reason_jit_tracer_error("complex types")),
@@ -377,15 +376,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
 )
 # fmt: on
 
-# Expected opset specific fails for ops that do not support specific opsets
-EXPECTED_OPSET_FAILS: Tuple[XfailOpset, ...] = (
-    XfailOpset(
-        "remainder",
-        dtypes=[torch.uint8, torch.int8, torch.int16],
-        opsets=[opsets_before(11)],
-        reason="Sub not defined for u8, i16 before opset 14. Mod is used after 11 so we support from opset 11.",
-    ),
-)
 
 # END OF SECTION TO MODIFY #####################################################
 
@@ -405,62 +395,76 @@ class SingleOpModel(torch.nn.Module):
         return self.operator(*args, **self.kwargs)
 
 
+def parameterize_opsets(test_class, opsets: Sequence[int]):
+    """Parameterizes the TestConsistency class with the given opsets."""
+    for opset in opsets:
+        # Generate a test method for each opset
+        test_name = f"test_output_match_opset_{opset}"
+        base_method = test_class.get_test_base(opset)
+        # Important to rename the test method so that DecorateInfo can find it
+        base_method.__name__ = test_name
+
+        # Update the ops to skip in the OpInfo database
+        decorated = skip_ops(
+            OPS_DB,
+            test_class.__name__,
+            test_name,
+            opset=opset,
+            skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
+        )(base_method)
+
+        # Create parameterized tests for each op
+        if opset < 13:
+            # bfloat16 is not supported before opset 13
+            allowed_dtypes = tuple(
+                [dtype for dtype in SUPPORTED_DTYPES if dtype != torch.bfloat16]
+            )
+        else:
+            allowed_dtypes = SUPPORTED_DTYPES
+        filtered_ops = [op for op in OPS_DB if op.name in ALLOWLIST_OP]
+        decorated = common_device_type.ops(
+            filtered_ops,
+            allowed_dtypes=allowed_dtypes,
+        )(decorated)
+
+        setattr(test_class, test_name, decorated)
+
+
 class TestConsistency(common_utils.TestCase):
     """Test consistency of exported ONNX models.
 
     This is a parameterized test suite.
     """
 
-    @common_device_type.ops(
-        [op for op in OPS_DB if op.name in ALLOWLIST_OP],
-        allowed_dtypes=SUPPORTED_DTYPES,
-    )
-    @common_utils.parametrize("opset", TESTED_OPSETS)
-    @skip_ops(
-        OPS_DB,
-        "TestConsistency",
-        "test_output_match",
-        skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
-    )
-    def test_output_match(self, device: str, dtype: torch.dtype, op, opset: int):
-        assert device == "cpu"
+    @classmethod
+    def get_test_base(cls, opset: int):
+        """Returns the base test method for the given opset."""
 
-        expected_opset_fails_name_mapping = {
-            fail.op_name: fail for fail in EXPECTED_OPSET_FAILS
-        }
-        samples = op.sample_inputs(
-            device,
-            dtype,
-            requires_grad=False,
-        )
+        def _output_match_base(self, device: str, dtype: torch.dtype, op):
+            """Base test method for testing each opset."""
+            assert device == "cpu"
 
-        if dtype == torch.bfloat16 and opset < 13:
-            # Always skip bfloat16 for opsets before 13 because onnx started
-            # supporting bfloat16 from opset 13.
-            self.skipTest("bfloat16 not supported before opset 13")
+            samples = op.sample_inputs(
+                device,
+                dtype,
+                requires_grad=False,
+            )
 
-        context_manager = contextlib.nullcontext()
-        # Skip opset specific fails
-        if op.name in expected_opset_fails_name_mapping:
-            fail = expected_opset_fails_name_mapping[op.name]
-            if fail.should_fail(opset, dtype):
-                context_manager = self.assertRaises(fail.exception or Exception)
+            for (i, cpu_sample) in enumerate(samples):
+                # Provide the repr to subtest because tensors are not serializable in parallel test runs
+                with self.subTest(
+                    opset=opset,
+                    sample_num=i,
+                    input=repr(cpu_sample.input),
+                    args=repr(cpu_sample.args),
+                    kwargs=repr(cpu_sample.kwargs),
+                ):
+                    model = SingleOpModel(op, cpu_sample.kwargs)
+                    model.eval()
 
-        for i, cpu_sample in enumerate(samples):
-            # Provide the repr to subtest because tensors are not serializable in parallel test runs
-            with self.subTest(
-                sample_num=i,
-                input=repr(cpu_sample.input),
-                args=repr(cpu_sample.args),
-                kwargs=repr(cpu_sample.kwargs),
-            ):
-                model = SingleOpModel(op, cpu_sample.kwargs)
-                model.eval()
+                    # Run the test
+                    inputs = (cpu_sample.input, *cpu_sample.args)
 
-                # Run the test
-                inputs = (cpu_sample.input, *cpu_sample.args)
-
-                with context_manager:
                     if dtype == torch.bfloat16:
                         # Only export to ONNX without running with onnxruntime because
                         # the CPU execution path for bfloat16 is not implemented in onnxruntime.
@@ -485,7 +489,10 @@ class TestConsistency(common_utils.TestCase):
                         flatten=True,
                     )
 
+        return _output_match_base
 
+
+parameterize_opsets(TestConsistency, TESTED_OPSETS)
 common_device_type.instantiate_device_type_tests(
     TestConsistency, globals(), only_for="cpu"
 )
