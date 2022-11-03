@@ -807,7 +807,7 @@
     "qconfig_equals"
   ],
   "torch.quantization.quant_type": [
-    "QuantType",
+    "QuantType"
   ],
   "torch.quantization.quantization_mappings": [
     "get_default_compare_output_module_list",
