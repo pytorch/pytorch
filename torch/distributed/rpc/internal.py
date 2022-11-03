@@ -207,7 +207,7 @@ def _run_function(python_udf):
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     # TODO (rohan-varma): This should probably be BaseException, but change can
     # cause BC issues.
-    except Exception as e:
+    except BaseException as e:
         # except str = exception info + traceback string
         except_str = (
             f"On {_get_current_rpc_agent().get_worker_info()}:\n"
