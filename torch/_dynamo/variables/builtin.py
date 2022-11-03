@@ -13,7 +13,7 @@ import torch
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import unimplemented, Unsupported
+from ..exc import InternalTorchDynamoError, unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, TypeSource
@@ -744,7 +744,9 @@ class BuiltinVariable(VariableTracker):
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
-            obj.convert_to_unspecialized(tx)
+            # TODO(whc) transient state: after unhooking NNModuleVariable and using Unspec everywhere,
+            # i'd rename Unspec back to NNModuleVariable
+            raise InternalTorchDynamoError("We don't expect NNModuleVariables anymore")
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder

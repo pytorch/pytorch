@@ -10,9 +10,8 @@ import torch.nn
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
-from ..exc import RestartAnalysis, unimplemented
+from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..mutation_guard import GenerationTracker
 from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
 from ..utils import (
     is_lazy_module,
@@ -76,16 +75,6 @@ class NNModuleVariable(VariableTracker):
     def is_training(self, tx):
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
-
-    def convert_to_unspecialized(self, tx):
-        """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
-        mod = tx.output.get_submodule(self.module_key)
-        GenerationTracker.tag(mod)
-
-        # Mark the class dynamic unless its module initialization
-        if tx.f_code.co_name != "__init__":
-            GenerationTracker.mark_class_dynamic(type(mod))
-        raise RestartAnalysis()
 
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder

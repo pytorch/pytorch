@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import unittest
-from copy import deepcopy
 from unittest.mock import patch
 
 import torch
@@ -9,7 +8,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.eval_frame import unsupported
-from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -680,29 +678,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(out2, out3))
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
-
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
-    def test_generation_tag(self):
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        # guarantee that we have installed
-        # the generation tagging function
-        with torch._dynamo.optimize_assert(cnt):
-            pass
-
-        m1 = torch.nn.Linear(10, 10)
-        prev_generation = GenerationTracker.get_generation_value(m1)
-        cur_generation = prev_generation + 1
-
-        with torch._dynamo.optimize_assert(cnt):
-            m2 = torch.nn.Linear(10, 10)
-
-        self.assertEqual(GenerationTracker.get_generation_value(m1), prev_generation)
-        self.assertEqual(GenerationTracker.get_generation_value(m2), cur_generation)
-        # check that newly constructed instances
-        # also have the same generation (even if copied from an old instance)
-        m3 = deepcopy(m1)
-        self.assertEqual(GenerationTracker.get_generation_value(m3), cur_generation)
 
     def test_simple_torch_function(self):
         def foo(x):
