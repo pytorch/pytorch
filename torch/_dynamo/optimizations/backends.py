@@ -100,13 +100,13 @@ def nnc_ofi(subgraph):
 
 
 @create_backend
-def nvfuser(subgraph):
+def ts_nvfuser(subgraph):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model(subgraph)
 
 
 @create_backend
-def nvfuser_ofi(subgraph):
+def ts_nvfuser_ofi(subgraph):
     with torch.jit.fuser("fuser2"):
         return reload_jit_model_ofi(subgraph)
 
@@ -552,7 +552,7 @@ def cudagraphs_inner(model, inputs, copy_outputs=True):
 def aot_autograd(subgraph, **kwargs):
     def _wrapped_bw_compiler(*args, **kwargs):
         # stop TorchDynamo from trying to compile our generated backwards pass
-        return disable(bw_compiler(*args, **kwargs))
+        return disable(disable(bw_compiler)(*args, **kwargs))
 
     bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
     kwargs["bw_compiler"] = _wrapped_bw_compiler
@@ -783,6 +783,44 @@ def ltc_trivial(gm: torch.fx.GraphModule, example_inputs):
         return out
 
     return ltc_model
+
+
+@functools.lru_cache(None)
+def _init_torchxla():
+    global xm
+    try:
+        import torch_xla.core.xla_model as xm
+    except ModuleNotFoundError as e:
+        print(f"torchxla backend fails. Can not import {e.name}")
+        raise
+
+
+@create_backend
+def torchxla_trivial(subgraph):
+    _init_torchxla()
+
+    xla_dev = xm.xla_device()
+
+    xla_model = copy.deepcopy(subgraph.model).to(device=xla_dev)
+
+    def xla_model_wrapper(*inputs):
+        orig_device = inputs[0].device if len(inputs) > 0 else "cpu"
+        xla_inputs = tuple(inp.to(device=xla_dev) for inp in inputs)
+
+        xla_out = xla_model(*xla_inputs)
+        result = tuple(out.to(device=orig_device) for out in xla_out)
+        return result
+
+    return xla_model_wrapper
+
+
+@create_backend
+def torchxla_trace_once(subgraph):
+    import torch._dynamo.optimizations.torchxla_integration as integration
+
+    model = subgraph.model
+    example_inputs = subgraph.example_inputs
+    return integration.extract_compiled_graph(model, example_inputs)
 
 
 def ipex_fp32(gm: torch.fx.GraphModule, example_inputs):
