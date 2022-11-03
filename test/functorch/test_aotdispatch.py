@@ -974,9 +974,6 @@ aot_autograd_failures = {
     xfail('cholesky'),
     xfail('linalg.cholesky'),
 
-    # https://github.com/pytorch/pytorch/issues/87575
-    xfail('nn.functional.pad', 'circular'),
-
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),
@@ -1117,12 +1114,10 @@ symbolic_aot_autograd_failures = {
     xfail('masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=to...
     xfail('matmul', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
-    xfail('max', 'reduction_no_dim'),  # aten.logical_or_.default - couldn't find symbolic meta function/dec...
     xfail('max', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('median', ''),  # could not find kernel
     xfail('meshgrid', 'list_of_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('meshgrid', 'variadic_tensors'),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('min', 'reduction_no_dim'),  # aten.logical_or_.default - couldn't find symbolic meta function/dec...
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('msort', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1134,7 +1129,6 @@ symbolic_aot_autograd_failures = {
 
     # Deleting this in a followup
     xfail('nn.functional.feature_alpha_dropout', 'with_train'),
-    xfail('nn.functional.pad', 'circular'),
     xfail('nn.functional.poisson_nll_loss', ''),
 
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
