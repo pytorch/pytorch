@@ -146,18 +146,6 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
-def cpp_wrapper(func):
-    @functools.wraps(func)
-    def wrapTheFunction(*args):
-        for cpp_wrapper_enabled in [True, False]:
-            old = config.cpp_wrapper
-            config.cpp_wrapper = cpp_wrapper_enabled
-            func(*args)
-            config.cpp_wrapper = old
-
-    return wrapTheFunction
-
-
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
         args, _ = tree_flatten(args)
@@ -664,7 +652,6 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @cpp_wrapper
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)
@@ -934,7 +921,6 @@ class CommonTemplate:
             ),
         )
 
-    @cpp_wrapper
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -1144,7 +1130,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
-    @cpp_wrapper
     def test_transpose(self):
         def fn(a, b):
             return (
@@ -1905,7 +1890,6 @@ class CommonTemplate:
         if self.device == "cuda":
             assert torch._inductor.metrics.generated_kernel_count == 1
 
-    @cpp_wrapper
     def test_std(self):
         def fn(x):
             return (
@@ -2163,7 +2147,6 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
-    @cpp_wrapper
     def test_cat(self):
         def fn(a):
             tmp = a * 2
@@ -3196,7 +3179,6 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
-    @cpp_wrapper
     def test_as_strided(self):
         def fn(x):
             return (
@@ -4038,6 +4020,22 @@ class CommonTemplate:
                     self.assertTrue(matmul_seen)
                 else:
                     self.assertEqual(len(inps), 0)
+
+    @patch.object(config, "cpp_wrapper", True)
+    def test_cpp_wrapper(self):
+        device = "cpu"
+        for name in [
+            "test_as_strided",  # buffer reuse
+            "test_cat",  # alias
+            "test_relu",  # multiple inputs
+            "test_transpose",  # multiple outputs, buffer clear
+            "test_upsample_bilinear2d_b",  # single input, single output
+        ]:
+            test_name = f"{name}_{device}"
+            assert hasattr(self, test_name), "undefined function"
+            func = getattr(self, test_name)
+            assert callable(func), "not a callable"
+            func()
 
 
 if HAS_CPU:

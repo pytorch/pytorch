@@ -361,7 +361,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.check_output_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
 
-    def get_wrapper(self):
+    def init_wrapper_code(self):
         if config.cpp_wrapper:
             self.check_cpp_wrapper()
             if self._can_use_cpp_wrapper:
@@ -374,7 +374,7 @@ class GraphLowering(torch.fx.Interpreter):
     def codegen(self):
         from .scheduler import Scheduler
 
-        self.get_wrapper()
+        self.init_wrapper_code()
 
         self.scheduler = Scheduler(self.buffers)
         self.scheduler.codegen()

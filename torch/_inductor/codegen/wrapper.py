@@ -616,11 +616,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_end(self, result):
         shared = codecache.shared()
-        pre_cpp_command = codecache.pre_cpp_command()
-        post_cpp_command = codecache.post_cpp_command()
+        cpp_flags = codecache.cpp_flags()
+        optimization_flags = codecache.optimization_flags()
         ipaths, lpaths, libs = codecache.get_include_and_linking_paths()
 
-        extra_cflags = f"{pre_cpp_command} {post_cpp_command}"
+        extra_cflags = f"{cpp_flags} {optimization_flags}"
         extra_ldflags = f"{shared} {lpaths} {libs}"
         extra_include_paths = f"{ipaths}"
 

@@ -152,11 +152,11 @@ def shared():
     return "-shared"
 
 
-def pre_cpp_command():
+def cpp_flags():
     return "-fPIC -Wall -std=c++14 -Wno-unused-variable"
 
 
-def post_cpp_command():
+def optimization_flags():
     return "-march=native -O3 -ffast-math -fno-finite-math-only -fopenmp"
 
 
@@ -186,9 +186,9 @@ def cpp_compile_command(input, output, include_pytorch=False):
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {shared()} {pre_cpp_command()}
+            {cpp_compiler()} {shared()} {cpp_flags()}
             {ipaths} {lpaths} {libs}
-            {post_cpp_command()}
+            {optimization_flags()}
             -o{output} {input}
         """,
     ).strip()
