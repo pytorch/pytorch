@@ -72,7 +72,6 @@ def _get_allowed_globals():
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
-        "torch._utils._MathBits": torch._utils._MathBits,
     }
     # dtype
     for t in [
