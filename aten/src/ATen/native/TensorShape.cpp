@@ -1584,11 +1584,7 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tesnors");
   }
 
-  if (self.is_contiguous()) {
-    return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
-  } else {
-    return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
-  }
+  return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 // Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
