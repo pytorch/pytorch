@@ -100,6 +100,9 @@ static void accumulate(
   //     otherwise stock standard Tensor.
   //
   //  4) The candidate is mutable. Currently only ZeroTensors are immutable.
+  //
+  //  5) The other Tensor is not a Tensor subclass (except sparse), since
+  //     it's hard to predict the semantics of arbitrary subclass behavior.
 
   if (at::GradMode::is_enabled()) {
     buffer[pos] = old_var + var;
@@ -111,7 +114,8 @@ static void accumulate(
     } else {
       buffer[pos] = var + old_var;
     }
-  } else if (can_accumulate_inplace(old_var)) {
+  } else if (
+      can_accumulate_inplace(old_var) && !at::isTensorSubclassLike(var)) {
     buffer[pos] = old_var.add_(var);
   } else {
     buffer[pos] = old_var + var;
