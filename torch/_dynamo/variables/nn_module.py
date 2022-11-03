@@ -20,6 +20,7 @@ from ..utils import (
     istype,
     proxy_args_kwargs,
 )
+from . import ListIteratorVariable
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
@@ -526,7 +527,24 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # circular import.. resolve it later
         from .builder import VariableBuilder
+
+        def wrap_values(items, getsource=AttrSource):
+            result = []
+            for name, submod in items:
+                # layer.0.foo => layer[0].foo
+                name = re.sub(r"[.]([0-9]+)([.]|$)", r"[\1]\2", name)
+                src = NNModuleSource(getsource(self.source, name))
+                result.append(
+                    tx.output.register_attr_or_module(
+                        submod,
+                        name,
+                        source=src,
+                        **options,
+                    )
+                )
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         module = self.value
@@ -566,6 +584,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 return variables.ListIteratorVariable(
                     items, mutable_local=MutableLocal(), **options
                 )
+            elif method is torch.nn.Module.children:
+                assert not (args or kwargs)
+                return wrap_values(module.named_children())
             elif name == "__getitem__":
                 assert not kwargs and len(args) == 1
                 assert type(module).__getitem__ in (
