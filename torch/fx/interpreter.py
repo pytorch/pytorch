@@ -9,8 +9,6 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
 from torch.hub import tqdm
-import time
-import traceback
 
 __all__ = ['Interpreter', 'Transformer']
 
