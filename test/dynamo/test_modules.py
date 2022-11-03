@@ -904,6 +904,181 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
 
 
+class MockModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.relu = torch.nn.ReLU()
+        self.linear = torch.nn.Linear(10, 10)
+        self.register_buffer("buf0", torch.randn(10, 10))
+
+    def forward(self, x):
+        return self.relu(self.linear(x) + self.buf0)
+
+
+class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
+    def test_nn_module(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+
+        x = torch.randn(10, 10)
+        self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_to(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        x = torch.randn(10, 10)
+        self.assertTrue(torch._dynamo.testing.same(mod(x), opt_mod(x)))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Ensure that there is no recompilation
+        opt_mod(x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        opt_mod = opt_mod.to(device="cpu").to(dtype=torch.float64)
+        self.assertIsInstance(opt_mod, torch._dynamo.OptimizedModule)
+        x = torch.randn(10, 10).to(dtype=torch.float64)
+        opt_mod(x)
+        # Ensure that there is a recompilation
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_attr(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_buffer("buf0", torch.randn(10, 10))
+
+            def forward(self, x):
+                return self.r(torch.sin(x)) + self.buf0
+
+        mod = MockModule()
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+
+        # Check parameteres and buffers
+        for (p1, p2) in zip(mod.parameters(), opt_mod.parameters()):
+            self.assertTrue(id(p1) == id(p2))
+
+        mod_params = {}
+        for (name, param) in mod.named_parameters():
+            mod_params[name] = param
+        for (name, param) in mod.named_buffers():
+            mod_params[name] = param
+
+        opt_mod_params = {}
+        for (name, param) in mod.named_parameters():
+            opt_mod_params[name] = param
+        for (name, param) in mod.named_buffers():
+            opt_mod_params[name] = param
+
+        self.assertTrue(mod_params.keys() == opt_mod_params.keys())
+        self.assertTrue(
+            all(
+                [a is b for (a, b) in zip(mod_params.values(), opt_mod_params.values())]
+            )
+        )
+
+        # Check get_parameter and get_buffer
+        self.assertTrue(id(mod.get_buffer("buf0")) == id(opt_mod.get_buffer("buf0")))
+        self.assertTrue(
+            id(mod.get_parameter("linear.weight"))
+            == id(opt_mod.get_parameter("linear.weight"))
+        )
+
+        # Check modules
+        for (p1, p2) in zip(mod.modules(), opt_mod.modules()):
+            self.assertTrue(id(p1) == id(p2))
+
+        mod_modules = {}
+        for (name, module) in mod.named_modules():
+            mod_modules[name] = module
+
+        opt_mod_modules = {}
+        for (name, module) in mod.named_modules():
+            opt_mod_modules[name] = module
+
+        self.assertTrue(mod_modules.keys() == opt_mod_modules.keys())
+        self.assertTrue(
+            all(
+                [
+                    a is b
+                    for (a, b) in zip(mod_modules.values(), opt_mod_modules.values())
+                ]
+            )
+        )
+
+    def test_recursion(self):
+        mod = MockModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+
+        for _ in range(5):
+            opt_mod = torch._dynamo.optimize(cnt)(opt_mod)
+        opt_mod(torch.randn(10, 10))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_composition(self):
+        class InnerModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(torch.sin(x))
+
+        opt_inner_mod = InnerModule()
+
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = opt_inner_mod
+
+            def forward(self, x):
+                return self.mod(torch.cos(x))
+
+        outer_mod = OuterModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+
+        x = torch.randn(4)
+        self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
+        self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_composition_with_opt_mod(self):
+        class InnerModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(torch.sin(x))
+
+        inner_mod = InnerModule()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_inner_mod = torch._dynamo.optimize(cnt)(inner_mod)
+
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = opt_inner_mod
+
+            def forward(self, x):
+                return self.mod(torch.cos(x))
+
+        outer_mod = OuterModule()
+        opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+
+        x = torch.randn(4)
+        self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
+        self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
+        # There will be a graph break for the inner mod being OptimizedModule
+        self.assertEqual(cnt.frame_count, 2)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

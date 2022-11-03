@@ -5,6 +5,7 @@ import inspect
 import logging
 import os
 import sys
+import textwrap
 import threading
 import traceback
 import types
@@ -42,6 +43,103 @@ null_context = contextlib.nullcontext
 unset = object()
 compile_lock = threading.RLock()
 most_recent_backend = None
+
+
+class OptimizedModule(torch.nn.Module):
+    """
+    Wraps the original nn.Module object and later patches its
+    forward method to optimized self.forward method.
+    """
+
+    def __init__(self, mod):
+        super().__init__()
+        # Installs the params/buffer
+        self._mod = mod
+
+    def __getattr__(self, name):
+        if name == "_mod":
+            return self._modules["_mod"]
+        return getattr(self._mod, name)
+
+    def forward(self, *args, **kwargs):
+        # This will be monkey patched later
+        raise RuntimeError("Should not be here")
+
+    # Redirect the methods to the original module methods. This avoids things
+    # like `_mod` prefix in parameter names. A more pythonic way might be to use
+    # __getattribute__, but implementing it is very complicated with nn.Module.
+    def parameters(self):
+        return self._mod.parameters()
+
+    def buffers(self):
+        return self._mod.buffers()
+
+    def named_parameters(self):
+        return self._mod.named_parameters()
+
+    def named_buffers(self):
+        return self._mod.named_buffers()
+
+    def modules(self):
+        return self._mod.modules()
+
+    def named_children(self):
+        return self._mod.named_children()
+
+    def named_modules(self, memo=None, prefix="", remove_duplicate=True):
+        return self._mod.named_modules(memo, prefix, remove_duplicate)
+
+    def get_parameter(self, target):
+        return self._mod.get_parameter(target)
+
+    def get_submodule(self, target):
+        return self._mod.get_submodule(target)
+
+    def __str__(self):
+        # the _torchdynamo_orig_callable pollutes the print
+        return self._mod.__str__()
+
+    # List of unimplemented methods. Largely this is for safety, and we can
+    # clean up this list one by one.
+    def unimplemented(self, name):
+        raise RuntimeError("Optimized Module does not support {name} method")
+
+    def add_module(self, name, modules):
+        self.unimplemented("add_module")
+
+    def apply(self, fn):
+        self.unimplemented("apply")
+
+    def load_state_dict(self, state_dict, strict=True):
+        self.unimplemeted("load_state_dict")
+
+    def register_backward_hook(self, hook):
+        self.unimplemented("register_backward_hook")
+
+    def register_forward_hook(self, hook):
+        self.unimplemented("register_forward_hook")
+
+    def register_full_backward_hook(self, hook):
+        self.unimplemented("register_full_backward_hook")
+
+    def register_forward_pre_hook(self, hook):
+        self.unimplemented("register_forward_pre_hook")
+
+    def set_extra_state(self, *args, **kwawrgs):
+        self.unimplemented("set_extra_state")
+
+    def register_buffer(self, name, tensor, persistent=True):
+        self.unimplemented("register_buffer")
+
+    def register_module(self, name, tensor, persistent=True):
+        self.unimplemented("register_module")
+
+    def register_parameter(self, name, tensor, persistent=True):
+        self.unimplemented("register_parameter")
+
+    def state_dict(self, *args, **kwargs):
+        # TODO - maybe we should support this
+        self.unimplemented("state_dict")
 
 
 def remove_from_cache(f):
@@ -118,31 +216,15 @@ class _TorchDynamoContext:
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
-            optimized_forward = self(mod.forward)
-
-            class TorchDynamoNNModuleWrapper:
-                """
-                A wrapper that redirects the forward call to the optimized
-                forward, while for rest it redirects the calls to the original
-                module.
-                """
-
-                def __getattr__(self, name):
-                    return getattr(mod, name)
-
-                def forward(self, *args, **kwargs):
-                    return optimized_forward(*args, **kwargs)
-
-                def __call__(self, *args, **kwargs):
-                    return self.forward(*args, **kwargs)
-
-            new_mod = TorchDynamoNNModuleWrapper()
+            new_mod = OptimizedModule(mod)
+            new_mod.forward = self(mod.forward)
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod
             return new_mod
 
         assert callable(fn)
+
         callback = self.callback
         on_enter = self.on_enter
         backend_ctx_ctor = self.extra_ctx_ctor
@@ -184,6 +266,34 @@ class _TorchDynamoContext:
         # If the function is called using torch._dynamo.optimize decorator, we
         # should prevent any type of skipping.
         if callback not in (None, False):
+            if not hasattr(fn, "__code__"):
+                raise RuntimeError(
+                    textwrap.dedent(
+                        """
+
+                        torch._dynamo.optimize is called on a non function object.
+                        If this is a callable class, please optimize the individual methods that you are interested in optimizing.
+
+                        >> class CallableClass:
+                        >>     def __init__(self):
+                        >>         super().__init__()
+                        >>         self.relu = torch.nn.ReLU()
+                        >>
+                        >>     def __call__(self, x):
+                        >>         return self.relu(torch.sin(x))
+                        >>
+                        >>     def print_hello(self):
+                        >>         print("Hello world")
+                        >>
+                        >> mod = CallableClass()
+
+                        If you want to optimize the __call__ function
+
+                        >> mod.__call__ = torch._dynamo.optimize(mod.__call__)
+
+                        """
+                    )
+                )
             always_optimize_code_objects[fn.__code__] = True
 
         return _fn
