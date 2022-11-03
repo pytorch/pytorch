@@ -296,5 +296,19 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
+// return a map of MathBits on Tensor
+inline std::unordered_map<std::string, bool> getTensorMathBits(
+    const at::Tensor& t) {
+  return {{"conj", t.is_conj()}, {"neg", t.is_neg()}};
+}
+
+// set MathBits on Tensor from map
+inline void setTensorMathBits(
+    const at::Tensor& t,
+    std::unordered_map<std::string, bool> math_bits) {
+  t._set_conj(math_bits["conj"]);
+  t._set_neg(math_bits["neg"]);
+}
+
 } // namespace jit
 } // namespace torch
