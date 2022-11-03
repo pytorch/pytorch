@@ -2276,6 +2276,55 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
 
+    def test_lin_bn_folding_autocast_scenario_cuda(self):
+        module_pairs = [(nn.Linear, nn.BatchNorm1d), (nn.Linear, nn.BatchNorm2d), (nn.Linear, nn.BatchNorm3d)]
+
+        for modules in module_pairs:
+            class LinearBN(torch.nn.Module):
+                def __init__(self, in_features, out_features):
+                    super(LinearBN, self).__init__()
+                    self.linear = modules[0](in_features, out_features, bias=False, dtype=torch.half)
+                    self.bn = modules[1](out_features, eps=0.001, dtype=torch.float)
+
+                def forward(self, x):
+                    x = self.linear(x)
+                    return self.bn(x)
+
+            mod_eager = LinearBN(32, 32).cuda().eval()
+            scripted_mod = torch.jit.script(mod_eager)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            FileCheck().check("linear").check_not("aten::batch_norm").run(scripted_mod.graph)
+            lin_node = scripted_mod.graph.findNode("aten::linear", True)
+            self.assertTrue(lin_node is not None)
+            weight_input = lin_node.namedInput("weight")
+            bias_input = lin_node.namedInput("bias")
+            self.assertTrue(bias_input is not None)
+            if modules[1] == nn.BatchNorm1d:
+                print("batchnorm1d ", "weight: ", weight_input.type().dtype(), "bias: ", bias_input.type().dtype())
+                self.assertTrue(weight_input.type().dtype() == torch.half)
+                self.assertTrue(bias_input.type().dtype() == torch.half)
+            else:
+                print("batchnorm2,3d ", "weight: ", weight_input.type().dtype(), "bias: ", bias_input.type().dtype())
+                self.assertTrue(weight_input.type().dtype() == torch.half)
+                self.assertTrue(bias_input.type().dtype() == torch.float)
+
+
+            """
+            inps = [3, 32]
+            if modules[1] == nn.BatchNorm2d:
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+            if modules[1] == nn.BatchNorm3d:
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+
+            x = torch.rand(inps, dtype=torch.half).cuda()
+
+            self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
+            self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
+            """
+
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat(self):
         out_dimms = [[5, 10], [1, 5]]

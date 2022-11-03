@@ -29,9 +29,16 @@ bool supportedLinearNode(Node* n) {
 
 bool FoldFrozenLinearBatchnorm(Block* b) {
   bool graph_modified = false;
+  bool isBatchNorm1d = false;
   for (Node* n : b->nodes()) {
     for (Block* block : n->blocks()) {
       graph_modified |= FoldFrozenLinearBatchnorm(block);
+    }
+
+    if (n->kind() == prim::Constant &&
+        n->output()->type()->isSubtypeOf(*StringType::get()) &&
+        toIValue(n->output()) == "expected 2D or 3D input (got {}D input)") {
+      isBatchNorm1d = true;
     }
 
     if (n->kind() == aten::batch_norm &&
@@ -61,7 +68,15 @@ bool FoldFrozenLinearBatchnorm(Block* b) {
       // implementation taken from torch/nn/utils/fusion.py
       Tensor linear_b;
       if (linear->namedInput("bias")->type() == NoneType::get()) {
-        linear_b = at::zeros_like(bn_rm);
+        at::ScalarType bias_dtype = bn_rm.scalar_type();
+        at::ScalarType weight_dtype = linear_w.scalar_type();
+        at::DeviceType weight_device = linear_w.device().type();
+        if (isBatchNorm1d && weight_device == at::kCUDA &&
+            (weight_dtype == at::kHalf || weight_dtype == at::kBFloat16) &&
+            bias_dtype == at::kFloat) {
+          bias_dtype = weight_dtype;
+        }
+        linear_b = at::zeros_like(bn_rm, at::TensorOptions().dtype(bias_dtype));
       } else {
         linear_b = constant_as<Tensor>(linear->namedInput("bias")).value();
       }
