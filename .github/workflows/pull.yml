@@ -13,7 +13,7 @@ on:
     - cron: 0 0 * * *
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 jobs:
