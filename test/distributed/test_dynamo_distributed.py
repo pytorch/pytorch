@@ -128,6 +128,7 @@ class TestDistributedMultiProc(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     @patch.object(config, "optimize_ddp", True)
+    @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_ddp(self):
 
         with _per_rank_init(self.rank, self.world_size):
@@ -140,11 +141,12 @@ class TestDistributedMultiProc(MultiProcessTestCase):
             correct_loss.backward()
 
             reset_rng_state()
-            opt_model = torch._dynamo.optimize("aot_eager")(model)
+            opt_model = torch._dynamo.optimize("inductor")(model)
             opt_outputs = opt_model(**inputs)
             opt_loss = opt_outputs.loss
             opt_loss.backward()
             self.assertTrue(same(correct_outputs, opt_outputs))
+            # TODO(whc) add the optimizer, and verify grads match
 
 @requires_nccl()
 class TestDistributed(torch._dynamo.test_case.TestCase):
