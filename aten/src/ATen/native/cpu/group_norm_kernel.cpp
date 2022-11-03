@@ -894,6 +894,307 @@ void GroupNormBackwardKernelImplInternal(
   }
 }
 
+template <typename scalar_t, typename param_t>
+inline void calc_ds_db_channels_last(
+  const scalar_t* dY_ptr,
+  const scalar_t* X_ptr,
+  param_t* ds_ptr,
+  param_t* db_ptr,
+  int64_t C) {
+  using Vec = vec::Vectorized<vec::vec_scalar_t<param_t>>;
+  constexpr int64_t K = vec::Vectorized<scalar_t>::size();
+  const int64_t inner_size = C / K * K;
+  int64_t d = 0;
+  for (; d < inner_size; d+= K) {
+    Vec ds_dev = Vec::loadu(ds_ptr + d);
+    Vec db_vec = Vec::loadu(db_ptr + d);
+    Vec x_vec = Vec::loadu(X_ptr + d);
+    Vec dy_vec = Vec::loadu(dY_ptr + d);
+
+    ds_dev += x_vec * dy_vec;
+    db_vec += dy_vec;
+    ds_dev.store(ds_ptr + d);
+    db_vec.store(db_ptr + d);
+  }
+  if (C - d > 0) {
+    Vec ds_dev = Vec::loadu(ds_ptr + d, C - d);
+    Vec db_vec = Vec::loadu(db_ptr + d, C - d);
+    Vec x_vec = Vec::loadu(X_ptr + d, C - d);
+    Vec dy_vec = Vec::loadu(dY_ptr + d, C - d);
+    ds_dev += x_vec * dy_vec;
+    db_vec += dy_vec;
+    ds_dev.store(ds_ptr + d, C - d);
+    db_vec.store(db_ptr + d, C - d);
+  }
+}
+
+template <>
+inline void calc_ds_db_channels_last(
+  const BFloat16* dY_ptr,
+  const BFloat16* X_ptr,
+  float* ds_ptr,
+  float* db_ptr,
+  int64_t C) {
+  using fVec = vec::Vectorized<float>;
+  using bVec = vec::Vectorized<BFloat16>;
+  int64_t d = 0;
+  for (; d < C - (C % bVec::size()); d += bVec::size()) {
+    fVec ds_dev0 = fVec::loadu(ds_ptr + d);
+    fVec ds_dev1 = fVec::loadu(ds_ptr + d + fVec::size());
+    fVec db_vec0 = fVec::loadu(db_ptr + d);
+    fVec db_vec1 = fVec::loadu(db_ptr + d + fVec::size());
+    bVec x_vec = bVec::loadu(X_ptr + d);
+    bVec dy_vec = bVec::loadu(dY_ptr + d);
+    fVec x_vec0, x_vec1, dy_vec0, dy_vec1;
+    std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+    std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+    ds_dev0 += x_vec0 * dy_vec0;
+    ds_dev1 += x_vec1 * dy_vec1;
+    db_vec0 += dy_vec0;
+    db_vec1 += dy_vec1;
+
+    ds_dev0.store(ds_ptr + d);
+    ds_dev1.store(ds_ptr + d + fVec::size());
+    db_vec0.store(db_ptr + d);
+    db_vec1.store(db_ptr + d + fVec::size());
+
+  }
+  if (C - d > 0) {
+    fVec ds_dev0 = fVec::loadu(ds_ptr + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
+    fVec ds_dev1 = fVec::loadu(ds_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
+    fVec db_vec0 = fVec::loadu(db_ptr + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
+    fVec db_vec1 = fVec::loadu(db_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
+    bVec x_vec = bVec::loadu(X_ptr + d, C - d);
+    bVec dy_vec = bVec::loadu(dY_ptr + d, C - d);
+    fVec x_vec0, x_vec1, dy_vec0, dy_vec1;
+    std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+    std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+    ds_dev0 += x_vec0 * dy_vec0;
+    ds_dev1 += x_vec1 * dy_vec1;
+    db_vec0 += dy_vec0;
+    db_vec1 += dy_vec1;
+
+    ds_dev0.store(ds_ptr + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
+    ds_dev1.store(ds_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
+    db_vec0.store(db_ptr + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
+    db_vec1.store(db_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
+  }
+}
+
+template <typename T, typename PT, typename T_ACC>
+void apply_input_backward_channles_last(
+  const T* dY_ptr,
+  const T* X_ptr,
+  T* dX_ptr,
+  const PT* rstd,
+  const PT* gamma,
+  T_ACC c2,
+  T_ACC c3,
+  int64_t D) {
+  const bool gamma_null = (gamma == nullptr);
+  int64_t d = 0;
+  auto K = vec::Vectorized<T>::size();
+  for (; d < D / K * K; d += K) {
+    auto c1 = vec::Vectorized<T>(*rstd) *
+      (gamma_null ? vec::Vectorized<T>(1) : vec::Vectorized<T>::loadu(gamma + d));
+    auto dy_vec = vec::Vectorized<T>::loadu(dY_ptr + d);
+    auto x_vec = vec::Vectorized<T>::loadu(X_ptr + d);
+    auto dx_vec = c1 * dy_vec +
+      vec::Vectorized<T>(c2) * x_vec + vec::Vectorized<T>(c3);
+    dx_vec.store(dX_ptr + d);
+  }
+  for (; d < D; d++) {
+    T_ACC c1 = (*rstd) * (gamma_null ? T(1) : gamma[d]);
+    dX_ptr[d] = c1 * dY_ptr[d] + c2 * X_ptr[d] + c3;
+  }
+}
+
+template <>
+void apply_input_backward_channles_last(
+  const BFloat16* dY_ptr,
+  const BFloat16* X_ptr,
+  BFloat16* dX_ptr,
+  const float* rstd,
+  const float* gamma,
+  float c2,
+  float c3,
+  int64_t D) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  const bool gamma_null = (gamma == nullptr);
+  auto K = bVec::size();
+  int64_t d = 0;
+  for (; d < D / K * K; d += K) {
+    fVec c1_0 = fVec(*rstd) *
+      (gamma_null ? fVec(1) : fVec::loadu(gamma + d));
+    fVec c1_1 = fVec(*rstd) *
+      (gamma_null ? fVec(1) : fVec::loadu(gamma + d + fVec::size()));
+    bVec dy_vec = bVec::loadu(dY_ptr + d);
+    bVec x_vec = bVec::loadu(X_ptr + d);
+    fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
+    std::tie(x_vec0, x_vec1) = convert_bfloat16_float(x_vec);
+    std::tie(dy_vec0, dy_vec1) = convert_bfloat16_float(dy_vec);
+    fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
+    fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
+    convert_float_bfloat16(dx_vec0, dx_vec1).store(dX_ptr + d);
+  }
+  for (; d < D; d++) {
+    float c1 = (*rstd) * (gamma_null ? float(1) : gamma[d]);
+    dX_ptr[d] = c1 * float(dY_ptr[d]) + c2 * float(X_ptr[d]) + c3;
+  }
+}
+
+template <typename T, typename PT>
+void GroupNormBackwardKernelImplChannelsLastInternal(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    Tensor& dX,
+    Tensor& dgamma,
+    Tensor& dbeta) {
+  TORCH_CHECK(dY.numel() == N * C * HxW);
+  TORCH_CHECK(X.numel() == N * C * HxW);
+  TORCH_CHECK(mean.numel() == N * group);
+  TORCH_CHECK(rstd.numel() == N * group);
+  TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
+  int64_t D = C / group;
+  int64_t G = group;
+  using T_ACC = vec::vec_scalar_t<T>;
+  const T* dY_data = dY.data_ptr<T>();
+  const T* X_data = X.data_ptr<T>();
+  const PT* mean_data = mean.data_ptr<PT>();
+  const PT* rstd_data = rstd.data_ptr<PT>();
+  const PT* gamma_data = gamma.defined() ? gamma.data_ptr<PT>() : nullptr;
+  T* dX_data = dX.defined() ? dX.data_ptr<T>() : nullptr;
+  PT* dgamma_data = dgamma.defined() ? dgamma.data_ptr<PT>() : nullptr;
+  PT* dbeta_data = dbeta.defined() ? dbeta.data_ptr<PT>() : nullptr;
+  const bool gamma_null = (gamma_data == nullptr);
+  Tensor ds = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
+  Tensor db = at::empty({N, C}, X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
+  T_ACC* ds_data = ds.data_ptr<T_ACC>();
+  T_ACC* db_data = db.data_ptr<T_ACC>();
+
+  // parallel on N * HxW.
+  int num_threads = at::get_num_threads();
+  Tensor buffer = at::empty({num_threads, N, 2 * C},
+    X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value)).zero_();
+  T_ACC* buffer_data = buffer.data_ptr<T_ACC>();
+
+  // Tensor buffer_ds_db = at::empty({N, 2 * C},
+  //   X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value)).zero_();
+  // T_ACC* buffer_ds_db_data = buffer_ds_db.data_ptr<T_ACC>();
+
+  // Tensor buffer_mean_rstd = at::empty({N, 2 * C},
+  //   X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
+  // T_ACC* buffer_mean_rstd_data = buffer_mean_rstd.data_ptr<T_ACC>();
+
+  Tensor tmp_buffer = at::empty({N, 2 * G},
+    X.options().dtype(c10::CppTypeToScalarType<T_ACC>::value));
+  T_ACC* tmp_buffer_data = tmp_buffer.data_ptr<T_ACC>();
+
+  constexpr int64_t K = vec::Vectorized<T>::size();
+  // step 1
+  at::parallel_for(0, N * HxW, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    T_ACC* buffer_ptr = buffer_data + tid * N * 2 * C;
+    int64_t n{0}, m{0};
+    data_index_init(begin, n, N, m, HxW);
+    for (const auto i : c10::irange(begin, end)) {
+      T_ACC* ds_ptr = buffer_ptr +  n * 2 * C;
+      T_ACC* db_ptr = ds_ptr + C;
+      const T* X_ptr = X_data + i * C;
+      const T* dY_ptr = dY_data + i * C;
+
+      calc_ds_db_channels_last<T, T_ACC>(dY_ptr, X_ptr, ds_ptr, db_ptr, C);
+      data_index_step(n, N, m, HxW);
+    }
+  });
+
+  // step 2
+  for (const auto n : c10::irange(N)) {
+    for (const auto g : c10::irange(G)) {
+      T_ACC ds_gamma{0}, db_gamma{0};
+      for (const auto d : c10::irange(D)) {
+        T_ACC ds_val{0}, db_val{0};
+        for (const auto t : c10::irange(num_threads)) {
+          T_ACC* buffer_ptr = buffer_data + t * N * 2 * C + n * 2 * C;
+          ds_gamma += buffer_ptr[g * D + d] * (gamma_null ? T_ACC(1) : T_ACC(gamma_data[g * D + d]));
+          db_gamma += buffer_ptr[g * D + d + C] * (gamma_null ? T_ACC(1) : T_ACC(gamma_data[g * D + d]));
+          ds_val += buffer_ptr[g * D + d];
+          db_val += buffer_ptr[g * D + d + C];
+          // buffer_ds_db_data[g * D + d] += buffer_ptr[g * D + d];
+          // buffer_ds_db_data[g * D + d + C] += buffer_ptr[g * D + d + C];
+          }
+        ds_data[n * C + g * D + d] = ds_val;
+        db_data[n * C + g * D + d] = db_val;
+      }
+
+      tmp_buffer_data[n * 2 * G + 2 * g] = ds_gamma;
+      tmp_buffer_data[n * 2 * G + 2 * g + 1] = db_gamma;
+    }
+  }
+
+  // for (const auto n : c10::irange(N)) {
+  //   for (const auto g : c10::irange(G)) {
+  //     T_ACC* ds_ptr = buffer_data + n * 2 * C;
+  //     T_ACC* db_ptr = ds_ptr + C;
+  //     T_ACC mean_val = tmp_buffer_data[n * 2 * G + 2 * g];
+  //     T_ACC rstd_val = tmp_buffer_data[n * 2 * G + 2 * g + 1];
+  //     mean_data[n * G + g] = mean_val;
+  //     rstd_data[n * G + g] = rstd_val;
+
+  //     for (const auto d : c10::irange(D)) {
+  //       const int64_t c = g * D + d;
+  //       scale_ptr[c] = rstd_val * (gamma_null ? T_ACC(1) : T_ACC(gamma_data[c]));
+  //       bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_null ? T_ACC(0) : T_ACC(beta_data[c]));
+  //     }
+  //   }
+  // }
+
+  const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
+  // step 3 compute dx
+  if (dX_data != nullptr) {
+    at::parallel_for(0, N * HxW, 1, [&](int64_t begin, int64_t end) {
+      int64_t n{0}, m{0};
+      data_index_init(begin, n, N, m, HxW);
+      for (const auto i : c10::irange(begin, end)) {
+
+        for (const auto g : c10::irange(0, G)) {
+          const T* X_ptr = X_data + i * C + g * D;
+          const T* dY_ptr = dY_data + i * C + g * D;
+          T* dX_ptr = dX_data + i * C + g * D;
+          const PT* mean_ptr = mean_data + n * G + g;
+          const PT* rstd_ptr = rstd_data + n * G + g;
+          const PT* gamma_ptr = gamma_null ? gamma_data : (gamma_data + g * D);
+          T_ACC ds_val = tmp_buffer_data[n * 2 * G + 2 * g];
+          T_ACC db_val = tmp_buffer_data[n * 2 * G + 2 * g + 1];
+          const T_ACC c2 =
+          (db_val * T_ACC(*mean_ptr) - ds_val) * T_ACC(*rstd_ptr) * T_ACC(*rstd_ptr)* T_ACC(*rstd_ptr) * s;
+          const T_ACC c3 = -c2 * T_ACC(*mean_ptr) - db_val * T_ACC(*rstd_ptr) * s;
+          apply_input_backward_channles_last<T, PT, T_ACC>(dY_ptr, X_ptr, dX_ptr, rstd_ptr, gamma_ptr, c2, c3, D);
+        }
+
+        data_index_step(n, N, m, HxW);
+      }
+    });
+  }
+
+  // step 4 compute dgamma & dbeta
+  if (dgamma_data != nullptr) {
+    GammaBackward<PT, T_ACC>(
+        N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
+  }
+  if (dbeta_data != nullptr) {
+    BetaBackward<PT, T_ACC>(N, C, db_data, dbeta_data);
+  }
+}
+
 void GroupNormBackwardKernelImpl(
     const Tensor& dY,
     const Tensor& X,
@@ -908,16 +1209,38 @@ void GroupNormBackwardKernelImpl(
     Tensor& dgamma,
     Tensor& dbeta) {
   const bool mixed_type = is_mixed_type(dY, gamma);
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
-      if(mixed_type) {
-        GroupNormBackwardKernelImplInternal<BFloat16, float>(
-            dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
-      } else {
-        GroupNormBackwardKernelImplInternal<scalar_t, scalar_t>(
-            dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
-      }
+  switch (X.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
+        if(mixed_type) {
+          GroupNormBackwardKernelImplInternal<BFloat16, float>(
+              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+        } else {
+          GroupNormBackwardKernelImplInternal<scalar_t, scalar_t>(
+              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+        }
       });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast:
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_TYPES_AND(
+        ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
+        if(mixed_type) {
+          GroupNormBackwardKernelImplChannelsLastInternal<BFloat16, float>(
+              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+        } else {
+          GroupNormBackwardKernelImplChannelsLastInternal<scalar_t, scalar_t>(
+              dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
+        }
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, ChannelsLast3d, Contiguous");
+  }
+
 }
 
 } // namespace
