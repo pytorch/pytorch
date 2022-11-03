@@ -547,6 +547,86 @@ def get_fqn_to_example_inputs(
     return fqn_to_example_inputs
 
 
+def _get_fixed_params_observed_lstm(
+    float_lstm: torch.nn.LSTM,
+    is_qat: bool,
+    linear_output_qparams: Optional[Tuple[float, int]] = None,
+    sigmoid_qparams: Optional[Tuple[float, int]] = None,
+    tanh_qparams: Optional[Tuple[float, int]] = None,
+    cell_state_qparams: Optional[Tuple[float, int]] = None,
+    hidden_state_qparams: Optional[Tuple[float, int]] = None,
+) -> None:
+    """
+    Return an observed `torch.ao.nn.quantizable.LSTM` from a float `torch.nn.LSTM`
+    with fixed scales and zero points assigned to the inner ops or submodules.
+
+    In both eager and FX graph mode quantization, `torch.ao.nn.quantizable.LSTM` is
+    used as an observed custom module, which is responsible for inserting its own
+    observers. By default, all inner ops inherit the parent custom module's QConfig.
+    Users who wish to override this behavior may extend `torch.ao.nn.quantizable.LSTM`
+    and use this helper function to customize the observer insertion logic.
+
+    Args:
+        `float_lstm`: The float LSTM module
+        `is_qat`: If this is for QAT, then insert fake quantizes instead of observers
+        `linear_output_qparams`: (scale, zero_point) tuple for linear outputs Wx + b,
+            where W is the weight matrix, b is the bias, and x is either the inputs
+            or the hidden state from the previous layer (if any)
+        `sigmoid_qparams`: (scale, zero_point) tuple for sigmoid activations
+        `tanh_qparams`: (scale, zero_point) tuple for tanh activations
+        `cell_state_qparams`: (scale, zero_point) for the cell state
+        `hidden_state_qparams`: (scale, zero_point) for the hidden state and the output
+    """
+    def make_qconfig(scale: float, zero_point: int) -> torch.ao.quantization.QConfig:
+        """
+        Make a QConfig with fixed qparams observers or fake quantizes.
+        """
+        if is_qat:
+            activation = torch.ao.quantization.FixedQParamsFakeQuantize.with_args(
+                scale=scale, zero_point=zero_point)
+            weight = torch.ao.quantization.default_weight_fake_quantize
+        else:
+            activation = torch.ao.quantization.FixedQParamsObserver.with_args(
+                scale=scale, zero_point=zero_point)
+            weight = torch.ao.quantization.default_weight_observer
+        return torch.ao.quantization.QConfig(activation=activation, weight=weight)
+
+    observed_lstm = torch.ao.nn.quantizable.LSTM(
+        float_lstm.input_size, float_lstm.hidden_size, float_lstm.num_layers, float_lstm.bias,
+        float_lstm.batch_first, float_lstm.dropout, float_lstm.bidirectional)
+
+    # Assign QConfigs with fixed qparams to all inner submodules
+    # Module hierarchy: LSTM > _LSTMLayer > _LSTMSingleLayer (forward or backward) > LSTMCell
+    for layer in observed_lstm.layers:
+        inner_layers = [layer.layer_fw]
+        if float_lstm.bidirectional:
+            inner_layers.append(layer.layer_bw)
+        for inner_layer in inner_layers:
+            cell = inner_layer.cell
+            if linear_output_qparams is not None:
+                cell.igates.qconfig = make_qconfig(*linear_output_qparams)
+                cell.hgates.qconfig = make_qconfig(*linear_output_qparams)
+            if sigmoid_qparams is not None:
+                cell.input_gate.qconfig = make_qconfig(*sigmoid_qparams)
+                cell.forget_gate.qconfig = make_qconfig(*sigmoid_qparams)
+                cell.output_gate.qconfig = make_qconfig(*sigmoid_qparams)
+            if tanh_qparams is not None:
+                cell.cell_gate.qconfig = make_qconfig(*tanh_qparams)
+            if cell_state_qparams is not None:
+                cell.fgate_cx_igate_cgate.qconfig = make_qconfig(*cell_state_qparams)
+                cell.initial_cell_state_qparams = cell_state_qparams
+            if hidden_state_qparams is not None:
+                cell.ogate_cy.qconfig = make_qconfig(*hidden_state_qparams)
+                cell.initial_hidden_state_qparams = hidden_state_qparams
+
+    # Insert the observers based on the previously attached QConfigs
+    #torch.ao.quantization.add_observer_(observed_lstm)
+    torch.ao.quantization.add_observer_(
+        observed_lstm,
+        non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
+    )
+    return observed_lstm
+
 __all__ = [
     "NodePattern",
     "Pattern",

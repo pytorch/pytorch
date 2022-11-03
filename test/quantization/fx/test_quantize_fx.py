@@ -192,7 +192,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Tuple
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -4216,6 +4216,78 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_function(tuple): 1,
         }
         self._test_static_lstm_helper(m2, prepare_node_occurrence, convert_node_occurrence2)
+
+    def test_static_lstm_with_custom_fixed_qparams(self):
+        """
+        Test statically quantized LSTM with custom fixed qparams assigned to each of the
+        inner submodules. This flow requires users to extend `torch.ao.nn.quantizable.LSTM`
+        and use the child class in the custom module mapping.
+        """
+        linear_output_qparams = (2 ** -11, 2 ** 15)
+        sigmoid_qparams = (2 ** -16, 0)
+        tanh_qparams = (2 ** -15, 2 ** 15)
+        cell_state_qparams = (2 ** -11, 0)
+        hidden_state_qparams = (2 ** -7, 2 ** 7)
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_lstm = torch.nn.LSTM(50, 50, 1)
+
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                x = self.my_lstm(inputs, (h0, c0))
+                return x
+
+        class UserLSTM(torch.ao.nn.quantizable.LSTM):
+            """
+            Example of user provided LSTM implementation that has fixed qparams assigned
+            to the inner submodules.
+            """
+            @classmethod
+            def from_float(cls, other):
+                assert isinstance(other, cls._FLOAT_MODULE)
+                return torch.ao.quantization.utils._get_fixed_params_observed_lstm(
+                    float_lstm=other,
+                    is_qat=False,
+                    linear_output_qparams=linear_output_qparams,
+                    sigmoid_qparams=sigmoid_qparams,
+                    tanh_qparams=tanh_qparams,
+                    cell_state_qparams=cell_state_qparams,
+                    hidden_state_qparams=hidden_state_qparams,
+                )
+
+        # Prepare model
+        qconfig_mapping = get_default_qconfig_mapping()
+        example_inputs = (torch.rand(5, 3, 50), torch.rand(1, 3, 50), torch.randn(1, 3, 50))
+        prepare_custom_config = PrepareCustomConfig() \
+            .set_float_to_observed_mapping(torch.nn.LSTM, UserLSTM)
+        convert_custom_config = ConvertCustomConfig() \
+            .set_observed_to_quantized_mapping(UserLSTM, torch.ao.nn.quantized.LSTM)
+        model = MyModel()
+        model = prepare_fx(model, qconfig_mapping, example_inputs, prepare_custom_config=prepare_custom_config)
+
+        # Validate that the observers inserted to each inner module has the expected qparams
+        def validate_qparams(inner_module: torch.nn.Module, expected_qparams: Tuple[float, int]):
+            self.assertTrue(hasattr(inner_module, "activation_post_process"))
+            obs = inner_module.activation_post_process
+            scale, zp = expected_qparams
+            self.assertTrue(isinstance(obs, FixedQParamsObserver))
+            self.assertEqual(obs.scale, scale)
+            self.assertEqual(obs.zero_point, zp)
+        cell = model.my_lstm.layers[0].layer_fw.cell
+        validate_qparams(cell.igates, linear_output_qparams)
+        validate_qparams(cell.hgates, linear_output_qparams)
+        validate_qparams(cell.input_gate, sigmoid_qparams)
+        validate_qparams(cell.forget_gate, sigmoid_qparams)
+        validate_qparams(cell.cell_gate, tanh_qparams)
+        validate_qparams(cell.output_gate, sigmoid_qparams)
+        validate_qparams(cell.fgate_cx_igate_cgate, cell_state_qparams)
+        validate_qparams(cell.ogate_cy, hidden_state_qparams)
+
+        # Make sure the rest of the flow runs
+        model(*example_inputs)
+        model = convert_fx(model, convert_custom_config=convert_custom_config, _remove_qconfig=False)
+        model(*example_inputs)
 
     def test_reroute_tuple_getitem_patterns(self):
         """

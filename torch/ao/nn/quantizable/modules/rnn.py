@@ -41,11 +41,19 @@ class LSTMCell(torch.nn.Module):
         self.hgates = torch.nn.Linear(hidden_dim, 4 * hidden_dim, bias=bias, **factory_kwargs)
         self.gates = torch.ao.nn.quantized.FloatFunctional()
 
+        self.input_gate = torch.nn.Sigmoid()
+        self.forget_gate = torch.nn.Sigmoid()
+        self.cell_gate = torch.nn.Tanh()
+        self.output_gate = torch.nn.Sigmoid()
+
         self.fgate_cx = torch.ao.nn.quantized.FloatFunctional()
         self.igate_cgate = torch.ao.nn.quantized.FloatFunctional()
         self.fgate_cx_igate_cgate = torch.ao.nn.quantized.FloatFunctional()
 
         self.ogate_cy = torch.ao.nn.quantized.FloatFunctional()
+
+        self.initial_hidden_state_qparams: Tuple[float, int] = (1.0, 0)
+        self.initial_cell_state_qparams: Tuple[float, int] = (1.0, 0)
 
     def forward(self, x: Tensor, hidden: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:
@@ -58,10 +66,10 @@ class LSTMCell(torch.nn.Module):
 
         input_gate, forget_gate, cell_gate, out_gate = gates.chunk(4, 1)
 
-        input_gate = torch.sigmoid(input_gate)
-        forget_gate = torch.sigmoid(forget_gate)
-        cell_gate = torch.tanh(cell_gate)
-        out_gate = torch.sigmoid(out_gate)
+        input_gate = self.input_gate(input_gate)
+        forget_gate = self.forget_gate(forget_gate)
+        cell_gate = self.cell_gate(cell_gate)
+        out_gate = self.output_gate(out_gate)
 
         fgate_cx = self.fgate_cx.mul(forget_gate, cx)
         igate_cgate = self.igate_cgate.mul(input_gate, cell_gate)
@@ -75,8 +83,10 @@ class LSTMCell(torch.nn.Module):
     def initialize_hidden(self, batch_size: int, is_quantized: bool = False) -> Tuple[Tensor, Tensor]:
         h, c = torch.zeros((batch_size, self.hidden_size)), torch.zeros((batch_size, self.hidden_size))
         if is_quantized:
-            h = torch.quantize_per_tensor(h, scale=1.0, zero_point=0, dtype=torch.quint8)
-            c = torch.quantize_per_tensor(c, scale=1.0, zero_point=0, dtype=torch.quint8)
+            (h_scale, h_zp) = self.initial_hidden_state_qparams
+            (c_scale, c_zp) = self.initial_cell_state_qparams
+            h = torch.quantize_per_tensor(h, scale=h_scale, zero_point=h_zp, dtype=torch.quint8)
+            c = torch.quantize_per_tensor(c, scale=c_scale, zero_point=c_zp, dtype=torch.quint8)
         return h, c
 
     def _get_name(self):
