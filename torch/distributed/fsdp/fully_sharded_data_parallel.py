@@ -281,13 +281,13 @@ class FullyShardedDataParallel(nn.Module):
 
     Args:
         module (nn.Module):
-            module to be wrapped with FSDP.
+            This is the module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
-            process group for sharding
+            This is the process group used for collective communications.
         sharding_strategy (Optional[ShardingStrategy]):
-            Config sharding algorithm, different sharding algorithm has trade
-            off between memory saving and communication overhead. ``FULL_SHARD``
-            will be chosen if sharding_strategy is not specified.
+            This configures the sharding strategy used by FSDP, which may trade
+            off memory saving and communication overhead. See
+            :class:`ShardingStrategy` for details. (Default: ``FULL_SHARD``)
         cpu_offload (Optional[CPUOffload]):
             This configures CPU offloading. If this is set to ``None``, then
             no CPU offloading happens. See :class:`CPUOffload` for details.
