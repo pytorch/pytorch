@@ -5,7 +5,7 @@ import time
 
 import sympy
 from sympy import Integer
-from tqdm import tqdm
+from torch.hub import tqdm
 
 import torch
 import torch.fx
@@ -337,9 +337,7 @@ class GraphLowering(torch.fx.Interpreter):
             print(code)
 
         mod = PyCodeCache.load(code)
-        for name, value in tqdm(
-            self.constants.items(), desc="Graphs compiled", initial=1
-        ):
+        for name, value in self.constants.items():
             setattr(mod, name, value)
 
         log.log(dynamo_logging.CODE, "Output code: %s", mod.__file__)
