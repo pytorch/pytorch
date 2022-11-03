@@ -37,7 +37,7 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
   }
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self, output}, /*use_scalar_value*/ false);
     auto cachedGraph = cache_->LookUpAs<MPSUnaryCachedGraph>(key);
 
     if(!cachedGraph) {
@@ -282,7 +282,7 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
  int64_t dim,
  c10::optional<ScalarType> dtype,
  const Tensor& result) {
-  TORCH_CHECK(dim >=0 && dim < self.ndimension());
+  TORCH_CHECK(dim >=0 && dim < std::max(1LL, self.ndimension()), "Expected dim to be between 0 and ", self.ndimension(), " but got ", dim);
   if (!mpsSupportsCumsum()) {
     TORCH_WARN_ONCE("torch.cumsum supported by MPS on MacOS 13+, please upgrade");
     auto cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
@@ -292,9 +292,18 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
   mps::unary_op(input, result, "cumsum_out_mp" + std::to_string(dim),
                 ^ MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-       return [mpsGraph cumulativeSumWithTensor:inputTensor
-                                    axis:dim
-                                    name:nil];
+       // cumsum is horribly broken for int8, int16 and as chances for overflow is pretty high, cast to int32
+       if (isIntegralType(input.scalar_type()) && input.scalar_type() !=ScalarType::Int) {
+           inputTensor = mps::castMPSTensor(mpsGraph, inputTensor, result.scalar_type());
+       }
+       auto rc = [mpsGraph cumulativeSumWithTensor: inputTensor
+                                              axis: dim
+                                              name: nil];
+       if (result.scalar_type()!= input.scalar_type() ||
+           (isIntegralType(input.scalar_type()) && input.scalar_type() !=ScalarType::Int)) {
+         return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
+       }
+       return rc;
     });
 }
 
