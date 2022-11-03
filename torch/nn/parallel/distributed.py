@@ -433,7 +433,7 @@ class DistributedDataParallel(Module, Joinable):
         of ``DistributedDataParallel`` will register the additional gradient
         reduction functions on all the parameters of the model itself at the
         time of construction. If you change the model's parameters afterwards,
-        gradient redunction functions no longer match the correct set of
+        gradient reduction functions no longer match the correct set of
         parameters.
 
     .. warning::
@@ -509,7 +509,7 @@ class DistributedDataParallel(Module, Joinable):
                      3) Activation checkpointing when model has unused parameters.
                      4) There are model parameters that are outside of forward function.
                      5) Potentially improve performance when there are unused parameters,
-                     as DDP will not search graph in each iteraton to detect unused
+                     as DDP will not search graph in each iteration to detect unused
                      parameters when static_graph is set to be ``True``.
                      To check whether you can set static_graph to be ``True``, one way is to
                      check ddp logging data at the end of your previous model training,
@@ -1018,7 +1018,7 @@ class DistributedDataParallel(Module, Joinable):
 
     # note, this ctxmgr function is marked 'skip' in torchdynamo, so dynamo only kicks in
     # for the 'module_to_run' underneath
-    # see torchdynamo/eval_frame.py TorchPatcher.patch for more details
+    # see torch._dynamo/eval_frame.py TorchPatcher.patch for more details
     @contextmanager
     def _inside_ddp_forward(self):
         DistributedDataParallel._active_ddp_module = self
@@ -1175,7 +1175,7 @@ class DistributedDataParallel(Module, Joinable):
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks
-    # of whether backwards pass synchronization will run this iteraton or not.
+    # of whether backwards pass synchronization will run this iteration or not.
     def _check_global_requires_backward_grad_sync(self, is_joined_rank):
         if not is_joined_rank and self.require_backward_grad_sync:
             requires_sync_tensor = torch.ones(1, device=self.device)
@@ -1815,7 +1815,7 @@ class DistributedDataParallel(Module, Joinable):
         r"""
         This interface allows users to set sample_rate of collecting
         runtime stats. The runtime stats will be recorded for the
-        first 10 iterations, after 10 iteratons runtime stats will be
+        first 10 iterations, after 10 iterations runtime stats will be
         recorded once every "sample_rate" training iterations. In
         default, runtime stats are recorded for the first 10 iterations,
         after 10 iterations runtime stats are recorded once every
