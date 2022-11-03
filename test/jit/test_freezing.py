@@ -2276,6 +2276,8 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
 
+    @skipCUDAMemoryLeakCheckIf(True)
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_lin_bn_folding_autocast_scenario_cuda(self):
         module_pairs = [(nn.Linear, nn.BatchNorm1d), (nn.Linear, nn.BatchNorm2d), (nn.Linear, nn.BatchNorm3d)]
 
@@ -2300,16 +2302,12 @@ class TestFrozenOptimizations(JitTestCase):
             bias_input = lin_node.namedInput("bias")
             self.assertTrue(bias_input is not None)
             if modules[1] == nn.BatchNorm1d:
-                print("batchnorm1d ", "weight: ", weight_input.type().dtype(), "bias: ", bias_input.type().dtype())
                 self.assertTrue(weight_input.type().dtype() == torch.half)
                 self.assertTrue(bias_input.type().dtype() == torch.half)
             else:
-                print("batchnorm2,3d ", "weight: ", weight_input.type().dtype(), "bias: ", bias_input.type().dtype())
                 self.assertTrue(weight_input.type().dtype() == torch.half)
                 self.assertTrue(bias_input.type().dtype() == torch.float)
 
-
-            """
             inps = [3, 32]
             if modules[1] == nn.BatchNorm2d:
                 inps.append(inps[-1])
@@ -2323,7 +2321,6 @@ class TestFrozenOptimizations(JitTestCase):
 
             self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
             self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
-            """
 
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat(self):
