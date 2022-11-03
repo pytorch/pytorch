@@ -15,7 +15,7 @@ __all__ = ['Interpreter', 'Transformer']
 @compatibility(is_backward_compatible=True)
 class Interpreter:
     """
-    An Interpreter executes an FX graph Node-by-Node. This pattern
+    An Interpreter executes an FX graph Node-by-Node. This pattern`
     can be useful for many things, including writing code
     transformations as well as analysis passes.
 
@@ -118,7 +118,7 @@ class Interpreter:
         if enable_io_processing:
             args = self.module.graph.process_inputs(*args)
         self.args_iter : Iterator[Any] = iter(args)
-        for node in tqdm(self.module.graph.nodes, desc=f"Compiling subgraph {str(list(self.module.graph.nodes))}", initial=1, position=0, leave=True):
+        for node in tqdm(self.module.graph.nodes, desc=f"Compiling subgraph {str(list(self.module.graph.nodes))} in pass {self.__class__}", initial=1, position=0, leave=True):
             if node in self.env:
                 # Short circuit if we have this value. This could
                 # be used, for example, for partial evaluation
