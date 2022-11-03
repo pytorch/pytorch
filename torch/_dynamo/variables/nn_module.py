@@ -623,6 +623,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     [self] + args,
                     kwargs,
                 )
+            elif isinstance(method, staticmethod):
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(method.__func__, **options),
+                    args,
+                    kwargs,
+                )
             # TODO(whc) do we still want to filter out some methods? what is this for?
             elif id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
