@@ -66,6 +66,10 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   set_constructor_metadata();
 }
 
+void FunctionalTensorWrapper::freeze_storage() const {
+  functional_storage_impl()->freeze();
+}
+
 // Note [Functionalization: Alias Removal]
 // When someone calls a view() op during the functionalization pass, e.g. 'b = a.view(...)',
 // we link `b` and `a` to a shared Alias object to preserve the aliasing relationship.
@@ -206,12 +210,7 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   value_ = other;
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  if (sizes() != value_.sizes() || strides() != value_.strides()) {
-    set_sizes_and_strides(value_.sizes(), value_.strides());
-  }
-  if (storage_offset() != value_.storage_offset()) {
-    set_storage_offset(value_.storage_offset());
-  }
+  set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides(), value_.sym_storage_offset());
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
@@ -307,12 +306,16 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
       return r;
     }
   }
+
   auto impl = c10::make_intrusive<FunctionalTensorWrapper>(value_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->level_ = level_;
+  impl->generation_ = generation_;
+  impl->view_metas_ = view_metas_;
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;
@@ -352,6 +355,12 @@ c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
   return value_.unsafeGetTensorImpl()->sym_strides();
+}
+c10::SymInt FunctionalTensorWrapper::sym_size_custom(int64_t d) const {
+  return value_.unsafeGetTensorImpl()->sym_size(d);
+}
+c10::SymInt FunctionalTensorWrapper::sym_storage_offset_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_storage_offset();
 }
 
 namespace functionalization {
@@ -532,6 +541,12 @@ bool isFunctionalTensor(ITensorListRef list) {
   return isFunctionalTensorIListRef(list);
 }
 
+void freeze_functional_tensor(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
+  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  functional_base_impl->freeze_storage();
+}
+
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(view_to_wrap));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(base));
@@ -566,8 +581,7 @@ void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) 
 // calls each {view} reference implementations with meta tensors.
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
 void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
-  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sizes(), reference_out.strides());
-  out.unsafeGetTensorImpl()->set_storage_offset(reference_out.storage_offset());
+  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides(), reference_out.sym_storage_offset());
 }
 
 void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& reference_outs) {

@@ -288,12 +288,14 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addmv",
     "addr",
     "linalg_householder_product",
+    "ormqr",
     "constant_pad_nd",
     "reflection_pad1d",
     "reflection_pad2d",
     "reflection_pad3d",
     "linalg_cholesky_ex",
     "linalg_eig",
+    "diagonal_copy",
     "select_backward",
     "diagonal_backward",
     "slice_backward",
@@ -351,10 +353,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_solve_triangular",
     "linalg_pinv",
     "linalg_lstsq",
+    "unfold_copy",
     "col2im",
-    "col2im_backward",
     "im2col",
-    "im2col_backward",
     "cholesky_inverse",
     "to_sparse",
     "sparse_sampled_addmm",
@@ -599,10 +600,10 @@ at::redispatch::${api_name}(${unpacked_args})"""
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoDispatchBelowAutograd` guard block.
-DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate(
+DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES_JVP_DECOMP = CodeTemplate(
     """\
 auto ${tmp_var} = ([&]() {
-  if (${try_jit_decomposition_bool} && ${any_has_forward_grad}) {
+  if (${any_has_forward_grad}) {
     static c10::OperatorName full_name("aten::${op_name}", "${op_overload}");
     static c10::optional<c10::OperatorHandle> opt_op = c10::Dispatcher::singleton().findSchema(full_name);
     return impl::run_jit_decomposition_with_args_for_jvp<${return_types}>("${op_name}", *opt_op, ks, ${arg_names});
@@ -610,6 +611,15 @@ auto ${tmp_var} = ([&]() {
     ${guard}
     return ${base_type_call};
   }
+})();
+"""
+)
+
+DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES = CodeTemplate(
+    """\
+auto ${tmp_var} = ([&]() {
+  ${guard}
+  return ${base_type_call};
 })();
 """
 )
@@ -1390,7 +1400,6 @@ def emit_body(
         else:
             guard = "at::AutoDispatchBelowADInplaceOrView guard;"
 
-        try_jit_decomposition_bool = "true" if try_jit_decomposition else "false"
         any_has_forward_grad = (
             get_any_has_fw_grad_cond(derivative=None)
             if requires_derivative
@@ -1414,19 +1423,23 @@ def emit_body(
         ]
 
         if not modifies_arguments(f) and not returns_void:
-            # Just to keep things simple here, we only care about this path
-            # and always emit the if/else for now
-            call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
-                base_type_call=base_type_call,
-                tmp_var=TMP_VAR,
-                guard=guard,
-                try_jit_decomposition_bool=try_jit_decomposition_bool,
-                any_has_forward_grad=any_has_forward_grad,
-                op_name=cpp.name(f.func),
-                op_overload=f.func.name.overload_name,
-                return_types=return_types,
-                arg_names=arg_names,
-            )
+            if try_jit_decomposition:
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES_JVP_DECOMP.substitute(
+                    base_type_call=base_type_call,
+                    tmp_var=TMP_VAR,
+                    guard=guard,
+                    any_has_forward_grad=any_has_forward_grad,
+                    op_name=cpp.name(f.func),
+                    op_overload=f.func.name.overload_name,
+                    return_types=return_types,
+                    arg_names=arg_names,
+                )
+            else:
+                call = DISPATCH_TO_NON_VAR_TYPE_WITH_TMP_RETURN_VALUES.substitute(
+                    base_type_call=base_type_call,
+                    tmp_var=TMP_VAR,
+                    guard=guard,
+                )
 
             call += wrap_output(f, unpacked_bindings, TMP_VAR)
         else:

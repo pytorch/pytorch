@@ -38,9 +38,6 @@ _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
 
 
-BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA') or (os.path.exists(os.path.join(
-    TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cu{CLIB_EXT}')) and os.path.exists(os.path.join(TORCH_LIB_PATH, f'{CLIB_PREFIX}torch_cuda_cpp{CLIB_EXT}')))
-
 SUBPROCESS_DECODE_ARGS = ('oem',) if IS_WINDOWS else ()
 MINIMUM_GCC_VERSION = (5, 0, 0)
 MINIMUM_MSVC_VERSION = (19, 0, 24215)
@@ -294,7 +291,9 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
     # If compiler wrapper is used try to infer the actual compiler by invoking it with -v flag
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
+    env = os.environ.copy()
+    env['LC_ALL'] = 'C'  # Don't localize output
+    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
         # Check for 'gcc' or 'g++' for sccache warpper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
@@ -1058,11 +1057,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     else:
         libraries.append('cudart')
         libraries.append('c10_cuda')
-        if BUILD_SPLIT_CUDA:
-            libraries.append('torch_cuda_cu')
-            libraries.append('torch_cuda_cpp')
-        else:
-            libraries.append('torch_cuda')
+        libraries.append('torch_cuda')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -1655,15 +1650,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('c10_cuda.lib')
         extra_ldflags.append('torch_cpu.lib')
-        if BUILD_SPLIT_CUDA and with_cuda:
-            extra_ldflags.append('torch_cuda_cu.lib')
-            # See [Note about _torch_cuda_cu_linker_symbol_op and torch_cuda_cu] in native_functions.yaml
-            extra_ldflags.append('-INCLUDE:?_torch_cuda_cu_linker_symbol_op_cuda@native@at@@YA?AVTensor@2@AEBV32@@Z')
-            extra_ldflags.append('torch_cuda_cpp.lib')
-            # /INCLUDE is used to ensure torch_cuda_cpp is linked against in a project that relies on it.
-            # Related issue: https://github.com/pytorch/pytorch/issues/31611
-            extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
-        elif with_cuda:
+        if with_cuda:
             extra_ldflags.append('torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
@@ -1680,9 +1667,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
         extra_ldflags.append('-ltorch_cpu')
-        if BUILD_SPLIT_CUDA and with_cuda:
-            extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda_cu -ltorch_cuda_cpp')
-        elif with_cuda:
+        if with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
         extra_ldflags.append('-ltorch')
         if not is_standalone:
@@ -1744,10 +1729,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
         ('Ampere', '8.0;8.6+PTX'),
+        ('Ada', '8.9+PTX'),
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.9']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x

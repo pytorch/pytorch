@@ -6,7 +6,6 @@
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
-  - test/jit/test_export_modes.py
   - test/onnx/**
   - tools/onnx/**
   - torch/_C/__init__.pyi.in
@@ -22,7 +21,7 @@
   - BowenBao
   - abock
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -36,9 +35,10 @@
   - csarofeen
   - ngimel
   - jjsjann123
+  - kevinstephano
   - ptrblck
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -54,7 +54,7 @@
   - dagitses
   - pytorch/pytorch-dev-infra
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -65,7 +65,7 @@
   approved_by:
   - pytorchbot
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -75,7 +75,7 @@
   approved_by:
   - pytorchbot
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull / linux-bionic-py3_7-clang8-xla / build
   - pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)
@@ -87,7 +87,7 @@
   approved_by:
   - svekars
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -102,7 +102,7 @@
   - dreiss
   - raziel
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -123,7 +123,7 @@
   - lezcano
   - IvanYashchuk
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -143,7 +143,7 @@
   - mruberry
   - peterbell10
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -170,7 +170,7 @@
   - pearu
   - IvanYashchuk
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -186,7 +186,7 @@
   - malfet
   - razarmehr
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 - name: Distributions
@@ -198,7 +198,7 @@
   - neerajprad
   - alicanb
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -232,7 +232,7 @@
   - aazzolini
   - kwen2501
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -241,11 +241,14 @@
   - third_party/ideep
   - caffe2/ideep/**
   - caffe2/python/ideep/**
+  - cmake/Modules/FindMKLDNN.cmake
+  - third_party/mkl-dnn.BUILD
   approved_by:
   - XiaobingSuper
-  - yanbing-j
+  - jgong5
+  - mingfeima
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -256,8 +259,9 @@
   approved_by:
   - sanchitintel
   - chunyuan-w
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -268,11 +272,13 @@
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
   - aten/src/ATen/native/mkldnn/**
+  - test/test_mkldnn.py
   approved_by:
   - mingfeima
   - XiaobingSuper
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -283,9 +289,9 @@
   - test/test_mkldnn.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -297,9 +303,20 @@
   - test/test_autocast.py
   approved_by:
   - leslie-fang-intel
-  - CaoE
+  - jgong5
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: NNC
+  patterns:
+  - torch/csrc/jit/tensorexpr/**
+  approved_by:
+  - EikanWang
+  - jgong5
+  mandatory_checks_name:
+  - EasyCLA
   - Lint
   - pull
 
@@ -317,7 +334,7 @@
   - alanwaketan
   - JackCaoG
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -327,7 +344,7 @@
   approved_by:
   - pytorch/metamates
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -338,7 +355,7 @@
   - mruberry
   - lezcano
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull
 
@@ -351,6 +368,6 @@
   - ezyang
   - dzhulgakov
   mandatory_checks_name:
-  - Facebook CLA Check
+  - EasyCLA
   - Lint
   - pull

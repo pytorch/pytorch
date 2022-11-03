@@ -1,4 +1,4 @@
-# Owner(s): ["module: primTorch"]
+# Owner(s): ["module: primTorch", "module: decompositions"]
 
 from collections import defaultdict
 from torch import Tensor
@@ -15,7 +15,6 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
-    skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
@@ -162,6 +161,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
+        (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -198,6 +199,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
+        (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -280,6 +282,7 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.bfloat16, "nn.functional.dropout"),
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
+    (None, None, "special.ndtr"),  # aten.special_ndtr was not decomposed
     (None, None, "new_empty"),
     (None, None, "empty_like"),
     (None, None, "empty"),
@@ -288,11 +291,16 @@ CROSS_REF_EXCLUDE_SET = {
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
     (None, None, "meshgrid"),
+    # diag was not decomposed (it just registers a decomp for diag_out, torch.diag is CompImplicit)
+    (None, None, "diag"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
-    # Backward formula is not as precise as the custom CUDA kernel
+    # Decomposed backward formula is not as precise
+    ("cuda", torch.float16, "nn.functional.embedding"),
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
+    ("cpu", torch.bfloat16, "nn.functional.hardswish"),
+    ("cuda", torch.float16, "nn.functional.cross_entropy"),
 }
 
 all_decomposed = set()
@@ -344,7 +352,6 @@ def any_unsupported(args, kwargs):
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
-@skipIfSlowGradcheckEnv
 class TestDecomp(TestCase):
     longMessage = True
 
@@ -519,6 +526,40 @@ class TestDecomp(TestCase):
                 )
 
 instantiate_device_type_tests(TestDecomp, globals())
+
+class DecompContiguousTests(TestCase):
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_contiguous_softmax(self, device):
+        size = (2, 4, 3, 3)
+        stride = (9, 18, 3, 1)
+        dtype = torch.float32
+
+        x = torch.randn(size, dtype=dtype, device=device)
+        x = torch.as_strided(x, size, stride)
+
+        ref = torch.ops.aten._softmax(x, -1, False)
+        res = torch._decomp.decompositions._softmax(x, -1, False)
+        self.assertEqual(ref.stride(), res.stride())
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_contiguous_log_softmax(self, device):
+        size = (2, 4, 3, 3)
+        stride = (9, 18, 3, 1)
+
+        dtype = torch.float32
+        x = torch.randn(size, dtype=dtype, device=device)
+        x = torch.as_strided(x, size, stride)
+
+        ref = torch.ops.aten._log_softmax(x, -1, False)
+        res = torch._decomp.decompositions._log_softmax(x, -1, False)
+        self.assertEqual(ref.stride(), res.stride())
+
+instantiate_device_type_tests(DecompContiguousTests, globals())
+
 
 if __name__ == "__main__":
     run_tests()

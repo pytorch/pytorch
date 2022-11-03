@@ -2,7 +2,7 @@
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and defines mathematical operations over these tensors.
-Additionally, it provides many utilities for efficient serializing of
+Additionally, it provides many utilities for efficient serialization of
 Tensors and arbitrary types, and other useful utilities.
 
 It has a CUDA counterpart, that enables you to run your tensor computations
@@ -47,7 +47,7 @@ __all__ = [
     'is_deterministic_algorithms_warn_only_enabled',
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
-    'set_warn_always', 'is_warn_always_enabled',
+    'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
 ]
 
 ################################################################################
@@ -195,6 +195,67 @@ else:
 # torch._C module initialization code in C
 if TYPE_CHECKING:
     import torch._C as _C
+
+class SymInt:
+    """
+    Like an int (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    def __int__(self):
+        return self.node.int_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
+    def __sym_float__(self):
+        ...
+
+    def __repr__(self):
+        return self.node.str()
+
+    # For BC; direct access of node is OK too
+    def get_pyobj(self):
+        return self.node
+
+class SymFloat:
+    """
+    Like an float (including magic methods), but redirects all operations on the
+    wrapped node. This is used in particular to symbolically record operations
+    in the symbolic shape workflow.
+    """
+
+    def __init__(self, node):
+        from torch.fx.experimental.symbolic_shapes import SymNode
+        assert isinstance(node, SymNode)
+        # This field MUST be named node; C++ binding code assumes that this
+        # class has a field named node that stores SymNode
+        self.node = node
+
+    def __bool__(self):
+        return self.node.bool_()
+
+    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+
+    def __sym_int__(self):
+        ...
+
+    def __repr__(self):
+        return self.node.str()
+
+    # For BC; direct access of node is OK too
+    def get_pyobj(self):
+        return self.node
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
@@ -846,6 +907,7 @@ from torch import fft as fft
 from torch import futures as futures
 from torch import nested as nested
 from torch import nn as nn
+from torch.signal import windows as windows
 from torch import optim as optim
 import torch.optim._multi_tensor
 from torch import multiprocessing as multiprocessing
@@ -873,12 +935,12 @@ from torch import profiler as profiler
 
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
-import torch.nn.intrinsic
 from torch import ao as ao
 # nn.quant* depends on ao -- so should be after those.
 import torch.nn.quantizable
 import torch.nn.quantized
 import torch.nn.qat
+import torch.nn.intrinsic
 
 _C._init_names(list(torch._storage_classes))
 
@@ -895,29 +957,6 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
-
-# Import from torch._decomp import decompositions_for_jvp to register
-# decompositions for jvp to the jit registry
-# (decompositions_for_jvp depends on torch.ops, so we place it after)
-#
-# FIXME: We specify that __debug__ must be True because
-# if python is run with -OO or -O flags (i.e., __debug__ is False), we encounter the
-# following error:
-#
-# Return value was annotated as having type Tuple[NoneType, NoneType] but is actually of
-# type Tuple[Tensor, Tensor]:
-#   File ".../torch/_decomp/__init__.py", line 1585
-#     else:
-#         buffer = z
-#     return min - torch.log1p(z), buffer
-#     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-# Currently broken for 3.11, see https://github.com/pytorch/pytorch/issues/85506
-if (os.environ.get("PYTORCH_JIT", "1" if sys.version_info < (3, 11) else "0") == "1" and
-        __debug__ and
-        not torch._C._is_deploy_enabled() and
-        os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0"):
-    from torch._decomp import decompositions_for_jvp
-    del decompositions_for_jvp
 
 # quantization depends on torch.fx
 # Import quantization
@@ -963,7 +1002,6 @@ from ._linalg_utils import (  # type: ignore[misc]
     lstsq,
 )
 
-
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
     supported by torch.
@@ -993,3 +1031,6 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     import torch.cuda._sanitizer as csan
 
     csan.enable_cuda_sanitizer()
+
+# Populate magic methods on SymInt and SymFloat
+import torch.fx.experimental.symbolic_shapes

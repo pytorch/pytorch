@@ -19,6 +19,7 @@ from typing_extensions import TypeAlias
 import copyreg
 import pickle
 import pathlib
+import torch._weights_only_unpickler as _weights_only_unpickler
 
 DEFAULT_PROTOCOL = 2
 
@@ -247,7 +248,7 @@ class _opener(object):
 
 class _open_file(_opener):
     def __init__(self, name, mode):
-        super(_open_file, self).__init__(open(name, mode))
+        super().__init__(open(name, mode))
 
     def __exit__(self, *args):
         self.file_like.close()
@@ -255,7 +256,7 @@ class _open_file(_opener):
 
 class _open_buffer_reader(_opener):
     def __init__(self, buffer):
-        super(_open_buffer_reader, self).__init__(buffer)
+        super().__init__(buffer)
         _check_seekable(buffer)
 
 
@@ -278,12 +279,12 @@ def _open_file_like(name_or_buffer, mode):
 
 class _open_zipfile_reader(_opener):
     def __init__(self, name_or_buffer) -> None:
-        super(_open_zipfile_reader, self).__init__(torch._C.PyTorchFileReader(name_or_buffer))
+        super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name) -> None:
-        super(_open_zipfile_writer_file, self).__init__(torch._C.PyTorchFileWriter(str(name)))
+        super().__init__(torch._C.PyTorchFileWriter(str(name)))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -291,8 +292,13 @@ class _open_zipfile_writer_file(_opener):
 
 class _open_zipfile_writer_buffer(_opener):
     def __init__(self, buffer) -> None:
+        if not callable(getattr(buffer, "write", None)):
+            msg = f"Buffer of {str(type(buffer)).strip('<>')} has no callable attribute 'write'"
+            if not hasattr(buffer, "write"):
+                raise AttributeError(msg)
+            raise TypeError(msg)
         self.buffer = buffer
-        super(_open_zipfile_writer_buffer, self).__init__(torch._C.PyTorchFileWriter(buffer))
+        super().__init__(torch._C.PyTorchFileWriter(buffer))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -358,7 +364,7 @@ def _check_dill_version(pickle_module) -> None:
         pickle_module: module used for pickling metadata and objects
 
     '''
-    if pickle_module.__name__ == 'dill':
+    if pickle_module is not None and pickle_module.__name__ == 'dill':
         required_dill_version = (0, 3, 1)
         if not check_module_version_greater_or_equal(pickle_module, required_dill_version, False):
             raise ValueError((
@@ -652,7 +658,9 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 def load(
     f: FILE_LIKE,
     map_location: MAP_LOCATION = None,
-    pickle_module: Any = pickle,
+    pickle_module: Any = None,
+    *,
+    weights_only: bool = False,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -660,7 +668,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -700,15 +708,18 @@ def load(
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
+        weights_only: Indicates whether unpickler should be restricted to
+            loading only tensors, primitive types and dictionaries
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
 
     .. warning::
-        :func:`torch.load()` uses ``pickle`` module implicitly, which is known to be insecure.
+        :func:`torch.load()` unless `weights_only` parameter is set to `True`,
+        uses ``pickle`` module implicitly, which is known to be insecure.
         It is possible to construct malicious pickle data which will execute arbitrary code
         during unpickling. Never load data that could have come from an untrusted
-        source, or that could have been tampered with. **Only load data you trust**.
+        source in an unsafe mode, or that could have been tampered with. **Only load data you trust**.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
@@ -742,6 +753,21 @@ def load(
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
+    UNSAFE_MESSAGE = (
+        "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
+        " will likely succeed, but it can result in arbitrary code execution."
+        "Do it only if you get the file from a trusted source. WeightsUnpickler error: "
+    )
+    # Add ability to force safe only weight loads via environment variable
+    if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:
+        weights_only = True
+
+    if weights_only:
+        if pickle_module is not None:
+            raise RuntimeError("Can not safely load weights when expiclit picke_module is specified")
+    else:
+        pickle_module = pickle
+
     _check_dill_version(pickle_module)
 
     if 'encoding' not in pickle_load_args.keys():
@@ -760,7 +786,17 @@ def load(
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
+                if weights_only:
+                    try:
+                        return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
+                    except RuntimeError as e:
+                        raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+        if weights_only:
+            try:
+                return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
+            except RuntimeError as e:
+                raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
         return _legacy_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
 

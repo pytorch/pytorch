@@ -227,6 +227,14 @@ class FakeTensorTest(TestCase):
             out = x + y
         self.checkType(out, "cuda", [1])
 
+    def test_recursive_invocation(self):
+        mode = FakeTensorMode()
+        with mode:
+            x = torch.tensor(2)
+            mode.in_kernel_invocation = True
+            y = x + x
+            self.assertTrue(mode.in_kernel_invocation)
+
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cudnn_rnn(self):
@@ -386,6 +394,14 @@ class FakeTensorTest(TestCase):
             self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
             b = torch.rand([4, 4], device='cuda')
             self.checkType(b.new(device='cuda'), "cuda", [0])
+            self.checkType(a.new(torch.rand([1])), "cpu", [1])
+
+    def test_scalar_inputs(self):
+        with FakeTensorMode():
+            self.checkType(torch.div(3, 2), "cpu", [])
+            ten = torch.zeros(2, dtype=torch.int32) * 2.0
+            self.assertEqual(ten.dtype, torch.float)
+            self.checkType(ten, "cpu", [2])
 
 
 class FakeTensorConstHandling(TestCase):
@@ -434,6 +450,29 @@ class FakeTensorConstHandling(TestCase):
             self.assertEqual(x.size(0), 2)
             self.assertNotConst(x)
 
+    def test_fake_tensor_in_intlist_repro(self):
+
+        def fn(tensors):
+            max_size = torch.tensor([800, 1216], dtype=torch.int64)
+            batch_shape = [len(tensors)] + list(tensors[0].shape[:-2]) + list(max_size)
+            return tensors[0].new_full(batch_shape, 0.0)
+
+        with self.assertRaises(torch._subclasses.fake_tensor.DataDependentOutputException):
+            with torch._subclasses.fake_tensor.FakeTensorMode(throw_on_data_dependent_ops=True):
+                a = torch.randn(3, 800, 1199)
+                b = torch.randn(3, 800, 800)
+                inputs = [a, b]
+                ref = fn(inputs)
+
+    def test_fake_tensor_batch_norm_cpu(self):
+        with torch._subclasses.CrossRefFakeMode():
+            m = torch.nn.Sequential(
+                torch.nn.BatchNorm2d(10),
+                torch.nn.ReLU(),
+            )
+            m.eval()
+            out = m(torch.randn([2, 10, 8, 8]))
+
     def test_shared_storage_invalidation(self):
         with FakeTensorMode():
             x = torch.tensor([1.])
@@ -466,7 +505,7 @@ class FakeTensorConverterTest(TestCase):
         x = torch.rand(2, 2).to(device="meta")
         mode = FakeTensorMode()
         converter = mode.fake_tensor_converter
-        self.assertTrue(converter(mode, x, "cpu") is converter(mode, x, "cpu"))
+        self.assertTrue(converter.from_meta_and_device(mode, x, "cpu") is converter.from_meta_and_device(mode, x, "cpu"))
 
     def test_separate_tensor_storages_view(self):
         x = torch.rand(2, 2, 2)
@@ -515,10 +554,10 @@ class FakeTensorConverterTest(TestCase):
         converter = FakeTensorConverter()
         x_conv = converter(mode, x)
         self.assertEqual(len(converter.tensor_memo), 1)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 1)
+        x_conv2 = converter(mode, x)
+        assert x_conv2 is x_conv
         del x
         self.assertEqual(len(converter.tensor_memo), 0)
-        self.assertEqual(len(converter.meta_converter.tensor_memo), 0)
 
     def test_no_active_mode(self):
         with FakeTensorMode() as mode:
@@ -616,7 +655,7 @@ class FakeTensorOperatorInvariants(TestCase):
         for schema in self.get_all_aten_schemas():
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
-                self.assertTrue(op in torch._subclasses.fake_tensor._like_tensor_constructors)
+                self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
 
 if __name__ == "__main__":
     run_tests()

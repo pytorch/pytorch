@@ -196,7 +196,15 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
   auto kernel_runtime = getKernelRuntimeFor(args);
   most_recent_runtime_ = kernel_runtime;
+  int seq_id = 0;
+  // Record kernel input and output tensors so profiler can construct
+  // the data flow graph
+  RECORD_FUNCTION(
+      "run_fused_kernel",
+      std::vector<c10::IValue>(inputs.begin(), inputs.end()),
+      seq_id);
   auto outputs = kernel_runtime->runWithInput(args);
+  RECORD_OUTPUTS(outputs);
 
   // permute output tensor returned by kernel execution. See Part_3 in Note [
   // Permutation support in nvfuser ]
@@ -621,11 +629,16 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
               << std::endl;
   }
 
+  // group should share cache id.
+  auto group_cache_id = args.getCacheId();
   for (auto group_to_run : runtime_workspace_.group_run_order) {
     // TODO: index mode should be updated per segmented kernel
     // Prepare input vector
     KernelArgumentHolder group_runtime_inputs(args.getIndexMode());
     group_runtime_inputs.setDeviceIndex(args.getDeviceIndex());
+    if (group_cache_id.has_value()) {
+      group_runtime_inputs.setCacheId(group_cache_id.value());
+    }
     for (auto input : group_to_run->inputs()) {
       group_runtime_inputs.push(tensor_map.at(input));
     }

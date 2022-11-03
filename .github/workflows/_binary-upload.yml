@@ -101,7 +101,7 @@ jobs:
           no-sudo: true
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
@@ -112,6 +112,7 @@ jobs:
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
       - name: Set UPLOAD_CHANNEL (only for tagged pushes)
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        shell: bash -e -l {0}
         run: |
           # reference ends with an RC suffix
           if [[ ${GITHUB_REF_NAME} = *-rc[0-9]* ]]; then
@@ -127,7 +128,5 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
           BUILD_NAME: ${{ inputs.build_name }}
         run: |
-            if [[ ${BUILD_NAME} == *with-pypi-cudnn* ]]; then
-              export UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_cudnn"
-            fi
+            set -ex
             bash .circleci/scripts/binary_upload.sh

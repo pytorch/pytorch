@@ -39,7 +39,7 @@ MPI supports CUDA only if the implementation used to build PyTorch supports it.
 +----------------+-----+-----+-----+-----+-----+-----+
 | gather         | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
+| scatter        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
 | reduce_scatter | ✘   | ✘   | ✘   | ✘   | ✘   | ✓   |
 +----------------+-----+-----+-----+-----+-----+-----+
@@ -350,6 +350,10 @@ as they should never be created manually, but they are guaranteed to support two
 
 .. autofunction:: irecv
 
+.. autofunction:: batch_isend_irecv
+
+.. autoclass:: P2POp
+
 Synchronous and asynchronous collective operations
 --------------------------------------------------
 Every collective operation function supports the following two kinds of operations,
@@ -431,6 +435,8 @@ Collective functions
 
 .. autofunction:: reduce_scatter
 
+.. autofunction:: reduce_scatter_tensor
+
 .. autofunction:: all_to_all
 
 .. autofunction:: barrier
@@ -465,6 +471,9 @@ Please refer to the `profiler documentation <https://pytorch.org/docs/master/pro
 
 Multi-GPU collective functions
 ------------------------------
+
+.. warning::
+    The multi-GPU functions will be deprecated. If you must use them, please revisit our documentation later.
 
 If you have more than one GPU on each node, when using the NCCL and Gloo backend,
 :func:`~torch.distributed.broadcast_multigpu`

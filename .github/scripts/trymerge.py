@@ -36,7 +36,6 @@ from gitutils import (
 )
 from trymerge_explainer import (
     TryMergeExplainer,
-    get_land_check_troubleshooting_message,
     get_revert_message,
 )
 
@@ -152,6 +151,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            status {
+              contexts {
+                context
+                state
+                targetUrl
+              }
+            }
             pushedDate
             oid
           }
@@ -173,6 +179,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       comments(last: 5) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -330,6 +337,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
       comments(last: 100, before: $cursor) {
         nodes {
           bodyText
+          createdAt
           author {
             login
           }
@@ -399,6 +407,7 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
     r'https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)',
     re.MULTILINE
 )
+RE_PR_CC_LINE = re.compile(r'^cc:? @\w+.*\r?\n?$', re.MULTILINE)
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
@@ -577,6 +586,7 @@ def can_skip_internal_checks(pr: "GitHubPR", comment_id: Optional[int] = None) -
 @dataclass
 class GitHubComment:
     body_text: str
+    created_at: str
     author_login: str
     author_association: str
     editor_login: Optional[str]
@@ -752,6 +762,13 @@ class GitHubPR:
         checksuites = orig_last_commit["checkSuites"]
 
         self.conclusions = add_workflow_conclusions(checksuites, get_pr_next_check_runs, get_pr_next_checksuites)
+
+        # Append old style statuses(like ones populated by CircleCI or EasyCLA) to conclusions
+        if orig_last_commit["status"] and orig_last_commit["status"]["contexts"]:
+            for status in orig_last_commit["status"]["contexts"]:
+                name = status["context"]
+                self.conclusions[name] = WorkflowCheckState(name=name, status=status["state"], url=status["targetUrl"])
+
         return self.conclusions
 
     def get_authors(self) -> Dict[str, str]:
@@ -794,6 +811,7 @@ class GitHubPR:
     def _comment_from_node(node: Any) -> GitHubComment:
         editor = node["editor"]
         return GitHubComment(body_text=node["bodyText"],
+                             created_at=node["createdAt"] if "createdAt" in node else "",
                              author_login=node["author"]["login"],
                              author_association=node["authorAssociation"],
                              editor_login=editor["login"] if editor else None,
@@ -890,8 +908,12 @@ class GitHubPR:
             filters out ghstack info """
         # Adding the url here makes it clickable within the Github UI
         approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
+        # Remove "cc: " line from the message body
+        msg_body = re.sub(RE_PR_CC_LINE, "", self.get_body())
+        if filter_ghstack:
+            msg_body = re.sub(RE_GHSTACK_DESC, "", msg_body)
         msg = self.get_title() + f" (#{self.pr_num})\n\n"
-        msg += self.get_body() if not filter_ghstack else re.sub(RE_GHSTACK_DESC, "", self.get_body())
+        msg += msg_body
         msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
         msg += f"Approved by: {approved_by_urls}\n"
         return msg
@@ -1100,7 +1122,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         # Does the PR pass the checks required by this rule?
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-        required_checks = filter(lambda x: skip_mandatory_checks is False or "CLA Check" in x, mandatory_checks)
+        required_checks = filter(lambda x: skip_mandatory_checks is False or "EasyCLA" in x, mandatory_checks)
         [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
@@ -1363,7 +1385,9 @@ def merge(pr_num: int, repo: GitRepo,
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         if land_checks and not dry_run:
             pr.delete_land_time_check_branch(repo)
-        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+        raise RuntimeError(f"This PR is too stale; the last push date was more than {stale_pr_days} days ago. "
+                           "Please rebase and try again. You can rebase by leaving the following comment on this PR:\n"
+                           "`@pytorchbot rebase`")
 
     start_time = time.time()
     last_exception = ''
@@ -1433,10 +1457,6 @@ def main() -> None:
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
 
-        troubleshooting = ""
-        if args.land_checks:
-            troubleshooting += get_land_check_troubleshooting_message()
-
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
@@ -1450,8 +1470,6 @@ def main() -> None:
         msg = "\n".join((
             f"## {title}",
             f"{exception}",
-            "",
-            f"{troubleshooting}",
             "",
             f"{internal_debugging}"
         ))

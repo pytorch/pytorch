@@ -21,7 +21,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
-from torch.testing._internal.common_utils import TestCase, skipIfSlowGradcheckEnv
+from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
@@ -130,7 +130,6 @@ def _get_random_tensor_and_q_params(shapes, rand_scale, torch_type):
         X_scale = 1e-10
     return X, X_scale, X_zero_point
 
-@skipIfSlowGradcheckEnv
 class TestQuantizedOps(TestCase):
 
     """Helper function to test quantized activation functions."""
@@ -168,6 +167,8 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
         if not isinstance(X, torch.Tensor):
             X = torch.from_numpy(X)
+        if (X.device.type == 'cuda') and (torch.backends.quantized.engine == 'qnnpack'):
+            return
         # Quantizes the reference to account for max error.
         # q_min and q_max only depend on the initial torch_type.
         q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
@@ -229,9 +230,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
     @override_qengines
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qrelu(self, X):
+    def test_qrelu(self):
         relu_test_configs = [
             {
                 'quantized_fn': [
@@ -253,7 +252,17 @@ class TestQuantizedOps(TestCase):
                 }
             }
         ]
-        self._test_activation_function(X, 'relu', relu_test_configs)
+        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
+        for device in devices:
+            shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+            dtypes = (torch.quint8, torch.qint8)
+            scales = (0.05, 0.1)
+            zero_points = (0, 5)
+            test_cases = itertools.product(shapes, dtypes, scales, zero_points)
+            for shape, dtype, scale, zero_point in test_cases:
+                X = torch.randn(*shape, device=device)
+                X = (X, (scale, zero_point, dtype))
+                self._test_activation_function(X, 'relu', relu_test_configs)
 
     """Tests the correctness of the quantized::relu6 op."""
     def test_qrelu6(self):
@@ -1012,7 +1021,7 @@ class TestQuantizedOps(TestCase):
 
             A = torch.arange(-100, 100, dtype=torch.float)
             B = torch.arange(-100, 100, dtype=torch.float)
-            scale = 2.0
+            scale = 2
             zero_point = 127
             qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
                                            dtype=dtype)
@@ -2900,7 +2909,7 @@ class TestQuantizedOps(TestCase):
             ]
 
             q_data = []
-            reduce_range = (qengine in ('fbgemm', 'onednn'))
+            reduce_range = (qengine in ('x86', 'fbgemm', 'onednn'))
             for idx, x in enumerate(fp_data):
                 scale, zero_point = _calculate_dynamic_qparams(
                     x, dtype=dtype, reduce_range=reduce_range)
@@ -3018,7 +3027,7 @@ class TestDynamicQuantizedOps(TestCase):
             (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32) if use_bias else None
 
-        if torch.backends.quantized.engine in ('fbgemm', 'onednn'):
+        if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
             avoid_vpmaddubsw_overflow_linear(
                 batch_size,
                 input_channels,
@@ -3590,7 +3599,7 @@ class TestQuantizedLinear(TestCase):
                 np.random.rand(output_channels) *
                 (b_value_max - b_value_min) + b_value_min
             ).astype(np.int32) if use_bias else None
-            if torch.backends.quantized.engine in ('fbgemm', 'onednn'):
+            if torch.backends.quantized.engine in ('x86', 'fbgemm', 'onednn'):
                 avoid_vpmaddubsw_overflow_linear(
                     batch_size,
                     input_channels,
@@ -4479,7 +4488,7 @@ class TestQuantizedConv(TestCase):
            height=st.integers(10, 16),
            width=st.integers(7, 14),
            output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           groups=st.integers(1, 3),
+           groups=st.integers(1, 300),
            kernel_h=st.integers(1, 7),
            kernel_w=st.integers(1, 7),
            stride_h=st.integers(1, 2),
@@ -4835,7 +4844,7 @@ class TestQuantizedConv(TestCase):
            height=st.integers(10, 16),
            width=st.integers(7, 14),
            output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           groups=st.integers(1, 3),
+           groups=st.integers(1, 300),
            kernel_h=st.integers(1, 7),
            kernel_w=st.integers(1, 7),
            stride_h=st.integers(1, 2),
@@ -4961,7 +4970,7 @@ class TestQuantizedConv(TestCase):
            height=st.integers(10, 16),
            width=st.integers(7, 14),
            output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           groups=st.integers(1, 3),
+           groups=st.integers(1, 300),
            kernel_t=st.integers(1, 7),
            kernel_h=st.integers(1, 7),
            kernel_w=st.integers(1, 7),
@@ -5705,6 +5714,66 @@ class TestQNNPackOps(TestCase):
                 qCrelu_hat = torch.ops.quantized.add_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
                 np.testing.assert_equal(qCrelu.int_repr().numpy(), qCrelu_hat.int_repr(),
                                         "Quantized addition with ReLU failed.")
+
+        """Tests the correctness of the quantized::add (qnnpack) mul."""
+    @settings(suppress_health_check=(HealthCheck.filter_too_much,))
+    @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=[torch.quint8, torch.qint8])),
+           zero_point=st.sampled_from([0, 2, 5, 15, 127]),
+           scale_A=st.sampled_from([0.3, 0.57, 0.889]),
+           scale_B=st.sampled_from([0.8, 0.821, 0.67]),
+           scale_C=st.sampled_from([0.3, 0.7821, 0.457]),)
+    def test_qnnpack_mul(self, A, zero_point, scale_A, scale_B, scale_C):
+        with override_quantized_engine('qnnpack'):
+            A_temp = A
+            for channels_last in [True, False]:
+                if channels_last and len(A_temp[0].shape) != 4:
+                    continue
+                A, (scale_a, zero_point_A, torch_type) = A_temp
+                B, (scale_b, zero_point_B, torch_type) = A_temp
+                A = torch.from_numpy(A)
+                B = torch.from_numpy(B)
+
+                if torch_type == torch.qint8 and not torch.backends.xnnpack.enabled:
+                    continue
+
+                if channels_last:
+                    A = A.to(memory_format=torch.channels_last)
+                    B = B.to(memory_format=torch.channels_last)
+                assume(scale_A // scale_C >= 2**-14)
+                assume(scale_A // scale_C < 2**8)
+                assume(scale_B // scale_C >= 2**-14)
+                assume(scale_B // scale_C < 2**8)
+
+                zero_point_C = 127
+                np_dtype = np.uint8
+
+                if torch_type == torch.qint8:
+                    zero_point_C = 0
+                    np_dtype = np.int8
+
+                qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
+                                               dtype=torch_type)
+                qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
+                                               dtype=torch_type)
+
+                # Add ground truth
+                C = (qA.dequantize() * qB.dequantize()).numpy()
+
+                qC = _quantize(C, scale_C, zero_point_C, dtype=np_dtype)
+                qC_qnnp = torch.ops.quantized.mul(qA, qB, scale_C, zero_point_C)
+
+                np.testing.assert_equal(qC, qC_qnnp.int_repr(),
+                                        "Quantized addition failed.")
+
+                Crelu = C.copy()
+                Crelu[C < 0] = 0
+                qCrelu = torch.quantize_per_tensor(torch.from_numpy(Crelu), scale_C,
+                                                   zero_point_C, dtype=torch_type)
+                qCrelu_hat = torch.ops.quantized.mul_relu(qA, qB, scale=scale_C, zero_point=zero_point_C)
+                np.testing.assert_equal(qCrelu.int_repr().numpy(), qCrelu_hat.int_repr(),
+                                        "Quantized addition with ReLU failed.")
+
 
     """Tests that quantized add works with broadcasting """
     def test_qnnpack_add_broadcast(self):

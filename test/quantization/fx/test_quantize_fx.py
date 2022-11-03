@@ -18,9 +18,11 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     convert_fx,
     convert_to_reference_fx,
+    _convert_to_reference_decomposed_fx,
     prepare_qat_fx,
     fuse_fx,
 )
+
 
 from torch.ao.quantization.fx.quantization_patterns import DefaultNodeQuantizeHandler
 
@@ -42,6 +44,8 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
     default_qat_qconfig,
     default_reuse_input_qconfig,
+    default_symmetric_qnnpack_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
     float16_static_qconfig,
@@ -73,6 +77,7 @@ from torch.ao.quantization import (
 )
 
 from torch.ao.quantization.backend_config import (
+    get_qnnpack_backend_config,
     BackendConfig,
     BackendPatternConfig,
     DTypeConfig,
@@ -84,6 +89,7 @@ from torch.ao.quantization.backend_config.native import (
 )
 
 from torch.ao.quantization.qconfig_mapping import (
+    _get_symmetric_qnnpack_qconfig_mapping,
     GLOBAL_DICT_KEY,
     MODULE_NAME_DICT_KEY,
     MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
@@ -743,7 +749,7 @@ class TestQuantizeFx(QuantizationTestCase):
             ],
         }
         prepared = prepare_qat_fx(model, qconfig_dict, example_inputs=(torch.randn(1, 5),))
-        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.nn.intrinsic.qat.LinearReLU))
+        self.assertTrue(isinstance(getattr(prepared.mods1, "0").tmp, torch.ao.nn.intrinsic.qat.LinearReLU))
 
     def _get_conv_linear_test_cases(self, is_reference):
         """ Returns a list of test cases, with format:
@@ -2619,8 +2625,13 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.linear2.weight = torch.nn.Parameter(original_m.custom.linear.weight.detach())
         original_ref_m.linear2.bias = torch.nn.Parameter(original_m.custom.linear.bias.detach())
 
+        a16_qconfig = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.qint32, quant_min=0, quant_max=65536),
+            weight=default_weight_observer,
+        )
         test_configs = {
             "static": (default_qconfig, StaticQuantCustomModule, 3),
+            "static_a16": (a16_qconfig, StaticQuantCustomModule, 3),
             "dynamic": (default_dynamic_qconfig, DynamicQuantCustomModule, 0)
         }
 
@@ -4964,7 +4975,8 @@ class TestQuantizeFx(QuantizationTestCase):
             model: torch.nn.Module,
             qconfig: QConfig,
             backend_config: BackendConfig,
-            satisfies_constraints: bool):
+            satisfies_constraints: bool,
+            qconfig_name: Optional[str] = None):
         """
         Helper method to validate whether `qconfig` satisfies the constraints specified in `backend_config`.
         """
@@ -4983,7 +4995,12 @@ class TestQuantizeFx(QuantizationTestCase):
                 ns.call_module(torch.ao.nn.quantized.Linear) : 0,
                 ns.call_module(torch.nn.Linear) : 1,
             }
-        self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+        try:
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+        except AssertionError as e:
+            if qconfig_name is not None:
+                print("ERROR: Validation for QConfig '%s' failed" % qconfig_name)
+            raise e
 
     def test_backend_config_quantization_range(self):
         """
@@ -5108,6 +5125,175 @@ class TestQuantizeFx(QuantizationTestCase):
             activation=FixedQParamsObserver.with_args(scale=1.0, zero_point=0),
             weight=FixedQParamsObserver.with_args(scale=1.0, zero_point=0))
         validate_qconfig(qconfig5, satisfies_constraints=False)
+
+    def test_qnnpack_backend_config(self):
+        """
+        Test whether default QNNPACK QConfigs are compatible with the QNNPACK BackendConfig.
+        """
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        all_qconfigs: List[Tuple[QConfig, str]] = [
+            (get_default_qconfig("qnnpack", version=0), "default_qnnpack_qconfig_v0"),
+            (get_default_qat_qconfig("qnnpack", version=0), "default_qat_qnnpack_qconfig_v0"),
+            (get_default_qat_qconfig("qnnpack", version=1), "default_qat_qnnpack_qconfig_v1"),
+            (default_symmetric_qnnpack_qconfig, "default_symmetric_qnnpack_qconfig"),
+            (default_symmetric_qnnpack_qat_qconfig, "default_symmetric_qnnpack_qat_qconfig"),
+            # TODO: Test these QConfigs once they are fixed, see https://github.com/pytorch/pytorch/issues/85862
+            # (default_per_channel_symmetric_qnnpack_qconfig, "default_per_channel_symmetric_qnnpack_qconfig"),
+            # (default_per_channel_symmetric_qnnpack_qat_qconfig, "default_per_channel_symmetric_qnnpack_qat_qconfig"),
+        ]
+        backend_config = get_qnnpack_backend_config()
+        for qconfig, qconfig_name in all_qconfigs:
+            self._validate_qconfig_against_backend_config_constraints(
+                MyModel(), qconfig, backend_config, satisfies_constraints=True, qconfig_name=qconfig_name)
+
+    def test_symmetric_qnnpack_qconfig_mapping(self):
+        """
+        Test whether `torch.ao.quantization.qconfig_mapping._get_symmetric_qnnpack_qconfig_mapping`
+        works with the QNNPACK BackendConfig.
+        """
+        if "qnnpack" not in supported_qengines:
+            return
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with override_quantized_engine("qnnpack"):
+            qconfig_mapping = _get_symmetric_qnnpack_qconfig_mapping()
+            example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+            backend_config = get_qnnpack_backend_config()
+            model = MyModel()
+            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+            model(*example_inputs)
+            model = convert_fx(model, backend_config=backend_config)
+            expected_node_occurrence = {
+                ns.call_module(torch.ao.nn.quantized.Linear) : 1,
+                ns.call_module(torch.nn.Linear) : 0,
+            }
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+            model(*example_inputs)
+
+    def test_get_executorch_backend_config(self):
+        from torch.ao.quantization.backend_config import get_executorch_backend_config
+        # make sure this runs
+        executorch_backend_config = get_executorch_backend_config()
+
+    def test_backend_config_check_for_weight_and_bias(self):
+        """ Test to make sure the backend_config check for weight and bias
+        runs when the qconfig is None for the ops with weight and bias
+        previously the error was not hit because we first check input, and
+        the check for weight and bias are skipped.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.tensor((5, 5))
+                self.bias = torch.tensor((5,))
+
+            def forward(self, x):
+                return torch.addmm(self.bias, x, self.weight)
+
+        m = M().eval()
+        qconfig_mapping = QConfigMapping()
+        observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
+        weighted_op_quint8_dtype_config = DTypeConfig(
+            input_dtype=torch.quint8,
+            output_dtype=torch.quint8,
+            weight_dtype=torch.qint8,
+            bias_dtype=torch.float,
+        )
+        dtype_configs = [weighted_op_quint8_dtype_config]
+        backend_pattern_config = BackendPatternConfig(torch.addmm) \
+            .set_observation_type(observation_type) \
+            .set_dtype_configs(dtype_configs) \
+            ._set_input_type_to_index({"weight": 2, "bias": 0})
+        backend_config = BackendConfig() \
+            .set_backend_pattern_config(backend_pattern_config)
+        example_inputs = (torch.rand(1, 5),)
+        # make sure this runs
+        m = prepare_fx(m, qconfig_mapping, example_inputs, backend_config=backend_config)
+
+    def test_get_default_qconfig_valid_backend(self):
+        """ Checks that AssertionError is raised when non expected backend input is specified
+        """
+        invalid_backends = ["imaginary_backend", 3]
+        for invalid_backend in invalid_backends:
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig = get_default_qconfig(invalid_backend)
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig = get_default_qat_qconfig(invalid_backend)
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig_mapping = get_default_qconfig_mapping(invalid_backend)
+            with self.assertRaisesRegex(AssertionError, "not supported"):
+                qconfig_mapping = get_default_qat_qconfig_mapping(invalid_backend)
+
+    def test__convert_to_reference_decomposed_fx(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        qconfig_mapping = get_default_qconfig_mapping("fbgemm")
+        example_inputs = (torch.randn(1, 5),)
+        m = prepare_fx(m, qconfig_mapping, example_inputs)
+        m_ref = copy.deepcopy(m)
+        m_ref = convert_to_reference_fx(m_ref)
+        m = _convert_to_reference_decomposed_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_occurrence=expected_occurrence)
+        # make sure it runs
+        res_ref = m_ref(*example_inputs)
+        res = m(*example_inputs)
+        self.assertEqual(res, res_ref)
+
+    def test_change_backend_config_for_fixed_qparam_ops(self):
+        """ Making sure we can skip validation of qconfigs for fixedqparam ops based
+        on BackendConfig
+        """
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x: torch.Tensor):
+                x = self.tanh(x)
+                return x
+
+        model = M().eval()
+        # we set a global default_qconfig, which will be ignored since the backend
+        # we defined doesn't support anything
+        # this is to make sure we don't validate the qconfig when BackendConfig does not
+        # have fixed qparam op related configurations
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        backend_config = BackendConfig()
+        # make sure this runs
+        model = prepare_fx(
+            model,
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 2, 3, 4),),
+            backend_config=backend_config
+        )
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -7971,7 +8157,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             inp = torch.randn(5, 5, device=device, requires_grad=True)
             out_ref = prepared_ref(inp)
             out = prepared(inp)
-            torch.testing.assert_allclose(out, out_ref)
+            torch.testing.assert_close(out, out_ref)
 
             # try backward pass
             labels = torch.randn(5, 5, device=device)
@@ -7979,7 +8165,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             grad = torch.autograd.grad(loss, [inp])
             loss_ref = (out_ref - labels).sum()
             grad_ref = torch.autograd.grad(loss_ref, [inp])
-            torch.testing.assert_allclose(grad[0], grad_ref[0])
+            torch.testing.assert_close(grad[0], grad_ref[0])
 
         if 'fbgemm' in torch.backends.quantized.supported_engines:
             # During the lowering step in convert, fold_weight calls quantized::linear_prepack
@@ -7992,7 +8178,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out = converted(inp)
             out_ref = converted_ref(inp)
 
-            torch.testing.assert_allclose(out, out_ref)
+            torch.testing.assert_close(out, out_ref)
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

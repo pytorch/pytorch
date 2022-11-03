@@ -1,42 +1,42 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/TCPStore.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
-#include <c10d/HashStore.hpp>
-#include <c10d/ProcessGroupRoundRobin.hpp>
+#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/PyProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
-#include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/ProcessGroupWrapper.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 #endif
 
 #ifdef USE_C10D_NCCL
-#include <c10d/NCCLUtils.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
-#include <c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 #endif
 
 #ifdef USE_C10D_UCC
-#include <c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #endif
 
-#include <c10d/PrefixStore.hpp>
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
-#include <c10d/comm.hpp>
-#include <c10d/debug.h>
-#include <c10d/logger.hpp>
-#include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/Ops.hpp>
@@ -515,10 +515,14 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
+  // TODO(crcrpar): Hardening `ReduceOp`.
+  //    While keeping most op types as enum value,
+  //    making `PREMUL_SUM` callable, i.e., allowing for
+  //    `ReduceOp.PREMUL_SUM(scale)` might be better as per @wanchaol.
   // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
   py::class_<::c10d::ReduceOp> reduce_op(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
-``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+``MIN``, ``MAX``, ``BAND``, ``BOR``, ``BXOR``, and ``PREMUL_SUM``.
 
 ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
@@ -529,13 +533,16 @@ and only for NCCL versions 2.10 or later.
 
 ``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
 ``PREMUL_SUM`` is only available with the ``NCCL`` backend,
-and only available for NCCL versions 2.11 or later.
+and only available for NCCL versions 2.11 or later. Users are supposed to
+use ``torch.distributed._make_nccl_premul_sum``.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.)");
+:func:`reduce`, :func:`all_reduce_multigpu`, etc.
+
+This class does not support ``__members__`` property.)");
 
   reduce_op.def(py::init<::c10d::ReduceOp::RedOpType>())
       .def_readwrite("op", &::c10d::ReduceOp::op_);
@@ -555,8 +562,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
           [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
             return self == other.op_;
           })
-      .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
+      .def("__hash__", [](const ::c10d::ReduceOp& self) {
+        return static_cast<uint8_t>(self.op_);
+      });
 
+  // note(crcrpar): Deliberately skip
+  // [`export_values`](https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types)
+  // here and manually set values in Python side. See note "ReduceOp static
+  // class attributes to support `isinstance`"
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
       .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
@@ -566,10 +579,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
       .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
       .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
-      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
-      .export_values();
+      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM);
 
-  // Ref: [Implicit
+  // note(crcrpar): This could be removed because users will not pass
+  // `RedOpType` to reduce collective ops Ref: [Implicit
   // conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
   // Let us skip the explicit construction of `c10d::ReduceOp` from
   // `c10d::ReduceOp::RedOpType` in Python.
@@ -640,6 +653,20 @@ They are used in specifying strategies for reduction collectives, e.g.,
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
+
+  py::class_<::c10d::DistributedBackendOptions>(
+      module, "_DistributedBackendOptions")
+      .def(py::init<>())
+      .def_readwrite("store", &::c10d::DistributedBackendOptions::store)
+      .def_readwrite(
+          "group_rank", &::c10d::DistributedBackendOptions::group_rank)
+      .def_readwrite(
+          "group_size", &::c10d::DistributedBackendOptions::group_size)
+      .def_readwrite("timeout", &::c10d::DistributedBackendOptions::timeout)
+      .def_readwrite("group_id", &::c10d::DistributedBackendOptions::group_id)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::DistributedBackendOptions::global_ranks_in_group);
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
@@ -1819,8 +1846,7 @@ Example::
         };
 
         auto set = [&store](const std::string& key, const std::string& value) {
-          std::vector<uint8_t> value_(value.begin(), value.end());
-          store->set(key, value_);
+          store->set(key, value);
         };
 
         auto get = [&store](const std::string& key) {

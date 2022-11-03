@@ -1,14 +1,25 @@
-#include <ATen/ATen.h>
-#include <ATen/AccumulateType.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/div_rtn.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Unfold2d.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_slow_conv2d_backward_native.h>
+#include <ATen/ops/_slow_conv2d_forward.h>
+#include <ATen/ops/_slow_conv2d_forward_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/thnn_conv2d_native.h>
+#endif
 
 namespace at {
 namespace native {

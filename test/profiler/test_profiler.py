@@ -67,7 +67,7 @@ except ImportError:
     HAS_PSUTIL = False
 import pickle
 
-from torch._C._profiler import _ExtraFields_PyCall
+from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -126,6 +126,24 @@ class TestProfilerCUDA(TestCase):
             s = custom_layer(z)
             q = s.sum()
             q.backward()
+
+@unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
+class TestProfilerITT(TestCase):
+
+    def test_custom_module_input_op_ids(self):
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return x
+
+        def custom_layer(input_ten):
+            return MyFunc.apply(input_ten)
 
         # Only testing that emit_itt runs when
         # record_shapes option is enabled.
@@ -485,7 +503,7 @@ class TestProfiler(TestCase):
         def call_module(x):
             return mod(x)
 
-        with _profile(with_stack=True, use_kineto=kineto_available()) as p:
+        with _profile(with_stack=True, use_kineto=kineto_available(), experimental_config=_ExperimentalConfig(verbose=True)) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
@@ -1026,7 +1044,7 @@ class TestProfiler(TestCase):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
     def test_export_stacks(self):
-        with _profile(with_stack=True, use_kineto=kineto_available()) as p:
+        with _profile(with_stack=True, use_kineto=kineto_available(), experimental_config=_ExperimentalConfig(verbose=True)) as p:
             x = torch.randn(10, 10)
             y = torch.randn(10, 10)
             z = torch.mm(x, y)
@@ -1260,12 +1278,14 @@ class TestProfiler(TestCase):
 
 
 def find_node_with_name(nodes, name):
-    for node in nodes:
-        if node.name() == name:
+    for node in _utils.traverse_dfs(nodes):
+        if node.name == name:
             return node
-        result = find_node_with_name(node.children, name)
-        if result is not None:
-            return result
+
+def find_node_with_regex(nodes, pattern):
+    for node in _utils.traverse_dfs(nodes):
+        if re.search(pattern, node.name):
+            return node
 
 
 class SimpleNet(nn.Module):
@@ -1279,6 +1299,17 @@ class SimpleNet(nn.Module):
 
 
 class TestTorchTidyProfiler(TestCase):
+
+    def _get_tensor_fields(self, node, index):
+        self.assertIsNotNone(node)
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._profiler._ExtraFields_TorchOp)
+        tensor_info = node.extra_fields.inputs.tensor_metadata[index]
+        self.assertIsNotNone(tensor_info.impl_ptr)
+        self.assertIsNotNone(tensor_info.storage_data_ptr)
+        self.assertIsNotNone(tensor_info.id)
+        return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
 
     def test_pointers_and_ids(self):
         a = torch.randn(4, 3)
@@ -1306,16 +1337,9 @@ class TestTorchTidyProfiler(TestCase):
         nodes = p.profiler.kineto_results.experimental_event_tree()
 
         def get_fields(op_name, index):
-            node = find_node_with_name(nodes, op_name)
-            self.assertIsNotNone(node)
-            self.assertIsInstance(
-                node.extra_fields,
-                torch._C._profiler._ExtraFields_TorchOp)
-            tensor_info = node.extra_fields.inputs.tensor_metadata[index]
-            self.assertIsNotNone(tensor_info.impl_ptr)
-            self.assertIsNotNone(tensor_info.storage_data_ptr)
-            self.assertIsNotNone(tensor_info.id)
-            return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
+            return self._get_tensor_fields(
+                find_node_with_name(nodes, op_name),
+                index)
 
         a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
         b_impl, b_storage_data, b_id = get_fields("aten::mul", 0)
@@ -1346,6 +1370,158 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(c_id, c_id_new)
         self.assertEqual(d_id, c_id_new)
 
+    def test_module_and_optimizer_ids(self) -> None:
+        model = torch.nn.Linear(2, 1, bias=True)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+
+        def check(cold_start: bool) -> None:
+            with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+                x = torch.ones((1, 2))
+                _ = x.sin()  # Mark `x`
+                model(x).backward()
+                optimizer.step()
+                _ = optimizer.state[model.weight]["momentum_buffer"].cos()  # Mark weight momentum
+                _ = model.weight.grad.tan()  # Mark weight gradient
+
+            nodes = p.profiler.kineto_results.experimental_event_tree()
+
+            def get_fields(op_name, index):
+                return self._get_tensor_fields(
+                    find_node_with_name(nodes, op_name),
+                    index)
+
+            # Marked Tensors act as ground truth for python tracer IDs.
+            _, _, x_id = get_fields("aten::sin", 0)
+            _, _, weight_momenumtum_id = get_fields("aten::cos", 0)
+            _, _, weight_grad_id = get_fields("aten::tan", 0)
+            self.assertNotEqual(x_id, weight_momenumtum_id)
+            self.assertNotEqual(x_id, weight_grad_id)
+            self.assertNotEqual(weight_momenumtum_id, weight_grad_id)
+
+            # Use linear op to identify weight ground truth.
+            linear_op_node = find_node_with_name(nodes, "aten::linear")
+            self.assertIsNotNone(linear_op_node)
+            x_metadata, weight_metadata, _ = linear_op_node.extra_fields.inputs.tensor_metadata
+            self.assertEqual(x_id, x_metadata.id)
+
+            # Module
+            linear_module_node = find_node_with_name(nodes, "nn.Module: Linear_0")
+            self.assertIsNotNone(linear_module_node)
+            self.assertIsNotNone(linear_module_node.extra_fields.module)
+            self.assertIsNone(linear_module_node.extra_fields.optimizer)
+
+            linear_parameters = linear_module_node.extra_fields.module.parameters
+            name, weight, weight_grad = linear_parameters[0]
+            self.assertEqual(name, "weight")
+            self.assertEqual(weight.id, weight_metadata.id)
+
+            self.assertEqual(weight_grad is None, cold_start)
+            if not cold_start:
+                self.assertEqual(weight_grad.id, weight_grad_id)
+
+            # Optimizer
+            step_node = find_node_with_regex(nodes, "_optimizer_step_code")
+            self.assertIsNotNone(step_node)
+            self.assertIsNone(step_node.extra_fields.module)
+            self.assertIsNotNone(step_node.extra_fields.optimizer)
+            optimizer_parameters = step_node.extra_fields.optimizer.parameters
+            self.assertEqual(len(optimizer_parameters), 2)  # Weight and bias
+            weight, weight_grad, state = optimizer_parameters[0]
+            self.assertEqual(weight.id, weight_metadata.id)
+            self.assertEqual(weight_grad.id, weight_grad_id)
+            self.assertEqual(len(state), 1)
+            self.assertEqual(state[0][0], "momentum_buffer")
+            self.assertEqual(state[0][1].id, weight_momenumtum_id)
+
+        # Check that we handle first step (lazy initalization) and steady state.
+        check(cold_start=True)
+        check(cold_start=False)
+
+    def _test_allocation_ids(self, before_fn, after_fn) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            # Introduce other operations and allocations to check robustness
+            _ = before_fn()
+
+            x = torch.rand(4, 3)
+            x.resize_(4, 4)
+
+            # We need to use `x` post resize for profiler to determine its ID.
+            x.sin()
+
+            # Introduce other operations and allocations to check robustness
+            _ = after_fn()
+
+            # Ensure `x` is the last variable collected to make it easier to
+            # find the deallocation event.
+            gc.collect()
+            del x
+            gc.collect()
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+
+        def find_chain(names: List[str]):
+            out = []
+            for name in names:
+                root = [out[-1]] if out else nodes
+                out.append(find_node_with_name(root, name))
+                self.assertIsNotNone(out[-1], name)
+            return out
+
+        allocation = find_chain(["aten::rand", "aten::empty", "[memory]"])[-1].extra_fields
+        _, uniform_node = find_chain(["aten::rand", "aten::uniform_"])
+        x_impl, x_storage_data, x_id = self._get_tensor_fields(uniform_node, 0)
+
+        # Make sure IDs are consistent between allocations and op inputs
+        self.assertEqual(allocation.ptr, x_storage_data)
+        self.assertEqual(allocation.id, x_id)
+
+        resize_node = find_node_with_name(nodes, "aten::resize_")
+        self.assertIsNotNone(resize_node)
+        self.assertEqual(len(resize_node.children), 2)
+        allocate_new = resize_node.children[0].extra_fields
+        free_old = resize_node.children[1].extra_fields
+
+        # Destruction of the old storage for x.
+        self.assertEqual(free_old.id, allocation.id)
+        self.assertEqual(free_old.ptr, allocation.ptr)
+
+        # Make sure ID is retained through change in storage.
+        self.assertEqual(allocate_new.id, allocation.id)
+        self.assertNotEqual(allocate_new.ptr, allocation.ptr)
+
+        # Deletion when `x` goes out of scope.
+        free_new = [i for i in nodes if i.tag == torch._C._profiler._EventType.Allocation][-1].extra_fields
+        self.assertIsInstance(free_new, torch._C._profiler._ExtraFields_Allocation)
+        self.assertEqual(free_new.id, allocate_new.id)
+        self.assertEqual(free_new.ptr, allocate_new.ptr)
+
+    def test_allocation_ids(self) -> None:
+        self._test_allocation_ids(lambda: None, lambda: None)
+
+    def test_allocation_ids_with_other_ops(self) -> None:
+        x = torch.ones((1,))
+        self._test_allocation_ids(
+            lambda: (x + 1).relu_(),
+            lambda: torch.zeros((1,)).cos()
+        )
+
+    def test_impl_reuse(self) -> None:
+        repeats = 1_000
+        with profile(profile_memory=True, record_shapes=True) as p:
+            for _ in range(repeats):
+                torch.ones((1,))
+            gc.collect()
+
+        roots = p.profiler.kineto_results.experimental_event_tree()
+        tensor_impls = tuple(
+            e.extra_fields.inputs.tensor_metadata[0].impl_ptr
+            for e in _utils.traverse_dfs(roots)
+            if e.name == "aten::fill_"
+        )
+
+        self.assertEqual(len(tensor_impls), repeats)
+        self.assertEqual(len(set(tensor_impls)), repeats)
+
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
@@ -1362,8 +1538,8 @@ class TestTorchTidyProfiler(TestCase):
             node.parent.extra_fields,
             torch._C._profiler._ExtraFields_PyCCall)
 
-        self.assertEqual(node.children[0].name(), "aten::empty")
-        self.assertEqual(node.children[0].children[0].name(), "[memory]")
+        self.assertEqual(node.children[0].name, "aten::empty")
+        self.assertEqual(node.children[0].children[0].name, "[memory]")
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
             torch._C._profiler._ExtraFields_Allocation)
@@ -1394,6 +1570,8 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
         device_info = [x.device if x else None for x in input_info.tensor_metadata]
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+        tensor_dtypes = [x.dtype if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(tensor_dtypes, [torch.float32, torch.float32, None])
         self.assertEqual(node.extra_fields.scope, torch.profiler.RecordScope.FUNCTION)
 
         mul_node = find_node_with_name(nodes, "aten::mul")
@@ -1482,23 +1660,24 @@ class TestTorchTidyProfiler(TestCase):
                 out = []
             for node in nodes:
                 if isinstance(node.extra_fields, _ExtraFields_PyCall) and node.extra_fields.module:
-                    if node.extra_fields.module.params:
+                    if node.extra_fields.module.parameters:
                         out.append(node.extra_fields.module)
                 flat_out_extrafields(node.children, out)
             return out
 
-
         inputs = torch.rand(10)
+        net = SimpleNet()
+        out = net(inputs)
+        torch.nn.functional.cross_entropy(out, torch.rand(2)).backward()
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = SimpleNet()
-            out = net(inputs)
+            _ = net(inputs)
 
         modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
         self.assertEqual(len(modules), 2, f"Expected two parameter list, but got {len(modules)}")
 
-        params = [p for module in modules for p in module.params]
-        expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
-        expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
+        params = [(n, p.storage_data_ptr, g.storage_data_ptr) for module in modules for (n, p, g) in module.parameters]
+        expected = [(name, val.storage().data_ptr(), val.grad.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
+        expected += [(name, val.storage().data_ptr(), val.grad.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
 
     def _flat_out_extrafields(self, nodes, out=None):
@@ -1506,24 +1685,37 @@ class TestTorchTidyProfiler(TestCase):
             out = []
         for node in nodes:
             if (isinstance(node.extra_fields, _ExtraFields_PyCall) and
-                    node.extra_fields.opt and node.extra_fields.opt.param_addrs):
+                    node.extra_fields.optimizer and node.extra_fields.optimizer.parameters):
                 # avoiding OptInfo duplicates from iterations
-                addr = node.extra_fields.opt.param_addrs[0]
-                if not [o for o in out if addr in o.param_addrs]:
-                    out.append(node.extra_fields.opt)
+                addr = node.extra_fields.optimizer.parameters[0][0].storage_data_ptr
+                if not [o for o in out if addr == o.parameters[0][0].storage_data_ptr]:
+                    out.append(node.extra_fields.optimizer)
             self._flat_out_extrafields(node.children, out)
         return out
 
     def _check_results(self, opt, opts, check_items=False):
-        self.assertEqual(len(opts), 1, "Expected 1 optimizer")
-        self.assertEqual(id(opt), opts[0].self, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self})")
+        self.assertEqual(len(opts), 1, f"Expected 1 optimizer: len(opts): {len(opts)}")
+        self.assertEqual(id(opt), opts[0].self_ptr, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self_ptr})")
         if check_items:
             self.assertEqual(len(opt.param_groups), len(opts))
             for group, opt_ in zip(opt.param_groups, opts):
                 self.assertEqual(
                     [(v.storage().data_ptr()) for v in group.get("params", [])],
-                    opt_.param_addrs
+                    [(o.storage_data_ptr) for (o, _, _) in opt_.parameters]
                 )
+            for opt_ in opts:
+                observed_state = {
+                    p.storage_data_ptr: {name: s.storage_data_ptr for name, s in state}
+                    for (p, _, state) in opt_.parameters
+                }
+
+                # Make sure the profiler collected all optimizer state and check
+                # that the address recorded by the profiler is correct.
+                for parameter, parameter_state in opt.state.items():
+                    self.assertEqual(
+                        {name: value.storage().data_ptr() for name, value in parameter_state.items()},
+                        observed_state.get(parameter.storage().data_ptr(), [])
+                    )
 
     def test_optimizer(self):
         inputs = torch.rand(10)
@@ -1570,8 +1762,7 @@ class TestTorchTidyProfiler(TestCase):
         ptr = node.extra_fields.ptr
         self.assertGreater(ptr, 0)
         self.assertEqual(node.extra_fields.alloc_size, alloc_size)
-        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
-        self.assertEqual(node.extra_fields.device_index, -1)
+        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         total_allocated = node.extra_fields.total_allocated
 
         # total_reserved is only for CUDACachingAllocator
@@ -1587,8 +1778,7 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertEqual(node.extra_fields.ptr, ptr)
         self.assertEqual(node.extra_fields.alloc_size, -alloc_size)
-        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
-        self.assertEqual(node.extra_fields.device_index, -1)
+        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
 
 
@@ -1600,6 +1790,7 @@ class MockKinetoEvent():
     _linked_correlation_id: int
     _device_type: int
 
+    @property
     def name(self) -> str:
         return self._name
 
@@ -1630,6 +1821,7 @@ class MockProfilerEvent():
     def end_time_ns(self):
         return self.start_time_ns + self.duration_time_ns
 
+    @property
     def name(self) -> str:
         return self._name
 
@@ -1637,8 +1829,46 @@ class MockProfilerEvent():
         object.__setattr__(self, "parent", parent)
         object.__setattr__(self, "children", children)
 
+class MockNode:
+    def __init__(self, name, children) -> None:
+        self.name = name
+        self.children = [MockNode(name, i) for name, i in children.items()]
+
 
 class TestExperimentalUtils(TestCase):
+
+    def make_tree(self) -> List[MockNode]:
+        tree = {
+            "root_0": {
+                "1": {
+                    "2": {}
+                },
+                "3": {
+                    "4": {},
+                    "5": {},
+                },
+            },
+            "root_1": {
+                "6": {},
+                "7": {},
+                "8": {
+                    "9": {
+                        "10": {}
+                    },
+                },
+            },
+        }
+        return [MockNode(name, i) for name, i in tree.items()]
+
+    def test_dfs(self) -> None:
+        self.assertEqual(
+            " ".join(i.name for i in _utils.traverse_dfs(self.make_tree())),
+            "root_0 1 2 3 4 5 root_1 6 7 8 9 10")
+
+    def test_bfs(self) -> None:
+        self.assertEqual(
+            " ".join(i.name for i in _utils.traverse_bfs(self.make_tree())),
+            "root_0 root_1 1 3 6 7 8 2 4 5 9 10")
 
     @staticmethod
     def generate_mock_profile():
@@ -1712,7 +1942,7 @@ class TestExperimentalUtils(TestCase):
 
             kineto_events = [{
                 '_name':
-                e.name(),
+                e.name,
                 '_start_us':
                 e.start_us(),
                 '_duration_us':
@@ -1733,7 +1963,7 @@ class TestExperimentalUtils(TestCase):
                         stack.append(child_event)
 
             profiler_events = [{
-                '_name': e.name(),
+                '_name': e.name,
                 'id': e.id,
                 'start_time_ns': e.start_time_ns,
                 'duration_time_ns': e.duration_time_ns,
@@ -1809,7 +2039,7 @@ class TestExperimentalUtils(TestCase):
         def format_queue_depth(queue_depth_list, events):
             res = ""
             for data, event in zip(queue_depth_list, events):
-                res += f"{data.queue_depth} [{event.name()}]\n"
+                res += f"{data.queue_depth} [{event.name}]\n"
             return res
 
         # We have to use Mock because time series data is too flaky to test
@@ -1863,7 +2093,7 @@ class TestExperimentalUtils(TestCase):
         profiler = self.generate_mock_profile()
         basic_evaluation = _utils.BasicEvaluation(profiler)
         expected_output = "\n".join([
-            f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name()}]"
+            f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name}]"
             for event_key in basic_evaluation.event_keys
         ])
         self.assertExpectedInline(
@@ -1886,7 +2116,7 @@ class TestExperimentalUtils(TestCase):
         optimizable_events = basic_evaluation.get_optimizable_events(
             2, print_enable=False)
         expected_output = "\n".join(
-            [f"{event_key.event.name()}" for event_key in optimizable_events])
+            [f"{event_key.event.name}" for event_key in optimizable_events])
         self.assertExpectedInline(
             expected_output, """\
 <built-in function _cuda_synchronize>
@@ -1899,7 +2129,7 @@ aten::copy_""")
                 x = x @ x
                 x = x + x
         matched_events = NamePattern(prof, "aten::mm").matched_events()
-        output = "\n".join([f"{event.name()}" for event in matched_events])
+        output = "\n".join([f"{event.name}" for event in matched_events])
         self.assertExpectedInline(output, """\
 aten::mm
 aten::mm

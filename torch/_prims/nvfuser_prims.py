@@ -42,6 +42,7 @@ nvprim_names = [
     "atanh",
     "cos",
     "cosh",
+    "clone",
     "bitwise_not",
     "ceil",
     "erf",
@@ -210,6 +211,32 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
     )
 
 
+def _native_batch_norm_nvfuser(
+    fd, input, weight, bias, running_mean, running_var, training, momentum, eps
+):
+
+    """
+    if weight is None:
+        weight = fd.define_null_tensor()
+    if bias is None:
+        bias = fd.define_null_tensor()
+    if running_mean is None:
+        running_mean = fd.define_null_tensor()
+    if running_var is None:
+        running_var = fd.define_null_tensor()
+    """
+    return fd.ops.batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        momentum,
+        eps,
+        training,
+    )
+
+
 def _broadcast_in_dim_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -224,8 +251,8 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
-def _transpose_nvfuser(fd, a, permutation):
-    return fd.ops.permute(a, permutation)  # type: ignore[attr-defined]
+def _transpose_nvfuser(fd, a, dims):
+    return fd.ops.permute(a, dims)  # type: ignore[attr-defined]
 
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
@@ -237,6 +264,15 @@ def _squeeze_nvfuser(fd, a, a_shape, dimensions):
 
 def _view_of_nvfuser(fd, a):
     return fd.ops.set(a)
+
+
+def _view_nvfuser(
+    fd,
+    a,
+    a_shape,
+    new_shape,
+):
+    return fd.ops.view(a, a_shape, new_shape)
 
 
 def _sum_nvfuser(
@@ -299,17 +335,54 @@ def _amin_nvfuser(
     return fd.ops.min(a, dims, keep_dims)
 
 
+def _clone_nvfuser(fd: Any, input: TensorLikeType, *, memory_format=None):
+    return fd.ops.set(input)
+
+
+_nvfuser_impls["native_batch_norm"] = _native_batch_norm_nvfuser
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
+_nvfuser_impls["clone"] = _clone_nvfuser
 _nvfuser_impls["transpose"] = _transpose_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["view_of"] = _view_of_nvfuser
+_nvfuser_impls["view"] = _view_nvfuser
 _nvfuser_impls["rand_like"] = _rand_like_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
+
+
+def register_native_batch_norm():
+    """This function is used to register the native_batch_norm function in torch.ops.nvprims module."""
+    name = "native_batch_norm"
+
+    nvprim.define(
+        f"{name}(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, "
+        + "bool training, float momentum, float eps)"
+        + " -> (Tensor, Tensor, Tensor)"
+    )
+
+    def _prim_impl(
+        input, weight, bias, running_mean, running_var, training, momentum, eps
+    ):
+        return torch.native_batch_norm(
+            input, weight, bias, running_mean, running_var, training, momentum, eps
+        )
+
+    nvprim_impl.impl(name, _prim_impl)
+    nvprim_autograd_impl.impl(
+        name, backwards_not_supported(torch.ops.nvprims.native_batch_norm.default)
+    )
+
+    prim_packet = torch.ops.nvprims.native_batch_norm
+    prim = prim_packet.default
+    for p in (prim_packet, prim):
+        p.__doc__ = "Computes batch normalization."
+        p.impl_nvfuser = _nvfuser_impls["native_batch_norm"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
 def register_rand_like():
@@ -331,6 +404,7 @@ def register_rand_like():
     ):
         strides = make_contiguous_strides_for(self.shape)
         return torch._prims.TensorMeta(
+            self,
             shape=self.shape,
             strides=strides,
             dtype=dtype,
@@ -467,9 +541,49 @@ def register_var_mean():
         p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
+def _nvprims_view_impl_aten(a, original_shape, new_shape):
+    return a.reshape(new_shape)
+
+
+def register_view():
+    """This function is used to register the view function in torch.ops.view module."""
+    # View is implemented as a decomposition into prims.split_dim,
+    # prims.collapse_dim, and prims.reshape, but we would like to intercept
+    # non-decomposed view for now
+    name = "view"
+
+    nvprim.define("view(Tensor inp, SymInt[] original_shape, SymInt[] shape) -> Tensor")
+    nvprim.define("view.shape(Tensor inp, SymInt[] shape) -> Tensor")
+
+    # This function is used under _AutoDispatchBelowAutograd context
+    def _prim_impl(a, original_shape, new_shape):
+        return a.reshape(new_shape)
+
+    nvprim_impl.impl(name, _prim_impl)
+
+    prim_packet = torch.ops.nvprims.view
+    prim = prim_packet.default
+
+    def _view_no_original_shape_overload_impl(a, shape):
+        if list(a.shape) == list(shape):
+            return torch.ops.nvprims.view_of(a)
+        return torch.ops.nvprims.view.default(a, a.shape, shape)
+
+    nvprim_implicit_impl.impl("view.shape", _view_no_original_shape_overload_impl)
+    nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
+
+    for p in (prim_packet, prim):
+        p.__doc__ = "Creates a tensor with the specified shape containing a copy of the data in a."
+        p.impl_nvfuser = _nvfuser_impls["view"]
+        p.return_type = torch._prims_common.RETURN_TYPE.VIEW  # type: ignore[attr-defined]
+        p.impl_aten = _nvprims_view_impl_aten
+
+
 def register_nvprims():
     """Registers all nvFuser primitives in the torch.ops.nvprims module."""
     register_var_mean()
+    register_view()
+    register_native_batch_norm()
     register_rand_like()
 
     for name in nvprim_names:
@@ -488,3 +602,4 @@ def register_nvprims():
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
+            p.impl_aten = main_prim.impl_aten

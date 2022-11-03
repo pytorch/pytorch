@@ -143,7 +143,7 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.NCCL,
     dist.Backend.GLOO,
     dist.Backend.MPI,
-    # TODO(ucc): dist.Backend.UCC,
+    dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported with use_cuda=True
@@ -151,7 +151,7 @@ CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
     dist.Backend.NCCL,
-    # TODO(ucc): dist.Backend.UCC,
+    dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported for p2p ops
@@ -159,7 +159,7 @@ SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.MPI,
     dist.Backend.GLOO,
     dist.Backend.NCCL,
-    # TODO(ucc): dist.Backend.UCC,
+    dist.Backend.UCC,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -1147,6 +1147,7 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_3_level_hierarchical_model_averager(self):
+            from torch.distributed.distributed_c10d import _pg_group_ranks
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1177,8 +1178,8 @@ class DistributedTest:
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
 
-            real_group_ranks_res1 = dist.get_process_group_ranks(subgroup1)
-            real_group_ranks_res2 = dist.get_process_group_ranks(subgroup2)
+            real_group_ranks_res1 = list(_pg_group_ranks[subgroup1].keys())
+            real_group_ranks_res2 = list(_pg_group_ranks[subgroup2].keys())
             expect_group_ranks_res1 = (rank // subgroup_size1 * subgroup_size1 + np.array(list(range(subgroup_size1)))).tolist()
             expect_group_ranks_res2 = (rank // subgroup_size2 * subgroup_size2 + np.array(list(range(subgroup_size2)))).tolist()
             self.assertEqual(real_group_ranks_res1, expect_group_ranks_res1)
@@ -2259,6 +2260,53 @@ class DistributedTest:
                 expected_tensor = expected_tensor.fill_(expected_value).cuda(device_id)
 
                 self.assertEqual(out_tensor, expected_tensor)
+            self._barrier()
+
+        # Test reduce_scatter_tensor accepting single tensor as input
+        def _reduce_scatter_tensor_helper(
+            self, tensor_out, tensor_in,
+            group_id, rank, cuda=True, rank_to_GPU=None
+        ):
+            if cuda:
+                tensor_in = tensor_in.cuda(rank_to_GPU[rank][0])
+                tensor_out = tensor_out.cuda(rank_to_GPU[rank][0])
+            tensor_shapes = [tensor_out.shape]
+            self.call_dist_op(
+                ":reduce_scatter_tensor",
+                False,
+                dist.reduce_scatter_tensor,
+                tensor_out,
+                tensor_in,
+                dist.ReduceOp.SUM,
+                group_id,
+                False,
+                expect_event=False,
+                tensor_shapes=tensor_shapes,
+            )
+            return tensor_out
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA reduce_scatter_tensor")
+        @skip_if_no_gpu
+        def test_reduce_scatter_tensor_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            size = 2
+            tensor_out = torch.zeros(size, dtype=torch.int64)
+
+            # Concatenated input
+            tensor_in = torch.arange(len(group) * size)
+            tensor_out = self._reduce_scatter_tensor_helper(tensor_out, tensor_in, group_id, rank, True, rank_to_GPU)
+            # Check result
+            expected_tensor = torch.arange(rank * size, (rank + 1) * size) * len(group)
+            self.assertEqual(tensor_out, expected_tensor)
+            self._barrier()
+
+            # Stacked input
+            tensor_in = torch.reshape(tensor_in, (len(group), size))
+            tensor_out = self._reduce_scatter_tensor_helper(tensor_out, tensor_in, group_id, rank, True, rank_to_GPU)
+            # Check result
+            # Should be the same as the result in concatenated case
+            self.assertEqual(tensor_out, expected_tensor)
             self._barrier()
 
         @skip_if_no_gpu
@@ -3795,6 +3843,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3812,6 +3861,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -4169,6 +4219,23 @@ class DistributedTest:
                 RuntimeError, lambda: nn.parallel.DistributedDataParallel(nn.Module())
             )
             self._barrier()
+
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel"
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        def test_ddp_zero_output_features(self):
+            class ToyModel(nn.Module):
+                def __init__(self):
+                    super(ToyModel, self).__init__()
+                    self.net1 = nn.Linear(10, 10)
+                    self.relu = nn.ReLU()
+                    self.net2 = nn.Linear(10, 0)
+
+            model = ToyModel().to(self.rank)
+            ddp_model = nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
 
         @sandcastle_skip_if(
             BACKEND == "nccl",
@@ -6109,11 +6176,13 @@ class DistributedTest:
                     group=pg
                 )
 
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object(self):
             return self._test_gather_object()
 
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         @require_backend(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object_subgroup(self):
@@ -7644,12 +7713,14 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_with_logger(self):
             self._test_verify_model_across_rank(use_logger=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @sandcastle_skip_if(BACKEND == "ucc", "test timing out locally with ucc")
         @skip_if_lt_x_gpu(2)
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
@@ -7673,6 +7744,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_shape_across_ranks(self):
             group_gloo = dist.new_group(
@@ -7695,6 +7767,7 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @sandcastle_skip_if(BACKEND == "ucc", "test failing locally with UCC")
         @skip_if_lt_x_gpu(2)
         def test_ddp_model_diff_num_params_across_ranks(self):
             group_gloo = dist.new_group(

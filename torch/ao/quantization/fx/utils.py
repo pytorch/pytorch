@@ -10,13 +10,14 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     DTypeWithConstraints,
 )
-from torch.ao.quantization.fake_quantize import FakeQuantize
+from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
     activation_is_statically_quantized,
     is_per_tensor,
     is_per_channel,
+    to_underlying_dtype,
 )
 from torch.ao.quantization.quantize import is_activation_post_process
 
@@ -27,6 +28,8 @@ from torch.fx.graph import (
     Node,
 )
 from .custom_config import PrepareCustomConfig
+# importing the lib so that the quantized_decomposed ops are registered
+from ._decomposed import quantized_decomposed_lib  # noqa: F401
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 from collections import namedtuple
@@ -62,7 +65,6 @@ __all__ = [
     "node_arg_is_weight",
     "NON_OBSERVABLE_ARG_DICT",
     "NON_QUANTIZABLE_WEIGHT_OPS",
-    "quantize_node",
     "return_arg_list",
 ]
 
@@ -160,11 +162,22 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
-    ''' Given an activation_post_process module,
-    return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
-    of extracted qparams from the module
-    '''
+def get_quantize_node_info(
+    activation_post_process: Callable,
+    is_decomposed: bool
+) -> Optional[Tuple[str, Union[Callable[..., Any], str], Dict[str, Any]]]:
+    """ Extract information about quantize op from activation_post_process module
+    Args:
+      * `activation_post_process`: observer module instance or fake quant module instance
+        after calibration/QAT
+      * `is_decomposed`: a boolean flag to indicate whether we want to use the
+        quantize operator for decomposed quantized tensor (torch.ops.quantized_decomposed.quantize_per_tensor) or default/standalone
+        quantized tensor (torch.quantize_per_tensor)
+
+    Returns
+        node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
+        of extracted qparams from the module
+    """
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
     compute_dtype = None
     if hasattr(activation_post_process, "compute_dtype"):
@@ -177,20 +190,39 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
-            quantize_op = torch.quantize_per_channel
+            if is_decomposed:
+                raise NotImplementedError("decomposed quantize_per_channel op not implemented yet")
+            else:
+                quantize_op = torch.quantize_per_channel
         else:
             scale = float(scale)
             zero_point = int(zero_point)
-            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
-            quantize_op = torch.quantize_per_tensor
+            if is_decomposed:
+                quant_min = activation_post_process.quant_min  # type: ignore[attr-defined]
+                quant_max = activation_post_process.quant_max  # type: ignore[attr-defined]
+                dtype = to_underlying_dtype(dtype)
+                qparams = {
+                    "_scale_": scale,
+                    "_zero_point_": zero_point,
+                    "_quant_min": quant_min,
+                    "_quant_max": quant_max,
+                    "_dtype_": dtype
+                }
+                quantize_op = torch.ops.quantized_decomposed.quantize_per_tensor
+            else:
+                qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
+                quantize_op = torch.quantize_per_tensor
     elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
         # TODO(future PR): switch compute_dtype to is_dynamic
         # dynamic quantization
         node_type = "call_function"
-        quantize_op = torch.quantize_per_tensor_dynamic
+        if is_decomposed:
+            raise NotImplementedError("decomposed quantize_per_tensor_dynamic op not implemented yet")
+        else:
+            quantize_op = torch.quantize_per_tensor_dynamic
         # TODO: get reduce range from observer
         # reduce_range = activation_post_process.reduce_range
-        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        reduce_range = torch.backends.quantized.engine in ("fbgemm", "x86")
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     elif dtype == torch.float16:
         node_type = "call_method"
@@ -199,69 +231,11 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
         return None
-    return node_type, quantize_op, qparams
+    return node_type, quantize_op, qparams  # type: ignore[return-value]
 
-def quantize_node(
-        in_node: Node,
-        obs_module: torch.nn.Module,
-        obs_node: Node,
-        modules: Dict[str, torch.nn.Module],
-        quantized_graph: Graph,
-        node_name_to_scope: Dict[str, Tuple[str, type]],
-        is_input: bool,
-        output_prefix: str = "_output") -> Node:
-    ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
-    with the qparams calculated from activation_post_process (obs_module).
-    The observer node (obs_node) is used to find the FQN of the user of act_post_process.
-    e.g. Given input `node` in `node = self.conv(x)`, insert node:
-    `quantized_node = torch.quantize_per_tensor(x, self._scale_0, self._zer_point_0, self._dtype_0)`
-    where self._scale_0, self._zero_point_0 and self._dtype_0 are
-    calculated from `obs_module`
-    '''
-    # Find the first use of the observer node, we use this to get the scope of the module.
-    if is_input:
-        # if the quantize function is at the input of op, then we find the first user of the observer_node
-        # to get the path. If a linear call_function is in the user list, we return the first instance
-        # of linear node to get the FQN.
-        users = list(obs_node.users)
-        first_linear_use_or_first_use = users[0] if users else None
-        linear_node = None
-        for n in users:
-            if n.op == "call_function" and n.target == torch.nn.functional.linear:
-                linear_node = n
-                break
-        if linear_node:
-            first_linear_use_or_first_use = linear_node
-        prefix = "_input"
-    else:
-        # if the quantize function is at the output of the op, we use the observer input node to get the path
-        first_linear_use_or_first_use = in_node
-        prefix = output_prefix
-
-    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
-        module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]
-    else:
-        # TODO: it's not used, so actually we can skip quantization
-        # but this requires changing return type of quantize_node
-        # we can fix it later if needed
-        module_path = ""
-    root_module = modules['']
-    graph = quantized_graph
-    maybe_quantize_node_info = get_quantize_node_info(obs_module)
-    assert maybe_quantize_node_info is not None, \
-        f"Expecting quantize node info not to be None, observer: {obs_module}"
-    node_type, quantize_op, qparams = maybe_quantize_node_info
-    inputs = [in_node]
-
-    for key, value in qparams.items():
-        if key in ['_scale_', '_zero_point_']:
-            # For scale and zero_point values we register them as buffers in the root module.
-            qparam_node = create_getattr_from_value(root_module, graph, module_path + prefix + key, value)
-            inputs.append(qparam_node)
-        else:
-            # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
-            inputs.append(value)
-    return graph.create_node(node_type, quantize_op, tuple(inputs), {})
+# Keep it here for BC in torch.quantization namespace, we can remove it after
+# we deprecate the torch.quantization namespace
+quantize_node = NotImplemented
 
 def get_custom_module_class_keys(custom_module_mapping: Dict[QuantType, Dict[Type, Type]]) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
@@ -954,6 +928,19 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         for user in list(last_getitem.users.keys()):
             user.replace_input_with(last_getitem, new_input)
 
+def _get_observer_from_activation_post_process(
+    activation_post_process: Union[ObserverBase, FakeQuantizeBase],
+) -> ObserverBase:
+    """
+    If `activation_post_process` is an observer, return the observer.
+    If `activation_post_process` is a fake quantize, return the internal observer.
+    """
+    if isinstance(activation_post_process, ObserverBase):
+        return activation_post_process
+    else:
+        assert isinstance(activation_post_process, FakeQuantizeBase)
+        return activation_post_process.activation_post_process  # type: ignore[return-value]
+
 def _qconfig_satisfies_dtype_config_constraints(
         qconfig: QConfigAny,
         dtype_with_constraints: DTypeWithConstraints,
@@ -969,14 +956,15 @@ def _qconfig_satisfies_dtype_config_constraints(
     If `qconfig` or `dtype_with_constraints.dtype` is None, or the dtypes do not match, return True.
     """
     def _activation_post_process_satisfies_dtype_config_constraints(
-            activation_post_process: Union[ObserverBase, FakeQuantize],
+            activation_post_process: Union[ObserverBase, FakeQuantizeBase],
             dtype_with_constraints: DTypeWithConstraints,
             debug_string: str) -> bool:
-        app_quant_min = getattr(activation_post_process, "quant_min", None)
-        app_quant_max = getattr(activation_post_process, "quant_max", None)
+        observer = _get_observer_from_activation_post_process(activation_post_process)
+        app_quant_min = getattr(observer, "quant_min", None)
+        app_quant_max = getattr(observer, "quant_max", None)
         # TODO: for now, just use the existing eps value as scale_min. In the future, we should
         # resolve the differences between the two, either by renaming eps or some other way
-        app_scale_min = getattr(activation_post_process, "eps", None)
+        app_scale_min = getattr(observer, "eps", None)
         backend_quant_min = dtype_with_constraints.quant_min_lower_bound
         backend_quant_max = dtype_with_constraints.quant_max_upper_bound
         backend_scale_min = dtype_with_constraints.scale_min_lower_bound
