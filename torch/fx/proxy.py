@@ -13,6 +13,64 @@ import torch.fx.traceback as fx_traceback
 
 __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError', 'Proxy', 'Attribute', 'ParameterProxy']
 
+
+@compatibility(is_backward_compatible=False)
+class Scope(object):
+    """ Scope object that records the module path and the module type
+    of a module. Scope is used to track the information of the module
+    that contains a Node in a Graph of GraphModule. For example::
+
+        class Sub(torch.nn.Module):
+            def forward(self, x):
+                # This will be a call_method Node in GraphModule,
+                # scope for this would be (module_path="sub", module_type=Sub)
+                return x.transpose(1, 2)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                self.sub = Sub()
+
+            def forward(self, x):
+                # This will be a call_method Node as well,
+                # scope for this would be (module_path="", None)
+                x = x.transpose(1, 2)
+                x = self.sub(x)
+                return x
+
+    """
+
+    def __init__(self, module_path: str, module_type: Any):
+        super().__init__()
+        self.module_path = module_path
+        self.module_type = module_type
+
+
+@compatibility(is_backward_compatible=False)
+class ScopeContextManager(object):
+    """ A context manager to track the Scope of Node during symbolic tracing.
+    When entering a forward function of a Module, we'll update the scope information of
+    the current module, and when we exit, we'll restore the previous scope information.
+    """
+
+    def __init__(
+        self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
+    ):
+        super().__init__()
+        self.prev_module_type = scope.module_type
+        self.prev_module_path = scope.module_path
+        self.scope = scope
+        self.scope.module_path = current_module_path
+        self.scope.module_type = type(current_module)
+
+    def __enter__(self):
+        return
+
+    def __exit__(self, *args):
+        self.scope.module_path = self.prev_module_path
+        self.scope.module_type = self.prev_module_type
+        return
+
+
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
@@ -29,6 +87,12 @@ class TracerBase:
     # ``root`` is an instance of ``nn.Module``
     traced_func_name: str = "forward"
 
+    # Maps the containing module's name to the operator name
+    scope : Scope
+
+    # Mapping of node name to module scope
+    node_name_to_scope: Dict[str, Tuple[str, type]]
+
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
@@ -43,7 +107,13 @@ class TracerBase:
         if kind == 'call_function' and self.check_mutable_operations:
             check_for_mutable_operation(target, args, kwargs)
 
-        return self.graph.create_node(kind, target, args, kwargs, name, type_expr)
+        node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
+        self.node_name_to_scope[node.name] = (
+            self.scope.module_path,
+            self.scope.module_type,
+        )
+        node.meta['nn_module_stack'] = {self.scope.module_path : self.scope.module_type}
+        return node
 
     @compatibility(is_backward_compatible=True)
     def proxy(self, node: Node) -> 'Proxy':

@@ -27,8 +27,8 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
 from .graph_module import GraphModule
-from .node import Argument, base_types, map_aggregate, Target, Node
-from .proxy import ParameterProxy, Proxy, TracerBase
+from .node import Argument, base_types, map_aggregate
+from .proxy import ParameterProxy, Proxy, TracerBase, Scope, ScopeContextManager
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -43,62 +43,6 @@ _is_fx_tracing_flag = False
 
 def is_fx_tracing():
     return _is_fx_tracing_flag
-
-
-class Scope(object):
-    """ Scope object that records the module path and the module type
-    of a module. Scope is used to track the information of the module
-    that contains a Node in a Graph of GraphModule. For example::
-
-        class Sub(torch.nn.Module):
-            def forward(self, x):
-                # This will be a call_method Node in GraphModule,
-                # scope for this would be (module_path="sub", module_type=Sub)
-                return x.transpose(1, 2)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                self.sub = Sub()
-
-            def forward(self, x):
-                # This will be a call_method Node as well,
-                # scope for this would be (module_path="", None)
-                x = x.transpose(1, 2)
-                x = self.sub(x)
-                return x
-
-    """
-
-    def __init__(self, module_path: str, module_type: Any):
-        super().__init__()
-        self.module_path = module_path
-        self.module_type = module_type
-
-
-class ScopeContextManager(object):
-    """ A context manager to track the Scope of Node during symbolic tracing.
-    When entering a forward function of a Module, we'll update the scope information of
-    the current module, and when we exit, we'll restore the previous scope information.
-    """
-
-    def __init__(
-        self, scope: Scope, current_module: torch.nn.Module, current_module_path: str
-    ):
-        super().__init__()
-        self.prev_module_type = scope.module_type
-        self.prev_module_path = scope.module_path
-        self.scope = scope
-        self.scope.module_path = current_module_path
-        self.scope.module_type = type(current_module)
-
-    def __enter__(self):
-        return
-
-    def __exit__(self, *args):
-        self.scope.module_path = self.prev_module_path
-        self.scope.module_type = self.prev_module_type
-        return
-
 
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
@@ -308,6 +252,8 @@ class Tracer(TracerBase):
         self.root_module_name: str = ""
         # Maps the containing module's name to the operator name
         self.scope = Scope("", None)
+
+        # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
     @compatibility(is_backward_compatible=True)
@@ -495,23 +441,6 @@ class Tracer(TracerBase):
             else:
                 ret_val = self.create_proxy("call_module", module_qualified_name, args, kwargs)
         return ret_val
-
-    def create_node(
-        self,
-        kind: str,
-        target: Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None
-    ) -> Node:
-        node = super().create_node(kind, target, args, kwargs, name, type_expr)
-        self.node_name_to_scope[node.name] = (
-            self.scope.module_path,
-            self.scope.module_type,
-        )
-        node.meta['nn_module_stack'] = {self.scope.module_path : self.scope.module_type}
-        return node
 
     @compatibility(is_backward_compatible=False)
     def getattr(self, attr: str, attr_val: Any, parameter_proxy_cache: Dict[str, Any]):
