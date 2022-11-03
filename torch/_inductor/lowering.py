@@ -18,9 +18,12 @@ from torch._prims_common import (
 )
 
 from . import config, ir, overrides
+from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
+    IndexingConstant,
+    IndexingDiv,
     PermuteView,
     Pointwise,
     Reduction,
@@ -118,7 +121,7 @@ def decode_device(device):
     if isinstance(device, str):
         device = torch.device(device)
     if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=torch.cuda.current_device())
+        return torch.device("cuda", index=current_device())
     return device
 
 
@@ -259,7 +262,7 @@ def broadcast_symbolic_shapes(a, b):
 
 
 def promote_constants(inputs, override_return_dtype=None):
-    if not any(isinstance(x, (int, float)) for x in inputs):
+    if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
     if all(isinstance(x, (int, float)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
@@ -267,16 +270,20 @@ def promote_constants(inputs, override_return_dtype=None):
         )
         return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, TensorBox))
-    return [
-        (
-            ExpandView.create(
-                ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+    out = []
+    for x in inputs:
+        if isinstance(x, (int, float)):
+            out.append(
+                ExpandView.create(
+                    ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
+                )
             )
-            if isinstance(x, (int, float))
-            else x
-        )
-        for x in inputs
-    ]
+        elif isinstance(x, sympy.Expr):
+            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+        else:
+            out.append(x)
+
+    return out
 
 
 def make_pointwise(
@@ -284,6 +291,7 @@ def make_pointwise(
     override_return_dtype=None,
     override_device=None,
     override_fn_when_input_bool=None,
+    override_fn_when_cuda_float64=None,
     allow_alpha=False,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
@@ -297,6 +305,7 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
+        is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -307,11 +316,24 @@ def make_pointwise(
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
+            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
+                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
                 return fn(*[load(index) for load in loaders])
 
+        if not override_device:
+            device = None
+            for i in inputs:
+                if i.get_device().type == "cuda":
+                    device = i.get_device()
+                    break
+            if not device:
+                device = inputs[0].get_device()
+
+        device = override_device or device
+
         return Pointwise.create(
-            device=override_device or inputs[0].get_device(),
+            device=device,
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -409,10 +431,13 @@ def register_pointwise(
     override_return_dtype=None,
     override_fn_when_input_bool=None,
     allow_alpha=False,
+    use_libdevice_for_f64=False,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
     fn = ops_wrapper(name)
+    if use_libdevice_for_f64:
+        fn_libdevice = ops_wrapper("libdevice_" + name)
     if override_fn_when_input_bool is not None:
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
@@ -420,6 +445,7 @@ def register_pointwise(
         fn,
         override_return_dtype=override_return_dtype,
         override_fn_when_input_bool=override_fn_when_input_bool,
+        override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,
         allow_alpha=allow_alpha,
     )
     fn = register_lowering(
@@ -616,8 +642,8 @@ def repeat(x, repeats):
     new_size = list(x.get_size())
 
     for i in range(len(repeats)):
-        assert repeats[i] >= 1
-        if repeats[i] > 1:
+        assert repeats[i] != 0
+        if repeats[i] != 1:
             new_size[i] = new_size[i] * repeats[i]
 
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
@@ -627,7 +653,7 @@ def repeat(x, repeats):
         assert len(index) == len(repeats)
         index = list(index)
         for i in range(len(repeats)):
-            if repeats[i] > 1:
+            if repeats[i] != 1:
                 if old_size[i] == 1:
                     index[i] = sympy.Integer(0)
                 else:
@@ -860,6 +886,44 @@ def bmm(a: TensorBox, b: TensorBox):
     return TensorBox.create(ir.BatchMatrixMultiply.create(a, b))
 
 
+def register_onednn_fusion_ops():
+    if torch._C.has_mkldnn:
+
+        @register_lowering(torch.ops.mkldnn._convolution_pointwise)
+        def convolution_unary(
+            x: TensorBox,
+            weight: TensorBox,
+            bias: TensorBox,
+            padding,
+            stride,
+            dilation,
+            groups,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.ConvolutionUnary.create(
+                    x,
+                    weight,
+                    bias,
+                    padding,
+                    stride,
+                    dilation,
+                    groups,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
+    else:
+        pass
+
+
+register_onednn_fusion_ops()
+
+
 def fallback_handler(kernel):
     fallbacks.add(kernel)
 
@@ -1074,11 +1138,16 @@ def convolution(
     output_padding: List[int],
     groups: int,
 ):
+    is_cpu = all(
+        input.get_device().type == "cpu"
+        for input in (x, weight, bias)
+        if input is not None
+    )
     result = TensorBox.create(
         ir.Convolution.create(
             x,
             weight,
-            None,  # bias handled below
+            bias if is_cpu else None,  # For cpu path, bias can always be fused
             stride,
             padding,
             dilation,
@@ -1087,7 +1156,7 @@ def convolution(
             groups,
         )
     )
-    if bias is not None:
+    if not is_cpu and bias is not None:
         kernel_dims = len(weight.get_size()) - 2
         out_chan = result.get_size()[-1 - kernel_dims]
         bias = view(bias, [out_chan] + kernel_dims * [1])
@@ -1915,25 +1984,20 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-@register_lowering(aten.upsample_nearest2d)
-def upsample_nearest2d(x, output_size=None, scale_factors=None):
+def upsample_nearestnd(x, output_size=None, scale_factors=None, n=2):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
-
-    *batch, ih, iw = x.get_size()
-    ih = V.graph.sizevars.guard_static_shape(ih)
-    iw = V.graph.sizevars.guard_static_shape(iw)
+    i_sizes = x.get_size()[-n:]
+    batch = x.get_size()[:-n]
+    i_sizes = [V.graph.sizevars.guard_static_shape(i) for i in i_sizes]
 
     if scale_factors:
         assert not output_size
-        sh, sw = scale_factors
-        oh = int(ih * sh)
-        ow = int(iw * sw)
+        o_sizes = [int(i * s) for i, s in zip(i_sizes, scale_factors)]
     else:
-        oh, ow = output_size
+        o_sizes = output_size
 
-    scale_h = ih / oh
-    scale_w = iw / ow
+    scales = [i / o for i, o in zip(i_sizes, o_sizes)]
 
     def scale(x, scale):
         x = ops.index_expr(x, torch.float32)
@@ -1942,15 +2006,21 @@ def upsample_nearest2d(x, output_size=None, scale_factors=None):
         return ops.indirect_indexing(x)
 
     def fn(idx):
-        *b, x, y = idx
-        return x_loader([*b, scale(x, scale_h), scale(y, scale_w)])
+        x = idx[-n:]
+        b = idx[:-n]
+        return x_loader([*b, *[scale(i, s) for i, s in zip(x, scales)]])
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
-        ranges=[*batch, sympy.Integer(oh), sympy.Integer(ow)],
+        ranges=[*batch, *o_sizes],
     )
+
+
+register_lowering(aten.upsample_nearest1d)(functools.partial(upsample_nearestnd, n=1))
+register_lowering(aten.upsample_nearest2d)(functools.partial(upsample_nearestnd, n=2))
+register_lowering(aten.upsample_nearest3d)(functools.partial(upsample_nearestnd, n=3))
 
 
 @register_lowering(aten.upsample_bicubic2d.default)
@@ -3051,6 +3121,8 @@ def pow(a, b):
         ), "Pow input must be floating point."
     if isinstance(b, float) and b == int(b):
         return pow(a, int(b))
+    elif isinstance(b, float) and b == 0.5:
+        return sqrt(a)
     elif isinstance(b, int) and b == 1:
         return a
     elif isinstance(b, int) and -32 < b < 32:
@@ -3224,23 +3296,33 @@ add = register_pointwise(
     aten.add, allow_alpha=True, override_fn_when_input_bool="logical_or"
 )
 exp = register_pointwise(
-    aten.exp, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.exp,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 relu = register_pointwise(aten.relu)
 sigmoid = register_pointwise(
-    aten.sigmoid, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.sigmoid,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 sqrt = register_pointwise(
-    aten.sqrt, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.sqrt,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
 
 register_pointwise(
-    aten.cos, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.cos,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(
-    aten.sin, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.sin,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(aten.abs)
 register_pointwise(aten.bitwise_and)
@@ -3251,7 +3333,9 @@ register_pointwise(
     aten.lgamma, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 register_pointwise(
-    aten.log, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+    aten.log,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    use_libdevice_for_f64=True,
 )
 register_pointwise(aten.logical_not, convert_input_to_bool=True)
 register_pointwise(aten.maximum)
@@ -3262,9 +3346,6 @@ register_pointwise(
 )
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
-register_pointwise(
-    aten.silu, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-)
 register_pointwise(aten.ceil)
 register_pointwise(aten.fmod)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
@@ -3315,9 +3396,24 @@ def sym_size(a, dim):
     return a.get_size()[dim]
 
 
+@register_lowering(aten.sym_numel)
+def sym_numel(a):
+    return a.get_numel()
+
+
 @register_lowering(operator.mul)
 def op_mul(a, b):
     return a * b
+
+
+@register_lowering(operator.add)
+def op_add(a, b):
+    return a + b
+
+
+@register_lowering(operator.floordiv)
+def op_floordiv(a, b):
+    return IndexingDiv(a, b)
 
 
 @register_lowering(aten._foobar)

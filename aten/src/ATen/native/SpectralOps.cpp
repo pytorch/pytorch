@@ -1,16 +1,67 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cufft_clear_plan_cache_native.h>
+#include <ATen/ops/_cufft_get_plan_cache_max_size_native.h>
+#include <ATen/ops/_cufft_get_plan_cache_size_native.h>
+#include <ATen/ops/_cufft_set_plan_cache_max_size_native.h>
+#include <ATen/ops/_fft_c2c.h>
+#include <ATen/ops/_fft_c2r.h>
+#include <ATen/ops/_fft_r2c.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/arange_native.h>
+#include <ATen/ops/conj.h>
+#include <ATen/ops/conj_physical.h>
+#include <ATen/ops/constant_pad_nd.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/fft_fft2_native.h>
+#include <ATen/ops/fft_fft_native.h>
+#include <ATen/ops/fft_fftfreq_native.h>
+#include <ATen/ops/fft_fftn_native.h>
+#include <ATen/ops/fft_fftshift_native.h>
+#include <ATen/ops/fft_hfft2_native.h>
+#include <ATen/ops/fft_hfft_native.h>
+#include <ATen/ops/fft_hfftn_native.h>
+#include <ATen/ops/fft_ifft2_native.h>
+#include <ATen/ops/fft_ifft_native.h>
+#include <ATen/ops/fft_ifftn_native.h>
+#include <ATen/ops/fft_ifftshift_native.h>
+#include <ATen/ops/fft_ihfft2_native.h>
+#include <ATen/ops/fft_ihfft_native.h>
+#include <ATen/ops/fft_ihfftn_native.h>
+#include <ATen/ops/fft_irfft2_native.h>
+#include <ATen/ops/fft_irfft_native.h>
+#include <ATen/ops/fft_irfftn_native.h>
+#include <ATen/ops/fft_rfft2_native.h>
+#include <ATen/ops/fft_rfft_native.h>
+#include <ATen/ops/fft_rfftfreq_native.h>
+#include <ATen/ops/fft_rfftn_native.h>
+#include <ATen/ops/istft_native.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/pad.h>
+#include <ATen/ops/roll.h>
+#include <ATen/ops/stft.h>
+#include <ATen/ops/stft_native.h>
+#include <ATen/ops/unfold_backward.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like_ops.h>
+#endif
+
 #include <algorithm>
-#include <vector>
-#include <cmath>
 
 namespace at { namespace native {
 
@@ -157,7 +208,7 @@ Tensor fft_c2r(c10::string_view function_name,
   const auto norm = norm_from_string(norm_str, forward);
   if (forward) {
     // FIXME: _fft does not support complex_output=false with inverse=false
-    input = at::conj(input);
+    input = input.conj();
   }
   return fft_c2r_maybe_out(
       function_name, out, input, dim, static_cast<int64_t>(norm), n);
@@ -192,7 +243,7 @@ Tensor fft_r2c(c10::string_view function_name,
 
   if (!forward) {
     // FIXME: _fft_r2c doesn't support native r2c IFFT
-    return out.defined() ? at::conj_physical_out(out, ret) : at::conj(ret);
+    return out.defined() ? at::conj_physical_out(out, ret) : ret.conj();
   } else {
     return ret;
   }
@@ -521,7 +572,7 @@ static Tensor fft_hfftn_impl(
   }
 
   const auto last_dim = desc.dim.back();
-  tmp = at::conj(tmp);
+  tmp = tmp.conj();
   return fft_c2r_maybe_out(fname, out, tmp, last_dim, norm, last_dim_size);
 }
 
@@ -559,7 +610,7 @@ static Tensor fft_ihfftn_impl(
   const auto last_dim = desc.dim.back();
   auto tmp = at::_fft_r2c(x, last_dim, norm, /*onesided=*/true);
   if (desc.dim.size() == 1) {
-    return out.defined() ? at::conj_physical_out(tmp, out) : at::conj(tmp);
+    return out.defined() ? at::conj_physical_out(tmp, out) : tmp.conj();
   }
 
   tmp = at::conj_physical(tmp);
@@ -971,12 +1022,10 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   const auto win_length = win_lengthOpt.value_or(n_fft);
 
-  if (!self.is_complex()) {
-    TORCH_WARN_ONCE(
-      "istft will require a complex-valued input tensor in a future PyTorch release. "
-      "Matching the output from stft with return_complex=True. ");
-  }
-  Tensor input = self.is_complex() ? self.is_conj() ? at::view_as_real(self.resolve_conj()) : at::view_as_real(self) : self;
+  TORCH_CHECK(self.is_complex(),
+              "istft requires a complex-valued input tensor matching the "
+              "output from stft with return_complex=True.");
+  Tensor input = at::view_as_real(self.resolve_conj());
   const auto input_dim = input.dim();
   const auto n_frames = input.size(-2);
   const auto fft_size = input.size(-3);
@@ -1046,7 +1095,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     input = input.unsqueeze(0);
   }
 
-  input = as_complex(input.transpose(1, 2));  // size: (channel, n_frames, fft_size, 2)
+  input = as_complex(input.transpose(1, 2));  // size: (channel, n_frames, fft_size)
 
   const fft_norm_mode norm = normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n;
   if (return_complex) {
@@ -1063,26 +1112,23 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   TORCH_INTERNAL_ASSERT(input.size(2) == n_fft);
 
   Tensor y_tmp = input * window_tmp.view({1, 1, n_fft});  // size: (channel, n_frames, n_fft)
-  y_tmp = y_tmp.transpose(1, 2);  // size: (channel, n_fft, frame)
 
-  Tensor y = at::col2im(y_tmp,
-                                  /*output_size*/ {1, (n_frames - 1) * hop_length + n_fft},
-                                  /*kernel_size*/ {1, n_fft},
-                                  /*dilation*/    {1, 1},
-                                  /*padding*/     {0, 0},
-                                  /*stride*/      {1, hop_length}
-                                 ).squeeze(2);
-  window_tmp = window_tmp.pow(2).view({n_fft, 1}).repeat({1, n_frames}).unsqueeze(0);  // size: (1, n_fft, n_frames)
-  Tensor window_envelop = at::col2im(window_tmp,
-                                  /*output_size*/ {1, (n_frames - 1) * hop_length + n_fft},
-                                  /*kernel_size*/ {1, n_fft},
-                                  /*dilation*/    {1, 1},
-                                  /*padding*/     {0, 0},
-                                  /*stride*/      {1, hop_length}
-                                 ).squeeze(2); // size: (1, 1, expected_output_signal_len)
+  Tensor y = at::unfold_backward(
+    y_tmp,
+    /*input_sizes=*/{y_tmp.size(0), expected_output_signal_len},
+    /*dim=*/1,
+    /*size=*/n_fft,
+    /*step=*/hop_length);
+  window_tmp = window_tmp.pow(2).expand({1, n_frames, n_fft});  // size: (1, n_frames, n_fft)
+  Tensor window_envelop = at::unfold_backward(
+    window_tmp,
+    /*input_sizes=*/{1, expected_output_signal_len},
+    /*dim=*/1,
+    /*size=*/n_fft,
+    /*step=*/hop_length); // size: (1, expected_output_signal_len)
 
-  TORCH_INTERNAL_ASSERT(expected_output_signal_len == y.size(2));
-  TORCH_INTERNAL_ASSERT(expected_output_signal_len == window_envelop.size(2));
+  TORCH_INTERNAL_ASSERT(expected_output_signal_len == y.size(1));
+  TORCH_INTERNAL_ASSERT(expected_output_signal_len == window_envelop.size(1));
 
   // We need to trim the front padding away if centered
   const auto start = center ? n_fft / 2 : 0;
@@ -1096,8 +1142,8 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     return expected_output_signal_len;
   }();
 
-  y = y.slice(2, start, end, 1);
-  window_envelop = window_envelop.slice(2, start, end, 1);
+  y = y.slice(1, start, end, 1);
+  window_envelop = window_envelop.slice(1, start, end, 1);
   const auto window_envelop_lowest = window_envelop.abs().min().lt(1e-11);
   if (at::is_scalar_tensor_true(window_envelop_lowest)) {
     std::ostringstream ss;
@@ -1105,7 +1151,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     AT_ERROR(ss.str());
   }
 
-  y = (y / window_envelop).squeeze(1);  // size: (channel, expected_output_signal_len)
+  y = (y / window_envelop);  // size: (channel, expected_output_signal_len)
   if (input_dim == 3) {
     y = y.squeeze(0);
   }

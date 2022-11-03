@@ -369,6 +369,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
 
     out = flat_fn(*flat_args)
+    # Collect info on which output tensors require gradients,
+    # so we can mark them properly in the returned autograd.Function
+    _flat_outs_not_requiring_grad, _ = pytree.tree_flatten(
+        pytree.tree_map(
+            lambda x: isinstance(x, Tensor) and not x.requires_grad, out
+        )
+    )
     out = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
         out,
@@ -435,6 +442,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         compiled_bw = None
         num_outs = _num_outs
         num_symints = _num_symints
+        flat_outs_not_requiring_grad = _flat_outs_not_requiring_grad
 
         @staticmethod
         @disable_torchdynamo
@@ -451,6 +459,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             else:
                 ctx.save_for_backward(*fw_outs[num_outs:])
                 ctx.symints = []
+
+            fw_outs_not_requiring_grad = [
+                x for (i, x) in enumerate(fw_outs[0:num_outs]) if CompiledFunction.flat_outs_not_requiring_grad[i]
+            ]
+            ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
@@ -591,7 +605,7 @@ class PytreeThunk:
             return x
         return pytree.tree_unflatten(x, self.spec)
 
-KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymIntNode, torch.SymFloatNode]
+KNOWN_TYPES = [torch.Tensor, int, str, float, bool, torch.SymInt, torch.SymFloat]
 
 
 def aot_function(

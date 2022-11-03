@@ -7,6 +7,7 @@ from typing import Callable, List, Tuple
 import numpy
 
 import torch
+from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.common_utils import TEST_SCIPY
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
@@ -14,7 +15,6 @@ from torch.testing._internal.opinfo.core import (
     OpInfo,
     SampleInput,
 )
-from torch.testing._legacy import floating_types_and
 
 if TEST_SCIPY:
     import scipy.signal
@@ -59,7 +59,7 @@ def reference_inputs_window(op_info, device, dtype, requires_grad, *args, **kwar
 
 
 def reference_inputs_exponential_window(
-    op_info, device, dtype, requires_grad, **kwargs
+        op_info, device, dtype, requires_grad, **kwargs
 ):
     yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
 
@@ -88,6 +88,23 @@ def reference_inputs_gaussian_window(op_info, device, dtype, requires_grad, **kw
         (64, {"std": 3.9}),
         (128, {"std": 4.5}),
         (256, {"std": 10}),
+    )
+
+    for size, kw in cases:
+        yield SampleInput(size, sym=False, **kw)
+        yield SampleInput(size, sym=True, **kw)
+
+
+def reference_inputs_kaiser_window(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_window(op_info, device, dtype, requires_grad, **kwargs)
+
+    cases = (
+        (8, {"beta": 2}),
+        (16, {"beta": 12}),
+        (32, {"beta": 30}),
+        (64, {"beta": 35}),
+        (128, {"beta": 41.2}),
+        (256, {"beta": 100}),
     )
 
     for size, kw in cases:
@@ -156,6 +173,18 @@ def error_inputs_gaussian_window(op_info, device, **kwargs):
     )
 
 
+def error_inputs_kaiser_window(op_info, device, **kwargs):
+    # Yield common error inputs
+    yield from error_inputs_window(op_info, device, beta=12, **kwargs)
+
+    # Tests for negative beta
+    yield ErrorInput(
+        SampleInput(3, beta=-1, dtype=torch.float32, device=device, **kwargs),
+        error_type=ValueError,
+        error_regex="beta must be non-negative, got: -1 instead.",
+    )
+
+
 def reference_signal_window(fn: Callable):
     r"""Wrapper for scipy signal window references.
 
@@ -164,12 +193,12 @@ def reference_signal_window(fn: Callable):
     """
 
     def _fn(
-        *args,
-        dtype=numpy.float64,
-        device=None,
-        layout=torch.strided,
-        requires_grad=False,
-        **kwargs,
+            *args,
+            dtype=numpy.float64,
+            device=None,
+            layout=torch.strided,
+            requires_grad=False,
+            **kwargs,
     ):
         r"""The unused arguments are defined to disregard those values"""
         return fn(*args, **kwargs).astype(dtype)
@@ -178,13 +207,13 @@ def reference_signal_window(fn: Callable):
 
 
 def make_signal_windows_opinfo(
-    name: str,
-    ref: Callable,
-    sample_inputs_func: Callable,
-    reference_inputs_func: Callable,
-    error_inputs_func: Callable,
-    *,
-    skips: Tuple[DecorateInfo, ...] = (),
+        name: str,
+        ref: Callable,
+        sample_inputs_func: Callable,
+        reference_inputs_func: Callable,
+        error_inputs_func: Callable,
+        *,
+        skips: Tuple[DecorateInfo, ...] = (),
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
@@ -248,144 +277,7 @@ def make_signal_windows_opinfo(
 
 
 op_db: List[OpInfo] = [
-    make_signal_windows_opinfo(
-        name="signal.windows.cosine",
-        ref=reference_signal_window(scipy.signal.windows.cosine)
-        if TEST_SCIPY
-        else None,
-        sample_inputs_func=sample_inputs_window,
-        reference_inputs_func=reference_inputs_window,
-        error_inputs_func=error_inputs_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
-    ),
-    make_signal_windows_opinfo(
-        name="signal.windows.exponential",
-        ref=reference_signal_window(scipy.signal.windows.exponential)
-        if TEST_SCIPY
-        else None,
-        sample_inputs_func=partial(sample_inputs_window, tau=2.78),
-        reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
-        error_inputs_func=error_inputs_exponential_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
-    ),
-    make_signal_windows_opinfo(
-        name="signal.windows.gaussian",
-        ref=reference_signal_window(scipy.signal.windows.gaussian)
-        if TEST_SCIPY
-        else None,
-        sample_inputs_func=partial(sample_inputs_window, std=1.92),
-        reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
-        error_inputs_func=error_inputs_gaussian_window,
-        skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestMeta",
-                "test_dispatch_symbolic_meta",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestSchemaCheckModeOpInfo",
-                "test_schema_correctness",
-                dtypes=[torch.float16],
-                device_type="cpu",
-            ),
-        ),
-    ),
+
     make_signal_windows_opinfo(
         name="signal.windows.hamming",
         ref=reference_signal_window(scipy.signal.windows.hamming)
@@ -528,6 +420,173 @@ op_db: List[OpInfo] = [
                 "test_schema_correctness",
                 dtypes=[torch.float16],
                 device_type="cpu",
+            )
+        ),
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.cosine",
+        ref=reference_signal_window(scipy.signal.windows.cosine)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=sample_inputs_window,
+        reference_inputs_func=reference_inputs_window,
+        error_inputs_func=error_inputs_window,
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            )
+        )
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.exponential",
+        ref=reference_signal_window(scipy.signal.windows.exponential)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=partial(sample_inputs_window, tau=2.78),
+        reference_inputs_func=partial(reference_inputs_exponential_window, tau=2.78),
+        error_inputs_func=error_inputs_exponential_window,
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu"),
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.gaussian",
+        ref=reference_signal_window(scipy.signal.windows.gaussian)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=partial(sample_inputs_window, std=1.92),
+        reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
+        error_inputs_func=error_inputs_gaussian_window,
+        skips=(
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta",
+                dtypes=[torch.float16],
+                device_type="cpu",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestSchemaCheckModeOpInfo",
+                "test_schema_correctness",
+                dtypes=[torch.float16],
+                device_type="cpu"),
+            DecorateInfo(
+                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
+                "TestCommon",
+                "test_numpy_ref_mps",
+            ),
+        ),
+    ),
+    make_signal_windows_opinfo(
+        name="signal.windows.kaiser",
+        ref=reference_signal_window(scipy.signal.windows.kaiser)
+        if TEST_SCIPY
+        else None,
+        sample_inputs_func=partial(sample_inputs_window, beta=12.0),
+        reference_inputs_func=partial(reference_inputs_kaiser_window, beta=12.0),
+        error_inputs_func=error_inputs_kaiser_window,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now pending aten::i0 support"),
+                "TestCommon",
+                "test_numpy_ref_mps",
             ),
         ),
     ),

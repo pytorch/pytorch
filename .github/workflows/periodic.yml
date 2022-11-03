@@ -34,20 +34,20 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_6-py3-gcc7-slow-gradcheck-build.outputs.test-matrix }}
 
-  linux-focal-rocm5_2-py3_7-slow-build:
-    name: linux-focal-rocm5.2-py3.7-slow
+  linux-focal-rocm5_2-py3_8-slow-build:
+    name: linux-focal-rocm5.2-py3.8-slow
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.2-py3.7
-      docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
 
-  linux-focal-rocm5_2-py3_7-slow-test:
-    name: linux-focal-rocm5.2-py3.7-slow
+  linux-focal-rocm5_2-py3_8-slow-test:
+    name: linux-focal-rocm5.2-py3.8-slow
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_2-py3_7-slow-build
+    needs: linux-focal-rocm5_2-py3_8-slow-build
     with:
-      build-environment: linux-focal-rocm5.2-py3.7
-      docker-image: ${{ needs.linux-focal-rocm5_2-py3_7-slow-build.outputs.docker-image }}
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-slow-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.rocm.gpu" },
@@ -56,20 +56,20 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
-  linux-focal-rocm5_2-py3_7-distributed-build:
-    name: linux-focal-rocm5.2-py3.7-distributed
+  linux-focal-rocm5_2-py3_8-distributed-build:
+    name: linux-focal-rocm5.2-py3.8-distributed
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.2-py3.7
-      docker-image-name: pytorch-linux-focal-rocm5.2-py3.7
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image-name: pytorch-linux-focal-rocm5.2-py3.8
 
-  linux-focal-rocm5_2-py3_7-distributed-test:
-    name: linux-focal-rocm5.2-py3.7-distributed
+  linux-focal-rocm5_2-py3_8-distributed-test:
+    name: linux-focal-rocm5.2-py3.8-distributed
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_2-py3_7-distributed-build
+    needs: linux-focal-rocm5_2-py3_8-distributed-build
     with:
-      build-environment: linux-focal-rocm5.2-py3.7
-      docker-image: ${{ needs.linux-focal-rocm5_2-py3_7-distributed-build.outputs.docker-image }}
+      build-environment: linux-focal-rocm5.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_2-py3_8-distributed-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
@@ -147,31 +147,6 @@ jobs:
       build-environment: linux-bionic-cuda11.7-py3.7-gcc7-debug
       docker-image: ${{ needs.linux-bionic-cuda11_7-py3_7-gcc7-debug-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_7-py3_7-gcc7-debug-build.outputs.test-matrix }}
-
-  linux-bionic-cuda11_6-py3_10-gcc7-sm86-build:
-    name: cuda11.6-py3.10-gcc7-sm86
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-      cuda-arch-list: 8.6
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-
-  linux-bionic-cuda11_6-py3_10-gcc7-sm86-test:
-    name: cuda11.6-py3.10-gcc7-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_10-gcc7-sm86-build
-    with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-sm86-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-sm86-build.outputs.test-matrix }}
 
   libtorch-linux-bionic-cuda11_7-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.7-py3.7-gcc7

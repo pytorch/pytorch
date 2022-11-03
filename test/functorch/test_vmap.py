@@ -1663,6 +1663,12 @@ class TestVmapOperators(Namespace.TestVmapBase):
             return op
 
         test(get_op(0), (torch.rand(B0, 2), torch.rand(B0, 3)))
+        test(get_op(0), (torch.rand(B0, 0), torch.rand(B0, 0)))
+        test(get_op(0), (torch.rand(2), torch.rand(B0, 0)), in_dims=(None, 0))
+        test(get_op(1), (torch.rand(2, 5), torch.rand(B0, 0), torch.rand(2, 3)), in_dims=(None, 0, None))
+        test(get_op(1), (torch.rand(B0, 2, 3), torch.rand(B0, 0)))
+        test(get_op(1), (torch.rand(B0, 2, 3, 4), torch.rand(0)), in_dims=(0, None))
+        test(get_op(0), (torch.rand(0), torch.rand(B0, 2), torch.rand(B0, 0)), in_dims=(None, 0, 0))
         test(get_op(0), (torch.rand(2), torch.rand(B0, 3)), in_dims=(None, 0))
         test(get_op(0), (torch.rand(2, 17), torch.rand(3, 17, B0)), in_dims=(None, 2))
         test(get_op(-1), (torch.rand(17, 2), torch.rand(17, 3, B0)), in_dims=(None, 2))
@@ -3230,7 +3236,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
         xfail('cross'),  # The default value of dim in op is *very* weird. No wonder it doesn't work
-        xfail('linalg.cross'),  # Issue #83936
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
@@ -3263,6 +3268,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('int'),
         xfail('long'),
         xfail('short'),
+        xfail('cdouble'),
+        xfail('cfloat'),
 
         xfail('jiterator_binary', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
         xfail('jiterator_binary_return_by_ref', device_type='cuda'),  # NYI: querying is_contiguous inside of vmap
@@ -3285,8 +3292,9 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
-        xfail('cat'),
         xfail('native_batch_norm'),
+        # The error inputs are vectors, that pass when batched as they are treated as a matrix
+        xfail('trace'),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3303,7 +3311,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('cat'),
         xfail('complex'),
         xfail('copysign'),
         xfail('native_batch_norm'),
@@ -3324,7 +3331,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
-        xfail('narrow_copy'),  # hit the vmap fallback which is currently disabled
         xfail('ormqr'),
         xfail('put'),
         xfail('quantile'),
@@ -3344,6 +3350,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
+        xfail('trace'),  # Does not support batched tensors
         xfail('bucketize'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
@@ -3860,7 +3867,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.vector_norm'),  # can accept vector inputs
         xfail('linalg.norm'),  # can accept vector inputs
         xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
-        xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
         xfail('linalg.vecdot'),

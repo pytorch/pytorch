@@ -25,3 +25,4 @@ torch.signal.windows
     gaussian
     hamming
     hann
+    kaiser

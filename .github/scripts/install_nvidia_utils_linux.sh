@@ -26,18 +26,30 @@ install_nvidia_driver_amzn2() {
         # Purge any nvidia driver installed from RHEL repo
         sudo yum remove -y nvidia-driver-latest-dkms
 
+        # Try to gather more information about the runner and its existing NVIDIA driver if any
+        echo "Before installing NVIDIA driver"
+        lspci
+        lsmod
+        modinfo nvidia || true
+
         HAS_NVIDIA_DRIVER=0
         # Check if NVIDIA driver has already been installed
         if [ -x "$(command -v nvidia-smi)" ]; then
-            # The driver exists, check its version next
-            INSTALLED_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
+            set +e
+            # The driver exists, check its version next. Also check only the first GPU if there are more than one of them
+            # so that the same driver version is not print over multiple lines
+            INSTALLED_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader --id=0)
+            NVIDIA_SMI_STATUS=$?
 
-            if [ "$INSTALLED_DRIVER_VERSION" != "$DRIVER_VERSION" ]; then
+            if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
+                echo "Failed to get NVIDIA driver version ($INSTALLED_DRIVER_VERSION). Continuing"
+            elif [ "$INSTALLED_DRIVER_VERSION" != "$DRIVER_VERSION" ]; then
                 echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has been installed, but we expect to have $DRIVER_VERSION instead. Continuing"
             else
                 HAS_NVIDIA_DRIVER=1
                 echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has already been installed. Skipping NVIDIA driver installation"
             fi
+            set -e
         fi
 
         if [ "$HAS_NVIDIA_DRIVER" -eq 0 ]; then
@@ -51,7 +63,26 @@ install_nvidia_driver_amzn2() {
             sudo rm -fv /tmp/nvidia_driver
         fi
 
-        nvidia-smi
+        sudo modprobe nvidia || true
+        echo "After installing NVIDIA driver"
+        lspci
+        lsmod
+        modinfo nvidia || true
+
+        (
+            set +e
+            nvidia-smi
+            NVIDIA_SMI_STATUS=$?
+
+            # Allowable exit statuses for nvidia-smi, see: https://github.com/NVIDIA/gpu-operator/issues/285
+            if [ "$NVIDIA_SMI_STATUS" -eq 0 ] || [ "$NVIDIA_SMI_STATUS" -eq 14 ]; then
+                echo "INFO: Ignoring allowed status ${NVIDIA_SMI_STATUS}"
+            else
+                echo "ERROR: nvidia-smi exited with unresolved status ${NVIDIA_SMI_STATUS}"
+                exit ${NVIDIA_SMI_STATUS}
+            fi
+            set -e
+        )
     )
 }
 

@@ -1,5 +1,3 @@
-import warnings
-
 from .windows import (
     bartlett,
     blackman,
@@ -8,6 +6,7 @@ from .windows import (
     gaussian,
     hamming,
     hann,
+    kaiser,
 )
 
 
@@ -19,4 +18,5 @@ __all__ = [
     'gaussian',
     'hamming',
     'hann',
+    'kaiser',
 ]

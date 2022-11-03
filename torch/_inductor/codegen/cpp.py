@@ -10,7 +10,7 @@ import torch
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config
-from ..utils import sympy_product
+from ..utils import sympy_product, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -307,6 +307,11 @@ class CppOverrides(OpOverrides):
     def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
 
+    @staticmethod
+    def sigmoid(x):
+        x = ops.exp(f"-{x}")
+        return f"1 / (1 + {x})"
+
 
 class CppKernel(Kernel):
     overrides = CppOverrides
@@ -397,7 +402,7 @@ class CppKernel(Kernel):
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-            self.itervars = [sympy.Symbol(f"i{n}") for n in range(len(self.ranges))]
+            self.itervars = [sympy_symbol(f"i{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],

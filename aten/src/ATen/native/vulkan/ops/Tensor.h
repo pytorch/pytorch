@@ -2,7 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <c10/util/accumulate.h>
@@ -34,10 +34,12 @@ class vTensorStorage final {
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
+      const api::StorageType storage_type,
       const TensorOptions& options);
   vTensorStorage(
       api::Context* context,
       IntArrayRef sizes,
+      const api::StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -66,6 +68,7 @@ class vTensorStorage final {
   int64_t q_zero_point{0u};
 
   // Image Texture
+  api::StorageType storage_type_;
   mutable api::VulkanImage image_;
 
   // Last Access - used to insert memory barriers
@@ -96,9 +99,24 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
+
+  vTensor(
+      api::Context* context,
+      IntArrayRef sizes,
+      const api::StorageType storage_type,
+      const TensorOptions& options);
+
   vTensor(
       api::Context* const context,
       const IntArrayRef sizes,
+      const TensorOptions& options,
+      double q_scale,
+      int64_t q_zero_point);
+
+  vTensor(
+      api::Context* const context,
+      const IntArrayRef sizes,
+      const api::StorageType storage_type,
       const TensorOptions& options,
       double q_scale,
       int64_t q_zero_point);
@@ -127,6 +145,10 @@ class vTensor final {
   /*
    Texture Access
   */
+
+  inline api::StorageType storage_type() const {
+    return view_->storage_type_;
+  }
 
   api::VulkanImage& image(api::PipelineBarrier&, const api::PipelineStageFlags)
       const&;

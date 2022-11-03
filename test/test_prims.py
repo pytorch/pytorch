@@ -215,6 +215,29 @@ class TestPrims(TestCase):
         )
         self.assertFalse(include_any_nvprims_sin)
 
+    def test_partitioner_tuple_output(self, device):
+        # This test verifies that the partitioner doesn't segment on nodes with
+        # tuple outputs.
+        from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+        from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
+
+        a = make_tensor(5, 3, 3, device=device, dtype=torch.float32)
+
+        def func(x):
+            xx = torch.ops.nvprims.add(x, 1)
+            var, mean = torch.ops.nvprims.var_mean(x, correction=0)
+            var_cos = torch.ops.nvprims.cos(var)
+            mean_sin = torch.ops.nvprims.sin(mean)
+            return torch.ops.nvprims.add(var_cos, mean_sin)
+
+        gm = make_fx(func)(a)
+        supported_ops = NvfuserPrimOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            gm, supported_ops, allows_single_node_partition=False
+        )
+        partitions = partitioner.propose_partitions()
+        self.assertEqual(len(partitions), 1)
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_empty_fusion(self, device):
@@ -345,7 +368,7 @@ class TestPrims(TestCase):
     def test_nvfuser_executor_cached_noncontiguous(self, device):
         # This test is to ensure that nvfuser computes correct results for noncontiguous tensors
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 3, device=device)
@@ -353,16 +376,18 @@ class TestPrims(TestCase):
         def func(a):
             return torch.sigmoid(a)
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
         # First run to create the cache
-        execute(gm, a, executor="nvfuser")
+        execute(gm, a, executor="strictly_nvfuser")
 
         # a.mT is noncontiguous, but it shouldn't affect correctness
         expected = execute(gm, a.mT, executor="aten")
-        actual = execute(gm, a.mT, executor="nvfuser")
-        self.assertEqual(expected, actual)
+        for use_python_cache in [True, False]:
+            params = {"use_python_fusion_cache": use_python_cache}
+            actual = execute(gm, a.mT, executor="strictly_nvfuser", executor_parameters=params)
+            self.assertEqual(expected, actual)
 
     def test_nvfuser_capability_context(self, device):
         # This test is to ensure that the torch calls are replaced with refs
@@ -483,7 +508,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -496,7 +521,7 @@ class TestPrims(TestCase):
             dd = torch.sqrt(d)
             return torch.mul(aa, dd.digamma())
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a, b, c)
 
         expected = execute(gm, a, b, c, executor="aten")
@@ -512,7 +537,7 @@ class TestPrims(TestCase):
         self.assertTrue(getattr(torch.ops.nvprims, "digamma", None) is None)
 
         from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._prims.context import TorchRefsMode
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims.executor import execute
 
         a = torch.randn(3, 4, device=device)
@@ -520,7 +545,7 @@ class TestPrims(TestCase):
         def func(a):
             return torch.digamma(a)  # not supported by nvfuser
 
-        with TorchRefsMode():
+        with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
         with catch_warnings(record=True) as w:
@@ -611,6 +636,63 @@ class TestPrims(TestCase):
             out = execute(gm, sample.input, *sample.args, executor="strictly_nvfuser")
             self.assertEqual(out, gm(sample.input, *sample.args))
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64)
+    def test_cudnn_batch_norm_nvprims(self, device, dtype):
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        # This test verifies that cudnn_batch_norm is translated into nvprims
+        # and can be executed with nvFuser
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.testing._internal.common_methods_invocations import (
+            sample_inputs_native_batch_norm,
+        )
+
+        samples = sample_inputs_native_batch_norm(
+            None, device, dtype, requires_grad=False
+        )
+        for sample in samples:
+            if sample.input.numel() == 0:
+                continue
+
+            def func(
+                input, weight, bias, running_mean, running_var, training, momentum, eps
+            ):
+                return torch.ops.aten.cudnn_batch_norm.default(
+                    input,
+                    weight,
+                    bias,
+                    running_mean,
+                    running_var,
+                    training,
+                    momentum,
+                    eps,
+                )
+
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(sample.input, *sample.args)
+
+            call_function_nodes = list(
+                filter(lambda n: n.op == "call_function", gm.graph.nodes)
+            )
+            includes_aten_batch_norm = any(
+                torch.ops.aten.cudnn_batch_norm.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertFalse(includes_aten_batch_norm)
+
+            includes_nvprims_batch_norm = any(
+                torch.ops.nvprims.native_batch_norm.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertTrue(includes_nvprims_batch_norm)
+
+            # Check that the graph can be executed with nvFuser
+            out = execute(gm, sample.input, *sample.args, executor="nvfuser")
+            self.assertEqual(out, gm(sample.input, *sample.args))
+
     # decomposition of native_batch_norm_backward uses a casting, which prevents nvprim lowering on CPU build
     @onlyCUDA
     @dtypes(torch.float32, torch.float16)
@@ -624,23 +706,34 @@ class TestPrims(TestCase):
         sample = next(samples_iter)
         grad = torch.randn_like(sample.input)
 
-        def func(grad, input, weight, rm, rv, eps, train):
+        def func1(grad, input, weight, rm, rv, eps, train):
             return torch.ops.aten.native_batch_norm_backward.default(
                 grad, input, weight, rm, rv, rm, rv, train, eps, [True, True, True]
+            )
+
+        def func2(grad, input, weight, rm, rv, eps, train):
+            return torch.ops.aten.cudnn_batch_norm_backward.default(
+                input, grad, weight, rm, rv, rm, rv, eps, grad
             )
 
         args = sample.args
         kwargs = sample.kwargs
         all_args = [grad, sample.input, args[2], args[0], args[1], kwargs['eps'], kwargs['training']]
-        with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(*all_args)
 
-        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
-        includes_batch_norm_backward = any(
-            torch.ops.aten.native_batch_norm_backward.default == node.target
-            for node in call_function_nodes
-        )
-        self.assertFalse(includes_batch_norm_backward)
+        for func in (func1, func2):
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(*all_args)
+
+            call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+            includes_batch_norm_backward = any(
+                torch.ops.aten.native_batch_norm_backward.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertFalse(includes_batch_norm_backward)
+            all_nvprims = all(
+                str(node.target).startswith("nvprims") for node in call_function_nodes
+            )
+            self.assertTrue(all_nvprims)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -783,6 +876,32 @@ class TestPrims(TestCase):
             # Try executing the graph
             out = execute(gm, a, executor="strictly_nvfuser")
             self.assertEqual(out, func(a))
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_nvprims_view_partitioner(self, device, dtype):
+        # This test verifies that views that are not fused with other ops are
+        # correctly overriden to call aten implementation.
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.nvfuser_executor import maybe_partition_graph
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((4, 5))
+        b = make_arg((5, 4))
+
+        def func(a, b):
+            aa = a.view(b.shape)
+            aa = aa.view(a.shape)
+            return aa.digamma()
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a, b)
+        gm, _ = maybe_partition_graph(gm, False, False)
+
+        out = gm(a, b)
+        self.assertEqual(out, func(a, b))
 
     @onlyCUDA
     @skipCUDAIfRocm

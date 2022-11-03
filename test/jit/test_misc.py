@@ -361,3 +361,22 @@ class TestMisc(JitTestCase):
         ret = func()
         self.assertTrue(ret.numel() == 1)
         self.assertTrue(len(ret.size()) == 1)
+
+
+    def test_script_many_decorators(self):
+        def no_op_decorator(f):
+            return f
+
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        @no_op_decorator
+        def foo(x, dim: int):
+            return x.unsqueeze(dim)
+
+        x = torch.randn(1,)
+        expected = foo(x, 0)
+        scripted = torch.jit.script(foo)
+        actual = scripted(x, 0)
+        torch.testing.assert_close(expected, actual)

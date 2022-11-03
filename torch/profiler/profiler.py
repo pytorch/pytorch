@@ -109,6 +109,17 @@ class _KinetoProfile(object):
         assert self.profiler is not None
         self.profiler._start_trace()
 
+        if self.profile_memory:
+            self.add_metadata_json("profile_memory", "1")
+        if self.with_stack:
+            self.add_metadata_json("with_stack", "1")
+        if self.record_shapes:
+            self.add_metadata_json("record_shapes", "1")
+        if self.with_modules:
+            self.add_metadata_json("with_modules", "1")
+        if self.with_flops:
+            self.add_metadata_json("with_flops", "1")
+
         if kineto_available():
             dist_info = self._get_distributed_info()
             if dist_info:

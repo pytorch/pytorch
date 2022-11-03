@@ -831,6 +831,11 @@ inline Vectorized<T> fmadd(const Vectorized<T>& a, const Vectorized<T>& b, const
   return a * b + c;
 }
 
+template <typename T>
+inline Vectorized<T> fmsub(const Vectorized<T>& a, const Vectorized<T>& b, const Vectorized<T>& c) {
+  return a * b - c;
+}
+
 template <int64_t scale = 1, typename T = void>
 std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<T>>
 inline gather(T const* base_addr, const Vectorized<int_same_size_t<T>>& vindex) {

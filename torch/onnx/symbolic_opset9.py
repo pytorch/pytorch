@@ -4,6 +4,7 @@ Opset 9 is supported by ONNX release 1.4.1
 release on 01/23/19
 """
 
+import builtins
 import functools
 import math
 import sys
@@ -19,6 +20,7 @@ from torch import _C
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import (  # noqa: F401
     _constants,
+    _deprecation,
     _patch_torch,
     _type_utils,
     errors,
@@ -268,6 +270,8 @@ __all__ = [
     "unsafe_split_with_sizes",
     "unsafe_split",
     "unsqueeze",
+    "unsupported_complex_operators",
+    "noop_complex_operators",
     "unused",
     "var_mean",
     "var",
@@ -720,7 +724,7 @@ def _maybe_cast_reduce_op_input(g: jit_utils.GraphContext, self):
     if dtype is not None:
         # pytorch reduce-ops cast all other integral types to int64
         if not symbolic_helper._is_fp(self) and not (dtype == "Long"):
-            self = _cast_Long(g, self, False)  # type: ignore[name-defined]
+            self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.INT64)
     return self
 
 
@@ -1646,13 +1650,20 @@ def _avg_pool(name, tuple_fn):
         )
         assert isinstance(padding, tuple)
         adjusted_padding = padding
+        # Although onnx::AvgPool provides count_include_pad,
+        # The corner case of Average Pooling with ceil_mode on
+        # PyTorch allows sliding window go off bound, which leads to
+        # this accommodation.
+        # More detail on https://github.com/pytorch/pytorch/issues/57178
         if count_include_pad:
-            input = g.op(
+            input = _op_with_optional_float_cast(
+                g,
                 "Pad",
                 input,
                 pads_i=((0,) * 2 + padding) * 2,
                 mode_s="constant",
                 value_f=0.0,
+                opset_before=11,
             )
             adjusted_padding = (0,) * len(padding)
         if ceil_mode:
@@ -1849,32 +1860,34 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
     )
 
 
-@_onnx_symbolic("aten::_pad_circular")
 @_beartype.beartype
-def _pad_circular(g: jit_utils.GraphContext, input, pad):
+def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
     padding = _convert_padding_node(pad)
     assert len(padding) % 2 == 0
     ndim = len(padding) // 2
 
     cur = input
     for idx in range(ndim):
-        pad_l = padding[-(2 * idx + 1)]
-        pad_r = padding[-(2 * idx + 2)]
-
+        pad_r = padding[-(2 * idx + 1)]
+        pad_l = padding[-(2 * idx + 2)]
+        # get size for targeting the last idx, as Slice don't take start=[-1], end=[-1]
+        size = symbolic_helper._get_tensor_sizes(input)
         tensors = []
         if pad_l > 0:
             left = symbolic_helper._slice_helper(
-                g, cur, axes=[2 + idx], starts=[-(pad_l + 1)], ends=[-1]
+                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[size[2 + idx]]
             )
             tensors.append(left)
 
         if pad_l < 0 or pad_r < 0:
+            start = builtins.max(0, -pad_l)
+            end = -(builtins.max(0, -pad_r))
             middle = symbolic_helper._slice_helper(
                 g,
                 cur,
                 axes=[2 + idx],
-                starts=[max(0, -pad_l)],
-                ends=[-(1 + max(0, -pad_r))],
+                starts=[start],
+                ends=[end],
             )
             tensors.append(middle)
         else:
@@ -1919,7 +1932,13 @@ def replication_pad(g: jit_utils.GraphContext, input, padding):
 
 @_onnx_symbolic("aten::pad")
 @_beartype.beartype
-def pad(g: jit_utils.GraphContext, input, pad, mode, value):
+def pad(
+    g: jit_utils.GraphContext,
+    input: _C.Value,
+    pad: _C.Value,
+    mode: _C.Value,
+    value: _C.Value,
+):
     mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)
@@ -3374,51 +3393,103 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
 
 
+@_onnx_symbolic("aten::_cast_Byte")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
 @_beartype.beartype
-def _cast_func_template(to_i, g, input, non_blocking):
-    """Template for creating a cast function."""
-    return g.op("Cast", input, to_i=to_i)
+def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.UINT8)
 
 
-# TODO(justinchuby): Use the decorator and _export for these operators
-# Metaprogram symbolics for each ATen native specialized cast operator.
-# For e.g. we specify a function named `_cast_Byte` that instantiates an
-# ONNX cast node with `to` attribute "UINT8"
-# def _cast_Byte
-# def _cast_Char
-# def _cast_Short
-# def _cast_Int
-# def _cast_Long
-# def _cast_Half
-# def _cast_Float
-# def _cast_Double
-# def _cast_ComplexFloat
-# def _cast_ComplexDouble
-# def _cast_Bool
-# def _cast_BFloat16
-for scalar_type in (
-    "Byte",
-    "Char",
-    "Short",
-    "Int",
-    "Long",
-    "Half",
-    "Float",
-    "Double",
-    "ComplexFloat",
-    "ComplexDouble",
-    "Bool",
-    "BFloat16",
-):
-    func_name = f"_cast_{scalar_type}"
-    globals()[func_name] = _onnx_symbolic(f"aten::{func_name}")(
-        symbolic_helper.parse_args("v", "i")(
-            functools.partial(
-                _cast_func_template,
-                _type_utils.JitScalarType.from_name(scalar_type).onnx_type(),
-            )
-        )
-    )
+@_onnx_symbolic("aten::_cast_Char")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT8)
+
+
+@_onnx_symbolic("aten::_cast_Short")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT16)
+
+
+@_onnx_symbolic("aten::_cast_Int")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
+
+
+@_onnx_symbolic("aten::_cast_Long")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
+
+
+@_onnx_symbolic("aten::_cast_Half")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
+
+
+@_onnx_symbolic("aten::_cast_Float")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+
+
+@_onnx_symbolic("aten::_cast_Double")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
+
+
+@_onnx_symbolic("aten::_cast_Bool")
+@_deprecation.deprecated(
+    "1.14",
+    "the future",
+    "Avoid using this function and create a Cast node instead",
+)
+@_beartype.beartype
+def _cast_Bool(g: jit_utils.GraphContext, input, non_blocking):
+    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL)
 
 
 @_onnx_symbolic("aten::empty")
@@ -4750,7 +4821,7 @@ def _pack_padded_sequence(g: jit_utils.GraphContext, input, lengths, batch_first
     # It's really only necessary because those operators expand to something that
     # only works with int32 types in Caffe2...
     if lengths.type().scalarType() != "Int":
-        lengths = _cast_Int(g, lengths, False)  # type: ignore[name-defined]
+        lengths = g.op("Cast", lengths, to_i=_C_onnx.TensorProtoDataType.INT32)
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
@@ -4983,7 +5054,7 @@ def _any(g: jit_utils.GraphContext, *args):
         input, dim, keepdim = args
         dim = [symbolic_helper._parse_arg(dim, "i")]
         keepdim = symbolic_helper._parse_arg(keepdim, "i")
-    input = _cast_Long(g, input, False)  # type: ignore[name-defined]
+    input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
     input_sum = symbolic_helper._reducesum_helper(
         g, input, axes_i=dim, keepdims_i=keepdim
     )
@@ -5323,7 +5394,7 @@ def lift(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::masked_fill")
 @_beartype.beartype
 def masked_fill(g: jit_utils.GraphContext, self, mask, value):
-    mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
+    mask = g.op("Cast", mask, to_i=_C_onnx.TensorProtoDataType.BOOL)
     value = symbolic_helper._maybe_get_scalar(value)
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
 
@@ -6660,3 +6731,35 @@ def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
     env = g.env
 
     return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
+
+
+@_onnx_symbolic("aten::resolve_conj")
+@_onnx_symbolic("aten::resolve_neg")
+@_beartype.beartype
+def noop_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
+    # ONNX does not have operators to *directly* manipulate real/imaginary components
+    # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
+    # which results in failures due to missing operators for complex numbers
+
+    # `aten::resolve_conj` and `aten::resolve_neg` can safely be implemented as no-op
+    return input
+
+
+@_onnx_symbolic("aten::_conj")
+@_onnx_symbolic("aten::conj_physical")
+@_beartype.beartype
+def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
+    # ONNX does not have operators to *directly* manipulate real/imaginary components
+    # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
+    # which results in failures due to missing operators for complex numbers
+
+    # While `aten::_conj` and `aten::conj_phisical` raise exception when input is complex
+    if symbolic_helper.is_complex_value(input):
+        # FIXME(justinchuby): report correct name for symbolic being executed
+        return symbolic_helper._onnx_unsupported(
+            "aten::_conj, aten::conj_physical",
+            input,
+        )
+
+    # they can safely be implemented as no-op for real numbers only
+    return noop_complex_operators(g, input)

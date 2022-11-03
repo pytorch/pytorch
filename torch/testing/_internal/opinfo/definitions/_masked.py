@@ -563,6 +563,12 @@ op_db: List[OpInfo] = [
                 "test_backward",
                 device_type="cuda",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=2e-3)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+            ),
         ),
         # Can reuse the same inputs; dim is required in both
         sample_inputs_func=sample_inputs_masked_cumops,
@@ -1103,7 +1109,10 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
             DecorateInfo(
-                unittest.skip("Skipped!"), "TestGradients", "test_fn_gradgrad"
+                unittest.skip("Skipped!"), "TestFwdGradients", "test_fn_gradgrad"
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"), "TestBwdGradients", "test_fn_gradgrad"
             ),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,

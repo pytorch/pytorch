@@ -1,12 +1,22 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 
+#include <ATen/Context.h>
+
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/pad.h>
+#include <ATen/ops/permute.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
@@ -510,6 +520,7 @@ vTensor pack_weights(
   vTensor v_weight{
       api::context(),
       weight_rearranged.sizes(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
       weight_arg.options(),
   };
 
@@ -534,6 +545,7 @@ vTensor pack_biases(
   vTensor v_bias{
       api::context(),
       bias_rearranged.sizes(),
+      quantized ? api::StorageType::TEXTURE_3D : api::StorageType::TEXTURE_2D,
       weight.options(),
   };
 

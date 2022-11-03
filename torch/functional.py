@@ -206,7 +206,7 @@ def einsum(*args: Any) -> Tensor:
     Equation:
 
         The :attr:`equation` string specifies the subscripts (letters in `[a-zA-Z]`) for each dimension of
-        the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
+        the input :attr:`operands` in the same order as the dimensions, separating subscripts for each operand by a
         comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
         must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
         repeated for the same input operand, in which case the dimensions labeled with this subscript for this operand
@@ -678,14 +678,13 @@ of right padding. These additional values could be zeros or a reflection of the 
 IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
 
 Args:
-    input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
-        can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
-        (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
-        dimension is optional.
+    input (Tensor): The input tensor. Expected to be in the format of :func:`~torch.stft`,
+        output. That is a complex tensor of shape (``channel``, ``fft_size``, ``n_frame``),
+        where the ``channel`` dimension is optional.
 
-        .. deprecated:: 1.8.0
-            Real input is deprecated, use complex inputs as returned by
-            ``stft(..., return_complex=True)`` instead.
+        .. versionchanged:: 1.14.0
+            Real datatype inputs are no longer supported. Input must now have a
+            complex datatype, as returned by ``stft(..., return_complex=True)``.
     n_fft (int): Size of Fourier transform
     hop_length (Optional[int]): The distance between neighboring sliding window frames.
         (Default: ``n_fft // 4``)

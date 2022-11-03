@@ -1650,7 +1650,7 @@ class TestLRScheduler(TestCase):
         new_scheduler = CosineAnnealingLR(
             self.opt, T_max=T_max, eta_min=eta_min, last_epoch=0)
         new_lrs = new_scheduler._last_lr
-        torch.testing.assert_allclose(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
+        torch.testing.assert_close(original_lrs, new_lrs, rtol=1e-4, atol=1e-5)
 
     def test_reduce_lr_on_plateau1(self):
         epochs = 10
@@ -2833,6 +2833,7 @@ class TestSWAUtils(TestCase):
         # Test AveragedModel with EMA as avg_fn
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10)
         )
         alpha = 0.9
@@ -2851,11 +2852,17 @@ class TestSWAUtils(TestCase):
                 else:
                     updated_averaged_params.append((p_avg * alpha +
                                                    p * (1 - alpha)).clone())
+            for b in dnn.buffers():
+                if b.size() != torch.Size([]):
+                    b.detach_().add_(torch.randn_like(b))
+
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
+        for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
+            self.assertEqual(b_avg, b_swa)
 
     def test_averaged_model_exponential_buffers(self):
         # Test AveragedModel with EMA as avg_fn and use_buffers as True.
@@ -3129,6 +3136,57 @@ class TestDifferentiableOptimizer(TestCase):
         gradcheck(
             _diff_fn,
             (p, grad, state, torch.optim.Rprop,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
+
+
+    def test_adamw(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['max_exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.AdamW,
+             {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
+        )
+
+    def test_nadam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['mu_product'] = torch.tensor(1.0, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.NAdam,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
+
+    def test_radam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.RAdam,
              {'lr': 0.9, 'differentiable': True}, *state.values())
         )
 

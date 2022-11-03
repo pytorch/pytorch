@@ -9,7 +9,8 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
+    IS_ARM64, parametrize, TEST_WITH_ASAN
 import torch
 from torch import Tensor
 import functools
@@ -585,10 +586,13 @@ class TestOperators(TestCase):
         skip("atleast_1d"),  # Takes too long
         skip("atleast_2d"),  # Takes too long
         skip("atleast_3d"),  # Takes too long
+        skip("ormqr"),  # Takes too long
         xfail("as_strided"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
         xfail("bfloat16"),  # rank 4 tensor for channels_last
+        xfail("cdouble"),  # rank 4 tensor for channels_last
+        xfail("cfloat"),  # rank 4 tensor for channels_last
         xfail("chalf"),  # rank 4 tensor for channels_last
         xfail("double"),  # rank 4 tensor for channels_last
         xfail("float"),  # rank 4 tensor for channels_last
@@ -651,7 +655,6 @@ class TestOperators(TestCase):
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -719,7 +722,6 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d'),  # randomness
         skip('nn.functional.dropout3d', ''),  # randomness
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -749,6 +751,8 @@ class TestOperators(TestCase):
         xfail('double'),
         xfail('float'),
         xfail('half'),
+        xfail('cdouble', ''),
+        xfail('cfloat', ''),
         xfail('chalf', ''),
 
         xfail('scatter_reduce', 'prod'),  # item call
@@ -820,6 +824,7 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
         decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
+        decorate('linalg.det', 'singular', decorator=unittest.skipIf(IS_MACOS, "Fails on x86 MacOS CI")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
 
@@ -836,6 +841,7 @@ class TestOperators(TestCase):
         skip('svd_lowrank', ''),  # randomness
 
         xfail('double'),  # required rank 4 tensor to use channels_last format
+        xfail('cdouble'),  # required rank 4 tensor to use channels_last format
 
         # potential silent incorrectness
         skip('nn.functional.max_unpool1d'),  # Flaky, seems to sometimes his max_unpool2d
@@ -847,7 +853,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
@@ -889,6 +894,7 @@ class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
         xfail('cumprod'),
@@ -985,6 +991,7 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
+        xfail('ormqr'),
         xfail('put'),
         xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
@@ -1034,6 +1041,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('linalg.lu', ''),
         xfail('linalg.lu_solve', ''),
+        xfail('cdouble', ''),
+        xfail('cfloat', ''),
         xfail('chalf', ''),
         xfail('index_reduce', ''),
         xfail('linalg.vander', ''),
@@ -1084,6 +1093,7 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
+        skip('ormqr', ''),  # takes too long
 
         # fallback path doesn't work
         # All of the following are bugs and need to be fixed
@@ -1107,11 +1117,12 @@ class TestOperators(TestCase):
         xfail('double'),
         xfail('float'),
         xfail('half'),
+        xfail('cdouble'),
+        xfail('cfloat'),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
         xfail("native_batch_norm"),
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1194,6 +1205,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('renorm', ''),  # NYI: forward AD for renorm
+        xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('symeig', ''),  # NYI: forward AD for symeig
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
@@ -1286,6 +1298,7 @@ class TestOperators(TestCase):
         skip('linalg.lstsq'),
         skip('nn.functional.bilinear'),
         skip('native_layer_norm'),
+        skip('ormqr'),
 
         # Potential bugs/errors
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
@@ -1293,8 +1306,11 @@ class TestOperators(TestCase):
         xfail('bernoulli'),  # calls random op
         xfail('bfloat16'),  # required rank 4 tensor to use channels_last format
         xfail('cdist'),  # Forward AD not implemented and no decomposition
+        xfail('cdouble'),  # required rank 4 tensor to use channels_last format
+        xfail('cfloat'),  # required rank 4 tensor to use channels_last format
         xfail('chalf'),  # required rank 4 tensor to use channels_last format
         xfail('cholesky'),  # Forward AD not implemented and no decomposition
+        xfail('ormqr'),  # Forward AD not implemented and no decomposition
         xfail('double'),  # required rank 4 tensor to use channels_last format
         xfail('float'),  # required rank 4 tensor to use channels_last format
         xfail('half'),  # required rank 4 tensor to use channels_last format
@@ -1359,7 +1375,6 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
-        xfail("cat"),  # improper handling for cat empty tensor with non-empty (new test exposed pre-existing bug)
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})

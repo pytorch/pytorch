@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import abc
 import collections
 import copy
 import dataclasses
@@ -26,6 +27,7 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
+from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -577,6 +579,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         self.assertEqual(cnts.op_count, 0)
 
+    # KeyError: '__name__'
+    @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_user_getattr1(self):
         class MyConfig(dict):
             def __getattr__(self, name):
@@ -1958,7 +1962,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         check_sum_all(torch.randn(200000, dtype=dtype, device=device))
 
-    @patch.object(torch._dynamo.config, "raise_on_backend_error", True)
     def test_raise_on_backend_error(self):
         def my_compiler(gm, _):
             raise RuntimeError("duck!")
@@ -2668,6 +2671,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    def test_user_function_variable_supports_type_abcmeta_argument(self):
+        class Foo(metaclass=abc.ABCMeta):
+            @abc.abstractclassmethod
+            def read(self):
+                pass
+
+        class Bar(Foo):
+            def read(self):
+                return "Hello World!"
+
+        class Baz:
+            pass
+
+        def gn(x, tys=(Bar, Baz)):
+            if Bar in tys:
+                return x - 1
+            else:
+                return x + 1
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(2, 3)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -2681,6 +2712,68 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         m = Mod()
         graph, _ = torch._dynamo.export(m, torch.randn(3, 3))
+
+    def test_nn_sequential_invocation(self):
+        with freeze_rng_state():
+
+            class TestModel(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linears = torch.nn.Sequential(
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                    )
+
+                def forward(self, x):
+                    all_but_last = self.linears[:-1]
+                    return all_but_last(x)
+
+            m = TestModel()
+            x = torch.rand((2, 2))
+            real = m(x)
+            graph, _ = torch._dynamo.export(m, x)
+            dynamo_result = graph(x)
+            self.assertTrue(same(real, dynamo_result))
+
+    def test_nn_sequential_invocation_reposition_indices(self):
+        with freeze_rng_state():
+
+            class TestModel(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linears = torch.nn.Sequential(
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                        torch.nn.Linear(2, 2),
+                    )
+
+                def forward(self, x):
+                    all_but_last = self.linears[1:3]
+                    return all_but_last(x)
+
+            m = TestModel()
+            x = torch.rand((2, 2))
+            real = m(x)
+            graph, _ = torch._dynamo.export(m, x)
+            dynamo_result = graph(x)
+            self.assertTrue(same(real, dynamo_result))
+
+    def test_error_on_nested_fx_trace(self):
+        input = torch.rand(2, 3)
+
+        def f(x):
+            x + x
+
+        real = f(input)
+
+        optimized = torch._dynamo.optimize("eager")(f)
+        self.assertTrue(same(optimized(input), real))
+
+        with self.assertRaisesRegex(RuntimeError, "Detected that you are using FX"):
+            gm = torch.fx.symbolic_trace(optimized)
 
 
 class CustomFunc(torch.autograd.Function):

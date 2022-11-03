@@ -166,6 +166,8 @@
             # shellcheck disable=SC1091
             source "${WORKSPACE_DIR}"/miniconda3/bin/activate
 
+            brew link --force libomp
+
             echo "export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${BASH_ENV}"
             .jenkins/pytorch/macos-build.sh
 

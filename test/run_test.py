@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     shell,
     set_cwd,
     parser as common_parser,
+    is_slow_gradcheck_env,
 )
 import torch.distributed as dist
 from torch.multiprocessing import get_context
@@ -170,6 +171,7 @@ USE_PYTEST_LIST = [
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
     "test_deploy",
+    "distributed/test_c10d_error_logger.py"
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -301,6 +303,7 @@ CORE_TEST_LIST = [
     "test_nn",
     "test_ops",
     "test_ops_gradients",
+    "test_ops_fwd_gradients",
     "test_ops_jit",
     "test_torch"
 ]
@@ -379,6 +382,23 @@ TESTS_REQUIRING_LAPACK = [
     "distributions/test_distributions",
 ]
 
+# These are just the slowest ones, this isn't an exhaustive list.
+TESTS_NOT_USING_GRADCHECK = [
+    # Note that you should use skipIfSlowGradcheckEnv if you do not wish to
+    # skip all the tests in that file, e.g. test_mps
+    "doctests",
+    "test_meta",
+    "test_hub",
+    "test_fx",
+    "test_decomp",
+    "test_cpp_extensions_jit",
+    "test_jit",
+    "test_ops",
+    "test_ops_jit",
+    "dynamo/test_recompile_ux",
+    "inductor/test_smoke",
+    "test_quantization",
+]
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
@@ -698,11 +718,19 @@ def run_doctests(test_module, test_directory, options):
 
 
 def print_log_file(test: str, file_path: str, failed: bool) -> None:
+    num_lines = sum(1 for _ in open(file_path, 'rb'))
+    n = 100
     with open(file_path, "r") as f:
         print_to_stderr("")
         if failed:
-            print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
-            print_to_stderr(f.read())
+            if n < num_lines:
+                print_to_stderr(f"Expand the folded group to see the beginning of the log file of {test}")
+                print_to_stderr(f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})")
+                for _ in range(num_lines - n):
+                    print_to_stderr(next(f).rstrip())
+                print_to_stderr("##[endgroup]")
+            for _ in range(min(n, num_lines)):
+                print_to_stderr(next(f).rstrip())
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         else:
             print_to_stderr(f"Expand the folded group to see the log file of {test}")
@@ -766,6 +794,7 @@ CUSTOM_HANDLERS = {
     "doctests": run_doctests,
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
+    "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
 }
@@ -973,11 +1002,11 @@ def find_test_index(test, selected_tests, find_last_index=False):
     return found_idx
 
 
-def exclude_tests(exclude_list, selected_tests, exclude_message=None):
+def exclude_tests(exclude_list, selected_tests, exclude_message=None, exact_match=False):
     for exclude_test in exclude_list:
         tests_copy = selected_tests[:]
         for test in tests_copy:
-            if test.startswith(exclude_test):
+            if (not exact_match and test.startswith(exclude_test)) or test == exclude_test:
                 if exclude_message is not None:
                     print_to_stderr("Excluding {} {}".format(test, exclude_message))
                 selected_tests.remove(test)
@@ -1062,7 +1091,11 @@ def get_selected_tests(options):
 
         # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
         # This below code should be removed once this issue is solved
-        if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
+        if (
+            torch.version.cuda is not None and
+            LooseVersion(torch.version.cuda) >= "11.5" and
+            LooseVersion(torch.version.cuda) <= "11.6"
+        ):
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
@@ -1103,6 +1136,11 @@ def get_selected_tests(options):
         else:
             print("Found test time stats from artifacts")
             test_file_times_config = test_file_times[test_config]
+            if is_slow_gradcheck_env():
+                # HACK: hardcode approx test times, so these two don't get put in the same shard
+                #       we can remove this when their actual runtimes are recorded
+                test_file_times_config["test_ops_fwd_gradients"] = 3600 * 2 + 600  # 2:10
+                test_file_times_config["test_ops_gradients"] = 3600 * 2 + 600  # 2:10
             shards = calculate_shards(num_shards, selected_tests, test_file_times_config,
                                       must_serial=must_serial)
             _, tests_from_shard = shards[which_shard - 1]
@@ -1117,6 +1155,11 @@ def get_selected_tests(options):
     if not torch._C.has_lapack:
         selected_tests = exclude_tests(TESTS_REQUIRING_LAPACK, selected_tests,
                                        "PyTorch is built without LAPACK support.")
+
+    if is_slow_gradcheck_env():
+        selected_tests = exclude_tests(TESTS_NOT_USING_GRADCHECK, selected_tests,
+                                       "Running in slow gradcheck mode, skipping tests "
+                                       "that don't use gradcheck.", exact_match=True)
 
     if options.distributed_tests:
         # Run distributed tests with multiple backends across all shards, one per backend

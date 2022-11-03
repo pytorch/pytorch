@@ -1,7 +1,24 @@
-#include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/alpha_dropout_native.h>
+#include <ATen/ops/dropout_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/feature_alpha_dropout_native.h>
+#include <ATen/ops/feature_dropout_native.h>
+#include <ATen/ops/native_dropout.h>
+#include <ATen/ops/native_dropout_backward_native.h>
+#include <ATen/ops/native_dropout_native.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {

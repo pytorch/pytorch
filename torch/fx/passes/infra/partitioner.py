@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable
+from typing import Dict, List, Set, Iterable, Sequence, Optional
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
@@ -10,8 +10,8 @@ import logging
 import itertools
 from copy import copy
 
-logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING)
 
 class Partition:
     def __init__(self, id: int = None, nodes: Iterable[Node] = None):
@@ -35,21 +35,23 @@ class CapabilityBasedPartitioner:
     def __init__(self,
                  graph_module: GraphModule,
                  operator_support: OperatorSupportBase,
-                 allows_single_node_partition: bool = False
+                 allows_single_node_partition: bool = False,
+                 non_compute_ops: Optional[Sequence[str]] = None,
+                 allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
                  ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
+        self.non_compute_ops = non_compute_ops if non_compute_ops is not None else []
+        self.allowed_single_node_partition_ops = (
+            allowed_single_node_partition_ops
+            if allowed_single_node_partition_ops is not None
+            else []
+        )
 
     def __is_node_supported(self, node: Node) -> bool:
         return (
             self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
-            and
-            # reject 'getitem' node since they are special cased in partitioning.
-            (
-                node.op != "call_function" or
-                _get_qualified_name(node.target) != "_operator.getitem"    # type: ignore[arg-type]
-            )
         )
 
     def propose_partitions(self) -> List[Partition]:
@@ -110,16 +112,20 @@ class CapabilityBasedPartitioner:
 
             return True
 
-        def merge_single_node(node: Node, id: int):
-            assert node not in assignment
+        def merge_single_node(node: Node, id: Optional[int]):
+            if node in assignment:
+                partitions_by_id[assignment[node]].remove_node(node)
 
-            assignment[node] = id
-            if id not in partitions_by_id:
+            if id is None:
+                assignment.pop(node)
+            elif id not in partitions_by_id:
+                assignment[node] = id
                 partitions_by_id[id] = Partition(id=id, nodes=[node])
             else:
+                assignment[node] = id
                 partitions_by_id[id].add_node(node)
 
-        logging.debug("Proposing partitions...")
+        logger.debug("Proposing partitions...")
 
         for node in reversed(self.graph_module.graph.nodes):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
@@ -171,7 +177,8 @@ class CapabilityBasedPartitioner:
         # filter out single node partitions
         if not self.allows_single_node_partition:
             logger.debug("Filtering out single node partitions...")
-            non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
+            default_non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
+            non_compute_ops = default_non_compute_ops.union(set(self.non_compute_ops))
             partitions_to_remove: List[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
@@ -179,19 +186,22 @@ class CapabilityBasedPartitioner:
                     if node.op == "call_function" and \
                        _get_qualified_name(node.target) not in non_compute_ops:  # type: ignore[arg-type]
                         compute_node_count += 1
+                    if node.op == "call_function" and \
+                       _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
+                        compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)
             for id in partitions_to_remove:
                 del partitions_by_id[id]
 
-        logging.debug("Partitions proposed:")
+        logger.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logging.debug(f"partition #{id}", [node.name for node in partition.nodes])
+            logger.debug(f"partition #{id}", [node.name for node in partition.nodes])
 
         return list(partitions_by_id.values())
 
     def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
-        logging.debug("Fusing partitions...")
+        logger.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
         return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])
 
