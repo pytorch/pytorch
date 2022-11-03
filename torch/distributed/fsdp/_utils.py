@@ -9,6 +9,7 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
     _is_namedtuple,
 )
 from torch.nn.utils.rnn import PackedSequence
+from torch.utils._mode_utils import no_dispatch
 
 
 def _contains_batchnorm(module):
