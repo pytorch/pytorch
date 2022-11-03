@@ -400,9 +400,10 @@ class FullyShardedDataParallel(nn.Module):
         limit_all_gathers (bool): If ``False``, then FSDP allows the CPU
             thread to schedule all-gathers without any extra synchronization.
             If ``True``, then FSDP explicitly synchronizes the CPU thread to
-            prevent too many in-flight all-gathers. This ``bool`` only affects
-            the sharded strategies that schedule all-gathers. Enabling this can
-            help lower the number of CUDA malloc retries.
+            prevent too many in-flight all-gathers, which may increase memory
+            usage. This ``bool`` only affects the sharded strategies that
+            schedule all-gathers. Enabling this can help lower the number of
+            CUDA malloc retries. (Default: ``True``)
     """
 
     def __init__(
@@ -419,7 +420,7 @@ class FullyShardedDataParallel(nn.Module):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
-        limit_all_gathers: bool = False,
+        limit_all_gathers: bool = True,
         use_orig_params: bool = False,
     ):
         if isinstance(auto_wrap_policy, ParamExecOrderWrapPolicy):
