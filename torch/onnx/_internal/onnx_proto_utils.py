@@ -8,7 +8,7 @@ from typing import List, Mapping, Set, Union
 import torch
 import torch.jit._trace
 import torch.serialization
-from torch.onnx import _constants, _exporter_states, errors  # noqa: F401
+from torch.onnx import _constants, _exporter_states, errors
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 
@@ -27,10 +27,10 @@ def _export_file(
         assert len(export_map) == 0
         with torch.serialization._open_file_like(f, "wb") as opened_file:
             opened_file.write(model_bytes)
-    elif export_type in [
+    elif export_type in {
         _exporter_states.ExportTypes.ZIP_ARCHIVE,
         _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
-    ]:
+    }:
         compression = (
             zipfile.ZIP_DEFLATED
             if export_type == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
@@ -57,7 +57,7 @@ def _export_file(
             ) as opened_file:
                 opened_file.write(v)
     else:
-        raise RuntimeError("Unknown export type")
+        raise ValueError("Unknown export type")
 
 
 @_beartype.beartype
