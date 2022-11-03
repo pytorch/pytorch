@@ -577,7 +577,7 @@ Tensor rad2deg_backward(const Tensor& grad) {
 Tensor deg2rad_backward(const Tensor& grad) {
   constexpr double M_PI_180 =
       0.017453292519943295769236907684886127134428718885417;
-  return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_PI_180)));
+  return at::mul(grad, Scalar(M_PI_180));
 }
 
 Tensor unsqueeze_multiple(

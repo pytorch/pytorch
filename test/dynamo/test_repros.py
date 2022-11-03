@@ -1471,8 +1471,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(y, 10)
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sort_out(self):
 
         dtype = torch.float32
@@ -1490,8 +1488,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         opt_fn()
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
     def test_sigmoid_out(self):
 
         dtype = torch.float32
@@ -1757,26 +1753,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
-
-    def test_modules(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc = torch.nn.Linear(4, 3)
-
-            def forward(self, inp):
-                res = torch.zeros(3, 3)
-                for mod in self.modules():
-                    res += self.fc(inp)
-                return res
-
-        mod = Foo()
-        args = (torch.ones(3, 4),)
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_mod = torch._dynamo.optimize(cnt, nopython=True)(mod)
-        self.assertTrue(same(mod(*args), opt_mod(*args)))
-        self.assertEqual(cnt.op_count, 5)
-        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
