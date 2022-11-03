@@ -146,6 +146,18 @@ class InputGen:
         return torch.arange(self.n, device=self.device, dtype=torch.int32)
 
 
+def cpp_wrapper(func):
+    @functools.wraps(func)
+    def wrapTheFunction(*args):
+        for cpp_wrapper_enabled in [True, False]:
+            old = config.cpp_wrapper
+            config.cpp_wrapper = cpp_wrapper_enabled
+            func(*args)
+            config.cpp_wrapper = old
+
+    return wrapTheFunction
+
+
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
         args, _ = tree_flatten(args)
@@ -652,6 +664,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
+    @cpp_wrapper
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)
@@ -698,6 +711,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 17, 8, 9),))
 
+    @cpp_wrapper
     def test_reduction1(self):
         def fn(a):
             return (a.sum(), a.max(), a.min(), a.argmax(), a.argmin())
@@ -921,6 +935,7 @@ class CommonTemplate:
             ),
         )
 
+    @cpp_wrapper
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -1130,6 +1145,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @cpp_wrapper
     def test_transpose(self):
         def fn(a, b):
             return (
@@ -1890,6 +1906,7 @@ class CommonTemplate:
         if self.device == "cuda":
             assert torch._inductor.metrics.generated_kernel_count == 1
 
+    @cpp_wrapper
     def test_std(self):
         def fn(x):
             return (
@@ -2147,6 +2164,7 @@ class CommonTemplate:
             (torch.randn([8, 16, 8, 8]),),
         )
 
+    @cpp_wrapper
     def test_cat(self):
         def fn(a):
             tmp = a * 2
@@ -3179,6 +3197,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    @cpp_wrapper
     def test_as_strided(self):
         def fn(x):
             return (
