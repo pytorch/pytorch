@@ -211,6 +211,29 @@ class LinearUnary(nn.Linear):
         return y
 
 
+class LinearBinary(nn.Linear):
+    def __init__(self, linear: nn.Module, binary_op_name: str):
+        super(LinearBinary, self).__init__(
+            linear.in_features,
+            linear.out_features,
+            linear.bias is not None,
+            linear.weight.device,
+            linear.weight.dtype,
+        )
+        self._update_module_params(linear, binary_op_name)
+
+    def _update_module_params(self, linear, binary_op_name):
+        self.__dict__ = copy.deepcopy(linear.__dict__)
+
+        self.attr = binary_op_name
+
+    def forward(self, input, other):
+        y = torch.ops.mkldnn._linear_pointwise(
+            input, other, self.weight, self.bias, self.attr
+        )
+        return y
+
+
 def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
@@ -239,6 +262,15 @@ def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module):
         linear,
         unary,
     )
+
+
+def fused_linear_binary_eval(linear: nn.Module, attr: str):
+    assert not (linear.training), "Fusion only for eval!"
+    linear_binary = LinearBinary(
+        linear,
+        attr,
+    )
+    return linear_binary
 
 
 def check_node_kind(current_node, modules, node_kind):
@@ -371,6 +403,11 @@ def fuse_binary(gm: torch.fx.GraphModule):
                         if len(node.args[index_node].users) > 1:
                             continue
                         computation_node = modules[node.args[index_node].target]
+                        # only fuse for linear when the dtype is bf16
+                        if type(computation_node) in [
+                            nn.Linear
+                        ] and not is_bfloat16_module(computation_node):
+                            continue
                         replace_and_fuse_for_binary(
                             computation_node,
                             node,
@@ -542,6 +579,7 @@ binary_attr = {
 
 computation_op_binary_op_fusion_map = {
     nn.Conv2d: fused_conv_binary_eval,
+    nn.Linear: fused_linear_binary_eval,
 }
 
 
