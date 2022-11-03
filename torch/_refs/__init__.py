@@ -2456,7 +2456,11 @@ def as_strided(
 
 @register_decomposition(torch.ops.aten.as_strided_scatter)
 def as_strided_scatter(
-        input: TensorLikeType, src: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: Optional[int] = None,
+    input: TensorLikeType,
+    src: TensorLikeType,
+    size: ShapeType,
+    stride: StrideType,
+    storage_offset: Optional[int] = None,
 ) -> TensorLikeType:
     output = input.clone()
     output_view = output.as_strided(size, stride, storage_offset)
