@@ -43,9 +43,9 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'FusedGraphModule',
             'ObservedGraphModule',
-            'is_observed_module',
+            '_is_observed_module',
             'ObservedStandaloneGraphModule',
-            'is_observed_standalone_module',
+            '_is_observed_standalone_module',
             'QuantizedGraphModule'
         ]
         self._test_function_import('fx.graph_module', function_list)

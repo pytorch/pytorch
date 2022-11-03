@@ -7,9 +7,7 @@ from typing import Union, Dict, Any, Set
 __all__ = [
     "FusedGraphModule",
     "ObservedGraphModule",
-    "is_observed_module",
     "ObservedStandaloneGraphModule",
-    "is_observed_standalone_module",
     "QuantizedGraphModule",
 ]
 
@@ -56,7 +54,7 @@ class ObservedGraphModule(GraphModule):
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         return ObservedGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
-def is_observed_module(module: Any) -> bool:
+def _is_observed_module(module: Any) -> bool:
     return isinstance(module, ObservedGraphModule)
 
 class ObservedStandaloneGraphModule(ObservedGraphModule):
@@ -71,7 +69,7 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
         return ObservedStandaloneGraphModule(fake_mod, copy.deepcopy(self.graph), copy.deepcopy(self.preserved_attr_names))
 
-def is_observed_standalone_module(module: Any) -> bool:
+def _is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
 
 def _save_packed_weight(self, destination, prefix, keep_vars):
