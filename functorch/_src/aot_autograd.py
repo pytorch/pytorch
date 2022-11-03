@@ -474,12 +474,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             all_args = list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
             del contiguous_args
             if CompiledFunction.compiled_bw is None:
-                mode = torch._subclasses.fake_tensor.FakeTensorMode()
-                fake_args = [mode.from_tensor(x) if isinstance(x, torch.Tensor) else x for x in all_args]
+                # TODO - pass in fake tensors ?
                 context = disable_autocast_manager if disable_amp else nullcontext
                 with context(), track_graph_compiling("backward", True):
                     CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, fake_args
+                        bw_module, all_args
                     )
 
             ctx.maybe_clear_saved_tensors()
