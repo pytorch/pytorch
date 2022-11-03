@@ -620,7 +620,6 @@ def _get_fixed_params_observed_lstm(
                 cell.initial_hidden_state_qparams = hidden_state_qparams
 
     # Insert the observers based on the previously attached QConfigs
-    #torch.ao.quantization.add_observer_(observed_lstm)
     torch.ao.quantization.add_observer_(
         observed_lstm,
         non_leaf_module_list=[torch.nn.Sigmoid, torch.nn.Tanh]
