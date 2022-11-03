@@ -1411,8 +1411,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_tensor_is_contiguous(self):
         def fn(x):
-            input = torch.randn((1, 16, 1, 1), device="cuda")
-            weight = torch.randn((8, 16, 3, 3), device="cuda")
+            input = torch.randn((1, 16, 1, 1))
+            weight = torch.randn((8, 16, 3, 3))
             weight = weight.to(memory_format=x)
             output = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
             return output.is_contiguous(memory_format=x)
