@@ -178,11 +178,11 @@ def _common_summon_post_state_dict_hook(
     _exit_full_param_ctx(module)
 
     cpu_device = torch.device("cpu")
-    buffer_fqns = []
+    buffer_clean_fqns = []
     buffers = []
     for clean_key in module._buffer_names:
         # This is a hack to support activation checkpoint.
-        clean_key = clean_key.replace(f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", "")
+        clean_key = clean_tensor_name(clean_key)
         fqn = f"{prefix}{clean_key}"
         if fqn not in state_dict:
             # A buffer can be registered as non-persistent.
@@ -193,12 +193,14 @@ def _common_summon_post_state_dict_hook(
             buffer = state_dict[fqn]
             if module._state_dict_config.offload_to_cpu and buffer.device != cpu_device:
                 state_dict[fqn] = buffer.to(cpu_device)
-            buffer_fqns.append(fqn)
+            # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
+            buffer_clean_fqns.append(clean_key)
             buffers.append(state_dict[fqn])
     if buffers and module._mixed_precision_enabled_for_buffers():
-        buffer_dtypes = _get_buffer_dtypes(module, buffer_fqns)
+        buffer_dtypes = _get_buffer_dtypes(module, buffer_clean_fqns)
         _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, module.compute_device)
-        for buffers, fqn in zip(buffers, buffer_fqns):
+        for buffers, clean_fqn in zip(buffers, buffer_clean_fqns):
+            fqn = f"{prefix}{clean_fqn}"
             state_dict[fqn] = buffer.clone()
     return state_dict
 
