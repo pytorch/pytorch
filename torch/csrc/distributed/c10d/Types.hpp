@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/distributed/c10d/Store.hpp>
+
 #include <chrono>
 #include <cstdint>
 
@@ -27,6 +29,7 @@ struct NCCLPreMulSumSupplement : _SupplementBase {
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
 struct TORCH_API ReduceOp : torch::CustomClassHolder {
+  // note(crcrpar): RedOpType could be defined outside of `ReduceOp`
   enum RedOpType : uint8_t {
     SUM = 0,
     AVG = 1,
@@ -44,7 +47,9 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   ReduceOp(RedOpType op) : op_(op) {
     TORCH_INTERNAL_ASSERT(
-      op_ != PREMUL_SUM, "PREMUL_SUM requires a scale factor tensor or scalar argument");
+      op_ != PREMUL_SUM,
+      "Use `torch.distributed._make_nccl_premul_sum` to create an instance of ReduceOp with PREMUL_SUM"
+    );
   }
 
   ReduceOp(RedOpType op, c10::intrusive_ptr<_SupplementBase> optional_supplement) {
@@ -147,6 +152,15 @@ struct AllToAllOptions {
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+};
+
+struct DistributedBackendOptions {
+  c10::intrusive_ptr<::c10d::Store> store;
+  int group_rank;
+  int group_size;
+  std::chrono::duration<float> timeout;
+  std::string group_id;
+  std::vector<int64_t> global_ranks_in_group;
 };
 
 } // namespace c10d

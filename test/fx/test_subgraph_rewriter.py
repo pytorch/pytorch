@@ -18,6 +18,18 @@ if __name__ == '__main__':
                        "\tpython test/test_fx.py TESTNAME\n\n"
                        "instead.")
 
+@torch.fx.wrap
+def wrapped_gemm_bias_mul(a, b, bias):
+    lin_res = torch.nn.functional.linear(a, b, bias=bias)
+    mul_res = lin_res * a
+    return lin_res, mul_res
+
+@torch.fx.wrap
+def wrapped_gemm_bias_mul_with_c(a, b, bias, c):
+    lin_res = torch.nn.functional.linear(a, b, bias=bias)
+    mul_res = lin_res * c
+    return lin_res, mul_res
+
 class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_preserves_logic(self):
@@ -656,3 +668,175 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x1)
         test_outs = traced.forward(x1)
         self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_nodes_with_kwargs(self):
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w0 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b0 = torch.nn.Parameter(torch.empty([128]))
+
+            def forward(self, in0):
+                lin_res = torch.nn.functional.linear(in0, self.w0, bias=self.b0)
+                mul_res = in0 * lin_res
+                sum_res = mul_res + in0
+                return sum_res
+
+        def pattern(a, b, bias):
+            lin_res = torch.nn.functional.linear(a, b, bias=bias)
+            mul_res = a * lin_res
+            return lin_res, mul_res
+
+        def replacement(a, b, bias):
+            lin_res, mul_res = wrapped_gemm_bias_mul(a, b, bias)
+            return lin_res, mul_res
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        self.assertEqual(len(matches), 1)
+
+        found_repalcement_node = False
+        for node in traced.graph.nodes:
+            if node.target == wrapped_gemm_bias_mul:
+                found_repalcement_node = True
+                break
+
+        self.assertTrue(found_repalcement_node)
+
+    def test_subgraph_rewriter_local_revert(self):
+
+        # Following model will have 3 anchors as the matching candidate with the given pattern
+        # Anchor 1 and 3 is a real match, but anchor 2 is not.
+        # The subgraph rewriter should be able to revert the changes made while matching anchor 2.
+        # Final match with anchor 3 should be successful.
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w0 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b0 = torch.nn.Parameter(torch.empty([128]))
+                self.w1 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b1 = torch.nn.Parameter(torch.empty([128]))
+                self.w2 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b2 = torch.nn.Parameter(torch.empty([128]))
+                self.w3 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b3 = torch.nn.Parameter(torch.empty([128]))
+                self.w4 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b4 = torch.nn.Parameter(torch.empty([128]))
+
+            def forward(self, in0, in1):
+                lin_res_1 = torch.nn.functional.linear(in1, self.w0, bias=self.b0)
+                lin_res_2 = torch.nn.functional.linear(lin_res_1, self.w1, bias=self.b1)
+                # potential match at anchor 1
+                mul_res_1 = in1 * lin_res_2
+                sum_res_1 = mul_res_1 + in1
+                lin_res_3 = torch.nn.functional.linear(
+                    sum_res_1, self.w2, bias=self.b2
+                )
+                sigmoid_res_1 = torch.sigmoid(lin_res_3)
+                # potential match at anchor 2
+                mul_res_2 = lin_res_3 * sigmoid_res_1
+                lin_res_4 = torch.nn.functional.linear(in0, self.w3, bias=self.b3)
+                lin_res_5 = torch.nn.functional.linear(lin_res_4, self.w4, bias=self.b4)
+                # potential match at anchor 3
+                mul_res_3 = in0 * lin_res_5
+                sum_res_2 = mul_res_3 + in0
+                cat_res = torch.cat(
+                    [mul_res_2, sum_res_2],
+                    dim=1,
+                )
+                return cat_res
+
+        def gemm_bias_mul_pattern_with_c(a, b, bias, c):
+            lin_res = torch.nn.functional.linear(a, b, bias=bias)
+            mul_res = c * lin_res
+            return lin_res, mul_res
+
+        def gemm_bias_mul_replacement_with_c(a, b, bias, c):
+            lin_res, mul_res = wrapped_gemm_bias_mul_with_c(a, b, bias, c)
+            return lin_res, mul_res
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(
+            traced,
+            gemm_bias_mul_pattern_with_c,
+            gemm_bias_mul_replacement_with_c)
+
+        self.assertEqual(len(matches), 2)
+
+        repalcement_node_found = 0
+        for node in traced.graph.nodes:
+            if node.target == wrapped_gemm_bias_mul_with_c:
+                repalcement_node_found += 1
+
+        self.assertEqual(repalcement_node_found, 2)
+
+    def test_replace_pattern_with_filters(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, scale, zero_point):
+                # Match, second input to add is a scalar
+                x = x.dequantize()
+                x = torch.add(x, 2)
+                x = x.relu()
+                x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+
+                y = x + 1
+                # NOT a match, second input to add is NOT a scalar
+                x = x.dequantize()
+                x = torch.add(x, y)
+                x = x.relu()
+                x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+
+                return x
+
+        def BinaryOpScalarReLUPattern(x, num, scale, zero_point):
+            x = x.dequantize()
+            x = torch.add(x, num)
+            x = x.relu()
+            x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+            return x
+
+        def BinaryOpScalarReLUReplacement(x, num, scale, zero_point):
+            x = torch.mul(x, num)
+            return x
+
+        def second_input_is_scalar(match, original_graph, pattern_graph):
+            """ check the node that's matched to the second input of the pattern graph
+            is a scalar number
+            """
+            input_idx = 0
+            for node in pattern_graph.nodes:
+                if node.op == "placeholder":
+                    if input_idx == 1:
+                        num_node = node
+                    input_idx += 1
+            if not isinstance(match.nodes_map[num_node], (int, float)):
+                return False
+            return True
+
+        def num_repalcement_node_found(traced):
+            return sum(1 for node in traced.graph.nodes if node.target == torch.mul)
+
+        # match without filter, should find 2 match
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(
+            traced,
+            BinaryOpScalarReLUPattern,
+            BinaryOpScalarReLUReplacement)
+        self.assertEqual(len(matches), 2)
+        self.assertEqual(num_repalcement_node_found(traced), 2)
+
+        # match with filter, should find 1 match
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern_with_filters(
+            traced,
+            BinaryOpScalarReLUPattern,
+            BinaryOpScalarReLUReplacement,
+            [second_input_is_scalar])
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(num_repalcement_node_found(traced), 1)

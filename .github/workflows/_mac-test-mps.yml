@@ -37,10 +37,21 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
+      # This is copied from the main macos test workflow. It was missed in the earlier fix because macos M1
+      # runners are shared and not ephemeral, so the issue wasn't manifested if the runners with the fix were
+      # used
+      - name: Install macOS homebrew dependencies
+        run: |
+          # Install dependencies
+          brew install libomp
+          brew link --force libomp
+
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.9
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
       - name: Install PyTorch
         env:
@@ -50,10 +61,9 @@ jobs:
         run: |
           # shellcheck disable=SC1090
           set -ex
-          ${CONDA_INSTALL} numpy expecttest pyyaml
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
-          ${CONDA_RUN} python3 -mpip install dist/*.whl
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
 
       - name: Run MPS tests
         env:
@@ -63,7 +73,6 @@ jobs:
           # shellcheck disable=SC1090
           set -ex
           # TODO(https://github.com/pytorch/pytorch/issues/79293)
-          # This step currently fails if we actually run as if we're in CI.
-          unset CI
 
           ${CONDA_RUN} --cwd test python3 test_mps.py -v
+          ${CONDA_RUN} --cwd test python3 test_metal.py -v

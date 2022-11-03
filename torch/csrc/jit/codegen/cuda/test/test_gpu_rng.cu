@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 #include <torch/csrc/jit/codegen/cuda/test/test_utils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -105,35 +106,33 @@ at::Tensor generate_uniform(int64_t size, at::ScalarType dtype) {
 } // namespace
 
 TEST_F(NVFuserTest, FusionRNGValidateWithCURand_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  Int* size_val = IrBuilder::create<Int>();
+  fusion->addInput(size_val);
+  TensorView* tv0 = rand({size_val}, DataType::Float);
+  TensorView* tv1 = rand({size_val}, DataType::Double);
+  fusion->addOutput(tv0);
+  fusion->addOutput(tv1);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+
   for (int64_t size : {16, 1024, 10001, 10002, 10003, 100000, 10000001}) {
-    for (auto dtype : {kFloat, kDouble}) {
-      std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-      auto fusion = fusion_ptr.get();
-      FusionGuard fg(fusion);
+    at::manual_seed(0);
+    auto cg_outputs = fec.runFusionWithInputs({size});
 
-      TensorView* tv0 = makeSymbolicTensor(1, aten_to_data_type(dtype));
-      fusion->addInput(tv0);
-      auto tv1 = randlike(tv0);
-      fusion->addOutput(tv1);
+    at::manual_seed(0);
+    auto ref0 = generate_uniform(size, kFloat);
+    auto ref1 = generate_uniform(size, kDouble);
 
-      FusionExecutorCache fec(std::move(fusion_ptr));
-
-      auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
-      at::Tensor t0 = at::zeros({size}, options);
-
-      at::manual_seed(0);
-      auto cg_outputs = fec.runFusionWithInputs({t0});
-      auto out = cg_outputs[0];
-
-      at::manual_seed(0);
-      auto ref = generate_uniform(size, dtype);
-
-      testValidate(fec.fusion(), {out}, {t0}, {ref}, __LINE__, __FILE__);
-    }
+    testValidate(
+        fec.fusion(), cg_outputs, {size}, {ref0, ref1}, __LINE__, __FILE__);
   }
 }
 
-TEST_F(NVFuserTest, FusionRNGSimpleValidateWithCURand_CUDA) {
+TEST_F(NVFuserTest, FusionRNGManualScheduleValidateWithCURand_CUDA) {
   int64_t size = 128;
   auto dtype = kFloat;
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
@@ -149,7 +148,7 @@ TEST_F(NVFuserTest, FusionRNGSimpleValidateWithCURand_CUDA) {
   tv2->split(0, 8);
   tv2->axis(0)->parallelize(ParallelType::TIDx);
 
-  tv0->computeAt(tv2, 1);
+  tv1->computeAt(tv2, 1);
 
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
   at::Tensor t0 = at::zeros({size}, options);
@@ -228,6 +227,74 @@ TEST_F(NVFuserTest, FusionBroadcastingRNG2_CUDA) {
       testValidate(fec.fusion(), {out}, {t0, t1}, {ref}, __LINE__, __FILE__);
     }
   }
+}
+
+TEST_F(NVFuserTest, FusionBroadcastingRNGSmem_CUDA) {
+  for (auto dtype : {kFloat, kDouble}) {
+    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+    auto fusion = fusion_ptr.get();
+    FusionGuard fg(fusion);
+
+    TensorView* tv0 = makeConcreteTensor({5, 1}, aten_to_data_type(dtype));
+    TensorView* tv1 = makeConcreteTensor({5, 5}, aten_to_data_type(dtype));
+    fusion->addInput(tv0);
+    fusion->addInput(tv1);
+    auto tv2 = randlike(tv0);
+    auto tv3 = add(tv1, tv2);
+    auto tv4 = add(tv0, tv3);
+    fusion->addOutput(tv4);
+
+    auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+    at::Tensor t0 = at::zeros({5, 1}, options);
+    at::Tensor t1 = at::zeros({5, 5}, options);
+
+    auto lparams = scheduleTranspose(fusion, {t0, t1});
+
+    FusionExecutor fe;
+    fe.compileFusion(fusion, {t0, t1}, lparams);
+    auto cg_outputs = fe.runFusion({t0, t1}, lparams);
+    auto out = cg_outputs[0];
+
+    TORCH_CHECK((out.select(1, 0) == out.select(1, 1)).all().item<bool>())
+    TORCH_CHECK((out.select(1, 0) == out.select(1, 2)).all().item<bool>())
+    TORCH_CHECK((out.select(1, 0) == out.select(1, 3)).all().item<bool>())
+    TORCH_CHECK((out.select(1, 0) == out.select(1, 4)).all().item<bool>())
+  }
+}
+
+TEST_F(NVFuserTest, FusionBroadcastingRNGSmemNonSquareTile_CUDA) {
+  // https://github.com/csarofeen/pytorch/issues/1926
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeConcreteTensor({5, 1});
+  TensorView* tv1 = makeConcreteTensor({5, 5});
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  auto tv2 = randlike(tv0);
+  auto tv3 = add(tv1, tv2);
+  auto tv4 = add(tv0, tv3);
+  fusion->addOutput(tv4);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::zeros({5, 1}, options);
+  at::Tensor t1 = at::zeros({5, 5}, options);
+
+  TransposeParams heuristics;
+  heuristics.tile_size1 = 8;
+  heuristics.tile_size2 = 4;
+  scheduleTranspose(fusion, heuristics);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+  auto out = cg_outputs[0];
+
+  TORCH_CHECK((out.select(1, 0) == out.select(1, 1)).all().item<bool>());
+  TORCH_CHECK((out.select(1, 0) == out.select(1, 2)).all().item<bool>());
+  TORCH_CHECK((out.select(1, 0) == out.select(1, 3)).all().item<bool>());
+  TORCH_CHECK((out.select(1, 0) == out.select(1, 4)).all().item<bool>());
 }
 
 } // namespace jit

@@ -136,9 +136,9 @@ def run_frozen_optimizations(
         mod (:class:`ScriptModule`): a frozen module to be optimized
 
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_allclose`
+        preserve numerics. These optimizations preserve default rtol and atol of `torch.testing.assert_close`
         when applied on a single transformation, however in a module where many transformations are applied
-        the rtol or atol may no longer fall within the default `assert_allclose` tolerance. Conv -> Batchnorm folding,
+        the rtol or atol may no longer fall within the default `assert_close` tolerance. Conv -> Batchnorm folding,
         Conv-Add/Sub, and Conv -> Mul/Div folding all may alter numerics.
 
     Returns:
@@ -162,7 +162,8 @@ def run_frozen_optimizations(
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
-    torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
+    if mod._c._has_method("forward"):
+        torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
 
     if preserved_methods is None:
         preserved_methods = []

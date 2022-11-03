@@ -28,13 +28,18 @@ new_common_args = parse_kwargs(
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
+    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+        Default: ``torch.strided``.
 """
 )
 
 add_docstr_all(
     "new_tensor",
-    r"""
-new_tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_tensor(data, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a new Tensor with :attr:`data` as the tensor data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -57,9 +62,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -76,8 +85,11 @@ Example::
 
 add_docstr_all(
     "new_full",
-    r"""
-new_full(size, fill_value, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_full(size, fill_value, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with :attr:`fill_value`.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -85,9 +97,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     fill_value (scalar): the number to fill the output tensor with.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -104,17 +120,26 @@ Example::
 
 add_docstr_all(
     "new_empty",
-    r"""
-new_empty(size, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_empty(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with uninitialized data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
 :class:`torch.device` as this tensor.
 
 Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -130,17 +155,26 @@ Example::
 
 add_docstr_all(
     "new_empty_strided",
-    r"""
-new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` and strides :attr:`stride` filled with
 uninitialized data. By default, the returned Tensor has the same
 :class:`torch.dtype` and :class:`torch.device` as this tensor.
 
 Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -156,8 +190,11 @@ Example::
 
 add_docstr_all(
     "new_ones",
-    r"""
-new_ones(size, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_ones(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with ``1``.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -166,9 +203,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -184,8 +225,11 @@ Example::
 
 add_docstr_all(
     "new_zeros",
-    r"""
-new_zeros(size, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_zeros(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with ``0``.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -194,9 +238,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -1481,8 +1529,8 @@ dense_dim() -> int
 
 Return the number of dense dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``len(self.shape)`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.sparse_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """,
@@ -1536,7 +1584,7 @@ See :func:`torch.diagonal_scatter`
 add_docstr_all(
     "as_strided_scatter",
     r"""
-as_strided_scatter(src, size, stride, storage_offset=0) -> Tensor
+as_strided_scatter(src, size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided_scatter`
 """,
@@ -2181,14 +2229,15 @@ add_docstr_all(
 get_device() -> Device ordinal (Integer)
 
 For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
-For CPU tensors, an error is thrown.
+For CPU tensors, this function returns `-1`.
 
 Example::
 
     >>> x = torch.randn(3, 4, 5, device='cuda:0')
     >>> x.get_device()
     0
-    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+    >>> x.cpu().get_device()
+    -1
 """,
 )
 
@@ -4214,7 +4263,7 @@ between ``0`` and ``self.size(dim) - 1`` inclusive.
 
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
-values in the tensor :attr:`src` into :attr:`self` at the indicies
+values in the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index`. For each value in :attr:`src`, the reduction
 operation is applied to an index in :attr:`self` which is specified by
 its index in :attr:`src` for ``dimension != dim`` and by the corresponding
@@ -4632,8 +4681,8 @@ sparse_dim() -> int
 
 Return the number of sparse dimensions in a :ref:`sparse tensor <sparse-docs>` :attr:`self`.
 
-.. warning::
-  Throws an error if :attr:`self` is not a sparse tensor.
+.. note::
+  Returns ``0`` if :attr:`self` is not a sparse tensor.
 
 See also :meth:`Tensor.dense_dim` and :ref:`hybrid tensors <sparse-hybrid-coo-docs>`.
 """,
@@ -6494,6 +6543,6 @@ add_docstr_all(
     "to_padded_tensor",
     r"""
 to_padded_tensor(padding, output_size=None) -> Tensor
-See :func:`torch.nested.to_padded_tensor`
+See :func:`to_padded_tensor`
 """,
 )

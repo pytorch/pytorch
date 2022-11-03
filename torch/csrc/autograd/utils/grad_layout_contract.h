@@ -14,7 +14,6 @@ inline bool obeys_layout_contract(
     const at::Tensor& grad,
     const at::Tensor& variable) {
   TORCH_INTERNAL_ASSERT(!grad.is_sparse());
-  TORCH_INTERNAL_ASSERT(!variable.is_sparse());
   TORCH_INTERNAL_ASSERT(!grad.is_sparse_csr());
   TORCH_INTERNAL_ASSERT(!variable.is_sparse_csr());
 
@@ -23,6 +22,9 @@ inline bool obeys_layout_contract(
     // current implementation of nested tensor likely does obey the gradient
     // contract and should return true, but this would likely change in the
     // future
+    return false;
+  } else if (variable.is_sparse()) {
+    // Gradient Layout Contract is not applicable for sparse layouts
     return false;
   } else if (variable.is_non_overlapping_and_dense()) {
     // Only look at stride for dimensions that are not of size 1.
@@ -61,9 +63,9 @@ inline at::Tensor clone_obey_contract(
     // Does this dicey-looking sequence attach the result to new_grad's
     // history if GradMode::is_enabled()?  Yes, and @alband says it should.
     return std::move(new_grad
-                         .new_empty_strided(
-                             variable.sizes(),
-                             variable.strides(),
+                         .new_empty_strided_symint(
+                             variable.sym_sizes(),
+                             variable.sym_strides(),
                              variable.options().memory_format(c10::nullopt))
                          .copy_(new_grad));
   } else {

@@ -347,8 +347,8 @@ __host__ __device__
 #endif // __CUDA_ARCH__
     void
     _wassert(wchar_t const* _Message, wchar_t const* _File, unsigned _Line);
-}
 #endif // __SYCL_DEVICE_ONLY__
+}
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                                                 \
   if (C10_UNLIKELY(!(cond))) {                                                                   \
@@ -437,15 +437,6 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
-#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 6
-#define CONSTEXPR_EXCEPT_GCC5
-#define IS_NOT_GCC5_CONSTEXPR 0
-#else
-#define CONSTEXPR_EXCEPT_GCC5 constexpr
-#define IS_NOT_GCC5_CONSTEXPR 1
 #endif
 
 #if defined(__CUDA_ARCH__)
