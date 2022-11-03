@@ -154,10 +154,13 @@ class LinearMixedPrecision(nn.Module):
     A linear module with extra checks for mixed precision training.
     """
 
-    def __init__(self, param_dtype):
+    def __init__(self, param_dtype, buffer_name="buffer"):
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False).to(param_dtype)
-        self.register_buffer("buffer", torch.randn((1, 2), dtype=_BUFFER_ORIG_DTYPE))
+        # Use a configurable buffer name to avoid all submodules sharing the
+        # same buffer name, which may hide prefixed vs. unprefixed name bugs
+        self.buffer_name = buffer_name
+        self.register_buffer(buffer_name, torch.randn((1, 2), dtype=_BUFFER_ORIG_DTYPE))
         self._orig_param_type = param_dtype
         self._orig_buffer_dtype = _BUFFER_ORIG_DTYPE
 
@@ -176,7 +179,7 @@ class LinearMixedPrecision(nn.Module):
         )
         cls.assertEqual(inp.dtype, expected_param_type)
         # Buffer should be in specified precision as well.
-        cls.assertEqual(self.buffer.dtype, expected_buffer_type)
+        cls.assertEqual(getattr(self, self.buffer_name).dtype, expected_buffer_type)
 
         # In FSDP, self.params should point to the right type.
         num_active_fsdp = 0
@@ -234,9 +237,11 @@ class TestFSDPMixedPrecision(FSDPTest):
         model = FSDP(
             nn.Sequential(
                 FSDP(
-                    LinearMixedPrecision(param_dtype).cuda(), *fsdp_args, **fsdp_kwargs
+                    LinearMixedPrecision(param_dtype, buffer_name="buffer0").cuda(),
+                    *fsdp_args,
+                    **fsdp_kwargs,
                 ),
-                LinearMixedPrecision(param_dtype).cuda(),
+                LinearMixedPrecision(param_dtype, buffer_name="buffer1").cuda(),
             ),
             *fsdp_args,
             **fsdp_kwargs,
