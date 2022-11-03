@@ -1886,6 +1886,11 @@ def upsample_bilinear2d_vec(
     q1 = torch.mul(v1, xscale1) + torch.mul(v2, xscale2)
     q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
     result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
+
+    # convert output to correct memory format, if necessary
+    input_memory_format = utils.suggest_memory_format(input)
+    result = result.contiguous(memory_format=input_memory_format)
+
     return result
 
 
