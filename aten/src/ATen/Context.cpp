@@ -104,6 +104,30 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
+bool Context::userEnabledFlashSDP() const {
+  return enabled_flashSDP;
+}
+
+void Context::setSDPUseFlash(bool e) {
+  enabled_flashSDP = e;
+}
+
+bool Context::userEnabledMemEfficientSDP() const {
+  return enabled_mem_efficientSDP;
+}
+
+void Context::setSDPUseMemEfficient(bool e) {
+  enabled_mem_efficientSDP = e;
+}
+
+bool Context::userEnabledMathSDP() const {
+  return enabled_mathSDP;
+}
+
+void Context::setSDPUseMath(bool e) {
+  enabled_mathSDP = e;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -308,9 +332,12 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
+      // The X86 qengine is available if and only if FBGEMM is available
+      engines.push_back(at::kX86);
       engines.push_back(at::kFBGEMM);
     }
 #endif
+
     return engines;
   }();
   return supported_qengines;

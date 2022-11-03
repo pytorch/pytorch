@@ -1,0 +1,40 @@
+name: inductor
+
+on:
+  push:
+    tags:
+      - ciflow/inductor/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-bionic-cuda11_6-py3_10-gcc7-inductor-build:
+    name: cuda11.6-py3.10-gcc7-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 3, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 4, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 5, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 6, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 7, num_shards: 7, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
+        ]}
+
+  linux-bionic-cuda11_6-py3_10-gcc7-inductor-test:
+    name: cuda11.6-py3.10-gcc7-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_6-py3_10-gcc7-inductor-build
+    with:
+      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-sm86
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-inductor-build.outputs.test-matrix }}

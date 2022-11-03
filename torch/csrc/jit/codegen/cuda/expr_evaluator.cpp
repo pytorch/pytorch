@@ -58,9 +58,9 @@ void ExpressionEvaluator::bind(Val* value, const IntOrDouble& concrete_value) {
 }
 
 c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(Val* value) {
-  if (evaluator_precomputed_integers_ != nullptr) {
+  if (evaluator_precomputed_values_ != nullptr) {
     return toOptionalIntOrDouble(
-        evaluator_precomputed_integers_->getMaybeValueFor(value));
+        evaluator_precomputed_values_->getMaybeValueFor(value));
   } else {
     auto maybe_concrete_value = getValue(value);
     if (!maybe_concrete_value.has_value()) {
@@ -111,17 +111,24 @@ void ExpressionEvaluator::handle(UnaryOp* uop) {
       case UnaryOpType::Neg:
         known_values_[uop->out()] = -*in;
         break;
+      case UnaryOpType::Set:
+        known_values_[uop->out()] = *in;
+        break;
       case UnaryOpType::Cast:
         if (uop->out()->getDataType() == DataType::Int) {
           known_values_[uop->out()] = in->cast<int64_t>();
         } else if (uop->out()->getDataType() == DataType::Double) {
           known_values_[uop->out()] = in->cast<double>();
         } else {
-          TORCH_INTERNAL_ASSERT(false);
+          TORCH_INTERNAL_ASSERT(false, "dtype not supported in evaluator");
         }
         break;
       default:
-        TORCH_CHECK(!"Unexpected operator type");
+        TORCH_CHECK(
+            !"Unexpected operator type ",
+            uop->getUnaryOpType(),
+            " in ",
+            uop->toString());
     }
   }
 }

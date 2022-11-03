@@ -491,9 +491,6 @@ class TestBinaryUfuncs(TestCase):
             make_tensor, (5,), device=device, **op.rhs_make_tensor_kwargs
         )
 
-        make_lhs_scalar_tensor = partial(
-            make_tensor, (), device='cpu', **op.lhs_make_tensor_kwargs
-        )
         make_rhs_scalar_tensor = partial(
             make_tensor, (), device='cpu', **op.rhs_make_tensor_kwargs
         )
@@ -782,17 +779,14 @@ class TestBinaryUfuncs(TestCase):
             )
             self.assertEqual(result.dtype, expected_dtype)
 
-        # scalar int x scalar float
+        # scalar  x scalar
         # Note: result dtype is default float type
-        # TODO: FIXME: re-enable this, scalar x scalar type promotion is currently broken
-        # https://github.com/pytorch/pytorch/issues/76801
-        # if op.supports_two_python_scalars and _supported((torch.long, torch.float32)):
-        #     lhs_i_scalar = 1
-        #     rhs_f_scalar = 2.
-
-        #     result = op(lhs_i_scalar, rhs_f_scalar)
-        #     expected_dtype = torch.get_default_dtype() if not op.always_returns_bool else torch.bool
-        #     self.assertEqual(result.dtype, expected_dtype)
+        if op.supports_two_python_scalars and _supported((torch.long, torch.float32)):
+            rhs_f_scalar = 2.
+            for lhs in (1, 1.):
+                result = op(lhs, rhs_f_scalar)
+                expected_dtype = torch.get_default_dtype() if not op.always_returns_bool else torch.bool
+                self.assertEqual(result.dtype, expected_dtype)
 
     # TODO: move to error input test
     @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
@@ -3371,6 +3365,23 @@ class TestBinaryUfuncs(TestCase):
             actual = torch.lerp(x, y, w)
             expected = torch.lerp(xref, yref, wref).to(dtype)
             self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    def test_lerp_lowp_cpu(self, device, dtype):
+        xvals = (0.0, -30000.0)
+        yvals = (0.1, -20000.0)
+        for shape in [(4,), (20,), (3, 10, 10)]:
+            xs = [torch.full(shape, xval, device=device, dtype=dtype) for xval in xvals]
+            ys = [torch.full(shape, yval, device=device, dtype=dtype) for yval in yvals]
+            weights = [70000, torch.full(shape, 8, device=device, dtype=dtype)]
+            for x, y, w in zip(xs, ys, weights):
+                xref = x.float()
+                yref = y.float()
+                wref = w.float() if isinstance(w, torch.Tensor) else w
+                actual = torch.lerp(x, y, w)
+                expected = torch.lerp(xref, yref, wref).to(dtype)
+                self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
 
     def _test_logaddexp(self, device, dtype, base2):
         if base2:

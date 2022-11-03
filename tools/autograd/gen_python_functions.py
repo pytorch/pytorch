@@ -1160,6 +1160,11 @@ def sort_overloads(
             # Prioritize IntArrayRef overload over SymIntArrayRef
             str(t1) == "SymInt[]"
             and str(t2) == "int[]"
+            or
+            # Make sure both in, SymInt are sorted consistently w.r.t. Tensor since Tensor can be implicitly
+            # converted to either int or SymInt.  Prioritize the Tensor overload since it otherwise gets shadowed.
+            (str(t1) == "SymInt" or str(t1) == "int")
+            and str(t2) == "Tensor"
         )
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:

@@ -38,16 +38,17 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
   // Insert an expression before the current top-level expression.
   void insertAtTopLevel(Expr* expr);
 
+  void handle(const ARangeOp*) final;
   void handle(const ViewAsScalar*) final;
   void handle(const UnaryOp*) final;
-  // TODO: use a separate IR node to represent rand like
-  void lowerRandLike(const UnaryOp*);
 
   void handle(const BinaryOp*) final;
   void handle(const TernaryOp*) final;
+  void handle(const RNGOp*) final;
   void handle(const ReductionOp*) final;
   void handle(const GroupedReductionOp*) final;
   void handle(const WelfordOp*) final;
+  void handle(const GroupedWelfordOp*) final;
   void handle(const LoadStoreOp*) final;
   void handle(const MmaOp*) final;
   void handle(const BroadcastOp*) final;
@@ -80,6 +81,17 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   void handleGridWelford(WelfordOp* new_wop);
 
+  void handleGroupedBlockWelford(
+      const GroupedWelfordOp* wop,
+      const std::vector<WelfordTriplet>& output_vals,
+      const std::vector<WelfordTriplet>& input_vals,
+      const std::vector<WelfordTriplet>& init_vals);
+  void handleGroupedGridWelford(
+      const GroupedWelfordOp* wop,
+      const std::vector<WelfordTriplet>& output_vals,
+      const std::vector<WelfordTriplet>& input_vals,
+      const std::vector<WelfordTriplet>& init_vals);
+
   // Allocate a unique buffer for grid reductions and broadcast. A
   // buffer is uniquely allocated for each output tensor of an
   // expression.
@@ -89,6 +101,11 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
       bool zero_init,
       TensorView* out_tv,
       std::unordered_map<TensorView*, kir::Allocate*>& alloc_map);
+
+  std::vector<kir::Allocate*> allocateWelfordWorkBuffer(
+      const std::vector<WelfordTriplet>& triplets,
+      WelfordTriplet::ValName name,
+      Val* buffer_size);
 
   // Allocate a fused reduction object uniquely for a given
   // TensorView. Parameter expr is the expression corresponding to the

@@ -100,7 +100,7 @@ inline bool isFwGradDefined(const c10::optional<at::Tensor>& t) {
   return t.has_value() && t->defined() && t->_fw_grad(/*level */ 0).defined();
 }
 
-inline bool isFwGradDefinedTensorList(const at::TensorList& variables) {
+inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
   bool ret = false;
   for (auto& variable : variables) {
     ret |= isFwGradDefined(variable);

@@ -7,14 +7,19 @@
 #include <utility>
 
 #include <ATen/Context.h>
-#include <c10/core/DeviceType.h>
+#include <c10/core/Device.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/strong_type.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
+#include <torch/csrc/profiler/data_flow.h>
+#include <torch/csrc/profiler/events.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
+#include <torch/csrc/profiler/perf.h>
+#include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
@@ -32,6 +37,67 @@ enum class EventType : uint8_t {
   Kineto
 };
 
+// ============================================================================
+// == Value (Tensor, Scalar) summary ==========================================
+// ============================================================================
+struct TORCH_API RawTensorMetadataBase {
+  RawTensorMetadataBase() = default;
+  explicit RawTensorMetadataBase(const at::Tensor& t);
+
+  StorageImplData data_;
+
+  // Device is separated into DeviceType and DeviceIndex as Device
+  // doesn't have a default initializer (which the std::array initializer needs)
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+
+  c10::ScalarType dtype_;
+  c10::Layout layout_;
+  uint32_t dim_;
+};
+
+// Collected during profiling.
+struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
+  RawTensorMetadata() = default;
+  RawTensorMetadata(const RawTensorMetadata&) = default;
+  explicit RawTensorMetadata(const at::Tensor& t)
+      : RawTensorMetadataBase(t), weak_self_{WeakTensor(t)} {};
+
+  // Wrap in `c10::optional` to make `weak_self_` default constructable.
+  c10::optional<WeakTensor> weak_self_;
+};
+
+// Used during post processing.
+struct TensorMetadata : public RawTensorMetadataBase {
+  explicit TensorMetadata(const RawTensorMetadata& r)
+      : RawTensorMetadataBase(r),
+        weak_self_{r.weak_self_.value_or(WeakTensor(at::Tensor()))} {
+    SOFT_ASSERT(r.weak_self_.has_value());
+  }
+
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  TensorImplAddress impl() {
+    return weak_self_.get();
+  }
+
+  WeakTensor weak_self_;
+  c10::optional<TensorID> id_;
+};
+
+struct Inputs {
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::vector<int64_t>> strides_;
+  std::vector<c10::IValue> ivalues_;
+  std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
+};
+
+// ============================================================================
+// == ExtraFields =============================================================
+// ============================================================================
 template <EventType>
 struct ExtraFields;
 
@@ -47,25 +113,6 @@ struct TorchOpBasicFields {
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
-};
-
-struct TensorMetadata {
-  void* ptr_;
-  // Device is separated into DeviceType and DeviceIndex as Device
-  // doesn't have a default initializer (which the std::array initializer needs)
-  c10::DeviceType device_type_;
-  c10::DeviceIndex device_index_;
-  c10::ScalarType dtype_;
-  uint32_t dim_;
-  c10::Layout layout_;
-};
-
-struct Inputs {
-  std::vector<std::vector<int64_t>> shapes_;
-  std::vector<std::vector<int64_t>> strides_;
-  std::vector<c10::IValue> ivalues_;
-  std::vector<std::string> dtypes_;
-  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -88,7 +135,8 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
       FallbackPair&& gpu_fallback,
-      bool allow_tf32_cublas)
+      bool allow_tf32_cublas,
+      std::unique_ptr<perf_counters_t>&& perf_event_counters)
       : TorchOpBasicFields(std::move(f)),
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
@@ -97,7 +145,8 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
         gpu_fallback_{std::move(gpu_fallback)},
-        allow_tf32_cublas_{allow_tf32_cublas} {}
+        allow_tf32_cublas_{allow_tf32_cublas},
+        perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
   time_t end_time_ns_;
   Inputs inputs_;
@@ -106,6 +155,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   extra_args_t extra_args_;
   FallbackPair gpu_fallback_;
   bool allow_tf32_cublas_;
+  std::unique_ptr<perf_counters_t> perf_event_counters_;
 };
 
 template <>
@@ -120,8 +170,7 @@ struct ExtraFields<EventType::Backend> {
   jit_modules_t jit_modules_;
 };
 
-template <>
-struct ExtraFields<EventType::Allocation> {
+struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
@@ -133,8 +182,19 @@ struct ExtraFields<EventType::Allocation> {
 
 // For performance.
 static_assert(
-    std::is_pod<ExtraFields<EventType::Allocation>>::value,
-    "Non-POD member of ExtraFields<EventType::Allocation>.");
+    std::is_pod<RawAllocation>::value,
+    "Non-POD member of RawAllocation.");
+
+template <>
+struct ExtraFields<EventType::Allocation> : RawAllocation {
+  ExtraFields(const RawAllocation& allocation) : RawAllocation(allocation) {}
+
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  c10::optional<TensorID> id_;
+};
 
 template <>
 struct ExtraFields<EventType::OutOfMemory> {
@@ -164,15 +224,37 @@ using strong_t = strong::
 using PyModuleSelf = strong_t<PyObject*, struct PyModuleSelf_>;
 using PyModuleCls = strong_t<PyObject*, struct PyModuleCls_>;
 using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
+using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
+using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
 
 struct NNModuleInfo {
+  struct ParameterInfo {
+    std::string name_;
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+  };
+
   PyModuleSelf self_;
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<std::pair<std::string, void*>> params_;
+  std::vector<ParameterInfo> parameters_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
+};
+
+struct OptimizerInfo {
+  struct ParameterInfo {
+    TensorMetadata metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
+    std::vector<std::pair<std::string, TensorMetadata>> state_;
+  };
+
+  PyOptimizerSelf self_;
+  PyOptimizerCls cls_;
+  at::StringView cls_name_;
+
+  std::vector<ParameterInfo> parameters_;
 };
 
 struct PyExtraFieldsBase {
@@ -189,7 +271,11 @@ struct PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
-  using args_t = std::pair<PyFrameState, c10::optional<NNModuleInfo>>;
+  struct args_t {
+    PyFrameState frame_state_;
+    c10::optional<NNModuleInfo> module_info_;
+    c10::optional<OptimizerInfo> optimizer_info_;
+  };
 
   ExtraFields(
       time_t end_time_ns,
@@ -197,11 +283,13 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       PyFrameState caller,
       args_t args)
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
-        callsite_{args.first},
-        module_{args.second} {}
+        callsite_{args.frame_state_},
+        module_{args.module_info_},
+        optimizer_{args.optimizer_info_} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
+  c10::optional<OptimizerInfo> optimizer_;
 };
 
 template <>
@@ -323,6 +411,7 @@ struct KinetoObserverContext : public at::ObserverContext {
     approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
 
     bool allow_tf32_cublas_;
+    std::unique_ptr<perf_counters_t> counters_;
   };
 
   explicit KinetoObserverContext(Event* event) : event_{event} {}
@@ -359,11 +448,13 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
-  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+  AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
 };
+
+using perf_profiler_t = torch::profiler::impl::linux_perf::PerfProfiler;
 
 class TORCH_API ThreadLocalSubqueue {
  public:
@@ -399,10 +490,15 @@ class TORCH_API ThreadLocalSubqueue {
     return kineto_info_;
   }
 
+  inline void disable_perf_profiler(perf_counters_t& counters) const {
+    perf_profiler_->Disable(counters);
+  }
+
  private:
   uint64_t tid_;
   ProfilerConfig config_;
   kineto::DeviceAndResource kineto_info_;
+  std::unique_ptr<perf_profiler_t> perf_profiler_;
 
   friend class RecordQueue;
   // See `containers.h` for block size benchmarks.
@@ -454,7 +550,7 @@ class TORCH_API ThreadLocalSubqueue {
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
 
   // reportMemoryUsage
-  AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
+  AppendOnlyList<RawAllocation, BlockSize> allocations_;
 
   // reportOOMs
   AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;

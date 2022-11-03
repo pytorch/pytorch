@@ -12,7 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
-from .vmap import vmap
+from .vmap import vmap, doesnt_support_saved_tensors_hooks
 from torch._decomp import decomposition_table
 
 from torch._C._functorch import (
@@ -31,7 +31,7 @@ from torch._C._functorch import (
     _assert_wrapped_functional,
     _propagate_functional_input_mutation,
     set_inplace_requires_grad_allowed,
-    get_inplace_requires_grad_allowed,
+    get_inplace_requires_grad_allowed
 )
 
 argnums_t = Union[int, Tuple[int, ...]]
@@ -262,6 +262,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
     return _vjp_with_argnums(func, *primals, has_aux=has_aux)
 
 
+@doesnt_support_saved_tensors_hooks
 def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False):
     # This is the same function as vjp but also accepts an argnums argument
     # All args are the same as vjp except for the added argument
@@ -759,11 +760,9 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
         evaluated at ``primals`` and the Jacobian-vector product.
         If ``has_aux is True``, then instead returns a ``(output, jvp_out, aux)`` tuple.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
 
     jvp is useful when you wish to compute gradients of a function R^1 -> R^N
 
@@ -789,6 +788,7 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
     return _jvp_with_argnums(func, primals, tangents, argnums=None, strict=strict, has_aux=has_aux)
 
 
+@doesnt_support_saved_tensors_hooks
 def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Optional[argnums_t], *,
                       strict: bool = False, has_aux: bool):
     # This is the same function as jvp but also accepts an argnums argument
@@ -899,11 +899,10 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
         is the Jacobian and ``aux`` is auxiliary objects returned by :attr:`func`.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use :func:`jacrev`, which has better operator coverage.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
@@ -1048,11 +1047,11 @@ def hessian(func, argnums=0):
         returns the Hessian of :attr:`func` with respect to the arg(s) at
         :attr:`argnums`.
 
-    .. warning::
-        PyTorch's forward-mode AD coverage on operators is not very good at the
-        moment. You may see this API error out with "forward-mode AD not
-        implemented for operator X". If so, please file us a bug report and we
-        will prioritize it.
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use ``jacrev(jacrev(func))``, which has better
+        operator coverage.
 
     A basic usage with a R^N -> R^1 function gives a N x N Hessian:
 
@@ -1096,6 +1095,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
 
     See :func:`grad` for examples
     """
+    @doesnt_support_saved_tensors_hooks
     @wraps(func)
     def wrapper(*args, **kwargs):
         level = _grad_increment_nesting()
@@ -1441,6 +1441,7 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
+    @doesnt_support_saved_tensors_hooks
     @wraps(func)
     def wrapped(*args, **kwargs):
         try:

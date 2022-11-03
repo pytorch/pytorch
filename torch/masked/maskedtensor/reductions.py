@@ -22,7 +22,6 @@ def _masked_all_dim(data, dim, keepdim=False, mask=None):
     return torch.all(data.masked_fill(~mask, True), dim=dim, keepdim=keepdim)
 
 
-# TODO: Add masked_all to torch._masked
 def _masked_all(*args, **kwargs):
     if len(args) == 1 and len(kwargs) == 1:
         return _masked_all_all(args[0], mask=kwargs["mask"])
@@ -32,7 +31,7 @@ def _masked_all(*args, **kwargs):
 def _multidim_any(mask, dim, keepdim):
     if isinstance(dim, int):
         return _multidim_any(mask, [dim], keepdim)
-    for d in sorted(dim)[::-1]:
+    for d in sorted(dim, reverse=True):
         mask = torch.any(mask, dim=d, keepdim=keepdim)
     return mask
 
@@ -40,7 +39,7 @@ def _multidim_any(mask, dim, keepdim):
 def _get_masked_fn(fn):
     if fn == "all":
         return _masked_all
-    return getattr(torch._masked, fn)
+    return getattr(torch.masked, fn)
 
 
 def _torch_reduce_all(fn):
@@ -149,15 +148,16 @@ REDUCE_NAMES = [
 NATIVE_REDUCE_MAP = {
     getattr(torch.ops.aten, name): _torch_reduce(name) for name in REDUCE_NAMES
 }
-
 TORCH_REDUCE_MAP = {
     getattr(torch, name): _torch_grad_reduce(name) for name in REDUCE_NAMES
 }
-
 TENSOR_REDUCE_MAP = {
     getattr(torch.Tensor, name): _torch_grad_reduce(name) for name in REDUCE_NAMES
 }
 
+NATIVE_REDUCE_FNS = list(NATIVE_REDUCE_MAP.keys())
+TORCH_REDUCE_FNS = list(TORCH_REDUCE_MAP.keys())
+TENSOR_REDUCE_FNS = list(TENSOR_REDUCE_MAP.keys())
 
 def _is_reduction(fn):
     return fn in NATIVE_REDUCE_MAP or fn in TORCH_REDUCE_MAP or fn in TENSOR_REDUCE_MAP
